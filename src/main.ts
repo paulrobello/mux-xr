@@ -189,6 +189,7 @@ ui = mountWorkspaceUI(app, {
     void scene.enterXR('ar').catch((error: Error) => notice(error.message));
   },
   onSettingsChange: (settings) => {
+    scene?.setGazeInputEnabled(settings.gazeInput);
     scene?.setBackground(settings.background);
     scene?.setGazeEnabled(settings.gazeEmphasis);
   },
@@ -201,10 +202,12 @@ desktop = createDesktopPanels(ui.sceneHost, selectPane, {
   onReset: () => scene.resetLayout(),
 });
 const stopPresentation = scene.subscribe((state) => {
+  ui.setGazeInputEnabled(state.gazeInputEnabled);
   desktop.setImmersive(state.xrMode !== 'desktop');
   if (state.xrMode !== 'desktop') ui.closeInput();
 });
 const settings = ui.getSettings();
+scene.setGazeInputEnabled(settings.gazeInput);
 scene.setBackground(settings.background);
 scene.setGazeEnabled(settings.gazeEmphasis);
 void loadObservatory(scene)

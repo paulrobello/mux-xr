@@ -28,7 +28,7 @@ Full hierarchy browsing requires `mux_tree_request` / `mux_tree_snapshot` and `/
 
 The prepared preview still uses the independently gated matching `95dbb69f` daemon/streamer pair. Its exact binaries and the tested release hashes are recorded in [the verification report](docs/verification.md). The vendored schema matches that hierarchy candidate and was also tested against 0.76.0. Core 0.76.0 ships [held-pane lifecycle metadata](https://board.example.test/board?card=01a1957a2aa8739abc2c5cb116818793); viewer exit-state badges remain a separate enhancement. A connected stream does not establish whether a held pane's process is still running.
 
-Select a pane to attach it, then explicitly select its panel to target input. Commands and Keyboard follow explicit pane selections, including while the drawer is open. The target caption identifies the pane receiving input. Head-directed gaze affects visual emphasis only. Detach closes the viewer connection, preserving the pane.
+Select a pane to attach it, then explicitly select its panel to target input. Commands and Keyboard follow explicit pane selections, including while the drawer is open. The target caption identifies the pane receiving input. Head-directed gaze emphasizes panes. Enable **Gaze input** to let a short dwell choose the keyboard target. It is off by default and keeps the last target while you look at the keyboard. Detach closes the viewer connection, preserving the pane.
 
 ## Quest and LAN HTTPS
 
@@ -36,7 +36,7 @@ WebXR needs a secure context. Desktop localhost is suitable for development. Dai
 
 The prepared preview serves the built app and WebSockets at **[https://192.0.2.10:4240](https://192.0.2.10:4240)**, also available at `https://localhost:4240`. The full app passed from test-mac over LAN HTTPS/WSS with two real shell panes and targeted command input. It uses a dedicated matching daemon and leaves shared par-mux and pardeck services unchanged. To view existing sessions, point a compatible streamer at their daemon socket.
 
-The existing IWSDK development PEM was reused. It is self-signed and covers localhost rather than the LAN IP, so the Quest browser needs an explicit certificate exception. Paul approved the exact preview binary's incoming-connection rule, which was applied and verified. Existing certificates, trust stores and credentials were preserved. Headset trust and XR entry remain owner checks.
+The existing IWSDK development PEM was reused. It is self-signed and covers localhost rather than the LAN IP, so the Quest browser needs an explicit certificate exception. Paul approved the exact preview binary's incoming-connection rule, which was applied and verified. Existing certificates, trust stores and credentials were preserved. Paul confirmed Quest Browser access and immersive XR entry on November 1, 2026. The refined controls still require a headset recheck.
 
 To serve an already running compatible daemon, run the streamer in a par-mux pane with these arguments (supply your actual binary, socket and existing PEM paths):
 
@@ -50,7 +50,7 @@ To serve an already running compatible daemon, run the streamer in a par-mux pan
 
 Stop that streamer with Ctrl-C in its owning pane. The prepared preview's exact private socket and pane IDs are recorded in `.local/runtime.json`; its shell panes are ordinary live shells. Preserve existing authentication configuration and shared services. No published hosting or tunnels are required.
 
-The endpoint is prefilled from the page origin, and a custom endpoint is remembered. The dedicated preview panes use the account's configured Homebrew Bash login shell. On Quest, open the preview and press Connect. Choose two pane leaves, then Enter XR. Use trigger to select controls and grip on a panel to move/rotate it. Panel ± controls adjust physical size, A± controls local text zoom. Commands opens saved quick commands and their editor. Keyboard opens text entry and terminal keys. Both follow your explicit pane selection. Shift shows uppercase letters and US-layout symbols, including `$`, then resets after a character. Settings offers passthrough and the three silent backgrounds.
+The endpoint is prefilled from the page origin, and a custom endpoint is remembered. The dedicated preview panes use the account's configured Homebrew Bash login shell. On Quest, open the preview and press Connect. Choose two pane leaves, then Enter XR. Use trigger to select controls and grip on a panel or input menu to move/rotate it. While gripping, the thumbstick turns horizontally and lifts vertically. Hold grip plus trigger to push/pull with the vertical stick, without typing. The compact spatial keyboard has its own Smaller/Larger/Reset controls and a grabbable title bar. Panel ± controls adjust physical size, A± controls local text zoom. Commands opens saved quick commands and their editor. Keyboard opens text entry and terminal keys. Both follow your pane selection, with optional Gaze input available in XR and browser settings. Shift shows uppercase letters and US-layout symbols, including `$`, then resets after a character. Settings offers passthrough and the three silent backgrounds.
 
 ## Spatial controls
 
@@ -74,9 +74,10 @@ The 3D preview toolbar always exposes **Smaller panel**, **Larger panel** and **
 - `make checkall-ci`: fast gate plus asset-chain validation, secret scan and dependency audit.
 - `make e2e`: local native-GPU browser tests with explicitly synthetic protocol fixtures.
 - `make real-app-check`: actual built app against a private compatible core pair, requiring `MUX_XR_PRIVATE_TEST=1` and `MUX_XR_BASE_URL`. It issues two harmless marker commands, so use isolated test panes.
+- `MUX_XR_BASE_URL=http://127.0.0.1:4241 bun run scripts/xr-visual-check.ts`: native GPU rendering of the spatial keyboard using an explicit test XR camera/controller. This requires a Vite development server and does not replace headset testing.
 - `make live-check`: real-streamer terminal-adapter diagnostic; requires `MUX_XR_STREAMER` and two `MUX_XR_PANES`. This is separate from full hierarchy and headset acceptance.
 
-Browser tests use hardware Chromium headless on supported hosts. Book the host before load-sensitive work. Paul requested the tested build first and will perform the Quest checks afterward. Actual Quest controller behavior, two-panel readability, passthrough and capacity remain pending owner acceptance. No maximum pane count is claimed before measurement.
+Browser tests use hardware Chromium headless on supported hosts. Book the host before load-sensitive work. Paul confirmed the build works in headset XR and provided the first controller/keyboard feedback. Updated controls, two-panel readability, passthrough, comfort and capacity still require owner acceptance. No maximum pane count is claimed before measurement.
 
 The observatory's editable high/low sources, deterministic generator, hashes and technical reports are in `assets-source/observatory` and `scripts/assets`. The runtime GLB is 2,528,120 bytes with 22,712 triangles and ten draw calls. Creative owner approval and Quest checks remain explicit.
 

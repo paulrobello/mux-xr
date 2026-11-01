@@ -31,6 +31,7 @@ export interface WorkspaceSettings {
   endpoint: string;
   background: BackgroundMode;
   gazeEmphasis: boolean;
+  gazeInput: boolean;
 }
 
 export interface WorkspaceUI {
@@ -50,6 +51,7 @@ export interface WorkspaceUI {
   setAttachedPaneIds(ids: string[]): void;
   openInput(mode: 'commands' | 'keyboard'): void;
   closeInput(): void;
+  setGazeInputEnabled(enabled: boolean): void;
   getCommandsForPane(paneId: string): QuickCommand[];
 }
 
@@ -65,6 +67,7 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   endpoint: '',
   background: 'observatory',
   gazeEmphasis: true,
+  gazeInput: false,
 };
 
 export function workspaceScope(endpoint: string, workspaceId: string): string {
@@ -97,6 +100,7 @@ export function validateSettings(value: unknown): WorkspaceSettings {
         ? candidate.background
         : DEFAULT_SETTINGS.background,
     gazeEmphasis: typeof candidate.gazeEmphasis === 'boolean' ? candidate.gazeEmphasis : true,
+    gazeInput: candidate.gazeInput === true,
   };
 }
 
@@ -248,7 +252,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   let capturedTarget: string | undefined;
   const root = document.createElement('section');
   root.className = 'mux-ui';
-  root.innerHTML = `<style>${CSS}</style><header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. No process control.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${KEY_LAYOUT.map((row) => `<div class="key-row">${row.map((key) => `<button class="key" data-key="${escapeHtml(key.key)}" data-modifier="${key.modifier ?? ''}" aria-label="${escapeHtml(key.key === 'Backspace' ? 'Backspace' : key.label)}" title="${escapeHtml(keyboardTitle(key.key))}">${escapeHtml(key.label)}</button>`).join('')}</div>`).join('')}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Visual emphasis only, never input focus.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
+  root.innerHTML = `<style>${CSS}</style><header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. No process control.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${KEY_LAYOUT.map((row) => `<div class="key-row">${row.map((key) => `<button class="key" data-key="${escapeHtml(key.key)}" data-modifier="${key.modifier ?? ''}" aria-label="${escapeHtml(key.key === 'Backspace' ? 'Backspace' : key.label)}" title="${escapeHtml(keyboardTitle(key.key))}">${escapeHtml(key.label)}</button>`).join('')}</div>`).join('')}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Highlight the pane at the center of your view.</span></label><label class="check" title="Use head direction to choose the keyboard target after a short dwell. Looking at the keyboard keeps the last pane target."><input type="checkbox" data-gaze-input> Gaze keyboard input <span>In XR, looking at a pane briefly makes it the keyboard target. Off keeps manual selection.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
   container.replaceChildren(root);
   const editor = document.createElement('div');
   editor.className = 'command-editor';
@@ -571,6 +575,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   qs<HTMLInputElement>('#endpoint').value = settings.endpoint;
   qs<HTMLSelectElement>('[data-background]').value = settings.background;
   qs<HTMLInputElement>('[data-gaze]').checked = settings.gazeEmphasis;
+  qs<HTMLInputElement>('[data-gaze-input]').checked = settings.gazeInput;
   qs<HTMLSelectElement>('[data-background]').addEventListener('change', (event) => {
     settings = {
       ...settings,
@@ -580,6 +585,10 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   });
   qs<HTMLInputElement>('[data-gaze]').addEventListener('change', (event) => {
     settings = { ...settings, gazeEmphasis: (event.target as HTMLInputElement).checked };
+    saveSettings();
+  });
+  qs<HTMLInputElement>('[data-gaze-input]').addEventListener('change', (event) => {
+    settings = { ...settings, gazeInput: (event.target as HTMLInputElement).checked };
     saveSettings();
   });
   const store = createCommandStore(storage);
@@ -653,6 +662,12 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         qs<HTMLElement>('[data-keyboard]').scrollIntoView({ block: 'nearest' });
     },
     closeInput,
+    setGazeInputEnabled(enabled) {
+      if (settings.gazeInput === enabled) return;
+      settings = { ...settings, gazeInput: enabled };
+      qs<HTMLInputElement>('[data-gaze-input]').checked = enabled;
+      saveSettings();
+    },
     getCommandsForPane(paneId) {
       const pane = snapshot.panes.find((item) => item.id === paneId);
       const workspace = pane?.workspaceId ?? 'default';

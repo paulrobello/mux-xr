@@ -1,10 +1,10 @@
 # Tested build evidence
 
-Software verification completed November 1, 2026 (Etc/GMT+8). Paul requested the tested build first and will perform Quest 3 checks afterward. This is a software-qualified headset test candidate.
+Software verification completed November 1, 2026 (Etc/GMT+8). Paul confirmed the app works in headset XR and supplied the first controller/keyboard feedback. The revised interaction build is software-qualified and ready for his headset recheck.
 
 ## Software gate
 
-`make checkall-ci` covers Biome, strict TypeScript, 46 unit tests across six files, the production build, observatory asset validation, secret scanning and a high-severity dependency audit. The audit reports zero vulnerabilities. The production JavaScript chunk is approximately 1.12 MB before gzip (293 KB gzip). Its warning remains visible and is not a headset performance result.
+`make checkall-ci` covers Biome, strict TypeScript, 57 unit tests across six files, the production build, observatory asset validation, secret scanning and a high-severity dependency audit. The audit reports zero vulnerabilities. The production JavaScript chunk is approximately 1.14 MB before gzip (299 KB gzip). Its warning remains visible and is not a headset performance result.
 
 The unit suite exercises protobuf/zlib framing, ANSI seeding and live output, disconnected input rejection, bounded reconnects, target capture, persistence failures, key encoding, hierarchy normalization, native controller events, relative panel transforms, local zoom and resource teardown. Controller tests dispatch actual Three.js Group events with only the GPU renderer mocked. They caught and reproduce fixes for DOM-style event assumptions, grip activating keys, inverted zoom and hierarchy leaves failing to attach new panes.
 
@@ -53,9 +53,9 @@ Desktop, tablet and mobile captures were reviewed. The interface uses a nested h
 
 ## Pending owner checks
 
-Quest 3 hardware acceptance is pending: two-panel physical readability, controller ray and grip behavior, passthrough, virtual keyboard comfort, observatory taste and frame pacing. No maximum pane count or production-scale performance improvement is claimed. Black and gradient modes provide simpler backgrounds for comparison.
+Quest Browser access and immersive XR entry are owner-confirmed. Acceptance of the revised rays, keyboard size and manipulation, gaze input, two-panel readability, passthrough, observatory taste and frame pacing remains pending. No maximum pane count or production-scale performance improvement is claimed. Black and gradient modes provide simpler backgrounds for comparison.
 
-The LAN preview reuses the existing IWSDK development certificate. It is self-signed and its SANs cover localhost, not the LAN address. HTTPS/WSS can be tested with an explicit development-certificate exception, but headset trust and WebXR entry must be confirmed by the owner. LAN HTTPS/WSS now pass after the explicitly approved application firewall rule. No trust store, credential or shared service configuration was changed.
+The LAN preview reuses the existing IWSDK development certificate. It is self-signed and its SANs cover localhost, not the LAN address. HTTPS/WSS can be tested with an explicit development-certificate exception, and Paul has now confirmed headset access and immersive entry. LAN HTTPS/WSS now pass after the explicitly approved application firewall rule. No trust store, credential or shared service configuration was changed.
 
 Both the matching daemon and streamer are required for complete geometry metadata. A published `0.75` version string alone is insufficient. The original candidate hashes above describe gated local builds. Official 0.76.0 release artifacts were additionally qualified as recorded above. Held-pane exit/respawn metadata shipped upstream in 0.76.0, while viewer status badges remain a separately tracked enhancement.
 
@@ -90,3 +90,18 @@ The next owner screenshots exposed the combined DOM/spatial keyboard presenter a
 Browser growth now projects the whole panel hierarchy, including attached controls, and caps enlargement at a 2% viewport margin. Shrinking remains allowed even for an already oversized panel. The preview toolbar provides selected-panel Smaller/Larger and Reset layout independently of geometry. VR retains its physical scale range and has recovery controls outside the pane, either on the HUD or above an open native input panel. Recovery controls render above pane geometry and receive explicit picking priority, while invisible controls are excluded. No shell process was restarted and no PTY grid resize is involved.
 
 All 46 unit tests and the parity gate pass. Desktop, tablet and mobile native-GPU fixtures pass after clicking the actual HUD Keyboard control, asserting no spatial keyboard exists, enlarging 25 times, checking viewport bounds/reachable shrink controls, and using recovery/reset. Accepted screenshots include `desktop-single-keyboard.png` and `desktop-bounded-panel.png`. The final screenshot run recorded test-mac load 1.843 to 2.290 with no page errors. These are browser/simulated XR results; physical Quest comfort/readability remains owner-pending.
+
+
+## First Quest feedback: rays, keyboard manipulation and gaze input
+
+Paul confirmed headset XR operation and reported short visible rays, a keyboard filling the view, missing hover/contact feedback and missing manipulation controls. The revised scene uses the actual picked intersection for the visible ray endpoint, an eight-meter fallback ray, a small contact dot and per-controller key highlights. Both controllers can hover one key without clearing each other's tint. Disconnect hides contact/ray visuals and releases the grab.
+
+The keyboard now opens near the current headset pose at approximately 1.07 meters wide, with all 59 keys and controls inside the test camera frustum. It has its own Smaller/Larger/Reset actions and a grabbable title/body. Its controls do not overlap. Typing, Shift, pane selection and menu mode changes preserve its current transform. Closing/reopening preserves the in-session arrangement, while XR reference-space changes and Reset discard stale poses. The workspace HUD remains fixed so recovery and Exit stay available.
+
+Grip moves and rotates a terminal or input menu with the controller. Horizontal thumbstick input turns the held object, vertical input lifts it in world space, and grip plus trigger changes vertical input to controller-ray push/pull. Motion uses elapsed frame time with a deadzone. Tests compare 60 Hz and 120 Hz rotation, verify accumulated depth and release pose, prevent trigger typing while gripping, and verify that gripping pane B's title manipulates B rather than the selected pane A. No layout action changes a PTY grid.
+
+Gaze input is a separate, persistent, default-off option in browser settings, the XR HUD and the keyboard panel. Enabling it uses a 350 ms head-directed dwell to select the keyboard target. Looking at the keyboard retains the last pane, including when a different terminal lies behind it. It pauses during manipulation and clears modifiers when the target changes. Visual gaze emphasis remains independently configurable. Positive routing tests verify selection of pane B and key delivery to B after dwell, while disabled gaze never retargets input.
+
+`make checkall` and `make checkall-ci` pass with 57 tests, strict TypeScript, asset validation, secret scanning and dependency audit. No CI workflow is configured in this repository. The desktop/tablet/mobile protocol fixtures each pass with 42 captured frames and no page errors. The new `MUX_XR_BASE_URL=http://127.0.0.1:4241 bun run scripts/xr-visual-check.ts` renders the actual spatial keyboard with a test XR camera/controller and native Metal Chromium, verifies all key bounds and checks a 0.7-meter ray contact on highlighted key A. Screenshots were inspected. Accepted final test-mac load was 1.497 before/after the spatial check and 1.794 after the browser suite. An earlier visual-fixture failure pointed its Three.js Group along positive Z instead of the controller ray's negative Z, and was corrected before acceptance.
+
+The accepted logs are `.local/evidence/quest-final-parity.log` and `quest-final-browser.log`, with `quest-keyboard-native.png` and `quest-keyboard-native-highlight.png` under `.impeccable/review`. This round uses protocol fixtures and simulated XR, not a fresh real-daemon round trip or physical headset acceptance. Existing real-core/LAN evidence above remains separate. Terminal processes, streamer binaries, firewall rules and certificates are preserved.

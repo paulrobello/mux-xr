@@ -27,7 +27,7 @@ LAN-only. No published hosting or tunnels. The daemon hierarchy is workspace, se
 - Move, resize and rotate panels. Physical scale and font zoom are separate from explicit terminal grid resizing.
 - Browse the mux hierarchy and display panes from multiple branches at once.
 - Global and workspace-specific command lists, with label, text and optional Enter, following pardeck.
-- Explicit input focus is independent of head-directed gaze emphasis. Never redirect commands merely because the user looks elsewhere.
+- Head-directed gaze emphasis is independent of input. Manual input targeting is the default. The optional Gaze input toggle lets a short head-gaze dwell select the keyboard target and retains the last target while looking at the keyboard.
 - Passthrough, pure black, gradient and a quiet sci-fi observatory. No ambient sound.
 - Benchmark actual panel capacity on Quest 3. Two readable panes is the acceptance target, not an invented maximum.
 - Named saved 3D layouts, elaborate radial menus/window choreography, whole-window splits and hand tracking are post-MVP.

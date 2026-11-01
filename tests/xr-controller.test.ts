@@ -309,6 +309,33 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('grips the title owner and leaves the workspace HUD fixed', () => {
+    const { workspace, actions, container } = fixture();
+    workspace.selectTerminal('pane-a');
+    const paneA = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    const paneB = workspace.scene.getObjectByName('terminal-panel-pane-b');
+    const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+    if (!paneA || !paneB || !hud) throw new Error('Panel or HUD missing');
+    const originalA = paneA.position.clone();
+    const originalB = paneB.position.clone();
+    const originalHud = hud.position.clone();
+    hit(workspace, { terminalTitle: true, terminalId: 'pane-b' }, 'squeezestart');
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    controller.position.x += 0.2;
+    fakeXR.frame?.(16);
+    expect(paneA.position.distanceTo(originalA)).toBeLessThan(0.000001);
+    expect(paneB.position.x).toBeCloseTo(originalB.x + 0.2, 5);
+    controller.dispatchEvent({ type: 'squeezeend' } as never);
+    hit(workspace, { inputAction: 'gazeInput' }, 'squeezestart');
+    controller.position.y += 0.2;
+    fakeXR.frame?.(32);
+    expect(hud.position.distanceTo(originalHud)).toBeLessThan(0.000001);
+    expect(workspace.state.gazeInputEnabled).toBe(false);
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
   it('removing the dragged pane releases controller state and restores fallback focus', () => {
     const { workspace, actions, container } = fixture();
     workspace.selectTerminal('pane-b');
@@ -347,9 +374,23 @@ describe('native XR controller event routing', () => {
     vi.mocked(actions.sendKey).mockClear();
     hit(workspace, { inputAction: 'key', key: 'a' }, 'squeezestart');
     expect(actions.sendKey).not.toHaveBeenCalled();
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
     hit(workspace, { inputAction: 'key', key: 'a' });
     expect(actions.selectPane).toHaveBeenLastCalledWith('pane-b');
     expect(vi.mocked(actions.sendKey).mock.calls.at(-1)?.[0]).toBe('a');
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('clears controller hover and grip state when a source disconnects', () => {
+    const { workspace, container } = fixture();
+    workspace.selectTerminal('pane-a');
+    workspace.showInput('keyboard');
+    hit(workspace, { inputAction: 'key', key: 'a' }, 'hover');
+    fakeXR.frame?.(16);
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'disconnected' } as never);
+    fakeXR.frame?.(32);
+    expect(workspace.scene.getObjectByName('xr-hover-help')?.visible).toBe(false);
     workspace.dispose();
     container.remove();
   });
@@ -411,6 +452,243 @@ describe('native XR controller event routing', () => {
     hit(workspace, { inputAction: 'hierarchyNext' });
     hit(workspace, { inputAction: 'pane', paneId: 'pane-c' });
     expect(actions.selectPane).toHaveBeenLastCalledWith('pane-c');
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('keeps the native keyboard compact, headset-relative, and independently scalable', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    const before = new THREE.Box3().setFromObject(keyboard);
+    expect(before.getSize(new THREE.Vector3()).x).toBeLessThanOrEqual(1.1);
+    expect(keyboard.position.length()).toBeGreaterThan(0.5);
+    const initialScale = keyboard.scale.x;
+    hit(workspace, { inputAction: 'inputScale', direction: -1 });
+    expect(keyboard.scale.x).toBeLessThan(initialScale);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('opens and resets near the current headset with non-overlapping controls', () => {
+    const { workspace, container } = fixture();
+    workspace.camera.position.set(3, 1.7, 2);
+    workspace.camera.lookAt(2, 1.7, 1);
+    workspace.camera.updateMatrixWorld(true);
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    const expected = workspace.camera.position
+      .clone()
+      .addScaledVector(workspace.camera.getWorldDirection(new THREE.Vector3()), 1.15);
+    expected.y -= 0.2;
+    expect(keyboard.position.distanceTo(expected)).toBeLessThan(0.000001);
+    const controls: THREE.Object3D[] = [];
+    keyboard.updateMatrixWorld(true);
+    keyboard.traverse((object) => {
+      if (object.userData.labelWidth) controls.push(object);
+    });
+    for (let a = 0; a < controls.length; a += 1) {
+      const first = controls[a];
+      const pointA = keyboard.worldToLocal(first.getWorldPosition(new THREE.Vector3()));
+      for (let b = a + 1; b < controls.length; b += 1) {
+        const second = controls[b];
+        const pointB = keyboard.worldToLocal(second.getWorldPosition(new THREE.Vector3()));
+        const overlapX =
+          (first.userData.labelWidth + second.userData.labelWidth) / 2 -
+          Math.abs(pointA.x - pointB.x);
+        const overlapY =
+          (first.userData.labelHeight + second.userData.labelHeight) / 2 -
+          Math.abs(pointA.y - pointB.y);
+        expect(
+          overlapX > 0.00001 && overlapY > 0.00001,
+          `${first.userData.labelText} overlaps ${second.userData.labelText}`,
+        ).toBe(false);
+      }
+    }
+    workspace.hideInput();
+    workspace.resetLayout();
+    workspace.camera.position.x += 2;
+    workspace.camera.updateMatrixWorld(true);
+    workspace.showInput('keyboard');
+    const reopened = workspace.scene.getObjectByName('xr-keyboard-controls');
+    expect(reopened?.position.x).toBeCloseTo(expected.x + 2, 5);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('uses the real controller event source for gamepad drag and suppresses trigger typing', () => {
+    const { workspace, actions, container } = fixture();
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    const gamepad = { axes: [0, 0, 0, -1], buttons: [{ pressed: false }] } as unknown as Gamepad;
+    controller.dispatchEvent({ type: 'connected', data: { gamepad } } as never);
+    hit(workspace, { inputAction: 'key', key: 'a' }, 'squeezestart');
+    const y = keyboard.position.y;
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    fakeXR.frame?.(16);
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    expect(keyboard.position.y).toBeGreaterThan(y);
+    controller.dispatchEvent({ type: 'squeezeend' } as never);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('routes keys to the head-gaze dwell target only when enabled and keeps it over the keyboard', async () => {
+    const session = { addEventListener: vi.fn() };
+    vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+    const { workspace, actions, container } = fixture();
+    await workspace.enterXR('vr');
+    workspace.camera.position.set(0, 1.5, 0);
+    workspace.camera.lookAt(0.87, 1.5, -1.5);
+    fakeXR.frame?.(0);
+    fakeXR.frame?.(400);
+    expect(workspace.state.selectedTerminalId).toBe('pane-a');
+    workspace.setGazeInputEnabled(true);
+    expect(workspace.state.gazeEnabled).toBe(false);
+    fakeXR.frame?.(500);
+    fakeXR.frame?.(849);
+    expect(workspace.state.selectedTerminalId).toBe('pane-a');
+    fakeXR.frame?.(851);
+    expect(workspace.state.selectedTerminalId).toBe('pane-b');
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    const direction = keyboard.position.clone().sub(workspace.camera.position).normalize();
+    const panelA = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    if (!panelA) throw new Error('Pane missing');
+    panelA.position.copy(workspace.camera.position).addScaledVector(direction, 2);
+    workspace.camera.lookAt(keyboard.position);
+    fakeXR.frame?.(1000);
+    fakeXR.frame?.(1400);
+    expect(workspace.state.selectedTerminalId).toBe('pane-b');
+    hit(workspace, { inputAction: 'key', key: 'a' });
+    expect(actions.selectPane).toHaveBeenLastCalledWith('pane-b');
+    expect(actions.sendKey).toHaveBeenLastCalledWith('a', undefined);
+    workspace.hideInput();
+    workspace.setGazeInputEnabled(false);
+    fakeXR.frame?.(1500);
+    fakeXR.frame?.(1900);
+    expect(workspace.state.selectedTerminalId).toBe('pane-b');
+    workspace.dispose();
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps thumbstick rotation independent of frame rate', () => {
+    const rotateForOneSecond = (hz: number): number => {
+      const { workspace, container } = fixture();
+      workspace.showInput('keyboard');
+      const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+      if (!keyboard) throw new Error('Keyboard missing');
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      const gamepad = { axes: [0, 0, 1, 0], buttons: [{ pressed: false }] } as unknown as Gamepad;
+      controller.dispatchEvent({ type: 'connected', data: { gamepad } } as never);
+      fakeXR.frame?.(0);
+      hit(workspace, { inputAction: 'grabInput' }, 'squeezestart');
+      const initial = keyboard.quaternion.clone();
+      for (let frame = 1; frame <= hz; frame += 1) fakeXR.frame?.((frame * 1000) / hz);
+      const angle = initial.angleTo(keyboard.quaternion);
+      controller.dispatchEvent({ type: 'squeezeend' } as never);
+      workspace.dispose();
+      container.remove();
+      return angle;
+    };
+    const at60 = rotateForOneSecond(60);
+    const at120 = rotateForOneSecond(120);
+    expect(at60).toBeCloseTo(0.9, 4);
+    expect(at120).toBeCloseTo(at60, 4);
+  });
+
+  it('preserves a held keyboard transform through Shift and pane retargeting', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('keyboard');
+    hit(workspace, { inputAction: 'grabInput' }, 'squeezestart');
+    const grip = fakeXR.controllers[0] as THREE.Group;
+    const trigger = fakeXR.controllers[1] as THREE.Group;
+    grip.position.x += 0.2;
+    grip.rotation.y += 0.15;
+    fakeXR.frame?.(16);
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    const position = keyboard.position.clone();
+    const rotation = keyboard.quaternion.clone();
+    const shift = keyboard.children.find((object) => object.userData.key === 'Shift');
+    if (!shift) throw new Error('Shift missing');
+    trigger.quaternion.copy(shift.getWorldQuaternion(new THREE.Quaternion()));
+    trigger.position
+      .copy(shift.getWorldPosition(new THREE.Vector3()))
+      .add(new THREE.Vector3(0, 0, 0.3).applyQuaternion(trigger.quaternion));
+    workspace.scene.updateMatrixWorld(true);
+    trigger.dispatchEvent({ type: 'selectstart' } as never);
+    workspace.selectTerminal('pane-b');
+    const refreshed = workspace.scene.getObjectByName('xr-keyboard-controls');
+    expect(refreshed?.position.distanceTo(position)).toBeLessThan(0.000001);
+    expect(refreshed?.quaternion.angleTo(rotation)).toBeLessThan(0.000001);
+    grip.position.y += 0.1;
+    fakeXR.frame?.(32);
+    expect(refreshed?.position.y).toBeGreaterThan(position.y + 0.09);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('terminates the controller ray at a distant key and keeps tint until both controllers leave', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('keyboard');
+    const key = (() => {
+      let found: THREE.Object3D | undefined;
+      workspace.scene.traverse((object) => {
+        if (!found && object.userData.inputAction === 'key' && object.userData.key === 'a')
+          found = object;
+      });
+      return found;
+    })();
+    if (!key) throw new Error('Key missing');
+    const orient = key.getWorldQuaternion(new THREE.Quaternion());
+    const point = key.getWorldPosition(new THREE.Vector3());
+    for (const controller of fakeXR.controllers as THREE.Group[]) {
+      controller.position.copy(point).add(new THREE.Vector3(0, 0, 2).applyQuaternion(orient));
+      controller.quaternion.copy(orient);
+    }
+    workspace.scene.updateMatrixWorld(true);
+    fakeXR.frame?.(16);
+    const line = (fakeXR.controllers[0] as THREE.Group).children.find(
+      (child) => child instanceof THREE.Line,
+    );
+    expect(line?.scale.z).toBeCloseTo(2 / 8, 5);
+    const material = (key as THREE.Mesh).material as THREE.MeshBasicMaterial;
+    expect(material.color.getHex()).toBe(0x9deaff);
+    (fakeXR.controllers[1] as THREE.Group).position.set(20, 20, 20);
+    fakeXR.frame?.(32);
+    expect(material.color.getHex()).toBe(0x9deaff);
+    (fakeXR.controllers[0] as THREE.Group).position.set(20, 20, 20);
+    fakeXR.frame?.(48);
+    expect(material.color.getHex()).toBe(0xffffff);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('accumulates controller-local depth while grip trigger is held and preserves release pose', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    const gamepad = { axes: [0, 0, 0, -1], buttons: [{ pressed: true }] } as unknown as Gamepad;
+    controller.dispatchEvent({ type: 'connected', data: { gamepad } } as never);
+    hit(workspace, { inputAction: 'key', key: 'a' }, 'squeezestart');
+    const initial = keyboard.position.clone();
+    fakeXR.frame?.(16);
+    fakeXR.frame?.(32);
+    expect(keyboard.position.distanceTo(initial)).toBeGreaterThan(0.001);
+    controller.dispatchEvent({ type: 'squeezeend' } as never);
+    const released = keyboard.position.clone();
+    (gamepad.axes as number[])[3] = 1;
+    fakeXR.frame?.(48);
+    expect(keyboard.position.distanceTo(released)).toBeLessThan(0.000001);
     workspace.dispose();
     container.remove();
   });

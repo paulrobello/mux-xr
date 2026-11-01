@@ -518,6 +518,40 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
     await page.locator('[data-background]').selectOption('black');
     await page.locator('[data-gaze]').uncheck();
     assert(
+      !(await page.locator('[data-gaze-input]').isChecked()),
+      'gaze keyboard input must default off',
+    );
+    await page.locator('[data-gaze-input]').check();
+    assert(
+      await page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __muxXR: { getState(): { scene: { gazeInputEnabled: boolean } } };
+            }
+          ).__muxXR.getState().scene.gazeInputEnabled,
+      ),
+      'gaze input setting did not reach the scene',
+    );
+    assert(
+      await page.evaluate(
+        () => JSON.parse(localStorage.getItem('mux-xr:settings:v1') ?? '{}').gazeInput === true,
+      ),
+      'gaze input setting was not persisted',
+    );
+    await page.locator('[data-gaze-input]').uncheck();
+    assert(
+      !(await page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __muxXR: { getState(): { scene: { gazeInputEnabled: boolean } } };
+            }
+          ).__muxXR.getState().scene.gazeInputEnabled,
+      )),
+      'gaze input did not disable',
+    );
+    assert(
       (await page.locator('[data-background]').inputValue()) === 'black',
       'background setting did not apply',
     );

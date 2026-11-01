@@ -27,6 +27,7 @@ export interface WorkspaceSceneState {
   selectedTerminalId: string | null;
   background: BackgroundMode;
   gazeEnabled: boolean;
+  gazeInputEnabled: boolean;
   xrMode: 'desktop' | 'vr' | 'ar';
   focusedTerminalId: string | null;
   rendererError: string | null;
@@ -44,6 +45,7 @@ export interface WorkspaceScene {
   selectTerminal(id: string | null): void;
   setBackground(mode: BackgroundMode): void;
   setGazeEnabled(enabled: boolean): void;
+  setGazeInputEnabled(enabled: boolean): void;
   setAvailablePanes(panes: PaneDescriptor[]): void;
   setQuickCommands(commands: QuickCommand[]): void;
   showInput(mode: 'commands' | 'keyboard' | 'panes'): void;
@@ -142,6 +144,7 @@ export function routeInput(
 const PANEL_WIDTH = 1.42;
 const PANEL_HEIGHT = 0.8;
 const ACCENT = 0x68d6ff;
+const CONTROLLER_RAY_LENGTH = 8;
 
 interface XrSessionLike {
   addEventListener(type: string, listener: () => void): void;
@@ -426,6 +429,7 @@ export function createWorkspaceScene(
     selectedTerminalId: null,
     background: 'observatory',
     gazeEnabled: false,
+    gazeInputEnabled: false,
     xrMode: 'desktop',
     focusedTerminalId: null,
     rendererError,
@@ -441,13 +445,25 @@ export function createWorkspaceScene(
     onSelect: (event: Event) => void;
     onSqueeze: (event: Event) => void;
     onSqueezeEnd: (event: Event) => void;
+    onConnected: (event: Event) => void;
+    onDisconnected: (event: Event) => void;
   }> = [];
   const tempMatrix = new THREE.Matrix4();
   const dragStates = new Map<
     THREE.Group,
-    { panel: TerminalPanel; localOffset: THREE.Vector3; relativeRotation: THREE.Quaternion }
+    {
+      object: THREE.Group;
+      localOffset: THREE.Vector3;
+      relativeRotation: THREE.Quaternion;
+      gamepad?: Gamepad;
+    }
   >();
   const availablePanes: PaneDescriptor[] = [];
+  const controllerGamepads = new Map<THREE.Group, Gamepad>();
+  const disconnectedControllers = new Set<THREE.Group>();
+  const heldControllers = new Set<THREE.Group>();
+  let previousRenderTime: number | null = null;
+  let gazeRetargeting = false;
   let quickCommands: QuickCommand[] = [];
   let menuCommands: QuickCommand[] = [];
   let commandPage = 0;
@@ -462,6 +478,14 @@ export function createWorkspaceScene(
   let hierarchySessionId: string | null = null;
   let hierarchyWindowId: string | null = null;
   let gazeState: GazeState = { candidateId: null, emphasizedId: null, since: 0 };
+  let gazeInputState: GazeState = { candidateId: null, emphasizedId: null, since: 0 };
+  let lastRayDistance = CONTROLLER_RAY_LENGTH;
+  const hoveredByController = new Map<THREE.Group, THREE.Object3D>();
+  let inputTransform: {
+    position: THREE.Vector3;
+    quaternion: THREE.Quaternion;
+    scale: number;
+  } | null = null;
   const updateRecoveryVisibility = (): void => {
     const immersive = Boolean(renderer?.xr.isPresenting);
     const hudRecovery = hudRoot?.getObjectByName('xr-recovery-controls');
@@ -480,7 +504,7 @@ export function createWorkspaceScene(
   const notify = (): void => {
     for (const listener of listeners) listener(mutableState);
   };
-  const hoverHelp = createLabelButton('', 1.05, 0.12, {});
+  const hoverHelp = createLabelButton('', 0.58, 0.07, {});
   hoverHelp.name = 'xr-hover-help';
   hoverHelp.visible = false;
   hoverHelp.raycast = () => undefined;
@@ -559,54 +583,136 @@ export function createWorkspaceScene(
   };
   const render = (time = 0): void => {
     if (disposed) return;
+    const deltaSeconds =
+      previousRenderTime === null
+        ? 1 / 60
+        : THREE.MathUtils.clamp((time - previousRenderTime) / 1000, 0, 0.05);
+    previousRenderTime = time;
     updateRecoveryVisibility();
     for (const [controller, drag] of dragStates) {
       controller.updateMatrixWorld(true);
-      const position = new THREE.Vector3()
-        .setFromMatrixPosition(controller.matrixWorld)
-        .add(
-          drag.localOffset
-            .clone()
-            .applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion())),
+      const controllerPosition = new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
+      const controllerQuaternion = controller.getWorldQuaternion(new THREE.Quaternion());
+      const gamepad = drag.gamepad;
+      if (gamepad) {
+        const axes = gamepad.axes;
+        const x = axes.length >= 4 ? axes[2] : (axes[axes.length - 2] ?? 0);
+        const y = axes.length >= 4 ? axes[3] : (axes[axes.length - 1] ?? 0);
+        const deadzone = 0.15;
+        const applyDeadzone = (value: number): number =>
+          Math.abs(value) < deadzone ? 0 : (value - Math.sign(value) * deadzone) / (1 - deadzone);
+        const yaw = applyDeadzone(x) * 0.9 * deltaSeconds;
+        const vertical = -applyDeadzone(y) * 0.8 * deltaSeconds;
+        drag.relativeRotation.multiply(
+          new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -yaw),
         );
-      drag.panel.root.position.copy(position);
-      drag.panel.root.quaternion
-        .copy(controller.getWorldQuaternion(new THREE.Quaternion()))
-        .multiply(drag.relativeRotation);
+        if (gamepad.buttons[0]?.pressed) {
+          drag.localOffset.z = THREE.MathUtils.clamp(drag.localOffset.z - vertical, -6, -0.3);
+        } else {
+          drag.localOffset.add(
+            new THREE.Vector3(0, vertical, 0).applyQuaternion(
+              controllerQuaternion.clone().invert(),
+            ),
+          );
+          drag.localOffset.y = THREE.MathUtils.clamp(drag.localOffset.y, -2, 2);
+        }
+      }
+      const finalPosition = controllerPosition
+        .clone()
+        .add(drag.localOffset.clone().applyQuaternion(controllerQuaternion));
+      drag.object.position.copy(finalPosition);
+      drag.object.quaternion.copy(controllerQuaternion).multiply(drag.relativeRotation);
     }
-    if (mutableState.gazeEnabled) {
+    if (mutableState.gazeEnabled || mutableState.gazeInputEnabled) {
       const gazeCamera = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+      scene.updateMatrixWorld(true);
+      gazeCamera.updateMatrixWorld(true);
+      raycaster.far = CONTROLLER_RAY_LENGTH;
       const origin = new THREE.Vector3().setFromMatrixPosition(gazeCamera.matrixWorld);
       const direction = gazeCamera.getWorldDirection(new THREE.Vector3());
       raycaster.set(origin, direction);
-      const hit = raycaster.intersectObjects(
-        [...panels.values()].map((panel) => panel.root),
-        true,
-      )[0]?.object;
+      const hit = raycaster
+        .intersectObjects(
+          [...panels.values()].map((panel) => panel.root).concat(inputRoot ? [inputRoot] : []),
+          true,
+        )
+        .find((entry) => isControlVisible(entry.object))?.object;
       let target: THREE.Object3D | null = hit ?? null;
       while (target && !target.userData.terminalId) target = target.parent;
-      gazeState = updateGaze(
-        gazeState,
-        (target?.userData.terminalId as string | undefined) ?? null,
-        time,
-      );
+      if (mutableState.gazeEnabled)
+        gazeState = updateGaze(
+          gazeState,
+          (target?.userData.terminalId as string | undefined) ?? null,
+          time,
+        );
+      if (
+        mutableState.gazeInputEnabled &&
+        mutableState.xrMode !== 'desktop' &&
+        dragStates.size === 0
+      ) {
+        const nextGaze = updateGaze(
+          gazeInputState,
+          (target?.userData.terminalId as string | undefined) ?? null,
+          time,
+        );
+        if (nextGaze.emphasizedId && nextGaze.emphasizedId !== gazeInputState.emphasizedId) {
+          gazeRetargeting = true;
+          selectTerminal(nextGaze.emphasizedId);
+          gazeRetargeting = false;
+        }
+        gazeInputState = nextGaze;
+      }
+      if (dragStates.size) gazeInputState = { candidateId: null, emphasizedId: null, since: time };
       for (const panel of panels.values()) {
-        const emphasized = panel.id === gazeState.emphasizedId;
+        const emphasized = mutableState.gazeEnabled && panel.id === gazeState.emphasizedId;
         panel.selection.visible = emphasized || panel.id === mutableState.selectedTerminalId;
         (panel.selection.material as THREE.LineBasicMaterial).opacity = emphasized ? 1 : 0.72;
       }
     }
     if (renderer?.xr.isPresenting) {
       let hover: THREE.Object3D | null = null;
+      const nextHovered = new Map<THREE.Group, THREE.Object3D>();
       for (const controller of controllerRoots) {
-        if (!controller.visible) continue;
+        if (!controller.visible || disconnectedControllers.has(controller)) continue;
         controller.updateMatrixWorld(true);
         const target = targetFromController(controller);
-        if (target?.object?.userData.helpText) {
-          hover = target.object;
-          break;
+        const distance =
+          (controller.userData.rayDistance as number | undefined) ?? CONTROLLER_RAY_LENGTH;
+        const line = controller.children.find((child) => child instanceof THREE.Line) as
+          | THREE.Line
+          | undefined;
+        if (line) line.scale.z = distance / CONTROLLER_RAY_LENGTH;
+        const contact = controller.children.find((child) => child instanceof THREE.Mesh) as
+          | THREE.Mesh
+          | undefined;
+        if (contact) {
+          contact.position.set(0, 0, -distance);
+          contact.visible = Boolean(target?.object);
+        }
+        const object = target?.object;
+        if (
+          object &&
+          object.userData.labelText !== undefined &&
+          (object.userData.inputAction || object.userData.key)
+        ) {
+          nextHovered.set(controller, object);
+          if (object.userData.helpText) hover ??= object;
         }
       }
+      const allHovered = new Set(nextHovered.values());
+      for (const previous of hoveredByController.values()) {
+        if (allHovered.has(previous)) continue;
+        const material = (previous as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
+        const modifier = previous.userData.modifier as keyof KeyModifiers | undefined;
+        if (material?.color)
+          material.color.setHex(modifier && armedModifiers[modifier] ? ACCENT : 0xffffff);
+      }
+      for (const object of allHovered) {
+        const material = (object as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
+        if (material?.color) material.color.setHex(0x9deaff);
+      }
+      hoveredByController.clear();
+      for (const [controller, object] of nextHovered) hoveredByController.set(controller, object);
       showHover(hover);
     }
     updateHoverPosition();
@@ -629,6 +735,9 @@ export function createWorkspaceScene(
   };
   const clearInputRoot = (): void => {
     if (!inputRoot) return;
+    for (const [controller, object] of hoveredByController)
+      if (inputRoot.getObjectById(object.id)) hoveredByController.delete(controller);
+    if (hoveredControl && inputRoot.getObjectById(hoveredControl.id)) showHover(null);
     scene.remove(inputRoot);
     disposeObject(inputRoot);
     inputRoot = null;
@@ -641,13 +750,45 @@ export function createWorkspaceScene(
     commandPage = 0;
     clearArmedModifiers();
   };
+  const resetInputPose = (): void => {
+    inputTransform = null;
+    if (!inputRoot) return;
+    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    view.updateMatrixWorld(true);
+    inputRoot.position
+      .copy(view.getWorldPosition(new THREE.Vector3()))
+      .addScaledVector(view.getWorldDirection(new THREE.Vector3()), 1.15);
+    inputRoot.position.y -= 0.2;
+    inputRoot.quaternion.copy(view.getWorldQuaternion(new THREE.Quaternion()));
+    inputRoot.scale.setScalar(0.38);
+  };
   const refreshInputRoot = (mode: 'commands' | 'keyboard' | 'panes'): void => {
     inputMode = mode;
+    const grabbedControllers = inputRoot
+      ? [...dragStates.entries()]
+          .filter(([, drag]) => drag.object === inputRoot)
+          .map(([controller]) => controller)
+      : [];
+    if (inputRoot) {
+      inputRoot.updateMatrixWorld(true);
+      inputTransform = {
+        position: inputRoot.position.clone(),
+        quaternion: inputRoot.quaternion.clone(),
+        scale: inputRoot.scale.x,
+      };
+    }
     clearInputRoot();
     inputRoot = new THREE.Group();
     inputRoot.name = `xr-${mode}-controls`;
-    inputRoot.position.set(0, 1.27, -0.82);
-    inputRoot.scale.setScalar(0.72);
+    if (inputTransform) {
+      inputRoot.position.copy(inputTransform.position);
+      inputRoot.quaternion.copy(inputTransform.quaternion);
+      inputRoot.scale.setScalar(inputTransform.scale);
+    } else resetInputPose();
+    for (const controller of grabbedControllers) {
+      const drag = dragStates.get(controller);
+      if (drag) drag.object = inputRoot;
+    }
     const modeCommands = createLabelButton('Commands', 0.28, 0.09, {
       inputAction: 'mode',
       mode: 'commands',
@@ -659,8 +800,18 @@ export function createWorkspaceScene(
     modeCommands.position.set(-0.2, 0.7, 0);
     modeKeyboard.position.set(0.2, 0.7, 0);
     inputRoot.add(modeCommands, modeKeyboard);
+    const gazeToggle = createLabelButton(
+      `Gaze input: ${mutableState.gazeInputEnabled ? 'on' : 'off'}`,
+      0.34,
+      0.08,
+      {
+        inputAction: 'gazeInput',
+      },
+    );
+    gazeToggle.position.set(0, 0.84, 0);
+    inputRoot.add(gazeToggle);
     const recovery = createRecoveryControls();
-    recovery.position.y = 0.9;
+    recovery.position.y = 1;
     inputRoot.add(recovery);
     const hudRecovery = hudRoot?.getObjectByName('xr-recovery-controls');
     if (hudRecovery) hudRecovery.visible = false;
@@ -671,8 +822,9 @@ export function createWorkspaceScene(
       `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? 'Terminal keyboard' : `Panes · ${hierarchyLevel}`} · ${targetTitle}`,
       0.9,
       0.12,
-      { inputAction: 'noop' },
+      { inputAction: 'grabInput' },
     );
+    title.userData.dragHandle = true;
     title.position.y = 0.56;
     inputRoot.add(title);
     if (mode === 'panes') {
@@ -770,9 +922,15 @@ export function createWorkspaceScene(
       }
     } else {
       semanticKeyboardLayout.forEach((row, rowIndex) => {
+        const widths = row.map((key) =>
+          key.key === ' ' ? 0.9 : key.label.length > 4 ? 0.27 : 0.17,
+        );
+        let left =
+          -(widths.reduce((total, width) => total + width, 0) + (row.length - 1) * 0.025) / 2;
         row.forEach((key, columnIndex) => {
-          const width = key.label.length > 4 ? 0.27 : 0.17;
-          const x = (columnIndex - (row.length - 1) / 2) * 0.19;
+          const width = widths[columnIndex];
+          const x = left + width / 2;
+          left += width + 0.025;
           const button = createLabelButton(
             key.key.length === 1 && key.key !== ' '
               ? terminalKeyLabel(key.key, Boolean(armedModifiers.shift))
@@ -790,9 +948,22 @@ export function createWorkspaceScene(
           inputRoot?.add(button);
         });
       });
+      const inputSmaller = createLabelButton('Smaller', 0.28, 0.08, {
+        inputAction: 'inputScale',
+        direction: -1,
+      });
+      const inputLarger = createLabelButton('Larger', 0.28, 0.08, {
+        inputAction: 'inputScale',
+        direction: 1,
+      });
+      const inputReset = createLabelButton('Reset', 0.24, 0.08, { inputAction: 'inputReset' });
+      inputSmaller.position.set(-0.32, -0.53, 0);
+      inputLarger.position.set(0, -0.53, 0);
+      inputReset.position.set(0.29, -0.53, 0);
+      inputRoot.add(inputSmaller, inputLarger, inputReset);
     }
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
-    close.position.set(0, -0.62, 0);
+    close.position.set(0, -0.82, 0);
     const black = createLabelButton('Black', 0.22, 0.08, {
       inputAction: 'background',
       background: 'black',
@@ -805,10 +976,29 @@ export function createWorkspaceScene(
       inputAction: 'background',
       background: 'observatory',
     });
-    black.position.set(-0.38, -0.55, 0);
-    gradient.position.set(-0.08, -0.55, 0);
-    observatory.position.set(0.3, -0.55, 0);
+    black.position.set(-0.38, -0.69, 0);
+    gradient.position.set(-0.08, -0.69, 0);
+    observatory.position.set(0.3, -0.69, 0);
     inputRoot.add(close, black, gradient, observatory);
+    inputRoot.updateMatrixWorld(true);
+    const bounds = new THREE.Box3();
+    for (const child of inputRoot.children) {
+      const geometry = (child as THREE.Mesh).geometry;
+      if (!geometry) continue;
+      geometry.computeBoundingBox();
+      if (geometry.boundingBox)
+        bounds.union(geometry.boundingBox.clone().applyMatrix4(child.matrix));
+    }
+    const size = bounds.getSize(new THREE.Vector3());
+    const center = bounds.getCenter(new THREE.Vector3());
+    const backing = new THREE.Mesh(
+      new THREE.PlaneGeometry(size.x + 0.12, size.y + 0.12),
+      new THREE.MeshBasicMaterial({ color: 0x0d1720 }),
+    );
+    backing.position.copy(center);
+    backing.position.z = -0.015;
+    backing.userData.inputAction = 'grabInput';
+    inputRoot.add(backing);
     scene.add(inputRoot);
     updateRecoveryVisibility();
   };
@@ -825,6 +1015,7 @@ export function createWorkspaceScene(
       ['Black', { inputAction: 'background', background: 'black' }],
       ['Gradient', { inputAction: 'background', background: 'gradient' }],
       ['Observatory', { inputAction: 'background', background: 'observatory' }],
+      ['Gaze input: off', { inputAction: 'gazeInput', gazeInputEnabled: false }],
     ];
     controls.forEach(([label, data], index) => {
       const button = createLabelButton(label, label === 'Observatory' ? 0.34 : 0.27, 0.09, data);
@@ -879,6 +1070,7 @@ export function createWorkspaceScene(
       hideInput();
       return true;
     }
+    if (action === 'grabInput') return true;
     if (action === 'mode') {
       const mode = hit.userData.mode as 'commands' | 'keyboard';
       if (renderer?.xr.isPresenting) refreshInputRoot(mode);
@@ -925,11 +1117,27 @@ export function createWorkspaceScene(
       setBackground(hit.userData.background as BackgroundMode);
       return true;
     }
-    if (action === 'selectedScale') {
-      scaleSelectedPanel(hit.userData.direction as number);
+    if (action === 'gazeInput') {
+      setGazeInputEnabled(!mutableState.gazeInputEnabled);
       return true;
     }
-    if (action === 'resetLayout') {
+    if (action === 'selectedScale' || action === 'inputScale') {
+      if (action === 'inputScale' && inputRoot)
+        inputRoot.scale.setScalar(
+          THREE.MathUtils.clamp(
+            inputRoot.scale.x + (hit.userData.direction as number) * 0.05,
+            0.18,
+            0.75,
+          ),
+        );
+      else scaleSelectedPanel(hit.userData.direction as number);
+      return true;
+    }
+    if (action === 'resetLayout' || action === 'inputReset') {
+      if (action === 'inputReset' && inputRoot) {
+        resetInputPose();
+        return true;
+      }
       resetLayout();
       return true;
     }
@@ -1018,6 +1226,7 @@ export function createWorkspaceScene(
     return true;
   };
   const targetFromRay = (): InputTarget | null => {
+    raycaster.far = CONTROLLER_RAY_LENGTH;
     const targets = [...panels.values()].map((panel) => panel.root);
     if (inputRoot) targets.push(inputRoot);
     if (hudRoot) targets.push(hudRoot);
@@ -1027,12 +1236,20 @@ export function createWorkspaceScene(
         if (object.userData.recoveryControl && isControlVisible(object))
           recoveryControls.push(object);
       });
-    const recoveryHit = raycaster.intersectObjects(recoveryControls, false)[0]?.object;
+    const recoveryIntersection = raycaster.intersectObjects(recoveryControls, false)[0];
     const hits = raycaster.intersectObjects(targets, true);
-    const hit = recoveryHit ?? hits.find((entry) => isControlVisible(entry.object))?.object;
+    const intersection =
+      recoveryIntersection ?? hits.find((entry) => isControlVisible(entry.object));
+    const hit = intersection?.object;
+    lastRayDistance = intersection?.distance ?? CONTROLLER_RAY_LENGTH;
     if (!hit) return null;
     if (hit.userData.inputAction)
-      return { terminalId: mutableState.focusedTerminalId ?? '', kind: 'keyboard', object: hit };
+      return {
+        terminalId:
+          (hit.userData.terminalId as string | undefined) ?? mutableState.focusedTerminalId ?? '',
+        kind: 'keyboard',
+        object: hit,
+      };
     let current: THREE.Object3D | null = hit;
     while (current && !current.userData.terminalId) current = current.parent;
     const terminalId = current?.userData.terminalId as string | undefined;
@@ -1044,7 +1261,9 @@ export function createWorkspaceScene(
     tempMatrix.identity().extractRotation(root.matrixWorld);
     raycaster.ray.origin.setFromMatrixPosition(root.matrixWorld);
     raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix).normalize();
-    return targetFromRay();
+    const target = targetFromRay();
+    root.userData.rayDistance = Math.min(CONTROLLER_RAY_LENGTH, Math.max(0.02, lastRayDistance));
+    return target;
   };
   const activateTarget = (target: InputTarget | null): void => {
     if (!target) return;
@@ -1079,54 +1298,109 @@ export function createWorkspaceScene(
     if (!renderer) return;
     for (let i = 0; i < 2; i += 1) {
       const root = renderer.xr.getController(i);
-      root.add(
-        new THREE.Line(
-          new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(0, 0, 0),
-            new THREE.Vector3(0, 0, -1),
-          ]),
-          new THREE.LineBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.65 }),
-        ),
+      const rayLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(0, 0, 0),
+          new THREE.Vector3(0, 0, -CONTROLLER_RAY_LENGTH),
+        ]),
+        new THREE.LineBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.65 }),
       );
-      const onSelect = (): void => onControllerSelect(root);
-      const onSqueeze = (): void => {
+      rayLine.raycast = () => undefined;
+      const contact = new THREE.Mesh(
+        new THREE.SphereGeometry(0.003, 8, 6),
+        new THREE.MeshBasicMaterial({ color: ACCENT }),
+      );
+      contact.raycast = () => undefined;
+      contact.visible = false;
+      root.add(rayLine, contact);
+      const onSelect = (): void => {
+        if (heldControllers.has(root) || disconnectedControllers.has(root)) return;
+        onControllerSelect(root);
+      };
+      const onSqueeze = (event: Event): void => {
+        heldControllers.add(root);
         const target = targetFromController(root);
-        const controller = root;
         if (!target) return;
-        if (target.kind === 'keyboard' && target.object) {
+        let object: THREE.Group | null = null;
+        if (
+          target.kind === 'keyboard' &&
+          inputRoot &&
+          target.object &&
+          inputRoot.getObjectById(target.object.id)
+        )
+          object = inputRoot;
+        else if (target.terminalId && target.object) {
+          const panel = panels.get(target.terminalId);
+          if (panel?.root.getObjectById(target.object.id)) object = panel.root;
+        }
+        if (!object) return;
+        if (
+          [...dragStates.entries()].some(
+            ([other, drag]) => other !== root && drag.object === object,
+          )
+        )
           return;
-        }
-        selectTerminal(target.terminalId);
-        if (target.kind === 'terminal' && target.object) {
-          let parent: THREE.Object3D | null = target.object;
-          while (parent && !parent.userData.terminalId) parent = parent.parent;
-          const panel = parent ? panels.get(parent.userData.terminalId as string) : undefined;
-          if (panel) {
-            panel.root.updateMatrixWorld(true);
-            const panelWorld = new THREE.Vector3().setFromMatrixPosition(panel.root.matrixWorld);
-            const controllerWorld = new THREE.Vector3().setFromMatrixPosition(
-              controller.matrixWorld,
-            );
-            const controllerRotation = controller.getWorldQuaternion(new THREE.Quaternion());
-            dragStates.set(controller, {
-              panel,
-              localOffset: panelWorld
-                .sub(controllerWorld)
-                .applyQuaternion(controllerRotation.clone().invert()),
-              relativeRotation: controllerRotation.clone().invert().multiply(panel.root.quaternion),
-            });
-          }
-        }
+        if (object.userData.terminalId) selectTerminal(object.userData.terminalId as string);
+        object.updateMatrixWorld(true);
+        const objectWorld = new THREE.Vector3().setFromMatrixPosition(object.matrixWorld);
+        const controllerWorld = new THREE.Vector3().setFromMatrixPosition(root.matrixWorld);
+        const controllerRotation = root.getWorldQuaternion(new THREE.Quaternion());
+        dragStates.set(root, {
+          object,
+          localOffset: objectWorld
+            .sub(controllerWorld)
+            .applyQuaternion(controllerRotation.clone().invert()),
+          relativeRotation: controllerRotation
+            .clone()
+            .invert()
+            .multiply(object.getWorldQuaternion(new THREE.Quaternion())),
+          gamepad:
+            controllerGamepads.get(root) ??
+            (event as Event & { data?: { gamepad?: Gamepad } }).data?.gamepad,
+        });
       };
       const onSqueezeEnd = (): void => {
+        heldControllers.delete(root);
         dragStates.delete(root);
+      };
+      const onConnected = (event: Event): void => {
+        disconnectedControllers.delete(root);
+        rayLine.visible = true;
+        const gamepad = (event as Event & { data?: { gamepad?: Gamepad } }).data?.gamepad;
+        if (gamepad) controllerGamepads.set(root, gamepad);
+      };
+      const onDisconnected = (): void => {
+        disconnectedControllers.add(root);
+        heldControllers.delete(root);
+        rayLine.visible = false;
+        contact.visible = false;
+        controllerGamepads.delete(root);
+        dragStates.delete(root);
+        const previous = hoveredByController.get(root);
+        hoveredByController.delete(root);
+        if (previous && ![...hoveredByController.values()].includes(previous)) {
+          const material = (previous as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
+          const modifier = previous.userData.modifier as keyof KeyModifiers | undefined;
+          if (material?.color)
+            material.color.setHex(modifier && armedModifiers[modifier] ? ACCENT : 0xffffff);
+        }
+        root.userData.rayDistance = 0;
       };
       const eventRoot = root as unknown as EventRoot;
       eventRoot.addEventListener('selectstart', onSelect);
       eventRoot.addEventListener('squeezestart', onSqueeze);
       eventRoot.addEventListener('squeezeend', onSqueezeEnd);
+      eventRoot.addEventListener('connected', onConnected);
+      eventRoot.addEventListener('disconnected', onDisconnected);
       controllerRoots.push(root);
-      controllerListeners.push({ root, onSelect, onSqueeze, onSqueezeEnd });
+      controllerListeners.push({
+        root,
+        onSelect,
+        onSqueeze,
+        onSqueezeEnd,
+        onConnected,
+        onDisconnected,
+      });
       scene.add(root);
     }
   };
@@ -1188,7 +1462,8 @@ export function createWorkspaceScene(
     fontUp.position.set(0.79, 0.22, 0.02);
     root.userData.fontZoom = 1;
     const titleLabel = createLabelButton(`${surface.pane.title} · ${surface.status}`, 0.92, 0.08, {
-      inputAction: 'noop',
+      terminalId: surface.pane.id,
+      terminalTitle: true,
     });
     titleLabel.position.set(0, 0.47, 0.02);
     root.add(selection, keyStrip, scaleDown, scaleUp, fontDown, fontUp, titleLabel);
@@ -1226,7 +1501,7 @@ export function createWorkspaceScene(
     panel.texture.dispose();
     panels.delete(id);
     dragStates.forEach((drag, controller) => {
-      if (drag.panel.id === id) dragStates.delete(controller);
+      if (drag.object.userData.terminalId === id) dragStates.delete(controller);
     });
     if (mutableState.inputTargetId === id) {
       clearInputCapture();
@@ -1243,6 +1518,7 @@ export function createWorkspaceScene(
     const nextId = id && panels.has(id) ? id : null;
     if (nextId === mutableState.selectedTerminalId && mutableState.focusedTerminalId === nextId)
       return;
+    if (!gazeRetargeting) gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
     mutableState.selectedTerminalId = nextId;
     mutableState.focusedTerminalId = mutableState.selectedTerminalId;
     if (mutableState.selectedTerminalId) actions.selectPane(mutableState.selectedTerminalId);
@@ -1287,6 +1563,24 @@ export function createWorkspaceScene(
         panel.selection.visible = panel.id === mutableState.selectedTerminalId;
       }
     }
+    notify();
+  };
+  const setGazeInputEnabled = (enabled: boolean): void => {
+    if (mutableState.gazeInputEnabled === enabled) return;
+    mutableState.gazeInputEnabled = enabled;
+    gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
+    if (hudRoot) {
+      const toggle = hudRoot.children.find((child) => child.userData.inputAction === 'gazeInput');
+      if (toggle) {
+        toggle.userData.gazeInputEnabled = enabled;
+        updateLabel(toggle as THREE.Mesh, `Gaze input: ${enabled ? 'on' : 'off'}`);
+      }
+    }
+    const inputToggle = inputRoot?.children.find(
+      (child) => child.userData.inputAction === 'gazeInput',
+    );
+    if (inputToggle)
+      updateLabel(inputToggle as THREE.Mesh, `Gaze input: ${enabled ? 'on' : 'off'}`);
     notify();
   };
   const setAvailablePanes = (panes: PaneDescriptor[]): void => {
@@ -1340,6 +1634,15 @@ export function createWorkspaceScene(
     refreshInputRoot(mode);
   };
   const hideInput = (): void => {
+    if (inputRoot)
+      inputTransform = {
+        position: inputRoot.position.clone(),
+        quaternion: inputRoot.quaternion.clone(),
+        scale: inputRoot.scale.x,
+      };
+    dragStates.forEach((drag, controller) => {
+      if (drag.object === inputRoot) dragStates.delete(controller);
+    });
     clearInputRoot();
     clearInputCapture();
     notify();
@@ -1360,6 +1663,10 @@ export function createWorkspaceScene(
         : { optionalFeatures: ['local-floor'] },
     );
     activeSession = session;
+    hideInput();
+    inputTransform = null;
+    previousRenderTime = null;
+    gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
     desktopCameraPosition.copy(camera.position);
     desktopCameraQuaternion.copy(camera.quaternion);
     renderer.xr.setReferenceSpaceType('local-floor');
@@ -1378,6 +1685,14 @@ export function createWorkspaceScene(
     session.addEventListener('end', () => {
       activeSession = null;
       hideInput();
+      inputTransform = null;
+      dragStates.clear();
+      heldControllers.clear();
+      controllerGamepads.clear();
+      previousRenderTime = null;
+      hoveredByController.clear();
+      showHover(null);
+      gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
       mutableState.xrMode = 'desktop';
       camera.position.copy(desktopCameraPosition);
       camera.quaternion.copy(desktopCameraQuaternion);
@@ -1393,6 +1708,8 @@ export function createWorkspaceScene(
       panel.root.rotation.set(0, panel.defaultPosition.x < 0 ? 0.06 : -0.06, 0);
       panel.root.scale.setScalar(1);
     }
+    dragStates.clear();
+    resetInputPose();
     notify();
   };
   const getControlHints = (): Array<{
@@ -1441,16 +1758,29 @@ export function createWorkspaceScene(
     canvas.removeEventListener('pointercancel', onPointerLeave);
     renderer?.setAnimationLoop(null);
     for (const id of [...panels.keys()]) removeTerminal(id);
-    for (const { root, onSelect, onSqueeze, onSqueezeEnd } of controllerListeners) {
+    for (const {
+      root,
+      onSelect,
+      onSqueeze,
+      onSqueezeEnd,
+      onConnected,
+      onDisconnected,
+    } of controllerListeners) {
       const eventRoot = root as unknown as EventRoot;
       eventRoot.removeEventListener('selectstart', onSelect);
       eventRoot.removeEventListener('squeezestart', onSqueeze);
       eventRoot.removeEventListener('squeezeend', onSqueezeEnd);
+      eventRoot.removeEventListener('connected', onConnected);
+      eventRoot.removeEventListener('disconnected', onDisconnected);
       scene.remove(root);
       disposeObject(root);
+      root.clear();
     }
     controllerListeners.length = 0;
     controllerRoots.length = 0;
+    controllerGamepads.clear();
+    disconnectedControllers.clear();
+    heldControllers.clear();
     clearInputRoot();
     if (hudRoot) {
       scene.remove(hudRoot);
@@ -1458,6 +1788,8 @@ export function createWorkspaceScene(
       hudRoot = null;
     }
     hoveredControl = null;
+    hoveredByController.clear();
+    dragStates.clear();
     canvas.title = '';
     scene.remove(hoverHelp);
     disposeObject(hoverHelp);
@@ -1479,6 +1811,7 @@ export function createWorkspaceScene(
     selectTerminal,
     setBackground,
     setGazeEnabled,
+    setGazeInputEnabled,
     setAvailablePanes,
     setQuickCommands,
     showInput,

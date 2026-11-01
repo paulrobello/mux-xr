@@ -181,7 +181,7 @@ The form language is compact and gently softened. Desktop containers use an 8px 
 Non-obvious controls explain their action on browser hover or controller-ray hover. Spatial hints use the existing dark label treatment, face the viewer and stay outside ray picking. Hover feedback never sends terminal input or changes its target.
 
 ### XR Terminal Panel
-Each panel presents one live pane with a readable terminal surface, title label, key strip, scale controls, and font zoom controls. Selection is explicit and independent from gaze emphasis. The observatory background is peripheral architecture and a distant planet, never a competing focal surface.
+Each panel presents one live pane with a readable terminal surface, title label, key strip, scale controls, and font zoom controls. Selection is explicit by default and independent from gaze emphasis. Optional Gaze input uses a short head-directed dwell to retarget the keyboard, with a visible target caption. The observatory background is peripheral architecture and a distant planet, never a competing focal surface.
 
 ## Do's and Don'ts
 
@@ -193,7 +193,7 @@ Each panel presents one live pane with a readable terminal surface, title label,
 - **Do** keep motion expressive enough to explain selection while leaving viewpoint control to the user.
 
 ### Don't:
-- **Don't** redirect commands because gaze moved; input focus must remain explicit.
+- **Don't** redirect input from gaze unless the user enables Gaze input. Show the current target and retain it while the user looks at the keyboard.
 - **Don't** add ambient sound as part of the visual system.
 - **Don't** use bright gradients, ornamental neon, or decorative glows that compete with pane content.
 - **Don't** invent headset acceptance claims from desktop or emulator evidence.

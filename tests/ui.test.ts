@@ -28,6 +28,7 @@ describe('mux XR local UI state', () => {
       version: 1,
       background: 'observatory',
       gazeEmphasis: true,
+      gazeInput: false,
     });
     expect(
       validateSettings({ version: 9, endpoint: 42, background: 'laser', gazeEmphasis: 'yes' }),
@@ -40,6 +41,34 @@ describe('mux XR local UI state', () => {
       background: 'black',
       gazeEmphasis: false,
     });
+  });
+
+  it('keeps gaze keyboard routing opt-in and persists changes from browser and XR', () => {
+    expect(validateSettings({ gazeInput: 'true' }).gazeInput).toBe(false);
+    localStorage.clear();
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const changes: boolean[] = [];
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onSettingsChange: (settings) => changes.push(settings.gazeInput),
+    });
+    const checkbox = query<HTMLInputElement>(root, '[data-gaze-input]');
+    expect(checkbox.checked).toBe(false);
+    checkbox.click();
+    expect(ui.getSettings().gazeInput).toBe(true);
+    ui.destroy();
+    const restored = mountWorkspaceUI(root, { onConnect: () => undefined });
+    expect(query<HTMLInputElement>(root, '[data-gaze-input]').checked).toBe(true);
+    restored.setGazeInputEnabled(false);
+    expect(query<HTMLInputElement>(root, '[data-gaze-input]').checked).toBe(false);
+    restored.destroy();
+    const again = mountWorkspaceUI(root, { onConnect: () => undefined });
+    expect(again.getSettings().gazeInput).toBe(false);
+    expect(changes).toEqual([true]);
+    again.destroy();
+    root.remove();
+    localStorage.clear();
   });
 
   it('prefills the serving origin and restores a saved custom endpoint', () => {
