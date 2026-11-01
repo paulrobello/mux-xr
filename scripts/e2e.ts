@@ -246,6 +246,36 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
     await page.locator('[data-action="desktop-preview"]').click();
     const sceneCanvas = page.locator('canvas[aria-label="Mux XR workspace"]');
     await sceneCanvas.waitFor({ state: 'visible', timeout: 5_000 });
+    type Hint = {
+      key?: string;
+      terminalId?: string;
+      inputAction?: string;
+      label: string;
+      help: string;
+      clientX: number;
+      clientY: number;
+    };
+    const hints = await page.evaluate(() =>
+      (window as unknown as { __muxXR: { getControlHints(): Hint[] } }).__muxXR.getControlHints(),
+    );
+    const stripEnter = hints.find(
+      (hint) => hint.key === 'Enter' && hint.terminalId === '%1' && !hint.inputAction,
+    );
+    assert(stripEnter, 'terminal Enter strip target missing');
+    await page.mouse.move(stripEnter.clientX, stripEnter.clientY);
+    assert(
+      (await sceneCanvas.getAttribute('title'))?.includes('Send Enter'),
+      'spatial hover explanation missing',
+    );
+    const stripStart = state.frames.length;
+    await page.mouse.click(stripEnter.clientX, stripEnter.clientY);
+    await observedInputFrames(page, state, '%1', stripStart, '\r');
+    const black = hints.find((hint) => hint.inputAction === 'background' && hint.label === 'Black');
+    assert(black, 'background HUD target missing');
+    await page.mouse.click(black.clientX, black.clientY);
+    const exit = hints.find((hint) => hint.inputAction === 'exit');
+    assert(exit, 'Exit HUD target missing');
+
     await page.waitForFunction(
       () => {
         const canvas = document.querySelector<HTMLCanvasElement>(
@@ -316,6 +346,11 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
       fullPage: true,
     });
     await page.locator('[data-action="commands"]').click();
+    assert(
+      !(await page.locator('[data-keyboard]').isVisible()),
+      'Commands still shows the keyboard',
+    );
+    assert(await page.locator('[data-command-label]').isVisible(), 'Commands editor missing');
     await page.locator('[data-command-label]').fill('Global status');
     await page.locator('[data-command-text]').fill('printf global');
     await page.locator('[data-action="save-command"]').click();
@@ -358,7 +393,7 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
 
     await page.locator('[data-action="close-drawer"]').click();
     await page.locator('[data-pane="%1"]').click();
-    await page.locator('[data-action="commands"]').click();
+    await page.locator('[data-action="keyboard"]').click();
     await page.locator('[data-pane="%2"]').click();
     await page.locator('[data-compose]').fill('printf captured');
     const capturedStart = state.frames.length;
@@ -374,6 +409,11 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
 
     await page.locator('[data-pane="%1"]').click();
     await page.locator('[data-action="keyboard"]').click();
+    assert(
+      !(await page.locator('[data-command-label]').isVisible()),
+      'Keyboard still shows command editor',
+    );
+    assert(await page.locator('[data-keyboard]').isVisible(), 'Keyboard view missing');
     const keyboardStart = state.frames.length;
     assert(
       (await page.locator('[data-key="a"]').textContent()) === 'a',

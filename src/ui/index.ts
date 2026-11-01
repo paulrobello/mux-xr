@@ -6,6 +6,7 @@ import type {
   TerminalStatus,
   WorkspaceSnapshot,
 } from '../contracts';
+import { getKeyHelp } from '../control-help';
 import { terminalKeyLabel } from '../terminal/protocol';
 
 export interface UICallbacks {
@@ -227,11 +228,13 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   let attachedPaneIds: string[] = [];
   let commands: QuickCommand[] = [];
   let commandScope = 'global';
+  let inputMode: 'commands' | 'keyboard' = 'commands';
   const heldModifiers: KeyModifiers = {};
   const keyboardLabel = (key: string, shift = false): string => {
     if (key.length === 1 && key !== ' ') return terminalKeyLabel(key, shift);
     return KEY_LAYOUT.flat().find((entry) => entry.key === key)?.label ?? key;
   };
+  const keyboardTitle = (key: string): string => getKeyHelp(key) ?? '';
   const clearModifiers = (): void => {
     delete heldModifiers.ctrl;
     delete heldModifiers.alt;
@@ -244,12 +247,13 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   let capturedTarget: string | undefined;
   const root = document.createElement('section');
   root.className = 'mux-ui';
-  root.innerHTML = `<style>${CSS}</style><header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. No process control.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong>Input & commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer">${icon('close')}</button></div><div class="command-row"><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn">Run</button></div><div class="command-edit"><button data-action="add-command" class="text-btn">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn">Remove selected</button></div><div class="compose-row"><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text">${icon('send')}</button></div><div class="keyboard" data-keyboard>${KEY_LAYOUT.map((row) => `<div class="key-row">${row.map((key) => `<button class="key" data-key="${escapeHtml(key.key)}" data-modifier="${key.modifier ?? ''}" aria-label="${escapeHtml(key.key === 'Backspace' ? 'Backspace' : key.label)}">${escapeHtml(key.label)}</button>`).join('')}</div>`).join('')}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Visual emphasis only, never input focus.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="reset" class="text-btn">Reset local arrangement</button></div>`;
+  root.innerHTML = `<style>${CSS}</style><header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. No process control.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${KEY_LAYOUT.map((row) => `<div class="key-row">${row.map((key) => `<button class="key" data-key="${escapeHtml(key.key)}" data-modifier="${key.modifier ?? ''}" aria-label="${escapeHtml(key.key === 'Backspace' ? 'Backspace' : key.label)}" title="${escapeHtml(keyboardTitle(key.key))}">${escapeHtml(key.label)}</button>`).join('')}</div>`).join('')}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Visual emphasis only, never input focus.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
   container.replaceChildren(root);
   const editor = document.createElement('div');
   editor.className = 'command-editor';
   editor.innerHTML =
-    '<input data-command-label placeholder="Label" aria-label="Command label"><input data-command-text placeholder="Command text" aria-label="Command text"><label><input type="checkbox" data-command-newline checked> Enter</label><button data-action="save-command">Save</button><button data-action="move-up">Up</button><button data-action="move-down">Down</button>';
+    '<input data-command-label placeholder="Label" aria-label="Command label"><input data-command-text placeholder="Command text" aria-label="Command text"><label><input type="checkbox" data-command-newline checked> Enter</label><button data-action="save-command" title="Save the quick command">Save</button><button data-action="move-up" title="Move the selected quick command up">Up</button><button data-action="move-down" title="Move the selected quick command down">Down</button>';
+  editor.dataset.commandControls = 'true';
   root
     .querySelector<HTMLElement>('[data-drawer]')
     ?.insertBefore(
@@ -262,6 +266,20 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     return element;
   };
   clearModifiers();
+  const actionHelp: Record<string, string> = {
+    demo: 'Preview synthetic terminals without running commands',
+    xr: 'Enter immersive VR with controller input',
+    commands: 'Open saved global and workspace quick commands',
+    keyboard: 'Open text entry and the terminal keyboard',
+    passthrough: 'Enter mixed reality with your surroundings visible',
+    'send-text': 'Send text as typed without adding Enter',
+    'run-command': 'Send the saved command; add Enter if enabled',
+  };
+  for (const [action, help] of Object.entries(actionHelp))
+    root.querySelector<HTMLButtonElement>(`[data-action="${action}"]`)?.setAttribute('title', help);
+  root
+    .querySelector('[data-command-newline]')
+    ?.setAttribute('title', 'Append Enter after the command text to execute it');
   const saveSettings = (): void => {
     try {
       storage?.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -333,7 +351,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       ? attached
           .map(
             (pane) =>
-              `<div class="attached-selector ${pane.id === activePaneId ? 'active' : ''}"><button data-select="${escapeHtml(pane.id)}">${escapeHtml(pane.title)}</button><button class="icon-btn" data-close="${escapeHtml(pane.id)}" aria-label="Detach ${escapeHtml(pane.title)}">${icon('close')}</button></div>`,
+              `<div class="attached-selector ${pane.id === activePaneId ? 'active' : ''}"><button data-select="${escapeHtml(pane.id)}">${escapeHtml(pane.title)}</button><button class="icon-btn" data-close="${escapeHtml(pane.id)}" aria-label="Detach ${escapeHtml(pane.title)}" title="Detach this viewer and keep the terminal running">${icon('close')}</button></div>`,
           )
           .join('')
       : '<div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div>';
@@ -359,6 +377,16 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   const loadCommands = (): void => {
     commands = store.get(currentScope());
     renderCommands();
+  };
+  const updateInputMode = (): void => {
+    qs<HTMLElement>('[data-drawer-heading]').textContent =
+      inputMode === 'commands' ? 'Commands' : 'Keyboard';
+    root.querySelectorAll<HTMLElement>('[data-command-controls]').forEach((element) => {
+      element.hidden = inputMode !== 'commands';
+    });
+    root.querySelectorAll<HTMLElement>('[data-keyboard-controls]').forEach((element) => {
+      element.hidden = inputMode !== 'keyboard';
+    });
   };
   const updateTargetCaption = (): void => {
     const target = snapshot.panes.find((pane) => pane.id === (capturedTarget ?? activePaneId));
@@ -437,9 +465,11 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         break;
       case 'commands':
       case 'keyboard':
-        capturedTarget = activePaneId;
+        inputMode = button.dataset.action as 'commands' | 'keyboard';
+        if (qs<HTMLElement>('[data-drawer]').hidden) capturedTarget = activePaneId;
         clearModifiers();
         qs<HTMLElement>('[data-drawer]').hidden = false;
+        updateInputMode();
         updateTargetCaption();
         loadCommands();
         break;
@@ -611,9 +641,11 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       renderPanes();
     },
     openInput(mode) {
-      capturedTarget = activePaneId;
+      inputMode = mode;
+      if (qs<HTMLElement>('[data-drawer]').hidden) capturedTarget = activePaneId;
       clearModifiers();
       qs<HTMLElement>('[data-drawer]').hidden = false;
+      updateInputMode();
       loadCommands();
       updateTargetCaption();
       if (mode === 'keyboard')

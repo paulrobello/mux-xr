@@ -59,4 +59,5 @@ export interface WorkspaceActions {
   runCommand(command: QuickCommand, paneId: string): void;
   openKeyboard(): void;
   openCommands(): void;
+  exitPreview?(): void;
 }

@@ -7,6 +7,7 @@ import type {
   TerminalSurface,
   WorkspaceActions,
 } from '../contracts';
+import { getControlHelp } from '../control-help';
 import { terminalKeyLabel } from '../terminal/protocol';
 import { type SemanticKey, semanticKeyboardLayout } from '../ui';
 
@@ -49,6 +50,15 @@ export interface WorkspaceScene {
   hideInput(): void;
   enterXR(mode: 'vr' | 'ar'): Promise<void>;
   resetLayout(): void;
+  getControlHints(): Array<{
+    label: string;
+    help: string;
+    terminalId?: string;
+    inputAction?: string;
+    key?: string;
+    clientX: number;
+    clientY: number;
+  }>;
   dispose(): void;
   subscribe(listener: (state: Readonly<WorkspaceSceneState>) => void): () => void;
 }
@@ -244,6 +254,7 @@ function createLabelButton(
     new THREE.MeshBasicMaterial({ map: texture, transparent: true }),
   );
   Object.assign(mesh.userData, data, {
+    helpText: getControlHelp(data),
     labelTexture: texture,
     labelText: label,
     labelWidth: width,
@@ -437,28 +448,71 @@ export function createWorkspaceScene(
   const notify = (): void => {
     for (const listener of listeners) listener(mutableState);
   };
-  const onPointerDown = (event: PointerEvent): void => {
+  const hoverHelp = createLabelButton('', 1.05, 0.12, {});
+  hoverHelp.name = 'xr-hover-help';
+  hoverHelp.visible = false;
+  hoverHelp.raycast = () => undefined;
+  scene.add(hoverHelp);
+  let hoveredControl: THREE.Object3D | null = null;
+  const showHover = (object: THREE.Object3D | null): void => {
+    const help = object?.userData.helpText as string | undefined;
+    hoveredControl = help ? object : null;
+    hoverHelp.visible = Boolean(help);
+    canvas.title = help ?? '';
+    if (help) updateLabel(hoverHelp, help);
+  };
+  const updateHoverPosition = (): void => {
+    if (!hoveredControl) return;
+    let owner: THREE.Object3D = hoveredControl;
+    while (owner.parent) owner = owner.parent;
+    if (owner !== scene) {
+      showHover(null);
+      return;
+    }
+    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    const eye = view.getWorldPosition(new THREE.Vector3());
+    hoverHelp.position.copy(hoveredControl.getWorldPosition(new THREE.Vector3()));
+    const towardEye = eye.sub(hoverHelp.position).normalize();
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(
+      view.getWorldQuaternion(new THREE.Quaternion()),
+    );
+    hoverHelp.position.addScaledVector(up, 0.14).addScaledVector(towardEye, 0.12);
+    const projected = hoverHelp.position.clone().project(view);
+    projected.x = THREE.MathUtils.clamp(projected.x, -0.6, 0.6);
+    projected.y = THREE.MathUtils.clamp(projected.y, -0.7, 0.75);
+    hoverHelp.position.copy(projected.unproject(view));
+    hoverHelp.quaternion.copy(view.getWorldQuaternion(new THREE.Quaternion()));
+  };
+  const setPointerRay = (event: PointerEvent): boolean => {
     const bounds = canvas.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return false;
     pointer.set(
       ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
       -((event.clientY - bounds.top) / bounds.height) * 2 + 1,
     );
+    scene.updateMatrixWorld(true);
+    camera.updateMatrixWorld(true);
     raycaster.setFromCamera(pointer, camera);
-    const hit = raycaster.intersectObjects(
-      [...panels.values()].map((panel) => panel.root),
-      true,
-    )[0]?.object;
-    let target: THREE.Object3D | null = hit ?? null;
-    while (target && !target.userData.terminalId) target = target.parent;
-    if (target?.userData.terminalId) selectTerminal(target.userData.terminalId as string);
+    return true;
   };
+  const onPointerDown = (event: PointerEvent): void => {
+    if (!setPointerRay(event)) return;
+    activateTarget(targetFromRay());
+    showHover(null);
+  };
+  const onPointerMove = (event: PointerEvent): void => {
+    if (!setPointerRay(event)) return;
+    showHover(targetFromRay()?.object ?? null);
+    updateHoverPosition();
+  };
+  const onPointerLeave = (): void => showHover(null);
   const resize = (): void => {
     const width = Math.max(1, container.clientWidth || window.innerWidth || 1);
     const height = Math.max(1, container.clientHeight || window.innerHeight || 1);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
     if (!renderer?.xr.isPresenting) {
-      const panelSpan = PANEL_WIDTH + 1.56;
+      const panelSpan = PANEL_WIDTH + 1.74;
       const horizontalFov =
         2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(58) / 2) * camera.aspect);
       const distance = panelSpan / 2 / Math.tan(horizontalFov / 2) / 0.85;
@@ -507,6 +561,20 @@ export function createWorkspaceScene(
         (panel.selection.material as THREE.LineBasicMaterial).opacity = emphasized ? 1 : 0.72;
       }
     }
+    if (renderer?.xr.isPresenting) {
+      let hover: THREE.Object3D | null = null;
+      for (const controller of controllerRoots) {
+        if (!controller.visible) continue;
+        controller.updateMatrixWorld(true);
+        const target = targetFromController(controller);
+        if (target?.object?.userData.helpText) {
+          hover = target.object;
+          break;
+        }
+      }
+      showHover(hover);
+    }
+    updateHoverPosition();
     observatory.rotation.y = time * 0.00001;
     renderer?.render(scene, camera);
     if (!renderer && typeof window.requestAnimationFrame === 'function')
@@ -516,6 +584,9 @@ export function createWorkspaceScene(
   if (renderer) renderer.setAnimationLoop((time: number) => render(time));
   window.addEventListener('resize', resize);
   canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerleave', onPointerLeave);
+  canvas.addEventListener('pointercancel', onPointerLeave);
 
   const setSelectedVisual = (): void => {
     for (const panel of panels.values())
@@ -764,6 +835,7 @@ export function createWorkspaceScene(
     if (action === 'exit') {
       hideInput();
       if (activeSession) void activeSession.end();
+      else actions.exitPreview?.();
       return true;
     }
     if (action === 'background') {
@@ -856,10 +928,7 @@ export function createWorkspaceScene(
     }
     return true;
   };
-  const targetFromController = (root: THREE.Group): InputTarget | null => {
-    tempMatrix.identity().extractRotation(root.matrixWorld);
-    raycaster.ray.origin.setFromMatrixPosition(root.matrixWorld);
-    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix).normalize();
+  const targetFromRay = (): InputTarget | null => {
     const targets = [...panels.values()].map((panel) => panel.root);
     if (inputRoot) targets.push(inputRoot);
     if (hudRoot) targets.push(hudRoot);
@@ -875,8 +944,13 @@ export function createWorkspaceScene(
     const key = hit.userData.key as string | undefined;
     return { terminalId, kind: key ? 'key' : 'terminal', object: hit };
   };
-  const onControllerSelect = (controller: THREE.Group): void => {
-    const target = targetFromController(controller);
+  const targetFromController = (root: THREE.Group): InputTarget | null => {
+    tempMatrix.identity().extractRotation(root.matrixWorld);
+    raycaster.ray.origin.setFromMatrixPosition(root.matrixWorld);
+    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix).normalize();
+    return targetFromRay();
+  };
+  const activateTarget = (target: InputTarget | null): void => {
     if (!target) return;
     if (target.kind === 'keyboard' && target.object) {
       handleInputTarget(target.object);
@@ -884,10 +958,7 @@ export function createWorkspaceScene(
     }
     selectTerminal(target.terminalId);
     if (target.kind === 'key') {
-      const hit = raycaster.intersectObjects(
-        [...panels.values()].map((panel) => panel.root),
-        true,
-      )[0]?.object;
+      const hit = target.object;
       const keyName = hit?.userData.key as string | undefined;
       if (keyName) {
         const modifier = hit?.userData.modifier as keyof KeyModifiers | undefined;
@@ -903,6 +974,10 @@ export function createWorkspaceScene(
         }
       }
     }
+  };
+  const onControllerSelect = (controller: THREE.Group): void => {
+    activateTarget(targetFromController(controller));
+    showHover(null);
   };
   const setupControllers = (): void => {
     if (!renderer) return;
@@ -964,7 +1039,7 @@ export function createWorkspaceScene(
     if (panels.has(surface.pane.id)) return;
     const index = panels.size;
     const defaultPosition = new THREE.Vector3(
-      index % 2 === 0 ? -0.78 : 0.78,
+      index % 2 === 0 ? -0.87 : 0.87,
       1.5 - Math.floor(index / 2) * 0.95,
       -1.5,
     );
@@ -1217,12 +1292,50 @@ export function createWorkspaceScene(
       panel.root.scale.setScalar(1);
     }
   };
+  const getControlHints = (): Array<{
+    label: string;
+    help: string;
+    terminalId?: string;
+    inputAction?: string;
+    key?: string;
+    clientX: number;
+    clientY: number;
+  }> => {
+    const bounds = canvas.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return [];
+    scene.updateMatrixWorld(true);
+    camera.updateMatrixWorld(true);
+    const result: ReturnType<WorkspaceScene['getControlHints']> = [];
+    const roots: THREE.Object3D[] = [...panels.values()].map((panel) => panel.root);
+    if (inputRoot) roots.push(inputRoot);
+    if (hudRoot) roots.push(hudRoot);
+    for (const root of roots)
+      root.traverse((object) => {
+        const help = object.userData.helpText as string | undefined;
+        if (!help) return;
+        const point = object.getWorldPosition(new THREE.Vector3()).project(camera);
+        if (point.z < -1 || point.z > 1 || Math.abs(point.x) > 1 || Math.abs(point.y) > 1) return;
+        result.push({
+          label: object.userData.labelText as string,
+          help,
+          terminalId: object.userData.terminalId as string | undefined,
+          inputAction: object.userData.inputAction as string | undefined,
+          key: object.userData.key as string | undefined,
+          clientX: bounds.left + ((point.x + 1) * bounds.width) / 2,
+          clientY: bounds.top + ((1 - point.y) * bounds.height) / 2,
+        });
+      });
+    return result;
+  };
   const dispose = (): void => {
     if (disposed) return;
     disposed = true;
     window.cancelAnimationFrame(frameHandle);
     window.removeEventListener('resize', resize);
     canvas.removeEventListener('pointerdown', onPointerDown);
+    canvas.removeEventListener('pointermove', onPointerMove);
+    canvas.removeEventListener('pointerleave', onPointerLeave);
+    canvas.removeEventListener('pointercancel', onPointerLeave);
     renderer?.setAnimationLoop(null);
     for (const id of [...panels.keys()]) removeTerminal(id);
     for (const { root, onSelect, onSqueeze, onSqueezeEnd } of controllerListeners) {
@@ -1241,6 +1354,10 @@ export function createWorkspaceScene(
       disposeObject(hudRoot);
       hudRoot = null;
     }
+    hoveredControl = null;
+    canvas.title = '';
+    scene.remove(hoverHelp);
+    disposeObject(hoverHelp);
     scene.clear();
     gradientTexture?.dispose();
     renderer?.dispose();
@@ -1265,6 +1382,7 @@ export function createWorkspaceScene(
     hideInput,
     enterXR,
     resetLayout,
+    getControlHints,
     dispose,
     subscribe(listener) {
       listeners.add(listener);

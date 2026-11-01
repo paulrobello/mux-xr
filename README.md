@@ -50,7 +50,23 @@ To serve an already running compatible daemon, run the streamer in a par-mux pan
 
 Stop that streamer with Ctrl-C in its owning pane. The prepared preview's exact private socket and pane IDs are recorded in `.local/runtime.json`; its shell panes are ordinary live shells. Preserve existing authentication configuration and shared services. No published hosting or tunnels are required.
 
-The endpoint is prefilled from the page origin, and a custom endpoint is remembered. The dedicated preview panes use the account's configured Homebrew Bash login shell. On Quest, open the preview and press Connect. Choose two pane leaves, then Enter XR. Use trigger to select controls and grip on a panel to move/rotate it. Panel ± controls adjust physical size, A± controls local text zoom. Commands and Keyboard follow your explicit pane selection. Shift shows uppercase letters and US-layout symbols, including `$`, then resets after a character. Settings offers passthrough and the three silent backgrounds.
+The endpoint is prefilled from the page origin, and a custom endpoint is remembered. The dedicated preview panes use the account's configured Homebrew Bash login shell. On Quest, open the preview and press Connect. Choose two pane leaves, then Enter XR. Use trigger to select controls and grip on a panel to move/rotate it. Panel ± controls adjust physical size, A± controls local text zoom. Commands opens saved quick commands and their editor. Keyboard opens text entry and terminal keys. Both follow your explicit pane selection. Shift shows uppercase letters and US-layout symbols, including `$`, then resets after a character. Settings offers passthrough and the three silent backgrounds.
+
+## Spatial controls
+
+Mouse clicks in 3D preview and controller triggers in VR use the same actions. Hover with the mouse or aim a controller ray at a non-obvious control to see its explanation. DOM icon and modifier buttons also have browser hover titles.
+
+| Control | Action |
+| --- | --- |
+| `−` / `+` | Shrink or enlarge the physical panel. |
+| `A−` / `A+` | Zoom terminal text out or in locally. |
+| Esc, Tab, arrows, Enter | Send that terminal key to the pane containing the strip. |
+| Ctrl / Alt | Arm a modifier for the next strip key. |
+| Commands / Keyboard / Panes | Open saved commands, terminal input or hierarchy navigation. |
+| Black / Gradient / Observatory | Change the VR background. |
+| Exit | Return to flat terminals in the browser, or end the immersive session in VR. |
+
+Panel scale and text zoom leave terminal rows and columns unchanged. Neighboring panels' default control positions are separated so resize buttons do not overlap.
 
 ## Verification
 

@@ -140,12 +140,43 @@ describe('mux XR local UI state', () => {
       ],
     });
     ui.setActivePane('a');
-    query<HTMLButtonElement>(root, '[data-action="commands"]').click();
+    query<HTMLButtonElement>(root, '[data-action="keyboard"]').click();
     ui.setActivePane('b');
     const compose = query<HTMLTextAreaElement>(root, '[data-compose]');
     compose.value = 'echo stable';
     query<HTMLButtonElement>(root, '[data-action="send-text"]').click();
     expect(sent).toEqual(['b']);
+    ui.destroy();
+  });
+
+  it('keeps commands and keyboard drawer views separate while preserving the target', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    ui.update({
+      panes: [
+        {
+          id: 'a',
+          workspaceId: 'w',
+          workspaceName: 'Main',
+          sessionId: 's',
+          sessionName: 'Dev',
+          windowId: 'win',
+          windowName: 'Code',
+          title: 'A',
+        },
+      ],
+    });
+    ui.setActivePane('a');
+    ui.openInput('commands');
+    expect(query<HTMLElement>(root, '[data-drawer-heading]').textContent).toBe('Commands');
+    expect(query<HTMLElement>(root, '[data-command-controls]').hidden).toBe(false);
+    expect(query<HTMLElement>(root, '[data-keyboard-controls]').hidden).toBe(true);
+    ui.openInput('keyboard');
+    expect(query<HTMLElement>(root, '[data-drawer-heading]').textContent).toBe('Keyboard');
+    expect(query<HTMLElement>(root, '[data-command-controls]').hidden).toBe(true);
+    expect(query<HTMLElement>(root, '[data-keyboard-controls]').hidden).toBe(false);
+    expect(query<HTMLElement>(root, '[data-detail]').textContent).toContain('Input target: A');
     ui.destroy();
   });
 

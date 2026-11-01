@@ -168,6 +168,7 @@ const actions: WorkspaceActions = {
     ui.openInput('commands');
   },
   openKeyboard: () => ui.openInput('keyboard'),
+  exitPreview: () => desktop.showTerminals(),
 };
 
 ui = mountWorkspaceUI(app, {
@@ -238,6 +239,7 @@ Object.assign(window, {
       attached: [...surfaces.keys()],
       scene: { ...scene.state },
     }),
+    getControlHints: () => scene.getControlHints(),
     startDemo,
     connect,
     selectPane,

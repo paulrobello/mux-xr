@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fakeXR = vi.hoisted(() => ({
   controllers: [] as unknown[],
+  presenting: false,
+  camera: null as unknown,
   frame: null as ((time: number) => void) | null,
 }));
 
@@ -11,9 +13,11 @@ vi.mock('three', async (importOriginal) => {
   class FakeRenderer {
     xr = {
       enabled: false,
-      isPresenting: false,
+      get isPresenting() {
+        return fakeXR.presenting;
+      },
       getController: (index: number) => fakeXR.controllers[index],
-      getCamera: (camera: unknown) => camera,
+      getCamera: () => fakeXR.camera,
       setReferenceSpaceType: vi.fn(),
       setSession: vi.fn(async () => undefined),
     };
@@ -79,6 +83,7 @@ function fixture() {
   };
   const container = document.createElement('div');
   const workspace = createWorkspaceScene(container, actions);
+  fakeXR.camera = workspace.camera;
   const left = surface(pane('pane-a', 'A'));
   const right = surface(pane('pane-b', 'B'));
   workspace.addTerminal(left);
@@ -114,17 +119,75 @@ function hit(
 
 describe('native XR controller event routing', () => {
   beforeEach(() => {
+    fakeXR.presenting = false;
     fakeXR.controllers.forEach((controller) => {
       const object = controller as THREE.Group;
       object.position.set(0, 0, 0);
+      object.visible = true;
       object.rotation.set(0, 0, 0);
     });
+  });
+
+  it('routes browser hover and clicks through the terminal control actions', () => {
+    const { workspace, actions, container, right } = fixture();
+    Object.defineProperty(workspace.canvas, 'getBoundingClientRect', {
+      value: () => ({ left: 0, top: 0, width: 1000, height: 700 }),
+    });
+    const enter = workspace
+      .getControlHints()
+      .find((hint) => hint.key === 'Enter' && hint.terminalId === 'pane-b');
+    if (!enter) throw new Error('Enter strip target missing');
+    const pointer = (type: string, control: { clientX: number; clientY: number }) =>
+      workspace.canvas.dispatchEvent(
+        new PointerEvent(type, { clientX: control.clientX, clientY: control.clientY }),
+      );
+    pointer('pointermove', enter);
+    expect(workspace.canvas.title).toContain('Send Enter');
+    expect(workspace.scene.getObjectByName('xr-hover-help')?.visible).toBe(true);
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    pointer('pointerdown', enter);
+    expect(actions.selectPane).toHaveBeenLastCalledWith('pane-b');
+    expect(actions.sendKey).toHaveBeenLastCalledWith('Enter', undefined);
+    const shrink = workspace
+      .getControlHints()
+      .find(
+        (hint) =>
+          hint.inputAction === 'scale' && hint.label === '−' && hint.terminalId === 'pane-b',
+      );
+    if (!shrink) throw new Error('Scale target missing');
+    pointer('pointermove', shrink);
+    expect(workspace.canvas.title).toContain('Shrink panel');
+    pointer('pointerdown', shrink);
+    expect(workspace.scene.getObjectByName('terminal-panel-pane-b')?.scale.x).toBeLessThan(1);
+    expect(right.resizeGrid).not.toHaveBeenCalled();
+    workspace.canvas.dispatchEvent(new PointerEvent('pointerleave'));
+    expect(workspace.canvas.title).toBe('');
+    expect(workspace.scene.getObjectByName('xr-hover-help')?.visible).toBe(false);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('shows controller-ray hover help without sending input', () => {
+    const { workspace, actions, container } = fixture();
+    hit(workspace, { key: 'Tab', terminalId: 'pane-b' }, 'hover');
+    fakeXR.presenting = true;
+    fakeXR.frame?.(16);
+    expect(workspace.scene.getObjectByName('xr-hover-help')?.visible).toBe(true);
+    expect(workspace.canvas.title).toContain('Send Tab');
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    controller.position.set(20, 20, 20);
+    (fakeXR.controllers[1] as THREE.Group).visible = false;
+    fakeXR.frame?.(32);
+    expect(workspace.scene.getObjectByName('xr-hover-help')?.visible).toBe(false);
+    workspace.dispose();
+    container.remove();
   });
 
   it('routes selectstart from Three EventDispatcher without DOM currentTarget', () => {
     const { workspace, actions, container } = fixture();
     const controller = fakeXR.controllers[0] as THREE.Group;
-    controller.position.set(0.78, 1.5, 0);
+    controller.position.set(0.87, 1.5, 0);
     workspace.scene.updateMatrixWorld(true);
     expect(() => controller.dispatchEvent({ type: 'selectstart' } as never)).not.toThrow();
     expect(actions.selectPane).toHaveBeenCalledWith('pane-b');
@@ -135,7 +198,7 @@ describe('native XR controller event routing', () => {
   it('keeps squeeze drag relative rotation and stops on squeezeend', () => {
     const { workspace, actions, container, right } = fixture();
     const controller = fakeXR.controllers[0] as THREE.Group;
-    controller.position.set(0.78, 1.5, 0);
+    controller.position.set(0.87, 1.5, 0);
     workspace.scene.updateMatrixWorld(true);
     expect(() => controller.dispatchEvent({ type: 'squeezestart' } as never)).not.toThrow();
     controller.position.x += 0.2;

@@ -176,6 +176,10 @@ The form language is compact and gently softened. Desktop containers use an 8px 
 - **Border:** Use slate borders for interactive controls and divider slate for structural separation.
 - **Internal Padding:** Use 8px, 12px, or 16px based on density and viewport.
 
+### Hover Help
+
+Non-obvious controls explain their action on browser hover or controller-ray hover. Spatial hints use the existing dark label treatment, face the viewer and stay outside ray picking. Hover feedback never sends terminal input or changes its target.
+
 ### XR Terminal Panel
 Each panel presents one live pane with a readable terminal surface, title label, key strip, scale controls, and font zoom controls. Selection is explicit and independent from gaze emphasis. The observatory background is peripheral architecture and a distant planet, never a competing focal surface.
 

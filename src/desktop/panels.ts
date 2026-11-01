@@ -9,6 +9,7 @@ export interface DesktopPanels {
   remove(id: string): void;
   select(id: string | null): void;
   setImmersive(enabled: boolean): void;
+  showTerminals(): void;
   dispose(): void;
 }
 
@@ -24,6 +25,7 @@ export function createDesktopPanels(
   preview.type = 'button';
   preview.dataset.action = 'desktop-preview';
   preview.textContent = '3D preview';
+  preview.title = 'Show the workspace in 3D';
   preview.setAttribute('aria-pressed', 'false');
   toolbar.append(preview);
   const grid = document.createElement('div');
@@ -43,6 +45,7 @@ export function createDesktopPanels(
     root.hidden = immersive;
     grid.hidden = immersive || previewing;
     preview.textContent = previewing ? 'Show terminals' : '3D preview';
+    preview.title = previewing ? 'Show terminal panels' : 'Show the workspace in 3D';
     preview.setAttribute('aria-pressed', String(previewing));
     if (previewing || immersive) window.dispatchEvent(new Event('resize'));
   };
@@ -66,6 +69,7 @@ export function createDesktopPanels(
     const heading = document.createElement('button');
     heading.type = 'button';
     heading.textContent = `${surface.pane.title} · ${surface.status}`;
+    heading.title = `Select terminal ${surface.pane.title} as the input target`;
     heading.className = 'desktop-terminal-heading';
     heading.addEventListener('click', () => onSelect(surface.pane.id));
     const body = document.createElement('div');
@@ -78,6 +82,7 @@ export function createDesktopPanels(
     grid.append(panel);
     const unsubscribe = surface.subscribe(() => {
       heading.textContent = `${surface.pane.title} · ${surface.status}`;
+      heading.title = `Select terminal ${surface.pane.title} as the input target`;
       updateSize(surface, surface.canvas);
     });
     panels.set(surface.pane.id, { element: panel, unsubscribe });
@@ -106,5 +111,15 @@ export function createDesktopPanels(
     host.classList.remove('desktop-terminal-host', 'is-3d-preview', 'is-immersive');
   };
   updateMode();
-  return { add, remove, select, setImmersive, dispose };
+  return {
+    add,
+    remove,
+    select,
+    setImmersive,
+    dispose,
+    showTerminals() {
+      previewing = false;
+      updateMode();
+    },
+  };
 }

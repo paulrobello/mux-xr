@@ -256,6 +256,7 @@ async function main(): Promise<void> {
       (text) => text.includes(firstMarker),
       'first real command output marker not observed',
     );
+    await page.locator('[data-action="keyboard"]').click();
     await page.locator(`[data-select="${paneIds[1]}"]`).click();
     assert(
       (await page.locator('[data-detail]').textContent())?.includes(

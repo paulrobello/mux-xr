@@ -4,7 +4,7 @@ Software verification completed November 1, 2026 (Etc/GMT+8). Paul requested the
 
 ## Software gate
 
-`make checkall-ci` covers Biome, strict TypeScript, 39 unit tests across six files, the production build, observatory asset validation, secret scanning and a high-severity dependency audit. The audit reports zero vulnerabilities. The production JavaScript chunk is approximately 1.12 MB before gzip (293 KB gzip). Its warning remains visible and is not a headset performance result.
+`make checkall-ci` covers Biome, strict TypeScript, 42 unit tests across six files, the production build, observatory asset validation, secret scanning and a high-severity dependency audit. The audit reports zero vulnerabilities. The production JavaScript chunk is approximately 1.12 MB before gzip (293 KB gzip). Its warning remains visible and is not a headset performance result.
 
 The unit suite exercises protobuf/zlib framing, ANSI seeding and live output, disconnected input rejection, bounded reconnects, target capture, persistence failures, key encoding, hierarchy normalization, native controller events, relative panel transforms, local zoom and resource teardown. Controller tests dispatch actual Three.js Group events with only the GPU renderer mocked. They caught and reproduce fixes for DOM-style event assumptions, grip activating keys, inverted zoom and hierarchy leaves failing to attach new panes.
 
@@ -72,3 +72,13 @@ The November 1 desktop feedback is addressed with these separate checks:
 - Desktop screenshots use device scale 2 and verify that the angled XR canvas is hidden by default. Fixture load was 1.836 to 1.940, and real-app load was 1.940 to 1.945 on test-mac. Browser images were inspected for actual text clarity.
 
 The final design detector reported advisory differences between legacy embedded UI colors/type sizes and DESIGN.md. The new desktop view reuses the incumbent palette. These advisories were not treated as functional failures or as permission for a broader redesign. Physical Quest behavior after these fixes remains owner-pending.
+
+## Spatial controls, hover help and separate input views
+
+The subsequent owner feedback confirmed the other desktop fixes and identified inert spatial strips and indistinguishable Commands/Keyboard drawers. These are now covered separately:
+
+- Browser pointer and XR controller adapters use one action dispatcher. Mouse projection/raycast tests exercise actual Three.js meshes for the per-pane Enter strip and panel scale button, and assert that scale sends no grid resize. Adjacent inner resize buttons were separated by a small increase in default panel spacing.
+- The browser native-GPU suite clicks the projected terminal Enter control and observes the correct pane's carriage-return frame. It also activates the workspace HUD Black action and Exit, which returns to flat terminal view. All three viewports pass with 42 captured frames and no page errors. These protocol fixtures remain distinct from real daemon acceptance.
+- Hover explanations share the control action metadata. Browser canvas titles and a non-interactive spatial label explain keys, physical sizing, text zoom and HUD controls. A simulated controller-ray hover shows the label without sending input, then clears it when the ray leaves. Tooltip objects and pointer listeners are disposed with the scene. Physical Quest readability remains owner-pending.
+- Commands shows saved-command controls/editor. Keyboard shows the composer and key grid. Unit and browser visibility assertions verify the views differ and preserve explicit pane targeting. DOM icon/modifier buttons include descriptive hover titles.
+- Full fast and CI-parity gates pass with 42 tests. test-mac native-GPU browser load was 1.610 before and 1.737 after. Owned preview processes and scratch files were removed after the run.
