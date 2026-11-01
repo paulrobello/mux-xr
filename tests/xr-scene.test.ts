@@ -113,8 +113,8 @@ describe('XR scene interaction helpers', () => {
       const panel = workspace.scene.getObjectByName('terminal-panel-%7');
       if (!panel) throw new Error('Panel was not created');
       applyPanelTransform(panel, { scale: 1.6 });
-      workspace.setGazeEnabled(true);
-      workspace.setGazeEnabled(false);
+      workspace.setGazeInputEnabled(true);
+      workspace.setGazeInputEnabled(false);
       expect(panel.scale.x).toBe(1.6);
       expect(surface.cols).toBe(80);
       const title = panel.children.find(

@@ -36,7 +36,6 @@ export interface WorkspaceSettings {
   version: 1;
   endpoint: string;
   background: BackgroundMode;
-  gazeEmphasis: boolean;
   gazeInput: boolean;
   colorMode: TerminalColorMode;
   keyboardBackground: boolean;
@@ -50,8 +49,8 @@ export interface WorkspaceUI {
   setActivePane(id: string | undefined): void;
   getSettings(): WorkspaceSettings;
   getCommands(): QuickCommand[];
-  addCommand(command: QuickCommand): void;
-  updateCommand(command: QuickCommand): void;
+  addCommand(command: QuickCommand): boolean;
+  updateCommand(command: QuickCommand): boolean;
   removeCommand(id: string): void;
   reorderCommands(from: number, to: number): void;
   captureCommandTarget(): string | undefined;
@@ -80,7 +79,6 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   version: 1,
   endpoint: '',
   background: 'observatory',
-  gazeEmphasis: true,
   gazeInput: false,
   colorMode: 'comfort',
   keyboardBackground: true,
@@ -116,7 +114,6 @@ export function validateSettings(value: unknown): WorkspaceSettings {
       candidate.background === 'observatory'
         ? candidate.background
         : DEFAULT_SETTINGS.background,
-    gazeEmphasis: typeof candidate.gazeEmphasis === 'boolean' ? candidate.gazeEmphasis : true,
     gazeInput: candidate.gazeInput === true,
     colorMode:
       candidate.colorMode === 'original' || candidate.colorMode === 'monochrome'
@@ -263,6 +260,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   let commands: QuickCommand[] = [];
   let commandScope = 'global';
   const terminalGrid = new Map<string, { cols: number; rows: number; canResize: boolean }>();
+  const pendingGrid = new Map<string, { cols: number; rows: number }>();
   let inputMode: 'commands' | 'keyboard' = 'commands';
   const heldModifiers: KeyModifiers = {};
   const keyboardLabel = (key: string, shift = false): string => {
@@ -297,6 +295,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     root.querySelector('.stage-head')?.after(updateNotice);
   }
   const settingsPanel = root.querySelector<HTMLElement>('[data-settings]');
+  root.querySelector('[data-gaze]')?.parentElement?.remove();
   let arrangementSelect: HTMLSelectElement | null = null;
   let arrangementApply: HTMLButtonElement | null = null;
   const updateArrangementAvailability = (): void => {
@@ -687,17 +686,12 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   qs<HTMLSelectElement>('[data-background]').value = settings.background;
   qs<HTMLSelectElement>('[data-color-mode]').value = settings.colorMode;
   qs<HTMLInputElement>('[data-keyboard-background]').checked = settings.keyboardBackground;
-  qs<HTMLInputElement>('[data-gaze]').checked = settings.gazeEmphasis;
   qs<HTMLInputElement>('[data-gaze-input]').checked = settings.gazeInput;
   qs<HTMLSelectElement>('[data-background]').addEventListener('change', (event) => {
     settings = {
       ...settings,
       background: (event.target as HTMLSelectElement).value as BackgroundMode,
     };
-    saveSettings();
-  });
-  qs<HTMLInputElement>('[data-gaze]').addEventListener('change', (event) => {
-    settings = { ...settings, gazeEmphasis: (event.target as HTMLInputElement).checked };
     saveSettings();
   });
   qs<HTMLInputElement>('[data-gaze-input]').addEventListener('change', (event) => {
@@ -733,7 +727,14 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       qs<HTMLElement>('[data-grid-status]').textContent = 'Use 2–300 columns and 2–150 rows.';
       return;
     }
-    if (!paneId || !callbacks.onResizeGrid?.(paneId, cols, rows)) {
+    if (!paneId || !callbacks.onResizeGrid) {
+      qs<HTMLElement>('[data-grid-status]').textContent =
+        'Resize unavailable while disconnected or read-only.';
+      return;
+    }
+    pendingGrid.set(paneId, { cols, rows });
+    if (!callbacks.onResizeGrid(paneId, cols, rows)) {
+      pendingGrid.delete(paneId);
       qs<HTMLElement>('[data-grid-status]').textContent =
         'Resize unavailable while disconnected or read-only.';
       return;
@@ -753,8 +754,8 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     renderCommands();
     callbacks.onCommandsChange?.(commands, scope);
   };
-  const writeCommand = (command: QuickCommand): void => {
-    if (!isCommand(command)) return;
+  const writeCommand = (command: QuickCommand): boolean => {
+    if (!isCommand(command)) return false;
     const scope = workspaceScope(settings.endpoint, command.workspaceId ?? '*');
     const saved = store.get(scope);
     const next = saved.some((item) => item.id === command.id)
@@ -762,10 +763,11 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       : [...saved, { ...command }];
     if (!store.set(scope, next)) {
       qs<HTMLElement>('[data-detail]').textContent = 'Commands could not be saved on this device.';
-      return;
+      return false;
     }
     loadCommands();
     callbacks.onCommandsChange?.(next, scope);
+    return true;
   };
   const sceneHost = qs<HTMLElement>('[data-scene-host]');
   return {
@@ -793,6 +795,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         selectPane(id, false);
         const grid = terminalGrid.get(id);
         if (grid) {
+          pendingGrid.delete(id);
           qs<HTMLInputElement>('[data-grid-cols]').value = String(grid.cols);
           qs<HTMLInputElement>('[data-grid-rows]').value = String(grid.rows);
           qs<HTMLElement>('[data-grid-caption]').textContent = `${grid.cols} × ${grid.rows}`;
@@ -837,14 +840,20 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     setTerminalGrid(paneId, cols, rows, canResize) {
       terminalGrid.set(paneId, { cols, rows, canResize });
       if (activePaneId !== paneId) return;
-      qs<HTMLInputElement>('[data-grid-cols]').value = String(cols);
-      qs<HTMLInputElement>('[data-grid-rows]').value = String(rows);
+      const pending = pendingGrid.get(paneId);
+      const acknowledged = !pending || (pending.cols === cols && pending.rows === rows);
+      if (acknowledged) {
+        pendingGrid.delete(paneId);
+        qs<HTMLInputElement>('[data-grid-cols]').value = String(cols);
+        qs<HTMLInputElement>('[data-grid-rows]').value = String(rows);
+      }
       qs<HTMLElement>('[data-grid-caption]').textContent = `${cols} × ${rows}`;
       const apply = qs<HTMLButtonElement>('[data-action="apply-grid"]');
       apply.disabled = !canResize;
-      qs<HTMLElement>('[data-grid-status]').textContent = canResize
-        ? 'Resize changes the process display size and do not restart it.'
-        : 'Resize unavailable while disconnected or read-only.';
+      if (acknowledged)
+        qs<HTMLElement>('[data-grid-status]').textContent = canResize
+          ? 'Resize changes the process display size and do not restart it.'
+          : 'Resize unavailable while disconnected or read-only.';
     },
     setTerminalColorMode(mode, persist = true) {
       settings = { ...settings, colorMode: mode };

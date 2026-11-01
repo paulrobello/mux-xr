@@ -200,6 +200,30 @@ describe('terminal surface lifecycle', () => {
     vi.useRealTimers();
   });
 
+  it('keeps retrying after repeated connection failures until a later connection recovers', async () => {
+    vi.useFakeTimers();
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    surface.connect();
+    for (let attempt = 0; attempt < 9; attempt += 1) {
+      MockSocket.instances.at(-1)?.closeSilently();
+      vi.advanceTimersByTime(5000);
+    }
+    expect(MockSocket.instances.length).toBeGreaterThan(8);
+    const recovered = MockSocket.instances.at(-1);
+    recovered?.open();
+    recovered?.message(
+      frame(
+        create(ServerMessageSchema, {
+          message: { case: 'connected', value: create(ConnectedSchema, { cols: 80, rows: 24 }) },
+        }),
+      ),
+    );
+    expect(surface.status).toBe('connected');
+    surface.dispose();
+    vi.useRealTimers();
+  });
+
   it('rejects resize while disconnected or read-only and normalizes pane URL', async () => {
     const { createTerminalSurface, paneWebSocketURL } = await import('../src/terminal/surface');
     expect(paneWebSocketURL('http://127.0.0.1:9', '%3')).toContain('session=pane-3');
@@ -290,6 +314,19 @@ describe('terminal surface lifecycle', () => {
     expect(paintStyles).toContain('rgb(17,34,51)');
     expect(paintStyles).toContain('#cd0000');
     expect(paintTextStyles).toContain('#cd0000');
+    surface.dispose();
+  });
+
+  it('repaints and notifies subscribers when the color mode changes', async () => {
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    const revisions: number[] = [];
+    surface.subscribe(() => revisions.push(surface.revision));
+    surface.setColorMode('monochrome');
+    expect(revisions).toEqual([1]);
+    expect(surface.revision).toBe(1);
+    surface.setColorMode('monochrome');
+    expect(revisions).toHaveLength(1);
     surface.dispose();
   });
 });

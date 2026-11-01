@@ -28,7 +28,7 @@ LAN-only. No published hosting or tunnels. The daemon hierarchy is workspace, se
 - Explicit terminal grid resize is available only for the selected pane through browser Workspace Settings or native HUD Terminal settings. Apply is required, bounds are 2..300 columns and 2..150 rows, server echo is read-only, and disconnected resize is denied. Terminal colors are a saved global preference with Comfortable as the default, plus Original and Monochrome. Native keyboard labels use self-hosted OFL Noto Sans and Symbols 2 through Troika SDF 0.52.5; unsupported visual glyphs show `?` while preserving the original title.
 - Browse the mux hierarchy and display panes from multiple branches at once.
 - Global and workspace-specific command lists, with label, text and optional Enter, following pardeck.
-- Head-directed gaze emphasis is independent of input. Manual input targeting is the default. The optional Gaze input toggle lets a short head-gaze dwell select the keyboard target and retains the last target while looking at the keyboard.
+- Selection highlighting belongs only to the active input pane. Manual input targeting is the default. The optional Gaze input toggle lets a short head-gaze dwell select the keyboard target and retains the last target while looking at the keyboard.
 - Passthrough, pure black, gradient and a quiet sci-fi observatory. No ambient sound.
 - Benchmark actual panel capacity on Quest 3. Two readable panes is the acceptance target, not an invented maximum.
 - Named saved 3D layouts, elaborate radial menus/window choreography, whole-window splits and hand tracking are post-MVP.
@@ -48,6 +48,6 @@ Reference repos: par-term-emu-core-rust, pardeck, par-dots and webxr1. Fixtures 
 3. Local presentation changes do not disturb desktop selection or terminal sizing.
 4. Animation supports spatial understanding while the user's viewpoint stays under their control.
 
-Frontend builds poll a same-origin version manifest and offer an explicit Reload action in browser and XR. The page never reloads merely because an update is detected. Reload ends XR before refreshing the viewer, preserving terminal processes and saved local preferences.
+Frontend builds poll a same-origin version manifest and offer an explicit Reload action in browser and XR. The desktop main page reloads automatically after detecting an update. XR keeps the explicit Reload action. Reload ends XR before refreshing the viewer, preserving terminal processes and saved local preferences.
 
 Attached terminal panels can be arranged as Row, Grid, Arc or a front-hemisphere Sphere from browser settings or the native XR Arrange menu. Presets position and orient panels around the current viewer, preserving their individual sizes, input target and terminal grid. Each panel remains directly manipulable afterward. Named saved 3D layouts are still roadmap scope.

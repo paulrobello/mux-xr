@@ -18,9 +18,9 @@ A LAN-only Quest 3 workspace for monitoring par-mux terminals and issuing occasi
 - Hierarchy navigation: daemon > workspace > session > window/tab > pane. One pane per MVP panel.
 - Explicit command target, global/workspace quick commands, terminal key strip and virtual keyboard. Terminal grid resize is explicit and selected-pane scoped, with browser/native settings, Apply-only sends, server-echo dimensions and bounded columns/rows.
 - Passthrough and VR with black, gradient and one polished silent sci-fi observatory.
-- Head-directed gaze emphasis plus a separate default-off toggle for dwell-based keyboard targeting.
+- Active-pane-only highlighting and a default-off head-gaze toggle for dwell-based keyboard targeting.
 - Headset-local settings. Measure higher panel capacity using real workload shapes.
-- Detect new frontend builds with a bounded same-origin manifest poll and a user-controlled Reload action in browser/XR. End immersion before reload; never reload automatically.
+- Detect new frontend builds with a bounded same-origin manifest poll and a user-controlled Reload action in browser/XR. Reload automatically on the non-XR main page; keep Reload explicit during immersion and end XR before navigation.
 
 ## Non-Goals
 

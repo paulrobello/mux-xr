@@ -43,19 +43,17 @@ describe('mux XR local UI state', () => {
     expect(validateSettings(null)).toMatchObject({
       version: 1,
       background: 'observatory',
-      gazeEmphasis: true,
       gazeInput: false,
     });
     expect(
       validateSettings({ version: 9, endpoint: 42, background: 'laser', gazeEmphasis: 'yes' }),
-    ).toMatchObject({ version: 1, endpoint: '', background: 'observatory', gazeEmphasis: true });
+    ).toMatchObject({ version: 1, endpoint: '', background: 'observatory', gazeInput: false });
     expect(
       validateSettings({ endpoint: 'WSS://LAN', background: 'black', gazeEmphasis: false }),
     ).toMatchObject({
       version: 1,
       endpoint: 'WSS://LAN',
       background: 'black',
-      gazeEmphasis: false,
       arrangement: 'arc',
     });
     expect(validateSettings({ arrangement: 'invalid' }).arrangement).toBe('arc');
@@ -120,6 +118,26 @@ describe('mux XR local UI state', () => {
     localStorage.clear();
   });
 
+  it('returns command persistence status and writes workspace scope independently of visible scope', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    expect(ui.addCommand(command('workspace-only', 'alpha'))).toBe(true);
+    expect(ui.getCommandsForPane('missing')).toEqual([]);
+    expect(ui.addCommand({ id: 'bad' } as never)).toBe(false);
+    const originalSetItem = localStorage.setItem;
+    Object.defineProperty(localStorage, 'setItem', {
+      configurable: true,
+      value: () => {
+        throw new Error('storage unavailable');
+      },
+    });
+    expect(ui.updateCommand(command('failed'))).toBe(false);
+    Object.defineProperty(localStorage, 'setItem', { configurable: true, value: originalSetItem });
+    ui.destroy();
+    localStorage.clear();
+  });
+
   it('persists comfort settings and targets the selected pane for grid resize', () => {
     localStorage.clear();
     const root = document.createElement('div');
@@ -172,6 +190,44 @@ describe('mux XR local UI state', () => {
     });
     restored.destroy();
     localStorage.clear();
+  });
+
+  it('preserves an edited grid draft across output updates until matching acknowledgement', () => {
+    const root = document.createElement('div');
+    const resized: Array<[string, number, number]> = [];
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onResizeGrid: (id, cols, rows) => {
+        resized.push([id, cols, rows]);
+        return true;
+      },
+    });
+    ui.update({
+      panes: [
+        {
+          id: 'pane-a',
+          workspaceId: 'w',
+          workspaceName: 'W',
+          sessionId: 's',
+          sessionName: 'S',
+          windowId: 'win',
+          windowName: 'Win',
+          title: 'A',
+        },
+      ],
+    });
+    ui.setActivePane('pane-a');
+    ui.setTerminalGrid('pane-a', 80, 24, true);
+    query<HTMLInputElement>(root, '[data-grid-cols]').value = '120';
+    query<HTMLInputElement>(root, '[data-grid-rows]').value = '36';
+    query<HTMLButtonElement>(root, '[data-action="apply-grid"]').click();
+    ui.setTerminalGrid('pane-a', 80, 24, true);
+    expect(resized).toEqual([['pane-a', 120, 36]]);
+    expect(query<HTMLInputElement>(root, '[data-grid-cols]').value).toBe('120');
+    expect(query<HTMLInputElement>(root, '[data-grid-rows]').value).toBe('36');
+    ui.setTerminalGrid('pane-a', 120, 36, true);
+    expect(query<HTMLElement>(root, '[data-grid-status]').textContent).toContain('Resize changes');
+    ui.destroy();
   });
 
   it('prefills the serving origin and restores a saved custom endpoint', () => {

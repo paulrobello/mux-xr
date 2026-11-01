@@ -109,11 +109,13 @@ describe('workspace metadata connection', () => {
       windowName: 'Build',
       cols: 100,
       rows: 30,
+      active: false,
+      windowActive: false,
     });
     expect(normalizeTree(create(MuxTreeSnapshotSchema)).panes).toEqual([]);
   });
 
-  it('requests fresh snapshots after bounded reconnect and replaces the prior structure', async () => {
+  it('requests fresh snapshots after reconnect and replaces the prior structure', async () => {
     vi.useFakeTimers();
     const snapshots: string[][] = [];
     const connection = await connectHierarchy(
@@ -175,6 +177,51 @@ describe('workspace metadata connection', () => {
       ),
     );
     expect(snapshots).toEqual([['old'], ['new']]);
+    connection.disconnect();
+    vi.useRealTimers();
+  });
+
+  it('keeps retrying beyond the old attempt limit and recovers later', async () => {
+    vi.useFakeTimers();
+    const snapshots: string[][] = [];
+    const connection = await connectHierarchy(
+      'http://localhost:4241/ws',
+      (snapshot) => snapshots.push(snapshot.panes.map((pane) => pane.id)),
+      vi.fn(),
+    );
+    let current = MockSocket.instances[0];
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      current.close();
+      vi.advanceTimersByTime(10000);
+      const latest = MockSocket.instances.at(-1);
+      if (!latest) throw new Error('Reconnect did not create a new socket');
+      current = latest;
+    }
+    expect(MockSocket.instances.length).toBe(9);
+    current.open();
+    current.message(
+      serverFrame(
+        create(MuxTreeSnapshotSchema, {
+          workspaces: [
+            create(MuxTreeWorkspaceSchema, {
+              id: 'recovered',
+              sessions: [
+                create(MuxTreeSessionSchema, {
+                  id: 's',
+                  windows: [
+                    create(MuxTreeWindowSchema, {
+                      id: 'w',
+                      panes: [create(MuxTreePaneSchema, { id: 'recovered-pane' })],
+                    }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        }),
+      ),
+    );
+    expect(snapshots).toEqual([['recovered-pane']]);
     connection.disconnect();
     vi.useRealTimers();
   });

@@ -66,26 +66,23 @@ try {
   const navigationBaseline = navigations;
   const initialPolls = polls;
   cpSync(join(root, 'next'), join(root, 'served'), { recursive: true });
-  await page.locator('[data-update-notice]').waitFor({ state: 'visible', timeout: 35_000 });
-  if (navigations !== navigationBaseline || (await buildId()) !== current.buildId)
-    throw new Error('Update caused an automatic reload');
-  if (polls <= initialPolls) throw new Error('Periodic polling did not observe the new build');
-  await page.screenshot({ path: '.impeccable/review/update-available-browser.png' });
-  await Promise.all([
-    page.waitForEvent('domcontentloaded'),
-    page.locator('[data-action="reload-update"]').click(),
-  ]);
-  await page.waitForFunction(() => Boolean((window as unknown as { __muxXR?: unknown }).__muxXR));
-  await page.evaluate(() =>
-    (
-      window as unknown as { __muxXR: { checkForUpdate(): Promise<void> } }
-    ).__muxXR.checkForUpdate(),
+  await page.waitForFunction(
+    ({ expected }) => {
+      const state = (
+        window as unknown as { __muxXR?: { getState(): { buildId: string } } }
+      ).__muxXR?.getState();
+      return (
+        state?.buildId === expected &&
+        !document.querySelector('[data-update-notice]')?.checkVisibility()
+      );
+    },
+    { expected: next.buildId },
+    { timeout: 40_000, polling: 100 },
   );
-  if (
-    (await buildId()) !== next.buildId ||
-    (await page.locator('[data-update-notice]').isVisible())
-  )
-    throw new Error('Explicit reload did not adopt the new build');
+  if (navigations <= navigationBaseline || (await buildId()) !== next.buildId)
+    throw new Error('Desktop update did not automatically reload to the next build');
+  if (polls <= initialPolls) throw new Error('Periodic polling did not observe the new build');
+  await page.screenshot({ path: '.impeccable/review/update-auto-reloaded-browser.png' });
   const labelFailures = messages.filter((message) =>
     /Troika|Creating a worker|Failure loading font|\/fonts\//i.test(message),
   );
@@ -97,6 +94,8 @@ try {
     next: next.buildId,
     polls,
     navigations,
+    automaticReload: true,
+    explicitReloadClicked: false,
     errors,
   };
   console.log(JSON.stringify(result, null, 2));

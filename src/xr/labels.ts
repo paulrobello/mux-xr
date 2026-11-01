@@ -40,20 +40,13 @@ type LabelRoot = THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> & {
 function backgroundTexture(background: string, width: number, height: number): THREE.DataTexture {
   // THREE.Color stores linear values. Convert back to sRGB before writing texture bytes.
   const fill = new THREE.Color(background).convertLinearToSRGB();
-  const border = new THREE.Color('#4a6b78').convertLinearToSRGB();
   const fillRgb = [Math.round(fill.r * 255), Math.round(fill.g * 255), Math.round(fill.b * 255)];
-  const borderRgb = [
-    Math.round(border.r * 255),
-    Math.round(border.g * 255),
-    Math.round(border.b * 255),
-  ];
   const textureSize = 64;
   const textureWidth = Math.max(8, Math.min(2048, Math.round((textureSize * width) / height)));
   const data = new Uint8Array(textureWidth * textureSize * 4);
   for (let y = 0; y < textureSize; y += 1) {
     for (let x = 0; x < textureWidth; x += 1) {
-      const edge = x === 0 || y === 0 || x === textureWidth - 1 || y === textureSize - 1;
-      data.set(edge ? [...borderRgb, 255] : [...fillRgb, 255], (y * textureWidth + x) * 4);
+      data.set([...fillRgb, 255], (y * textureWidth + x) * 4);
     }
   }
   const texture = new THREE.DataTexture(data, textureWidth, textureSize, THREE.RGBAFormat);

@@ -13,10 +13,16 @@ import { getControlHelp } from '../control-help';
 import { terminalKeyLabel } from '../terminal/protocol';
 import { type SemanticKey, semanticKeyboardLayout } from '../ui';
 import { calculateArrangement } from './arrangements';
+import {
+  type CommandDraft,
+  commandFromDraft,
+  createCommandDraft,
+  editCommandDraft,
+} from './command-editor';
 import { createFrameCounter } from './fps';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 
-type InputMode = 'commands' | 'keyboard' | 'panes' | 'terminal' | 'arrange';
+type InputMode = 'commands' | 'keyboard' | 'panes' | 'terminal' | 'arrange' | 'command-editor';
 
 export interface PanelTransform {
   position: THREE.Vector3;
@@ -33,7 +39,6 @@ export interface GazeState {
 export interface WorkspaceSceneState {
   selectedTerminalId: string | null;
   background: BackgroundMode;
-  gazeEnabled: boolean;
   gazeInputEnabled: boolean;
   terminalColorMode: TerminalColorMode;
   keyboardBackgroundEnabled: boolean;
@@ -45,6 +50,7 @@ export interface WorkspaceSceneState {
   inputTargetTitle: string | null;
   updateAvailable: boolean;
   arrangement: PanelArrangement | null;
+  notice: string | null;
 }
 
 export interface WorkspaceScene {
@@ -56,7 +62,6 @@ export interface WorkspaceScene {
   removeTerminal(id: string): void;
   selectTerminal(id: string | null): void;
   setBackground(mode: BackgroundMode): void;
-  setGazeEnabled(enabled: boolean): void;
   setGazeInputEnabled(enabled: boolean): void;
   setTerminalColorMode(mode: TerminalColorMode): void;
   setKeyboardBackgroundEnabled(enabled: boolean): void;
@@ -67,6 +72,7 @@ export interface WorkspaceScene {
   enterXR(mode: 'vr' | 'ar'): Promise<void>;
   exitXR(): Promise<void>;
   setUpdateAvailable(available: boolean): void;
+  setNotice(message: string | null): void;
   resetLayout(): void;
   arrangeTerminals(pattern: PanelArrangement): void;
   scaleSelectedPanel(direction: number): void;
@@ -180,10 +186,12 @@ interface TerminalPanel {
   screen: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   texture: THREE.CanvasTexture;
   frame: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>;
-  selection: THREE.LineSegments;
+  selection: THREE.Mesh<THREE.ShapeGeometry, THREE.MeshBasicMaterial>;
   unsubscribe: () => void;
   defaultPosition: THREE.Vector3;
   titleLabel: THREE.Mesh;
+  width: number;
+  height: number;
 }
 
 function disposeObject(object: THREE.Object3D): void {
@@ -230,6 +238,7 @@ function createLabelButton(
 }
 
 function setModifierVisual(object: THREE.Object3D, armed: boolean): void {
+  object.userData.activeState = armed;
   const material = (object as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
   if (material?.color) material.color.setHex(armed ? ACCENT : 0xffffff);
 }
@@ -256,12 +265,33 @@ function createGradientTexture(): THREE.CanvasTexture {
   return texture;
 }
 
-function createSelection(): THREE.LineSegments {
-  const geometry = new THREE.EdgesGeometry(
-    new THREE.PlaneGeometry(PANEL_WIDTH + 0.025, PANEL_HEIGHT + 0.025),
-  );
-  const material = new THREE.LineBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.95 });
-  const line = new THREE.LineSegments(geometry, material);
+function selectionGeometry(width: number, height: number): THREE.ShapeGeometry {
+  const x = (width + 0.07) / 2;
+  const y = (height + 0.07) / 2;
+  const innerX = (width + 0.01) / 2;
+  const innerY = (height + 0.01) / 2;
+  const shape = new THREE.Shape();
+  shape.moveTo(-x, -y).lineTo(x, -y).lineTo(x, y).lineTo(-x, y).closePath();
+  const hole = new THREE.Path();
+  hole
+    .moveTo(-innerX, -innerY)
+    .lineTo(-innerX, innerY)
+    .lineTo(innerX, innerY)
+    .lineTo(innerX, -innerY)
+    .closePath();
+  shape.holes.push(hole);
+  return new THREE.ShapeGeometry(shape);
+}
+
+function createSelection(): THREE.Mesh<THREE.ShapeGeometry, THREE.MeshBasicMaterial> {
+  const material = new THREE.MeshBasicMaterial({
+    color: ACCENT,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false,
+  });
+  const line = new THREE.Mesh(selectionGeometry(PANEL_WIDTH, PANEL_HEIGHT), material);
+  line.name = 'active-pane-highlight';
   line.position.z = 0.012;
   line.visible = false;
   line.raycast = () => undefined;
@@ -361,7 +391,6 @@ export function createWorkspaceScene(
   const mutableState: WorkspaceSceneState = {
     selectedTerminalId: null,
     background: 'observatory',
-    gazeEnabled: false,
     gazeInputEnabled: false,
     terminalColorMode: 'comfort',
     keyboardBackgroundEnabled: true,
@@ -373,6 +402,7 @@ export function createWorkspaceScene(
     inputTargetTitle: null,
     updateAvailable: false,
     arrangement: null,
+    notice: null,
   };
   let disposed = false;
   let frameHandle = 0;
@@ -470,10 +500,14 @@ export function createWorkspaceScene(
   let gazeRetargeting = false;
   let quickCommands: QuickCommand[] = [];
   let menuCommands: QuickCommand[] = [];
+  let commandDraft: CommandDraft | null = null;
+  let commandWorkspaceId: string | undefined;
+  let commandEditorMessage = '';
   let commandPage = 0;
   let inputRoot: THREE.Group | null = null;
   let hudRoot: THREE.Group | null = null;
   let updateNotice: THREE.Mesh | null = null;
+  let statusNotice: THREE.Mesh | null = null;
   let activeSession: XrSessionLike | null = null;
   let inputMode: InputMode = 'commands';
   let panePage = 0;
@@ -482,7 +516,6 @@ export function createWorkspaceScene(
   let hierarchyWorkspaceId: string | null = null;
   let hierarchySessionId: string | null = null;
   let hierarchyWindowId: string | null = null;
-  let gazeState: GazeState = { candidateId: null, emphasizedId: null, since: 0 };
   let gazeInputState: GazeState = { candidateId: null, emphasizedId: null, since: 0 };
   let lastRayDistance = CONTROLLER_RAY_LENGTH;
   const hoveredByController = new Map<THREE.Group, THREE.Object3D>();
@@ -537,9 +570,14 @@ export function createWorkspaceScene(
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(
       view.getWorldQuaternion(new THREE.Quaternion()),
     );
+    const distance = hoveredControl
+      .getWorldPosition(new THREE.Vector3())
+      .distanceTo(view.getWorldPosition(new THREE.Vector3()));
+    const tooltipScale = THREE.MathUtils.clamp(distance / 1.4, 0.3, 6);
+    hoverHelp.scale.setScalar(tooltipScale);
     hoverHelp.position
       .copy(hoveredControl.getWorldPosition(new THREE.Vector3()))
-      .addScaledVector(up, 0.075);
+      .addScaledVector(up, 0.075 * tooltipScale);
     hoverHelp.quaternion.copy(view.getWorldQuaternion(new THREE.Quaternion()));
   };
   const setPointerRay = (event: PointerEvent): boolean => {
@@ -555,16 +593,20 @@ export function createWorkspaceScene(
     return true;
   };
   const onPointerDown = (event: PointerEvent): void => {
+    if (renderer?.xr.isPresenting) return;
     if (!setPointerRay(event)) return;
     activateTarget(targetFromRay());
     showHover(null);
   };
   const onPointerMove = (event: PointerEvent): void => {
+    if (renderer?.xr.isPresenting) return;
     if (!setPointerRay(event)) return;
     showHover(targetFromRay()?.object ?? null);
     updateHoverPosition();
   };
-  const onPointerLeave = (): void => showHover(null);
+  const onPointerLeave = (): void => {
+    if (!renderer?.xr.isPresenting) showHover(null);
+  };
   const resize = (): void => {
     const width = Math.max(1, container.clientWidth || window.innerWidth || 1);
     const height = Math.max(1, container.clientHeight || window.innerHeight || 1);
@@ -680,7 +722,7 @@ export function createWorkspaceScene(
       drag.object.position.copy(finalPosition);
       drag.object.quaternion.copy(controllerQuaternion).multiply(drag.relativeRotation);
     }
-    if (mutableState.gazeEnabled || mutableState.gazeInputEnabled) {
+    if (mutableState.gazeInputEnabled) {
       const gazeCamera = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
       scene.updateMatrixWorld(true);
       gazeCamera.updateMatrixWorld(true);
@@ -696,15 +738,10 @@ export function createWorkspaceScene(
         .find((entry) => isControlVisible(entry.object))?.object;
       let target: THREE.Object3D | null = hit ?? null;
       while (target && !target.userData.terminalId) target = target.parent;
-      if (mutableState.gazeEnabled)
-        gazeState = updateGaze(
-          gazeState,
-          (target?.userData.terminalId as string | undefined) ?? null,
-          time,
-        );
       if (
         mutableState.gazeInputEnabled &&
         mutableState.xrMode !== 'desktop' &&
+        inputMode !== 'command-editor' &&
         dragStates.size === 0
       ) {
         const nextGaze = updateGaze(
@@ -720,11 +757,6 @@ export function createWorkspaceScene(
         gazeInputState = nextGaze;
       }
       if (dragStates.size) gazeInputState = { candidateId: null, emphasizedId: null, since: time };
-      for (const panel of panels.values()) {
-        const emphasized = mutableState.gazeEnabled && panel.id === gazeState.emphasizedId;
-        panel.selection.visible = emphasized || panel.id === mutableState.selectedTerminalId;
-        (panel.selection.material as THREE.LineBasicMaterial).opacity = emphasized ? 1 : 0.72;
-      }
     }
     if (renderer?.xr.isPresenting) {
       let hover: THREE.Object3D | null = null;
@@ -767,7 +799,11 @@ export function createWorkspaceScene(
         const material = (previous as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
         const modifier = previous.userData.modifier as keyof KeyModifiers | undefined;
         if (material?.color)
-          material.color.setHex(modifier && armedModifiers[modifier] ? ACCENT : 0xffffff);
+          material.color.setHex(
+            (modifier && armedModifiers[modifier]) || previous.userData.activeState
+              ? ACCENT
+              : 0xffffff,
+          );
       }
       for (const object of allHovered) {
         const material = (object as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
@@ -872,7 +908,12 @@ export function createWorkspaceScene(
     });
     modeCommands.position.set(-0.2, 0.7, 0);
     modeKeyboard.position.set(0.2, 0.7, 0);
-    inputRoot.add(modeCommands, modeKeyboard);
+    if (mode !== 'command-editor') inputRoot.add(modeCommands, modeKeyboard);
+    if (mode === 'commands') {
+      const add = createLabelButton('New command', 0.5, 0.09, { inputAction: 'newCommand' });
+      add.position.set(0.75, 0.7, 0);
+      inputRoot.add(add);
+    }
     if (mode === 'keyboard') {
       const backdropToggle = createLabelButton(
         `Backing: ${mutableState.keyboardBackgroundEnabled ? 'on' : 'off'}`,
@@ -892,21 +933,64 @@ export function createWorkspaceScene(
       },
     );
     gazeToggle.position.set(0, 0.84, 0);
-    inputRoot.add(gazeToggle);
+    if (mode !== 'command-editor') inputRoot.add(gazeToggle);
     const targetTitle = mutableState.inputTargetTitle
       ? `Target: ${mutableState.inputTargetTitle}`
       : 'No target selected';
     const title = createLabelButton(
-      mode === 'arrange'
-        ? 'Arrange terminals'
-        : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? 'Keyboard' : mode === 'terminal' ? 'Terminal settings' : `Panes · ${hierarchyLevel}`} · ${targetTitle}`,
+      mode === 'command-editor'
+        ? commandEditorMessage || 'New quick command'
+        : mode === 'arrange'
+          ? 'Arrange terminals'
+          : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? 'Keyboard' : mode === 'terminal' ? 'Terminal settings' : `Panes · ${hierarchyLevel}`} · ${targetTitle}`,
       0.9,
       0.12,
       { inputAction: 'grabInput' },
     );
     title.userData.dragHandle = true;
-    title.position.y = 0.56;
+    title.position.y = mode === 'command-editor' ? 0.88 : 0.56;
     inputRoot.add(title);
+    if (mode === 'command-editor' && commandDraft) {
+      for (const [field, y] of [
+        ['label', 0.7],
+        ['text', 0.56],
+      ] as const) {
+        const value = Array.from(commandDraft[field]);
+        const active = commandDraft.field === field;
+        if (active) value.splice(commandDraft.cursor, 0, '|');
+        const start = active ? Math.max(0, commandDraft.cursor - 28) : 0;
+        const button = createLabelButton(
+          `${field === 'label' ? 'Name' : 'Command'}: ${start ? '…' : ''}${value.slice(start, start + 56).join('')}`,
+          1.5,
+          0.1,
+          { inputAction: 'commandField', field, wrap: true },
+        );
+        button.position.y = y;
+        setModifierVisual(button, active);
+        inputRoot.add(button);
+      }
+      const scope = createLabelButton(
+        commandDraft.scope === 'global' ? 'Global' : 'Workspace',
+        0.5,
+        0.09,
+        { inputAction: 'commandScope' },
+      );
+      scope.position.set(-0.55, 1.04, 0);
+      const enter = createLabelButton(
+        `Enter: ${commandDraft.sendNewline ? 'on' : 'off'}`,
+        0.5,
+        0.09,
+        { inputAction: 'commandNewline' },
+      );
+      enter.position.set(0, 1.04, 0);
+      const save = createLabelButton('Save', 0.4, 0.09, { inputAction: 'commandSave' });
+      save.position.set(0.55, 1.04, 0);
+      const clear = createLabelButton('Clear field', 0.45, 0.09, { inputAction: 'commandClear' });
+      clear.position.set(-0.28, -0.53, 0);
+      const cancel = createLabelButton('Cancel', 0.4, 0.09, { inputAction: 'commandCancel' });
+      cancel.position.set(0.28, -0.53, 0);
+      inputRoot.add(scope, enter, save, clear, cancel);
+    }
     if (mode === 'arrange') {
       const status = createLabelButton(
         panels.size
@@ -1096,6 +1180,14 @@ export function createWorkspaceScene(
         setModifierVisual(button, mutableState.terminalColorMode === colorMode);
         inputRoot?.add(button);
       });
+      const modeStatus = createLabelButton(
+        `Colors: ${mutableState.terminalColorMode}`,
+        1.08,
+        0.05,
+        { inputAction: 'noop' },
+      );
+      modeStatus.position.y = -0.455;
+      inputRoot.add(modeStatus);
     } else {
       semanticKeyboardLayout.forEach((row, rowIndex) => {
         const widths = row.map((key) =>
@@ -1142,7 +1234,8 @@ export function createWorkspaceScene(
     black.position.set(-0.38, -0.53, 0);
     gradient.position.set(-0.08, -0.53, 0);
     observatory.position.set(0.3, -0.53, 0);
-    inputRoot.add(close, black, gradient, observatory);
+    inputRoot.add(close);
+    if (mode !== 'command-editor') inputRoot.add(black, gradient, observatory);
     inputRoot.updateMatrixWorld(true);
     const bounds = new THREE.Box3();
     for (const child of inputRoot.children) {
@@ -1161,7 +1254,10 @@ export function createWorkspaceScene(
     backing.position.copy(center);
     backing.position.z = -0.015;
     backing.name = 'input-backdrop';
-    if (mode === 'keyboard' && !mutableState.keyboardBackgroundEnabled) {
+    if (
+      (mode === 'keyboard' || mode === 'command-editor') &&
+      !mutableState.keyboardBackgroundEnabled
+    ) {
       backing.material.transparent = true;
       backing.material.opacity = 0;
       backing.material.depthWrite = false;
@@ -1198,6 +1294,13 @@ export function createWorkspaceScene(
     updateNotice.position.set(0, 0.16, 0);
     updateNotice.visible = false;
     hudRoot.add(updateNotice);
+    statusNotice = createLabelButton(mutableState.notice ?? '', 1.4, 0.075, {
+      inputAction: 'noop',
+      wrap: true,
+    });
+    statusNotice.position.set(0, 0.3, 0);
+    statusNotice.visible = Boolean(mutableState.notice);
+    hudRoot.add(statusNotice);
     const backing = new THREE.Mesh(
       new THREE.PlaneGeometry(controls.length * 0.31 + 0.08, 0.15),
       new THREE.MeshBasicMaterial({ color: 0x0d1720 }),
@@ -1218,6 +1321,15 @@ export function createWorkspaceScene(
     if (mutableState.updateAvailable === available) return;
     mutableState.updateAvailable = available;
     if (updateNotice) updateNotice.visible = available && Boolean(renderer?.xr.isPresenting);
+    notify();
+  };
+  const setNotice = (message: string | null): void => {
+    if (mutableState.notice === message) return;
+    mutableState.notice = message;
+    if (statusNotice) {
+      statusNotice.visible = Boolean(message);
+      updateLabel(statusNotice, message ?? '');
+    }
     notify();
   };
   const panelFitsPreview = (panel: TerminalPanel): boolean => {
@@ -1259,10 +1371,62 @@ export function createWorkspaceScene(
     const action = hit.userData.inputAction as string | undefined;
     if (!action || action === 'noop') return false;
     if (action === 'close') {
+      commandDraft = null;
       hideInput();
       return true;
     }
     if (action === 'grabInput') return true;
+    if (action === 'newCommand') {
+      commandDraft = createCommandDraft(crypto.randomUUID());
+      commandWorkspaceId = availablePanes.find(
+        (pane) => pane.id === mutableState.inputTargetId,
+      )?.workspaceId;
+      commandEditorMessage = '';
+      clearArmedModifiers();
+      refreshInputRoot('command-editor');
+      return true;
+    }
+    if (action === 'commandCancel') {
+      commandDraft = null;
+      commandEditorMessage = '';
+      refreshInputRoot('commands');
+      return true;
+    }
+    if (
+      commandDraft &&
+      ['commandField', 'commandScope', 'commandNewline', 'commandClear', 'commandSave'].includes(
+        action,
+      )
+    ) {
+      commandEditorMessage = '';
+      if (action === 'commandField') {
+        commandDraft.field = hit.userData.field as 'label' | 'text';
+        commandDraft.cursor = Array.from(commandDraft[commandDraft.field]).length;
+      } else if (action === 'commandScope') {
+        if (commandWorkspaceId)
+          commandDraft.scope = commandDraft.scope === 'global' ? 'workspace' : 'global';
+        else commandEditorMessage = 'Select a pane for workspace scope';
+      } else if (action === 'commandNewline') commandDraft.sendNewline = !commandDraft.sendNewline;
+      else if (action === 'commandClear') {
+        commandDraft[commandDraft.field] = '';
+        commandDraft.cursor = 0;
+      } else {
+        const command = commandFromDraft(commandDraft, commandWorkspaceId);
+        if (!command) commandEditorMessage = 'Enter a name and command';
+        else if (!actions.saveCommand?.(command))
+          commandEditorMessage = 'Could not save on this device';
+        else {
+          commandDraft = null;
+          menuCommands = quickCommands.map((item) => ({ ...item }));
+          clearArmedModifiers();
+          refreshInputRoot('commands');
+          return true;
+        }
+      }
+      clearArmedModifiers();
+      refreshInputRoot('command-editor');
+      return true;
+    }
     if (action === 'mode') {
       const mode = hit.userData.mode as 'commands' | 'keyboard';
       if (renderer?.xr.isPresenting) refreshInputRoot(mode);
@@ -1409,6 +1573,17 @@ export function createWorkspaceScene(
     if (action === 'commandPage') {
       commandPage = (commandPage + 1) % Math.max(1, Math.ceil(menuCommands.length / 8));
       refreshInputRoot(inputMode);
+      return true;
+    }
+    if (action === 'key' && inputMode === 'command-editor' && commandDraft) {
+      const modifier = hit.userData.modifier as keyof KeyModifiers | undefined;
+      if (modifier) armedModifiers[modifier] = !armedModifiers[modifier];
+      else {
+        commandDraft = editCommandDraft(commandDraft, hit.userData.key as string, armedModifiers);
+        clearArmedModifiers();
+      }
+      commandEditorMessage = '';
+      refreshInputRoot('command-editor');
       return true;
     }
     const paneId = mutableState.inputTargetId;
@@ -1576,7 +1751,11 @@ export function createWorkspaceScene(
           const material = (previous as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
           const modifier = previous.userData.modifier as keyof KeyModifiers | undefined;
           if (material?.color)
-            material.color.setHex(modifier && armedModifiers[modifier] ? ACCENT : 0xffffff);
+            material.color.setHex(
+              (modifier && armedModifiers[modifier]) || previous.userData.activeState
+                ? ACCENT
+                : 0xffffff,
+            );
         }
         root.userData.rayDistance = 0;
       };
@@ -1599,6 +1778,27 @@ export function createWorkspaceScene(
     }
   };
   setupControllers();
+  const syncPanelGrid = (panel: TerminalPanel): void => {
+    const width = (PANEL_WIDTH * panel.surface.cols) / 80;
+    const height = (PANEL_HEIGHT * panel.surface.rows) / 24;
+    if (width === panel.width && height === panel.height) return;
+    panel.width = width;
+    panel.height = height;
+    panel.screen.geometry.dispose();
+    panel.screen.geometry = new THREE.PlaneGeometry(width, height);
+    panel.frame.geometry.dispose();
+    panel.frame.geometry = new THREE.BoxGeometry(width + 0.035, height + 0.06, 0.035);
+    panel.selection.geometry.dispose();
+    panel.selection.geometry = selectionGeometry(width, height);
+    panel.titleLabel.position.y = height / 2 + 0.07;
+    const strip = panel.root.getObjectByName('terminal-key-strip');
+    if (strip) strip.position.y = -(height - PANEL_HEIGHT) / 2;
+    for (const child of panel.root.children) {
+      if (child.userData.inputAction !== 'fontZoom') continue;
+      child.position.x = Number(child.userData.direction) * (width / 2 + 0.08);
+      child.position.y = height / 2 - 0.18;
+    }
+  };
   const addTerminal = (surface: TerminalSurface): void => {
     if (panels.has(surface.pane.id)) return;
     const index = panels.size;
@@ -1662,8 +1862,12 @@ export function createWorkspaceScene(
       unsubscribe: () => undefined,
       defaultPosition,
       titleLabel,
+      width: PANEL_WIDTH,
+      height: PANEL_HEIGHT,
     };
+    syncPanelGrid(panel);
     panel.unsubscribe = surface.subscribe(() => {
+      syncPanelGrid(panel);
       texture.needsUpdate = true;
       updateLabel(panel.titleLabel, `${surface.pane.title} · ${surface.status}`);
     });
@@ -1741,16 +1945,6 @@ export function createWorkspaceScene(
     observatory.visible = mode === 'observatory';
     notify();
   };
-  const setGazeEnabled = (enabled: boolean): void => {
-    mutableState.gazeEnabled = enabled;
-    if (!enabled) {
-      gazeState = { candidateId: null, emphasizedId: null, since: 0 };
-      for (const panel of panels.values()) {
-        panel.selection.visible = panel.id === mutableState.selectedTerminalId;
-      }
-    }
-    notify();
-  };
   const setGazeInputEnabled = (enabled: boolean): void => {
     if (mutableState.gazeInputEnabled === enabled) return;
     mutableState.gazeInputEnabled = enabled;
@@ -1779,7 +1973,8 @@ export function createWorkspaceScene(
   const setKeyboardBackgroundEnabled = (enabled: boolean): void => {
     if (mutableState.keyboardBackgroundEnabled === enabled) return;
     mutableState.keyboardBackgroundEnabled = enabled;
-    if (inputRoot && inputMode === 'keyboard') refreshInputRoot(inputMode);
+    if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
+      refreshInputRoot(inputMode);
     notify();
   };
   const setAvailablePanes = (panes: PaneDescriptor[]): void => {
@@ -2084,7 +2279,6 @@ export function createWorkspaceScene(
     removeTerminal,
     selectTerminal,
     setBackground,
-    setGazeEnabled,
     setGazeInputEnabled,
     setTerminalColorMode,
     setKeyboardBackgroundEnabled,
@@ -2095,6 +2289,7 @@ export function createWorkspaceScene(
     enterXR,
     exitXR,
     setUpdateAvailable,
+    setNotice,
     arrangeTerminals,
     resetLayout,
     scaleSelectedPanel,

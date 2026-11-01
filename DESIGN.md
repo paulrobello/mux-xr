@@ -82,7 +82,7 @@ components:
 
 Mux XR is a functional monitoring instrument wrapped in a restrained sci-fi observatory. The interface stays dark and low-glare so live terminal text remains the visual priority. Controls are compact, legible, and deliberately targeted for controller use in mixed reality, while the world contributes only enough atmosphere to establish orientation.
 
-The system uses blue-black tonal layering, cool blue-gray text, and a scarce cyan selection signal. Motion may clarify panel selection and gaze emphasis, but the user's viewpoint remains under their control. Passthrough, pure black, gradient, and observatory backgrounds are explicit modes, not competing visual identities.
+The system uses blue-black tonal layering, cool blue-gray text, and a scarce cyan selection signal. Motion may clarify active-pane selection, but the user's viewpoint remains under their control. Passthrough, pure black, gradient, and observatory backgrounds are explicit modes, not competing visual identities.
 
 **Key Characteristics:**
 - Terminal content and intentional input stay primary.
@@ -178,7 +178,7 @@ The form language is compact and gently softened. Desktop containers use an 8px 
 
 ### Hover Help
 
-Non-obvious controls explain their action on browser hover or controller-ray hover. Spatial hints use the existing dark label treatment, face the viewer and stay outside ray picking. XR tooltips are small (about 0.32 x 0.05), appear after a 700 ms dwell, describe actions only and are hidden while gripping. There are no automatic grip instructions. Hover feedback never sends terminal input or changes its target.
+Non-obvious controls explain their action on browser hover or controller-ray hover. Spatial hints use the existing dark label treatment, face the viewer and stay outside ray picking. XR tooltips keep a compact angular size by scaling with distance, appear after a 700 ms dwell, describe actions only and are hidden while gripping. There are no automatic grip instructions. Hover feedback never sends terminal input or changes its target.
 
 ### XR Terminal Panel
 Each panel presents one live pane with a readable terminal surface, title label, key strip and local A± font zoom controls. The whole panel is a grabbable transform root, as are the keyboard, commands, hierarchy and workspace HUD surfaces. Terminal grid settings are selected-pane scoped and apply only through explicit numeric Apply controls, with presets 80x24, 100x30, 120x36 and 160x48 plus ±1/±10 draft controls. Bounds are 2..300 columns and 2..150 rows, server echo is read-only, and disconnected resize is denied. Terminal colors are a saved global preference: Comfortable is the default, with Original and Monochrome alternatives. The source geometry remains one flat canvas. Saturated color depth is a qualitative optical inference, not a proven physical display effect, and any physical effect needs owner recheck. Selection is explicit by default and independent from gaze emphasis. Optional Gaze input uses a short head-directed dwell to retarget the keyboard, with a visible target caption. The native keyboard uses self-hosted OFL Noto Sans and Symbols 2 through Troika SDF 0.52.5; unsupported visual glyphs render as `?` while the original title remains. Keyboard Backing is a saved browser/native-header toggle: off hides only key buttons while the logical plane remains grabbable and can occlude gaze, retaining the input target. The native FPS HUD is an actual frame counter updated about every 500 ms, not a capacity benchmark. Comfortable-distance guidance remains qualitative GPU-shot evidence and is not headset proof. The physical controller grab pose and two-hand behavior remain unchanged. The observatory background is peripheral architecture and a distant planet, never a competing focal surface.
@@ -201,7 +201,7 @@ Each panel presents one live pane with a readable terminal surface, title label,
 
 ### Update notices
 
-Version availability uses a compact inline browser notice and a small action attached to the movable XR HUD. It does not interrupt monitoring or change terminal/input focus. Reload is explicit, ends the current immersive session, and then refreshes the viewer. No centered modal or automatic reload is used.
+Version availability uses a compact inline browser notice and a small action attached to the movable XR HUD. It does not interrupt monitoring or change terminal/input focus. Desktop updates reload automatically. Immersive updates show Update: Reload and await selection, end XR, then navigate. No centered modal is used.
 
 ### Spatial arrangements
 

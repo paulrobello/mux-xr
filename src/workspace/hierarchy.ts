@@ -24,6 +24,8 @@ export function normalizeTree(tree: MuxTreeSnapshot): WorkspaceSnapshot {
             title: pane.title || `${window.name} · ${pane.id}`,
             cols: pane.cols,
             rows: pane.rows,
+            active: pane.active,
+            windowActive: window.active,
           });
         }
       }
@@ -58,6 +60,10 @@ export async function connectHierarchy(
   let attempts = 0;
   const start = (): void => {
     if (stopped) return;
+    if (retry) {
+      clearTimeout(retry);
+      retry = undefined;
+    }
     const current = new WebSocket(url);
     socket = current;
     current.binaryType = 'arraybuffer';
@@ -94,8 +100,8 @@ export async function connectHierarchy(
     current.onclose = () => {
       if (socket !== current || stopped) return;
       clearTimeout(timer);
-      if (++attempts <= 6) retry = setTimeout(start, Math.min(500 * 2 ** attempts, 10000));
-      else onError('Streamer connection stopped retrying. Use Connect to try again.');
+      attempts += 1;
+      retry = setTimeout(start, Math.min(500 * 2 ** attempts, 10000));
     };
   };
   start();

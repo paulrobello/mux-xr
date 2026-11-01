@@ -2,10 +2,32 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { WorkspaceScene } from './xr';
 
+export function quietObservatoryPlanet(root: THREE.Object3D): void {
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    const isPlanet =
+      child.name === 'observatory_distant_planet' ||
+      (child.material &&
+        (Array.isArray(child.material) ? child.material : [child.material]).some(
+          (material) =>
+            material.name === 'observatory_planet_high' ||
+            material.name === 'observatory_planet_low',
+        ));
+    if (!isPlanet) return;
+    for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+      if (material instanceof THREE.MeshStandardMaterial) {
+        material.color.setHex(0x172b3e);
+        material.emissiveIntensity = 0.05;
+      }
+    }
+  });
+}
+
 export async function loadObservatory(workspace: WorkspaceScene): Promise<() => void> {
   const gltf = await new GLTFLoader().loadAsync('/assets/observatory.glb');
   const root = gltf.scene;
   root.name = 'authored-observatory';
+  quietObservatoryPlanet(root);
   const placeholder = workspace.scene.getObjectByName('quiet-orbital-observatory');
   if (placeholder) placeholder.visible = false;
   workspace.scene.add(root);

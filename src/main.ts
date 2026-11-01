@@ -14,6 +14,8 @@ import { reloadAfterXR } from './reload';
 import { createTerminalSurface } from './terminal';
 import { mountWorkspaceUI, type WorkspaceSettings, type WorkspaceUI } from './ui';
 import { createUpdateChecker, type UpdateChecker } from './update-check';
+import { shouldAutoReload } from './update-policy';
+import { initialPaneSelection } from './workspace/initial';
 import { createWorkspaceScene, type WorkspaceScene } from './xr';
 
 const app = document.querySelector<HTMLElement>('#app');
@@ -37,6 +39,24 @@ let disposeEnvironment: (() => void) | undefined;
 let applyingSettings = false;
 let updateChecker: UpdateChecker | undefined;
 let reloading = false;
+let updateAvailable = false;
+let enteringXR = false;
+
+function maybeReloadUpdate(): void {
+  if (shouldAutoReload(updateAvailable, scene.state.xrMode, enteringXR)) void reloadApp();
+}
+
+async function enterXR(mode: 'vr' | 'ar'): Promise<void> {
+  enteringXR = true;
+  try {
+    await scene.enterXR(mode);
+  } catch (error) {
+    notice(error instanceof Error ? error.message : 'Could not enter XR.');
+  } finally {
+    enteringXR = false;
+    maybeReloadUpdate();
+  }
+}
 
 async function reloadApp(): Promise<void> {
   if (reloading) return;
@@ -63,6 +83,7 @@ async function reloadApp(): Promise<void> {
 
 function notice(message: string): void {
   ui.setConnection('disconnected', message);
+  scene?.setNotice(message);
 }
 
 function syncCommands(): void {
@@ -107,9 +128,11 @@ function closePane(id: string): void {
   if (next && !selectedId) selectPane(next);
 }
 
-function sendKey(id: string, key: string, modifiers?: KeyModifiers): void {
-  if (!surfaces.get(id)?.sendKey(key, modifiers))
-    notice('Terminal is disconnected. Reconnect before sending input.');
+function sendKey(id: string, key: string, modifiers?: KeyModifiers): boolean {
+  const sent = surfaces.get(id)?.sendKey(key, modifiers) ?? false;
+  if (!sent) notice('Terminal is disconnected. Reconnect before sending input.');
+  else scene.setNotice(null);
+  return sent;
 }
 
 function sendText(id: string, text: string): void {
@@ -146,7 +169,6 @@ function applySettings(settings: WorkspaceSettings): void {
     scene.setTerminalColorMode(settings.colorMode);
     scene.setKeyboardBackgroundEnabled(settings.keyboardBackground);
     scene.setGazeInputEnabled(settings.gazeInput);
-    scene.setGazeEnabled(settings.gazeEmphasis);
     scene.setBackground(settings.background);
     for (const surface of surfaces.values()) surface.setColorMode(settings.colorMode);
   } finally {
@@ -170,7 +192,9 @@ function applySnapshot(next: WorkspaceSnapshot): void {
   for (const id of [...surfaces.keys()]) if (!valid.has(id)) closePane(id);
   if (autoAttachPending && next.panes.length) {
     autoAttachPending = false;
-    for (const pane of next.panes.slice(0, 2)) selectPane(pane.id);
+    const initial = initialPaneSelection(next.panes);
+    for (const pane of initial.panes) selectPane(pane.id);
+    if (initial.activeId) selectPane(initial.activeId);
   }
 }
 
@@ -216,6 +240,7 @@ async function connect(nextEndpoint: string): Promise<void> {
 }
 
 const actions: WorkspaceActions = {
+  saveCommand: (command) => ui.addCommand(command),
   reloadApp: () => {
     void reloadApp();
   },
@@ -255,10 +280,10 @@ ui = mountWorkspaceUI(app, {
   onResizeGrid: resizeGrid,
   onCommandsChange: syncCommands,
   onEnterXR: () => {
-    void scene.enterXR('vr').catch((error: Error) => notice(error.message));
+    void enterXR('vr');
   },
   onPassthrough: () => {
-    void scene.enterXR('ar').catch((error: Error) => notice(error.message));
+    void enterXR('ar');
   },
   onSettingsChange: applySettings,
   onResetLayout: () => scene.resetLayout(),
@@ -283,6 +308,7 @@ const stopPresentation = scene.subscribe((state) => {
   }
   desktop.setImmersive(state.xrMode !== 'desktop');
   if (state.xrMode !== 'desktop') ui.closeInput();
+  maybeReloadUpdate();
 });
 applySettings(ui.getSettings());
 void loadObservatory(scene)
@@ -297,6 +323,7 @@ if (scene.state.rendererError) notice(scene.state.rendererError);
 const params = new URLSearchParams(location.search);
 if (params.get('demo') === '1') startDemo();
 else if (params.get('server')) void connect(params.get('server') ?? '');
+else if (ui.getSettings().endpoint.trim()) void connect(ui.getSettings().endpoint.trim());
 
 window.addEventListener(
   'pagehide',
@@ -330,6 +357,13 @@ Object.assign(window, {
           quaternion: object.quaternion.toArray(),
           scale: object.scale.x,
         })),
+      streams: [...surfaces.values()].map((surface) => ({
+        id: surface.pane.id,
+        status: surface.status,
+        cols: surface.cols,
+        rows: surface.rows,
+        writable: surface.canResizeGrid,
+      })),
     }),
     getControlHints: () => scene.getControlHints(),
     checkForUpdate: () => updateChecker?.poll() ?? Promise.resolve(),
@@ -345,8 +379,10 @@ if (/^[a-f0-9]{64}$/.test(runningBuildId)) {
     runningBuildId,
     url: new URL('/version.json', window.location.href).href,
     onChange: (manifest) => {
+      updateAvailable = manifest !== null;
       ui.setUpdateAvailable(manifest !== null);
       scene.setUpdateAvailable(manifest !== null);
+      maybeReloadUpdate();
       if (scene.state.xrMode === 'desktop') window.dispatchEvent(new Event('resize'));
     },
   });

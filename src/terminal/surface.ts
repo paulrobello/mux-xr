@@ -19,7 +19,7 @@ import {
 
 type SocketLike = WebSocket;
 const INITIAL_RETRY_MS = 500;
-const MAX_RETRIES = 8;
+const MAX_RETRY_MS = 5000;
 const CELL_WIDTH = 11;
 const LINE_HEIGHT = 21;
 const CANVAS_BACKGROUND = '#05070b';
@@ -224,8 +224,8 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     return true;
   };
   const scheduleRetry = (): void => {
-    if (disposed || retries >= MAX_RETRIES) return;
-    const delay = Math.min(INITIAL_RETRY_MS * 2 ** retries, 5000);
+    if (disposed || retry) return;
+    const delay = Math.min(INITIAL_RETRY_MS * 2 ** retries, MAX_RETRY_MS);
     retries += 1;
     retry = setTimeout(connect, delay);
   };
@@ -236,6 +236,10 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       socket?.readyState === WebSocket.CONNECTING
     )
       return;
+    if (retry) {
+      clearTimeout(retry);
+      retry = null;
+    }
     ready = false;
     setStatus('connecting');
     let ws: SocketLike;

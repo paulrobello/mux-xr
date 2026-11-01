@@ -9,6 +9,8 @@ export interface PaneDescriptor {
   title: string;
   cols?: number;
   rows?: number;
+  active?: boolean;
+  windowActive?: boolean;
 }
 
 export type TerminalStatus = 'connecting' | 'connected' | 'disconnected' | 'exited' | 'closed';
@@ -70,4 +72,5 @@ export interface WorkspaceActions {
   setTerminalColorMode?(mode: TerminalColorMode): void;
   setKeyboardBackground?(enabled: boolean): void;
   reloadApp?(): void;
+  saveCommand?(command: QuickCommand): boolean;
 }

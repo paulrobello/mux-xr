@@ -88,6 +88,7 @@ function fixture() {
     setTerminalColorMode: vi.fn(),
     setKeyboardBackground: vi.fn(),
     reloadApp: vi.fn(),
+    saveCommand: vi.fn(() => true),
   };
   const container = document.createElement('div');
   const workspace = createWorkspaceScene(container, actions);
@@ -349,6 +350,89 @@ describe('native XR controller event routing', () => {
     const position = panel.position.clone();
     workspace.addTerminal(surface(pane('pane-c')));
     expect(panel.position.distanceTo(position)).toBeLessThan(1e-9);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('creates a workspace quick command through native keys without executing the draft', () => {
+    const { workspace, actions, container } = fixture();
+    workspace.showInput('commands');
+    hit(workspace, { inputAction: 'newCommand' });
+    for (const key of ['p', 'w', 'd']) hit(workspace, { inputAction: 'key', key });
+    hit(workspace, { inputAction: 'commandField', field: 'text' });
+    for (const key of ['p', 'w', 'd']) hit(workspace, { inputAction: 'key', key });
+    hit(workspace, { inputAction: 'commandScope' });
+    hit(workspace, { inputAction: 'commandNewline' });
+    hit(workspace, { inputAction: 'commandSave' });
+    expect(actions.saveCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        label: 'pwd',
+        text: 'pwd',
+        sendNewline: false,
+        workspaceId: 'workspace',
+      }),
+    );
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    expect(actions.runCommand).not.toHaveBeenCalled();
+    expect(workspace.scene.getObjectByName('xr-command-editor-controls')).toBeUndefined();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('keeps an unsaved native command draft after validation or storage failure', () => {
+    const { workspace, actions, container } = fixture();
+    workspace.showInput('commands');
+    hit(workspace, { inputAction: 'newCommand' });
+    hit(workspace, { inputAction: 'commandSave' });
+    expect(actions.saveCommand).not.toHaveBeenCalled();
+    hit(workspace, { inputAction: 'key', key: 'x' });
+    hit(workspace, { inputAction: 'commandField', field: 'text' });
+    hit(workspace, { inputAction: 'key', key: 'x' });
+    if (!actions.saveCommand) throw new Error('Missing command save fixture');
+    vi.mocked(actions.saveCommand).mockReturnValue(false);
+    hit(workspace, { inputAction: 'commandSave' });
+    expect(workspace.scene.getObjectByName('xr-command-editor-controls')).toBeDefined();
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('retains the active pane marker while looking at another pane with gaze input off', () => {
+    const { workspace, container } = fixture();
+    workspace.camera.lookAt(0.87, 1.5, -1.5);
+    fakeXR.frame?.(0);
+    fakeXR.frame?.(800);
+    expect(
+      workspace.scene
+        .getObjectByName('terminal-panel-pane-a')
+        ?.getObjectByName('active-pane-highlight')?.visible,
+    ).toBe(true);
+    expect(
+      workspace.scene
+        .getObjectByName('terminal-panel-pane-b')
+        ?.getObjectByName('active-pane-highlight')?.visible,
+    ).toBe(false);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('scales distant tooltips while keeping their angular size bounded', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls') as THREE.Group;
+    const key = objectWithData(workspace, { inputAction: 'key', key: 'Shift' });
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    aimController(controller, key);
+    fakeXR.frame?.(0);
+    fakeXR.frame?.(800);
+    const tip = workspace.scene.getObjectByName('xr-hover-help') as THREE.Mesh;
+    const nearScale = tip.scale.x;
+    keyboard.position.z -= 2;
+    aimController(controller, key);
+    fakeXR.frame?.(1600);
+    expect(tip.visible).toBe(true);
+    expect(tip.scale.x).toBeGreaterThan(nearScale);
+    expect(tip.scale.x).toBeLessThanOrEqual(6);
     workspace.dispose();
     container.remove();
   });
@@ -799,7 +883,7 @@ describe('native XR controller event routing', () => {
     fakeXR.frame?.(400);
     expect(workspace.state.selectedTerminalId).toBe('pane-a');
     workspace.setGazeInputEnabled(true);
-    expect(workspace.state.gazeEnabled).toBe(false);
+    expect(workspace.state.selectedTerminalId).toBe('pane-a');
     fakeXR.frame?.(500);
     fakeXR.frame?.(849);
     expect(workspace.state.selectedTerminalId).toBe('pane-a');

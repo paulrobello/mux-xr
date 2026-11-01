@@ -19,6 +19,20 @@ export function getKeyHelp(key: string): string | undefined {
 export function getControlHelp(data: Record<string, unknown>): string | undefined {
   if (typeof data.key === 'string') return getKeyHelp(data.key);
   switch (data.inputAction) {
+    case 'newCommand':
+      return 'Create a saved quick command';
+    case 'commandField':
+      return 'Choose which field the keyboard edits';
+    case 'commandScope':
+      return 'Save globally or for this workspace';
+    case 'commandNewline':
+      return 'Append Enter when running this command';
+    case 'commandSave':
+      return 'Save on this device without running';
+    case 'commandClear':
+      return 'Clear the current draft field';
+    case 'commandCancel':
+      return 'Discard this command draft';
     case 'arrange':
       return data.pattern === 'sphere'
         ? 'Arrange terminals on a sphere in front of you'

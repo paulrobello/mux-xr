@@ -78,7 +78,7 @@ describe('scalable XR labels', () => {
     const pixels = (material.map as THREE.DataTexture).image.data as Uint8Array;
     const textureWidth = (material.map as THREE.DataTexture).image.width;
     expect(textureWidth).toBe(Math.round((64 * 0.28) / 0.09));
-    expect(Array.from(pixels.slice(0, 4))).toEqual([74, 107, 120, 255]);
+    expect(Array.from(pixels.slice(0, 4))).toEqual([28, 42, 53, 255]);
     expect(
       Array.from(pixels.slice((3 * textureWidth + 3) * 4, (3 * textureWidth + 3) * 4 + 4)),
     ).toEqual([28, 42, 53, 255]);
