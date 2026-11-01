@@ -4,13 +4,13 @@ Software verification completed November 1, 2026 (Etc/GMT+8). Paul requested the
 
 ## Software gate
 
-`make checkall-ci` covers Biome, strict TypeScript, 31 unit tests across six files, the production build, observatory asset validation, secret scanning and a high-severity dependency audit. The audit reports zero vulnerabilities. The production JavaScript chunk is approximately 1.12 MB before gzip (293 KB gzip). Its warning remains visible and is not a headset performance result.
+`make checkall-ci` covers Biome, strict TypeScript, 33 unit tests across six files, the production build, observatory asset validation, secret scanning and a high-severity dependency audit. The audit reports zero vulnerabilities. The production JavaScript chunk is approximately 1.12 MB before gzip (293 KB gzip). Its warning remains visible and is not a headset performance result.
 
 The unit suite exercises protobuf/zlib framing, ANSI seeding and live output, disconnected input rejection, bounded reconnects, target capture, persistence failures, key encoding, hierarchy normalization, native controller events, relative panel transforms, local zoom and resource teardown. Controller tests dispatch actual Three.js Group events with only the GPU renderer mocked. They caught and reproduce fixes for DOM-style event assumptions, grip activating keys, inverted zoom and hierarchy leaves failing to attach new panes.
 
 ## Browser evidence
 
-`make e2e` uses explicit protocol fixtures. Desktop (1440×900), tablet (820×900) and mobile (390×844) passed with native Chromium headless and the Apple M4 Metal renderer. Each captured 24 input frames with no page errors. It verifies hierarchy selection, two panels, command scopes, optional Enter, frozen input target, modifier bytes, detach, backgrounds and settings. Fixture results do not establish a real daemon round trip.
+`make e2e` uses explicit protocol fixtures. Desktop (1440×900), tablet (820×900) and mobile (390×844) passed with native Chromium headless and the Apple M4 Metal renderer. Each captured 24 input frames with no page errors. The final rerun recorded test-mac load 1.856 before and 2.028 after. The final visual reviewer cleared all six previously reported material findings, including the mobile Backspace label. It verifies hierarchy selection, two panels, command scopes, optional Enter, frozen input target, modifier bytes, detach, backgrounds and settings. Fixture results do not establish a real daemon round trip.
 
 The focused `make live-check` diagnostic separately sent distinct split-marker commands through two real terminal adapters, observed both outputs and revision increases, and rejected input after disposal. test-mac load was 1.953 before and after that diagnostic. It does not establish full-app hierarchy acceptance.
 
@@ -35,6 +35,6 @@ Desktop, tablet and mobile captures were reviewed. The interface uses a nested h
 
 Quest 3 hardware acceptance is pending: two-panel physical readability, controller ray and grip behavior, passthrough, virtual keyboard comfort, observatory taste and frame pacing. No maximum pane count or production-scale performance improvement is claimed. Black and gradient modes provide simpler backgrounds for comparison.
 
-The LAN preview reuses the existing IWSDK development certificate. It is self-signed and its SANs cover localhost, not the LAN address. HTTPS/WSS can be tested with an explicit development-certificate exception, but headset trust and WebXR entry must be confirmed by the owner. No trust store, firewall, credential or shared service configuration was changed.
+The LAN preview reuses the existing IWSDK development certificate. It is self-signed and its SANs cover localhost, not the LAN address. HTTPS/WSS can be tested with an explicit development-certificate exception, but headset trust and WebXR entry must be confirmed by the owner. Local HTTPS responds successfully, but requests to both LAN interfaces time out. The macOS firewall is enabled and has no allow entry for the dedicated candidate binary. Incoming-connection permission was requested from Paul and remains pending. No trust store, firewall, credential or shared service configuration was changed.
 
 Both the matching daemon and streamer are required for complete geometry metadata. A published `0.75` version string alone is insufficient. The candidates above are gated local builds, not published release artifacts. Held-pane exit/respawn state remains a separately tracked enhancement.

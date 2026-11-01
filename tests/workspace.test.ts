@@ -1,14 +1,67 @@
-import { create } from '@bufbuild/protobuf';
-import { describe, expect, it } from 'vitest';
+import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { paneWebSocketURL } from '../src/terminal/surface';
 import {
+  ClientMessageSchema,
   MuxTreePaneSchema,
   MuxTreeSessionSchema,
   MuxTreeSnapshotSchema,
   MuxTreeWindowSchema,
   MuxTreeWorkspaceSchema,
+  ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
-import { hierarchyURL, normalizeTree } from '../src/workspace/hierarchy';
+import { connectHierarchy, hierarchyURL, normalizeTree } from '../src/workspace/hierarchy';
+
+class MockSocket {
+  static instances: MockSocket[] = [];
+  static readonly OPEN = 1;
+  static readonly CONNECTING = 0;
+  readyState = MockSocket.CONNECTING;
+  binaryType = '';
+  sent: ArrayBuffer[] = [];
+  onopen?: () => void;
+  onmessage?: (event: MessageEvent<ArrayBuffer>) => void;
+  onerror?: () => void;
+  onclose?: () => void;
+  constructor(readonly url: string) {
+    MockSocket.instances.push(this);
+  }
+  send(message: ArrayBuffer): void {
+    this.sent.push(message);
+  }
+  open(): void {
+    this.readyState = MockSocket.OPEN;
+    this.onopen?.();
+  }
+  close(): void {
+    this.readyState = 3;
+    this.onclose?.();
+  }
+  message(message: ArrayBuffer): void {
+    this.onmessage?.({ data: message } as MessageEvent<ArrayBuffer>);
+  }
+}
+
+function serverFrame(tree: ReturnType<typeof create<typeof MuxTreeSnapshotSchema>>): ArrayBuffer {
+  const payload = toBinary(
+    ServerMessageSchema,
+    create(ServerMessageSchema, { message: { case: 'muxTreeSnapshot', value: tree } }),
+  );
+  const frame = new Uint8Array(payload.length + 1);
+  frame.set(payload, 1);
+  return frame.buffer;
+}
+
+beforeEach(() => {
+  MockSocket.instances = [];
+  (globalThis as Record<string, unknown>).WebSocket = MockSocket;
+  (globalThis as Record<string, unknown>).location = {
+    origin: 'http://localhost:4241',
+    protocol: 'http:',
+    href: 'http://localhost:4241/',
+  };
+  (globalThis as Record<string, unknown>).window = { location: globalThis.location };
+});
 
 describe('workspace metadata connection', () => {
   it('uses the metadata-only selector without accidentally pinning a pane', () => {
@@ -58,5 +111,90 @@ describe('workspace metadata connection', () => {
       rows: 30,
     });
     expect(normalizeTree(create(MuxTreeSnapshotSchema)).panes).toEqual([]);
+  });
+
+  it('requests fresh snapshots after bounded reconnect and replaces the prior structure', async () => {
+    vi.useFakeTimers();
+    const snapshots: string[][] = [];
+    const connection = await connectHierarchy(
+      'http://localhost:4241/ws?session=pane-3',
+      (snapshot) => snapshots.push(snapshot.panes.map((pane) => pane.id)),
+      vi.fn(),
+    );
+    const first = MockSocket.instances[0];
+    first.open();
+    expect(
+      fromBinary(ClientMessageSchema, new Uint8Array(first.sent[0]).slice(1)).message.case,
+    ).toBe('muxTreeRequest');
+    first.message(
+      serverFrame(
+        create(MuxTreeSnapshotSchema, {
+          workspaces: [
+            create(MuxTreeWorkspaceSchema, {
+              id: 'w',
+              sessions: [
+                create(MuxTreeSessionSchema, {
+                  id: 's',
+                  windows: [
+                    create(MuxTreeWindowSchema, {
+                      id: 'win',
+                      panes: [create(MuxTreePaneSchema, { id: 'old' })],
+                    }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        }),
+      ),
+    );
+    first.close();
+    vi.advanceTimersByTime(1000);
+    const second = MockSocket.instances[1];
+    second.open();
+    second.message(
+      serverFrame(
+        create(MuxTreeSnapshotSchema, {
+          workspaces: [
+            create(MuxTreeWorkspaceSchema, {
+              id: 'w2',
+              sessions: [
+                create(MuxTreeSessionSchema, {
+                  id: 's2',
+                  windows: [
+                    create(MuxTreeWindowSchema, {
+                      id: 'win2',
+                      panes: [create(MuxTreePaneSchema, { id: 'new' })],
+                    }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        }),
+      ),
+    );
+    expect(snapshots).toEqual([['old'], ['new']]);
+    connection.disconnect();
+    vi.useRealTimers();
+  });
+
+  it('disconnect suppresses retries and metadata mode sends no pane input or resize', async () => {
+    vi.useFakeTimers();
+    const connection = await connectHierarchy(
+      'http://localhost:4241/ws?session=pane-3',
+      vi.fn(),
+      vi.fn(),
+    );
+    const socket = MockSocket.instances[0];
+    socket.open();
+    const request = fromBinary(ClientMessageSchema, new Uint8Array(socket.sent[0]).slice(1));
+    expect(request.message.case).toBe('muxTreeRequest');
+    expect(socket.url).toContain('metadata=1');
+    expect(socket.url).not.toContain('session=');
+    connection.disconnect();
+    vi.advanceTimersByTime(60000);
+    expect(MockSocket.instances).toHaveLength(1);
+    vi.useRealTimers();
   });
 });

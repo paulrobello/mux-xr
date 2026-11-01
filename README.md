@@ -30,7 +30,7 @@ Select a pane to attach it, then explicitly select its panel to target input. Op
 
 WebXR needs a secure context. Desktop localhost is suitable for development. Daily LAN access needs a certificate trusted by the headset and HTTPS/WSS endpoints. Vite can load existing certificate/key files via `MUX_XR_TLS_CERT` and `MUX_XR_TLS_KEY`; no credentials, certificates or trust stores are replaced automatically.
 
-The prepared local preview serves the built app and WebSockets from the same origin, `https://192.0.2.10:4240`. It uses a dedicated matching daemon with two real shell panes, leaving the shared default daemon and pardeck service running unchanged. This preview does not expose the existing shared daemon's sessions until that daemon is upgraded separately.
+The prepared local preview serves the built app and WebSockets on `https://localhost:4240`. Its intended LAN URL is `https://192.0.2.10:4240`, pending macOS Firewall incoming-connection permission for the dedicated candidate binary. Local HTTPS responds, while LAN probes currently time out. It uses a dedicated matching daemon with two real shell panes, leaving the shared default daemon and pardeck service running unchanged. This preview does not expose the existing shared daemon's sessions until that daemon is upgraded separately.
 
 The existing IWSDK development PEM was reused locally. It is self-signed and covers localhost rather than the LAN IP, so the Quest browser will need an explicit certificate exception. No certificates, trust stores, firewall rules or credentials were generated or replaced. Headset trust and XR entry are pending owner checks.
 
