@@ -7,6 +7,7 @@ import type {
   TerminalSurface,
   WorkspaceActions,
 } from '../contracts';
+import { terminalKeyLabel } from '../terminal/protocol';
 import { type SemanticKey, semanticKeyboardLayout } from '../ui';
 
 export interface PanelTransform {
@@ -183,8 +184,8 @@ function disposeObject(object: THREE.Object3D): void {
 function createCanvasTexture(surface: TerminalSurface): THREE.CanvasTexture {
   const texture = new THREE.CanvasTexture(surface.canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.minFilter = THREE.NearestFilter;
-  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = false;
   return texture;
 }
@@ -297,6 +298,7 @@ function createSelection(): THREE.LineSegments {
   const line = new THREE.LineSegments(geometry, material);
   line.position.z = 0.012;
   line.visible = false;
+  line.raycast = () => undefined;
   return line;
 }
 
@@ -659,11 +661,19 @@ export function createWorkspaceScene(
         row.forEach((key, columnIndex) => {
           const width = key.label.length > 4 ? 0.27 : 0.17;
           const x = (columnIndex - (row.length - 1) / 2) * 0.19;
-          const button = createLabelButton(key.label, width, 0.1, {
-            inputAction: 'key',
-            key: key.key,
-            modifier: key.modifier,
-          });
+          const button = createLabelButton(
+            key.key.length === 1 && key.key !== ' '
+              ? terminalKeyLabel(key.key, Boolean(armedModifiers.shift))
+              : key.label,
+            width,
+            0.1,
+            {
+              inputAction: 'key',
+              key: key.key,
+              modifier: key.modifier,
+            },
+          );
+          if (key.modifier) setModifierVisual(button, Boolean(armedModifiers[key.modifier]));
           button.position.set(x, 0.4 - rowIndex * 0.13, 0);
           inputRoot?.add(button);
         });
@@ -833,11 +843,13 @@ export function createWorkspaceScene(
       if (modifier) {
         armedModifiers[modifier] = !armedModifiers[modifier];
         setModifierVisual(hit, Boolean(armedModifiers[modifier]));
+        if (modifier === 'shift') refreshInputRoot(inputMode);
         return true;
       }
       const modifiers = Object.keys(armedModifiers).length ? { ...armedModifiers } : undefined;
       actions.sendKey(hit.userData.key as string, modifiers);
       clearArmedModifiers();
+      if (inputMode === 'keyboard') refreshInputRoot(inputMode);
     } else if (action === 'command') {
       const command = menuCommands.find((item) => item.id === hit.userData.commandId);
       if (command) actions.runCommand(command, paneId);
@@ -1063,6 +1075,15 @@ export function createWorkspaceScene(
     mutableState.selectedTerminalId = nextId;
     mutableState.focusedTerminalId = mutableState.selectedTerminalId;
     if (mutableState.selectedTerminalId) actions.selectPane(mutableState.selectedTerminalId);
+    if (inputRoot) {
+      clearArmedModifiers();
+      mutableState.inputTargetId = nextId;
+      mutableState.inputTargetTitle =
+        availablePanes.find((pane) => pane.id === nextId)?.title ?? nextId;
+      menuCommands = quickCommands.map((command) => ({ ...command }));
+      commandPage = 0;
+      refreshInputRoot(inputMode);
+    }
     for (const panel of panels.values())
       panel.surface.focus(panel.id === mutableState.focusedTerminalId);
     setSelectedVisual();

@@ -168,24 +168,26 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('opens the native command HUD with a frozen target and command snapshot', () => {
+  it('retargets the native command HUD on explicit pane selection', () => {
     const { workspace, actions, container } = fixture();
     const command = { id: 'saved', label: 'Original', text: 'printf original', sendNewline: true };
     workspace.selectTerminal('pane-a');
     workspace.setQuickCommands([command]);
     hit(workspace, { inputAction: 'openInput', mode: 'commands' });
     expect(workspace.state.inputTargetId).toBe('pane-a');
+    const nextCommand = { ...command, text: 'printf changed' };
+    workspace.setQuickCommands([nextCommand]);
     workspace.selectTerminal('pane-b');
-    workspace.setQuickCommands([{ ...command, text: 'printf changed' }]);
+    expect(workspace.state.inputTargetId).toBe('pane-b');
     hit(workspace, { inputAction: 'command', commandId: 'saved' });
-    expect(actions.runCommand).toHaveBeenLastCalledWith(command, 'pane-a');
+    expect(actions.runCommand).toHaveBeenLastCalledWith(nextCommand, 'pane-b');
     hit(workspace, { inputAction: 'close' });
     expect(workspace.state.inputTargetId).toBeNull();
     workspace.dispose();
     container.remove();
   });
 
-  it('keeps keyboard input bound and never activates a key with grip', () => {
+  it('retargets keyboard input on explicit selection and never activates a key with grip', () => {
     const { workspace, actions, container } = fixture();
     workspace.selectTerminal('pane-a');
     hit(workspace, { inputAction: 'openInput', mode: 'keyboard' });
@@ -194,8 +196,43 @@ describe('native XR controller event routing', () => {
     hit(workspace, { inputAction: 'key', key: 'a' }, 'squeezestart');
     expect(actions.sendKey).not.toHaveBeenCalled();
     hit(workspace, { inputAction: 'key', key: 'a' });
-    expect(actions.selectPane).toHaveBeenLastCalledWith('pane-a');
+    expect(actions.selectPane).toHaveBeenLastCalledWith('pane-b');
     expect(vi.mocked(actions.sendKey).mock.calls.at(-1)?.[0]).toBe('a');
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('selects a pane when its own terminal key strip is activated', () => {
+    const { workspace, actions, container } = fixture();
+    workspace.selectTerminal('pane-a');
+    hit(workspace, { key: 'Enter', terminalId: 'pane-b' });
+    expect(actions.selectPane).toHaveBeenLastCalledWith('pane-b');
+    expect(actions.sendKey).toHaveBeenLastCalledWith('Enter', undefined);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('updates native key captions for Shift and restores them after input', () => {
+    const { workspace, actions, container } = fixture();
+    workspace.selectTerminal('pane-a');
+    hit(workspace, { inputAction: 'openInput', mode: 'keyboard' });
+    const label = (key: string): string | undefined => {
+      let found: string | undefined;
+      workspace.scene.traverse((object) => {
+        if (object.userData.inputAction === 'key' && object.userData.key === key)
+          found = object.userData.labelText;
+      });
+      return found;
+    };
+    expect(label('a')).toBe('a');
+    expect(label('Backspace')).toBe('⌫');
+    hit(workspace, { inputAction: 'key', key: 'Shift' });
+    expect(label('a')).toBe('A');
+    expect(label('4')).toBe('$');
+    hit(workspace, { inputAction: 'key', key: '4' });
+    expect(actions.sendKey).toHaveBeenLastCalledWith('4', { shift: true });
+    expect(label('a')).toBe('a');
+    expect(label('4')).toBe('4');
     workspace.dispose();
     container.remove();
   });

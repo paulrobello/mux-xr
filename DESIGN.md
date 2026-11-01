@@ -17,6 +17,9 @@ colors:
   text-cool: "#dce7ed"
   text-bright: "#edf7fa"
   accent-cyan: "#8be0ea"
+  interactive-cyan: "#66d5e7"
+  selected-text-cyan: "#a7eeef"
+  terminal-black: "#05070b"
   observatory-deep: "#050a10"
 rounded:
   sm: "4px"
@@ -135,6 +138,8 @@ The palette is a deep blue-black field with cool slate controls and a cyan signa
 ## Layout
 
 Desktop UI uses a full-height application frame with a top bar, a sidebar for mux hierarchy, and a stage for controls and spatial content. The scene host fills the remaining viewport and uses an 8px radius. The command editor is a three-column grid with 8px gaps, while mobile collapses into a vertically scrolling body, moves the sidebar above the stage, and keeps the XR scene at a stable 330px height. Control groups use 8–16px spacing and wrap rather than compressing labels.
+
+Desktop terminals use flat canvases at their logical text size, with scrolling rather than shrinking an entire terminal into a narrow card. At ordinary widths panels stack. A 3D preview toggle exposes the spatial scene. Canvas backing resolution follows device density up to 2x.
 
 In XR, terminal panels are movable spatial surfaces. Input opens as an explicit commands, keyboard, or panes surface near the workspace, and panel scale and font zoom are separate controls. Do not imply a fixed radial layout or a maximum panel count beyond the two-pane readability acceptance target.
 

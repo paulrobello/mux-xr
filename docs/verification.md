@@ -4,7 +4,7 @@ Software verification completed November 1, 2026 (Etc/GMT+8). Paul requested the
 
 ## Software gate
 
-`make checkall-ci` covers Biome, strict TypeScript, 33 unit tests across six files, the production build, observatory asset validation, secret scanning and a high-severity dependency audit. The audit reports zero vulnerabilities. The production JavaScript chunk is approximately 1.12 MB before gzip (293 KB gzip). Its warning remains visible and is not a headset performance result.
+`make checkall-ci` covers Biome, strict TypeScript, 39 unit tests across six files, the production build, observatory asset validation, secret scanning and a high-severity dependency audit. The audit reports zero vulnerabilities. The production JavaScript chunk is approximately 1.12 MB before gzip (293 KB gzip). Its warning remains visible and is not a headset performance result.
 
 The unit suite exercises protobuf/zlib framing, ANSI seeding and live output, disconnected input rejection, bounded reconnects, target capture, persistence failures, key encoding, hierarchy normalization, native controller events, relative panel transforms, local zoom and resource teardown. Controller tests dispatch actual Three.js Group events with only the GPU renderer mocked. They caught and reproduce fixes for DOM-style event assumptions, grip activating keys, inverted zoom and hierarchy leaves failing to attach new panes.
 
@@ -58,3 +58,17 @@ Quest 3 hardware acceptance is pending: two-panel physical readability, controll
 The LAN preview reuses the existing IWSDK development certificate. It is self-signed and its SANs cover localhost, not the LAN address. HTTPS/WSS can be tested with an explicit development-certificate exception, but headset trust and WebXR entry must be confirmed by the owner. LAN HTTPS/WSS now pass after the explicitly approved application firewall rule. No trust store, credential or shared service configuration was changed.
 
 Both the matching daemon and streamer are required for complete geometry metadata. A published `0.75` version string alone is insufficient. The original candidate hashes above describe gated local builds. Official 0.76.0 release artifacts were additionally qualified as recorded above. Held-pane exit/respawn metadata shipped upstream in 0.76.0, while viewer status badges remain a separately tracked enhancement.
+
+## Owner desktop feedback fixes
+
+The November 1 desktop feedback is addressed with these separate checks:
+
+- First load prefills the serving origin. A saved custom endpoint survives remount.
+- Lowercase keycaps match unshifted bytes. Shift exposes uppercase and US symbols including dollar, then returns to base labels after one character. Native XR labels share the same character mapping.
+- Explicit selection of pane B while input remains open retargets the keyboard, composer, commands and caption. Gaze remains independent. This deliberately replaces the earlier captured-until-dismissed behavior.
+- Desktop output uses natural-size flat canvases, with 3D preview as a separate choice. Canvas backing density is capped at 2x and XR texture filtering is linear. Foreground/background ANSI mapping is verified for inverse cells.
+- The preview's two idle Zsh panes were respawned using the actual account UserShell, `/opt/homebrew/opt/bash/bin/bash -l`. Both pane-info replies report bash. Shared services and shell configuration were preserved.
+- Unit coverage increased to 39 tests. The desktop/tablet/mobile native-GPU fixture and the actual two-pane app check passed against core 0.76.0. The real check switches to pane B with the input drawer still open and verifies unique output on B with no leakage to A and no Resize messages.
+- Desktop screenshots use device scale 2 and verify that the angled XR canvas is hidden by default. Fixture load was 1.836 to 1.940, and real-app load was 1.940 to 1.945 on test-mac. Browser images were inspected for actual text clarity.
+
+The final design detector reported advisory differences between legacy embedded UI colors/type sizes and DESIGN.md. The new desktop view reuses the incumbent palette. These advisories were not treated as functional failures or as permission for a broader redesign. Physical Quest behavior after these fixes remains owner-pending.

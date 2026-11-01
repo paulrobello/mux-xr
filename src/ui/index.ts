@@ -6,6 +6,7 @@ import type {
   TerminalStatus,
   WorkspaceSnapshot,
 } from '../contracts';
+import { terminalKeyLabel } from '../terminal/protocol';
 
 export interface UICallbacks {
   onConnect(endpoint: string): void;
@@ -219,17 +220,26 @@ export const semanticKeyboardLayout = KEY_LAYOUT;
 export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks): WorkspaceUI {
   const storage = typeof localStorage === 'undefined' ? undefined : localStorage;
   let settings = loadSettings(storage);
+  if (!settings.endpoint && typeof location !== 'undefined')
+    settings = { ...settings, endpoint: location.origin };
   let snapshot: WorkspaceSnapshot = { panes: [] };
   let activePaneId: string | undefined;
   let attachedPaneIds: string[] = [];
   let commands: QuickCommand[] = [];
   let commandScope = 'global';
   const heldModifiers: KeyModifiers = {};
+  const keyboardLabel = (key: string, shift = false): string => {
+    if (key.length === 1 && key !== ' ') return terminalKeyLabel(key, shift);
+    return KEY_LAYOUT.flat().find((entry) => entry.key === key)?.label ?? key;
+  };
   const clearModifiers = (): void => {
     delete heldModifiers.ctrl;
     delete heldModifiers.alt;
     delete heldModifiers.shift;
-    for (const key of root.querySelectorAll('.key.active')) key.classList.remove('active');
+    for (const key of root.querySelectorAll<HTMLButtonElement>('.key')) {
+      key.classList.remove('active');
+      if (!key.dataset.modifier) key.textContent = keyboardLabel(key.dataset.key ?? '');
+    }
   };
   let capturedTarget: string | undefined;
   const root = document.createElement('section');
@@ -251,6 +261,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     if (!element) throw new Error(`Missing workspace control: ${selector}`);
     return element;
   };
+  clearModifiers();
   const saveSettings = (): void => {
     try {
       storage?.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -367,6 +378,11 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     activePaneId = id;
     renderTree();
     renderPanes();
+    if (!qs<HTMLElement>('[data-drawer]').hidden) {
+      capturedTarget = id;
+      clearModifiers();
+      loadCommands();
+    }
     updateTargetCaption();
     if (notify) callbacks.onSelectPane?.(pane);
   };
@@ -390,6 +406,11 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       if (modifier) {
         heldModifiers[modifier] = !heldModifiers[modifier];
         button.classList.toggle('active');
+        root.querySelectorAll<HTMLButtonElement>('[data-key]').forEach((keyButton) => {
+          const raw = keyButton.dataset.key ?? '';
+          if (!keyButton.dataset.modifier)
+            keyButton.textContent = keyboardLabel(raw, Boolean(heldModifiers.shift));
+        });
         return;
       }
       if (capturedTarget) callbacks.onSendKey?.(capturedTarget, key, { ...heldModifiers });

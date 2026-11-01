@@ -36,9 +36,9 @@ Public hosting/tunnels, physical keyboard dependency, ambient sound, arbitrary r
 
 ## Architecture Direction
 
-TypeScript + Vite + Three.js. One terminal emulator and canvas surface per displayed pane. Reuse the core's generated protobuf schema and codec. Canvas textures feed XR meshes, updated only when output changes. DOM controls offer the same operations for setup, debugging and desktop use. XR controls must be native scene content, not DOM overlays presumed visible in immersion.
+TypeScript + Vite + Three.js. One terminal emulator and canvas surface per displayed pane. Reuse the core's generated protobuf schema and codec. Canvas textures feed XR meshes, updated only when output changes. Desktop mode displays the terminal canvases flat at their logical size, with a separate 3D preview. DOM controls offer the same operations for setup, debugging and desktop use. XR controls must be native scene content, not DOM overlays presumed visible in immersion.
 
-Typed boundaries separate terminal transport, hierarchy metadata, local settings, controls and XR rendering. Headset-local storage is versioned and validated. Connections reject input while disconnected, never replay unsent commands, and detach without killing panes. Menu targets are captured when opened. Closing/removing a panel withdraws its viewer connection.
+Typed boundaries separate terminal transport, hierarchy metadata, local settings, controls and XR rendering. Headset-local storage is versioned and validated. Connections reject input while disconnected, never replay unsent commands, and detach without killing panes. Menu targets start at the selected pane and follow later explicit pane selections. Gaze never changes an input target. Closing/removing a panel withdraws its viewer connection.
 
 Only explicit grid resize changes rows/columns. Grabbing, zooming, gazing or changing backgrounds does not send a resize. Preserve existing streamer authentication/origin configuration. LAN HTTPS/WSS must be trusted by the headset; no credentials or trust changes are silently provisioned. Initial planned local ports are 4240 (app) and 4241 (isolated verification), subject to reservation before use.
 

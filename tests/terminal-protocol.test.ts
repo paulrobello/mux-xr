@@ -4,6 +4,7 @@ import {
   createInputMessage,
   decodeServerMessage,
   encodeClientMessage,
+  terminalKeyLabel,
 } from '../src/terminal/protocol';
 import { paneWebSocketURL, terminalKeyBytes } from '../src/terminal/surface';
 import {
@@ -64,6 +65,14 @@ describe('terminal key bytes', () => {
     expect(terminalKeyBytes('ArrowUp', { alt: true })).toBe('\x1b[1;3A');
     expect(terminalKeyBytes('Delete', { ctrl: true })).toBe('\x1b[3;5~');
     expect(terminalKeyBytes('ArrowUp', { alt: true }, true)).toBe('\x1b[1;3A');
+  });
+
+  it('labels US printable keys for the visible keyboard', () => {
+    expect(terminalKeyLabel('a')).toBe('a');
+    expect(terminalKeyLabel('a', true)).toBe('A');
+    expect(terminalKeyLabel('4', true)).toBe('$');
+    expect(terminalKeyLabel('/', true)).toBe('?');
+    expect(terminalKeyLabel('ArrowUp', true)).toBe('ArrowUp');
   });
 });
 

@@ -18,6 +18,35 @@ export type { ClientMessage, ServerMessage } from './vendor/terminal_pb';
 const MAX_COMPRESSED_SIZE = 256 * 1024;
 const MAX_DECOMPRESSED_SIZE = 2 * 1024 * 1024;
 
+/** Returns the US-layout printable character represented by a key and Shift state. */
+export function terminalKeyLabel(key: string, shift = false): string {
+  if (key.length !== 1 || !shift) return key.length === 1 ? key.toLowerCase() : key;
+  const shifted: Record<string, string> = {
+    '`': '~',
+    '1': '!',
+    '2': '@',
+    '3': '#',
+    '4': '$',
+    '5': '%',
+    '6': '^',
+    '7': '&',
+    '8': '*',
+    '9': '(',
+    '0': ')',
+    '-': '_',
+    '=': '+',
+    '[': '{',
+    ']': '}',
+    ';': ':',
+    "'": '"',
+    '\\': '|',
+    ',': '<',
+    '.': '>',
+    '/': '?',
+  };
+  return shifted[key] ?? key.toUpperCase();
+}
+
 export function encodeClientMessage(message: ClientMessage): ArrayBuffer {
   const payload = toBinary(ClientMessageSchema, message);
   if (payload.length > 256) {

@@ -199,6 +199,7 @@ async function observedInputFrames(
         .some((frame) => frame.paneId === paneId && frame.case === 'focus'),
     'Input ordering boundary did not arrive',
   );
+  if (selected !== select) await page.locator(`[data-pane="${selected}"]`).click();
   return state.frames.slice(start);
 }
 
@@ -215,6 +216,7 @@ async function waitForText(page: Page, selector: string, pattern: RegExp): Promi
 async function runViewport(browser: Browser, viewport: Viewport): Promise<Record<string, unknown>> {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
+    deviceScaleFactor: viewport.name === 'desktop' ? 2 : 1,
   });
   const page = await context.newPage();
   const errors: string[] = [];
@@ -223,6 +225,10 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
   await installFixture(page, state);
   const execute = async (): Promise<Record<string, unknown>> => {
     await page.goto(BASE_URL, { waitUntil: 'networkidle', timeout: 15_000 });
+    assert(
+      (await page.locator('#endpoint').inputValue()) === new URL(BASE_URL).origin,
+      'endpoint was not prefilled from serving origin',
+    );
     await page.locator('#endpoint').fill(`${BASE_URL}/stream`);
     await page.locator('[data-action="connect"]').click();
     await page.locator('[data-pane="%1"]').waitFor({ state: 'visible', timeout: 10_000 });
@@ -233,6 +239,11 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
     await page.locator('[data-pane="%2"]').click();
     assert((await page.locator('[data-select="%1"]').count()) === 1, 'pane A was not attached');
     assert((await page.locator('[data-select="%2"]').count()) === 1, 'pane B was not attached');
+    assert(
+      !(await page.locator('canvas[aria-label="Mux XR workspace"]').isVisible()),
+      'desktop still shows the angled XR canvas by default',
+    );
+    await page.locator('[data-action="desktop-preview"]').click();
     const sceneCanvas = page.locator('canvas[aria-label="Mux XR workspace"]');
     await sceneCanvas.waitFor({ state: 'visible', timeout: 5_000 });
     await page.waitForFunction(
@@ -277,6 +288,24 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
           }),
       ),
       'rendered WebGL canvas was blank',
+    );
+    await page.locator('[data-action="desktop-preview"]').click();
+    assert(
+      !(await sceneCanvas.isVisible()),
+      '3D preview did not hide after returning to terminals',
+    );
+    await page.locator('.desktop-terminal-panel canvas').first().waitFor({ state: 'visible' });
+    const dimensions = await page
+      .locator('.desktop-terminal-panel canvas')
+      .first()
+      .evaluate((canvas: HTMLCanvasElement) => ({
+        pixels: canvas.width,
+        logical: canvas.getBoundingClientRect().width,
+        density: devicePixelRatio,
+      }));
+    assert(
+      Math.abs(dimensions.pixels / dimensions.logical - Math.min(2, dimensions.density)) < 0.01,
+      'desktop canvas is being scaled away from its logical resolution',
     );
 
     await page.locator('[data-pane="%1"]').click();
@@ -336,17 +365,31 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
     await page.locator('[data-action="send-text"]').click();
     await page.locator('[data-action="close-drawer"]').click();
     const captured = (
-      await observedInputFrames(page, state, '%1', capturedStart, 'printf captured')
+      await observedInputFrames(page, state, '%2', capturedStart, 'printf captured')
     ).find((frame) => frame.data === 'printf captured');
     assert(
-      captured?.paneId === '%1',
-      `captured target changed while selecting B: ${captured?.paneId ?? 'missing'}`,
+      captured?.paneId === '%2',
+      `explicit selection of B did not retarget input: ${captured?.paneId ?? 'missing'}`,
     );
 
     await page.locator('[data-pane="%1"]').click();
     await page.locator('[data-action="keyboard"]').click();
     const keyboardStart = state.frames.length;
+    assert(
+      (await page.locator('[data-key="a"]').textContent()) === 'a',
+      'base keycap was not lowercase',
+    );
     await page.locator('[data-key="a"]').click();
+    await page.locator('[data-modifier="shift"]').click();
+    assert(
+      (await page.locator('[data-key="4"]').textContent()) === '$',
+      'Shift keycap did not expose dollar',
+    );
+    await page.locator('[data-key="4"]').click();
+    assert(
+      (await page.locator('[data-key="4"]').textContent()) === '4',
+      'one-shot Shift did not restore keycap',
+    );
     await page.locator('[data-modifier="shift"]').click();
     await page.locator('[data-key="c"]').click();
     await page.locator('[data-modifier="ctrl"]').click();
@@ -355,7 +398,10 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
       .filter((frame) => frame.paneId === '%1' && frame.case === 'input')
       .map((frame) => frame.data ?? '');
     assert(
-      keyboardBytes.includes('a') && keyboardBytes.includes('C') && keyboardBytes.includes('\x03'),
+      keyboardBytes.includes('a') &&
+        keyboardBytes.includes('$') &&
+        keyboardBytes.includes('C') &&
+        keyboardBytes.includes('\x03'),
       'virtual keyboard did not emit lowercase, shift, and Ctrl-C bytes',
     );
     await page.screenshot({
@@ -391,7 +437,9 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
     await waitForText(page, '.status-copy', /HTTP|WebSocket|endpoint/i);
     assert(errors.length === 0, `page errors: ${errors.join('; ')}`);
     const renderer = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas');
+      const canvas = document.querySelector<HTMLCanvasElement>(
+        'canvas[aria-label="Mux XR workspace"]',
+      );
       const gl = canvas?.getContext('webgl2') ?? canvas?.getContext('webgl');
       const extension = gl?.getExtension('WEBGL_debug_renderer_info');
       return extension ? gl?.getParameter(extension.UNMASKED_RENDERER_WEBGL) : 'unavailable';

@@ -2,6 +2,8 @@
 
 A LAN-only Quest 3 workspace for monitoring par-mux panes and issuing occasional commands without a physical keyboard.
 
+The desktop opens with sharp, flat terminal canvases at their natural text size. Use **3D preview** to inspect the spatial scene, or **Enter XR** on Quest.
+
 The MVP candidate includes individual terminal panels, controller manipulation, global/workspace quick commands, a virtual keyboard, headset-local preferences, passthrough and silent black/gradient/observatory VR backgrounds. Named 3D layouts, radial menus, whole-window split views and hands are planned after MVP.
 
 ## Development
@@ -26,7 +28,7 @@ Full hierarchy browsing requires `mux_tree_request` / `mux_tree_snapshot` and `/
 
 The prepared preview still uses the independently gated matching `95dbb69f` daemon/streamer pair. Its exact binaries and the tested release hashes are recorded in [the verification report](docs/verification.md). The vendored schema matches that hierarchy candidate and was also tested against 0.76.0. Core 0.76.0 ships [held-pane lifecycle metadata](https://board.example.test/board?card=01a1957a2aa8739abc2c5cb116818793); viewer exit-state badges remain a separate enhancement. A connected stream does not establish whether a held pane's process is still running.
 
-Select a pane to attach it, then explicitly select its panel to target input. Opening Commands or Keyboard binds its target until dismissed/reopened. Head-directed gaze affects visual emphasis only. Detach closes the viewer connection, preserving the pane.
+Select a pane to attach it, then explicitly select its panel to target input. Commands and Keyboard follow explicit pane selections, including while the drawer is open. The target caption identifies the pane receiving input. Head-directed gaze affects visual emphasis only. Detach closes the viewer connection, preserving the pane.
 
 ## Quest and LAN HTTPS
 
@@ -48,7 +50,7 @@ To serve an already running compatible daemon, run the streamer in a par-mux pan
 
 Stop that streamer with Ctrl-C in its owning pane. The prepared preview's exact private socket and pane IDs are recorded in `.local/runtime.json`; its shell panes are ordinary live shells. Preserve existing authentication configuration and shared services. No published hosting or tunnels are required.
 
-On Quest, open the preview, enter `https://192.0.2.10:4240` as the endpoint and press Connect. Choose two pane leaves, then Enter XR. Use trigger to select controls and grip on a panel to move/rotate it. Panel ± controls adjust physical size, A± controls local text zoom. Commands and Keyboard bind the selected pane until dismissed. Settings offers passthrough and the three silent backgrounds.
+The endpoint is prefilled from the page origin, and a custom endpoint is remembered. The dedicated preview panes use the account's configured Homebrew Bash login shell. On Quest, open the preview and press Connect. Choose two pane leaves, then Enter XR. Use trigger to select controls and grip on a panel to move/rotate it. Panel ± controls adjust physical size, A± controls local text zoom. Commands and Keyboard follow your explicit pane selection. Shift shows uppercase letters and US-layout symbols, including `$`, then resets after a character. Settings offers passthrough and the three silent backgrounds.
 
 ## Verification
 

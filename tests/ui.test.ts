@@ -42,6 +42,21 @@ describe('mux XR local UI state', () => {
     });
   });
 
+  it('prefills the serving origin and restores a saved custom endpoint', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    expect(query<HTMLInputElement>(root, '#endpoint').value).toBe(location.origin);
+    const custom = 'https://other-computer.local:4240';
+    query<HTMLInputElement>(root, '#endpoint').value = custom;
+    query<HTMLButtonElement>(root, '[data-action="connect"]').click();
+    ui.destroy();
+    const restored = mountWorkspaceUI(root, { onConnect: () => undefined });
+    expect(query<HTMLInputElement>(root, '#endpoint').value).toBe(custom);
+    restored.destroy();
+    localStorage.clear();
+  });
+
   it('isolates command lists by endpoint and workspace and preserves order', () => {
     const storage = new Map<string, string>();
     const fakeStorage = {
@@ -92,7 +107,7 @@ describe('mux XR local UI state', () => {
     expect(store.get('scope').map((item) => item.id)).toEqual(['kept']);
   });
 
-  it('captures the input target when the drawer opens', () => {
+  it('retargets an open drawer when explicit selection changes', () => {
     const sent: string[] = [];
     const root = document.createElement('div');
     document.body.append(root);
@@ -130,7 +145,23 @@ describe('mux XR local UI state', () => {
     const compose = query<HTMLTextAreaElement>(root, '[data-compose]');
     compose.value = 'echo stable';
     query<HTMLButtonElement>(root, '[data-action="send-text"]').click();
-    expect(sent).toEqual(['a']);
+    expect(sent).toEqual(['b']);
+    ui.destroy();
+  });
+
+  it('renders lowercase base keys and restores them after Shift', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    const keyA = query<HTMLButtonElement>(root, '[data-key="a"]');
+    expect(keyA.textContent).toBe('a');
+    query<HTMLButtonElement>(root, '[data-key="Shift"]').click();
+    expect(keyA.textContent).toBe('A');
+    expect(query<HTMLButtonElement>(root, '[data-key="4"]').textContent).toBe('$');
+    query<HTMLButtonElement>(root, '[data-key="a"]').click();
+    expect(keyA.textContent).toBe('a');
+    expect(query<HTMLButtonElement>(root, '[data-key="4"]').textContent).toBe('4');
+    expect(query<HTMLButtonElement>(root, '[data-key="ArrowUp"]').textContent).toBe('↑');
     ui.destroy();
   });
 

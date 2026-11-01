@@ -1,0 +1,68 @@
+.mux-ui .scene-host.desktop-terminal-host:not(.is-3d-preview):not(.is-immersive) {
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+}
+.desktop-terminal-host:not(.is-3d-preview):not(.is-immersive) > canvas {
+  display: none;
+}
+.desktop-terminal-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+.desktop-terminal-toolbar button {
+  padding: 7px 12px;
+  border: 1px solid #3a5363;
+  border-radius: 4px;
+  background: #192b38;
+  color: #dce7ed;
+}
+.mux-desktop-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 920px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.desktop-terminal-panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #293746;
+  border-radius: 8px;
+  background: #05070b;
+}
+.desktop-terminal-panel.active {
+  border-color: #66d5e7;
+}
+.desktop-terminal-heading {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid #293746;
+  background: #111b25;
+  color: #edf4f8;
+  text-align: left;
+  font:
+    600 13px ui-sans-serif,
+    system-ui,
+    sans-serif;
+}
+.desktop-terminal-heading[aria-pressed="true"] {
+  color: #a7eeef;
+}
+.desktop-terminal-heading:hover,
+.desktop-terminal-toolbar button:hover {
+  background: #203c48;
+}
+.desktop-terminal-output {
+  overflow: auto;
+  padding: 12px;
+}
+
+.desktop-terminal-host.is-3d-preview .desktop-terminal-toolbar {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  right: 12px;
+}

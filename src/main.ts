@@ -7,6 +7,7 @@ import type {
   WorkspaceSnapshot,
 } from './contracts';
 import { createDemoSurface, demoSnapshot } from './demo';
+import { createDesktopPanels, type DesktopPanels } from './desktop/panels';
 import { loadObservatory } from './environment';
 import { createTerminalSurface } from './terminal';
 import { mountWorkspaceUI, type WorkspaceUI } from './ui';
@@ -25,6 +26,7 @@ let refreshMetadata: (() => void) | undefined;
 let autoAttachPending = true;
 let ui: WorkspaceUI;
 let scene: WorkspaceScene;
+let desktop: DesktopPanels;
 let disposeEnvironment: (() => void) | undefined;
 
 function notice(message: string): void {
@@ -41,6 +43,7 @@ function selectPane(id: string): void {
   if (!surfaces.has(id)) {
     const surface = demo ? createDemoSurface(pane) : createTerminalSurface(endpoint, pane);
     surfaces.set(id, surface);
+    desktop.add(surface);
     scene.addTerminal(surface);
     surface.subscribe(() => {
       if (selectedId === id) ui.setConnection(surface.status, `${pane.title} · ${surface.status}`);
@@ -51,11 +54,15 @@ function selectPane(id: string): void {
   if (selectedId === id) return;
   selectedId = id;
   ui.setActivePane(id);
-  scene.selectTerminal(id);
+  desktop.select(id);
   syncCommands();
+  scene.selectTerminal(id);
+  const surface = surfaces.get(id);
+  if (surface) ui.setConnection(surface.status, `${pane.title} · ${surface.status}`);
 }
 
 function closePane(id: string): void {
+  desktop.remove(id);
   scene.removeTerminal(id);
   surfaces.get(id)?.dispose();
   surfaces.delete(id);
@@ -188,6 +195,10 @@ ui = mountWorkspaceUI(app, {
   onDemo: startDemo,
 });
 scene = createWorkspaceScene(ui.sceneHost, actions);
+desktop = createDesktopPanels(ui.sceneHost, selectPane);
+const stopPresentation = scene.subscribe((state) => {
+  desktop.setImmersive(state.xrMode !== 'desktop');
+});
 const settings = ui.getSettings();
 scene.setBackground(settings.background);
 scene.setGazeEnabled(settings.gazeEmphasis);
@@ -208,6 +219,8 @@ window.addEventListener(
   'pagehide',
   () => {
     detachAll();
+    stopPresentation();
+    desktop.dispose();
     disposeEnvironment?.();
     scene.dispose();
     ui.destroy();

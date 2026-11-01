@@ -7,6 +7,7 @@ import {
   createResizeMessage,
   decodeServerMessage,
   encodeClientMessage,
+  terminalKeyLabel,
 } from './protocol';
 
 type SocketLike = WebSocket;
@@ -44,30 +45,7 @@ export function terminalKeyBytes(
     return prefix + String.fromCharCode(code >= 64 && code <= 95 ? code - 64 : code);
   }
   if (key.length === 1 && modifiers.shift) {
-    const shifted: Record<string, string> = {
-      '`': '~',
-      '1': '!',
-      '2': '@',
-      '3': '#',
-      '4': '$',
-      '5': '%',
-      '6': '^',
-      '7': '&',
-      '8': '*',
-      '9': '(',
-      '0': ')',
-      '-': '_',
-      '=': '+',
-      '[': '{',
-      ']': '}',
-      ';': ':',
-      "'": '"',
-      '\\': '|',
-      ',': '<',
-      '.': '>',
-      '/': '?',
-    };
-    return prefix + (shifted[key] ?? key.toUpperCase());
+    return prefix + terminalKeyLabel(key, true);
   }
   const code = named[key];
   if (code?.startsWith('\x1b['))
@@ -158,12 +136,18 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     return fallback;
   };
   const paint = (): void => {
-    canvas.width = cols * CELL_WIDTH;
-    canvas.height = rows * LINE_HEIGHT;
+    const logicalWidth = cols * CELL_WIDTH;
+    const logicalHeight = rows * LINE_HEIGHT;
+    const density = Math.min(typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1, 2);
+    canvas.width = Math.max(1, Math.round(logicalWidth * density));
+    canvas.height = Math.max(1, Math.round(logicalHeight * density));
+    canvas.style.width = `${logicalWidth}px`;
+    canvas.style.height = `${logicalHeight}px`;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    ctx.setTransform(density, 0, 0, density, 0, 0);
     ctx.fillStyle = '#05070b';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, logicalWidth, logicalHeight);
     ctx.font = '18px monospace';
     ctx.textBaseline = 'top';
     const buffer = terminal.buffer.active;
@@ -175,14 +159,14 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
         const cell = line.getCell(col);
         if (!cell || cell.getWidth() === 0) continue;
         const inverse = Boolean(cell.isInverse());
-        const fg = color(cell.isBgRGB(), cell.isBgPalette(), cell.getBgColor(), '#d8e1ef', false);
-        const bg = color(
+        const fg = color(
           cell.isFgRGB(),
           cell.isFgPalette(),
           cell.getFgColor(),
-          '#05070b',
+          '#d8e1ef',
           Boolean(cell.isBold()),
         );
+        const bg = color(cell.isBgRGB(), cell.isBgPalette(), cell.getBgColor(), '#05070b', false);
         const foreground = inverse ? bg : fg;
         const background = inverse ? fg : bg;
         if (background !== '#05070b') {

@@ -103,6 +103,7 @@ async function main(): Promise<void> {
   });
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 2,
     ignoreHTTPSErrors: true,
   });
   const page = await context.newPage();
@@ -204,7 +205,10 @@ async function main(): Promise<void> {
       (window as unknown as { __muxXRMetadataProbe?: WebSocket }).__muxXRMetadataProbe?.close(),
     );
     const sessionsAfterProbe = await sessionCount(page);
-    assert(sessionsAfterProbe === 0, `metadata probe created sessions: ${sessionsAfterProbe}`);
+    assert(
+      sessionsAfterProbe === sessionsBefore,
+      `metadata probe changed session count: ${sessionsBefore} to ${sessionsAfterProbe}`,
+    );
     await page.locator('#endpoint').fill(BASE_URL);
     await page.locator('[data-action="connect"]').click();
     await page.locator('[data-pane]').nth(1).waitFor({ state: 'visible', timeout: 15_000 });
@@ -252,9 +256,13 @@ async function main(): Promise<void> {
       (text) => text.includes(firstMarker),
       'first real command output marker not observed',
     );
-    await page.locator('[data-action="close-drawer"]').click();
-    await page.locator(`[data-pane="${paneIds[1]}"]`).click();
-    await page.locator('[data-action="commands"]').click();
+    await page.locator(`[data-select="${paneIds[1]}"]`).click();
+    assert(
+      (await page.locator('[data-detail]').textContent())?.includes(
+        treePanes[1].title || paneIds[1],
+      ),
+      'input target caption did not follow explicit selection',
+    );
     await page.locator('[data-compose]').fill(`printf '%s%s\\n' '${runPrefix}' 'B'`);
     await page.locator('[data-action="send-text"]').click();
     await page.locator('[data-key="Enter"]').click();
@@ -278,6 +286,10 @@ async function main(): Promise<void> {
     assert(
       JSON.stringify(gridsBefore) === JSON.stringify(gridsAfter),
       'Viewing and input changed pane dimensions',
+    );
+    assert(
+      !(outputs.get(paneIds[0]) ?? '').includes(secondMarker),
+      'pane B command leaked to pane A',
     );
     assert(errors.length === 0, `page errors: ${errors.join('; ')}`);
     const renderer = await page.evaluate(() => {

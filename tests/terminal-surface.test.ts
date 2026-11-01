@@ -10,6 +10,7 @@ const fakeWrites: Uint8Array[] = [];
 const fakeResets: number[] = [];
 const fakeCells: unknown[] = [];
 const paintStyles: string[] = [];
+const paintTextStyles: string[] = [];
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     public buffer = {
@@ -96,6 +97,7 @@ beforeEach(() => {
   fakeResets.length = 0;
   fakeCells.length = 0;
   paintStyles.length = 0;
+  paintTextStyles.length = 0;
   MockSocket.instances.length = 0;
   (globalThis as Record<string, unknown>).WebSocket = MockSocket;
   (globalThis as Record<string, unknown>).document = {
@@ -104,9 +106,11 @@ beforeEach(() => {
         ? {
             width: 0,
             height: 0,
+            style: {},
             getContext: () => ({
               fillRect: vi.fn(),
-              fillText: vi.fn(),
+              fillText: vi.fn(() => paintTextStyles.push(paintStyles.at(-1) ?? '')),
+              setTransform: vi.fn(),
               strokeRect: vi.fn(),
               set fillStyle(value: string) {
                 paintStyles.push(value);
@@ -220,6 +224,18 @@ describe('terminal surface lifecycle', () => {
     surface.dispose();
   });
 
+  it('supersamples at capped density without changing logical terminal size', async () => {
+    Object.assign(window, { devicePixelRatio: 3 });
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    expect(surface.canvas.width).toBe(1760);
+    expect(surface.canvas.height).toBe(1008);
+    expect(surface.canvas.style.width).toBe('880px');
+    expect(surface.canvas.style.height).toBe('504px');
+    expect([surface.cols, surface.rows]).toEqual([80, 24]);
+    surface.dispose();
+  });
+
   it('paints public RGB/palette cell colors and inverse text', async () => {
     fakeCells.push({
       getWidth: () => 1,
@@ -240,6 +256,7 @@ describe('terminal surface lifecycle', () => {
     const surface = createTerminalSurface('http://127.0.0.1:9', pane());
     expect(paintStyles).toContain('rgb(17,34,51)');
     expect(paintStyles).toContain('#cd0000');
+    expect(paintTextStyles).toContain('#cd0000');
     surface.dispose();
   });
 });
