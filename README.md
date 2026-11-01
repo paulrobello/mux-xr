@@ -73,6 +73,7 @@ Terminal grid size is changed only from the selected pane in browser Workspace S
 
 - `make checkall`: format/lint, TypeScript, unit tests and production build.
 - `make checkall-ci`: fast gate plus asset-chain validation, secret scan and dependency audit.
+- `MUX_XR_BASE_URL=https://localhost:4240 make production-label-check`: verify actual UI glyph pixels in a built app served with the streamer CSP. A Vite development server is not sufficient.
 - `make e2e`: local native-GPU browser tests with explicitly synthetic protocol fixtures.
 - `make real-app-check`: actual built app against a private compatible core pair, requiring `MUX_XR_PRIVATE_TEST=1` and `MUX_XR_BASE_URL`. It issues two harmless marker commands, so use isolated test panes.
 - `MUX_XR_BASE_URL=http://127.0.0.1:4241 bun run scripts/xr-visual-check.ts`: native GPU rendering of the spatial keyboard using an explicit test XR camera/controller. This requires a Vite development server and does not replace headset testing.
@@ -83,3 +84,5 @@ Browser tests use hardware Chromium headless on supported hosts. Book the host b
 The observatory's editable high/low sources, deterministic generator, hashes and technical reports are in `assets-source/observatory` and `scripts/assets`. The runtime GLB is 2,528,120 bytes with 22,712 triangles and ten draw calls. Creative owner approval and Quest checks remain explicit.
 
 See [the verification report](docs/verification.md), [DESIGN.md](DESIGN.md), [PRD.md](PRD.md) and the [phase plans](plans/phase-0-live-terminal.md) for scope and dependencies.
+
+The streamer's strict policy blocks blob workers, so Troika typesetting runs on the main thread. Label visibility is checked against the actual served build. Comfort colors replace blue-dominant terminal foregrounds with lighter, low-chroma teal; Original keeps source colors and Monochrome uses neutral foregrounds/backgrounds. Physical color-depth perception still needs a headset check.

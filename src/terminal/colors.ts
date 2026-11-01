@@ -24,11 +24,21 @@ function rgb(value: number): [number, number, number] {
 }
 
 function hex(red: number, green: number, blue: number): string {
-  return `#${[red, green, blue].map((channel) => Math.round(channel).toString(16).padStart(2, '0')).join('')}`;
+  return `#${[red, green, blue]
+    .map((channel) =>
+      Math.round(Math.min(255, Math.max(0, channel)))
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('')}`;
 }
 
 function comfort(red: number, green: number, blue: number, background: boolean): string {
   const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  if (blue > red * 1.2 && blue > green * 1.1) {
+    const target = background ? luminance : Math.min(220, 150 + luminance * 0.45);
+    return hex(target * 0.82, target * 0.98, target);
+  }
   const base = background ? luminance : Math.max(luminance, 48);
   const factor = 0.72;
   return hex(
@@ -62,6 +72,11 @@ function paletteRgb(value: number): [number, number, number] {
   return [shade, shade, shade];
 }
 
+function fallbackRgb(value: string): [number, number, number] | null {
+  const match = /^#([0-9a-f]{6})$/i.exec(value);
+  return match ? rgb(Number.parseInt(match[1], 16)) : null;
+}
+
 export function terminalColor(
   mode: TerminalColorMode,
   isRgb: boolean,
@@ -71,7 +86,13 @@ export function terminalColor(
   bright = false,
   background = false,
 ): string {
-  if (!isRgb && !isPalette) return fallback;
+  if (!isRgb && !isPalette) {
+    if (mode === 'monochrome') {
+      const fallbackColor = fallbackRgb(fallback);
+      return fallbackColor ? monochrome(...fallbackColor, background) : fallback;
+    }
+    return fallback;
+  }
   if (isPalette && (!Number.isInteger(value) || value < 0 || value > 255)) return fallback;
   const paletteValue = isPalette ? (bright && value >= 0 && value < 8 ? value + 8 : value) : -1;
   const [red, green, blue] = isRgb ? rgb(value) : paletteRgb(paletteValue);

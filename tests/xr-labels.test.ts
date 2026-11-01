@@ -17,6 +17,8 @@ interface MockTextLike extends THREE.Mesh {
   disposed: boolean;
 }
 
+const configuration = vi.hoisted(() => ({ current: null as unknown }));
+
 vi.mock('troika-three-text', () => ({
   Text: class MockText extends THREE.Mesh {
     text = '';
@@ -42,7 +44,9 @@ vi.mock('troika-three-text', () => ({
       this.disposed = true;
     }
   },
-  configureTextBuilder: vi.fn(),
+  configureTextBuilder: vi.fn((value: unknown) => {
+    configuration.current = value;
+  }),
 }));
 
 import {
@@ -58,6 +62,10 @@ describe('scalable XR labels', () => {
   beforeEach(() => vi.restoreAllMocks());
 
   it('creates a tintable plane with glyph-free background and local SDF text', async () => {
+    expect(configuration.current).toMatchObject({
+      defaultFontURL: LABEL_FONT_URL,
+      useWorker: false,
+    });
     const root = createScalableLabel('Commands', 0.28, 0.09, { background: '#1c2a35' });
     const text = root.userData.labelTextObject as MockTextLike;
 

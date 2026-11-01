@@ -20,5 +20,8 @@ declare module 'troika-three-text' {
     dispose(): void;
   }
 
-  export function configureTextBuilder(config: { defaultFontURL?: string }): void;
+  export function configureTextBuilder(config: {
+    defaultFontURL?: string;
+    useWorker?: boolean;
+  }): void;
 }

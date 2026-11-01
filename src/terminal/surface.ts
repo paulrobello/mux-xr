@@ -22,6 +22,8 @@ const INITIAL_RETRY_MS = 500;
 const MAX_RETRIES = 8;
 const CELL_WIDTH = 11;
 const LINE_HEIGHT = 21;
+const CANVAS_BACKGROUND = '#05070b';
+const MONOCHROME_BACKGROUND = '#070707';
 export const MIN_GRID_COLS = 2;
 export const MAX_GRID_COLS = 300;
 export const MIN_GRID_ROWS = 2;
@@ -136,8 +138,9 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     canvas.style.height = `${logicalHeight}px`;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    const canvasBackground = colorMode === 'monochrome' ? MONOCHROME_BACKGROUND : CANVAS_BACKGROUND;
     ctx.setTransform(density, 0, 0, density, 0, 0);
-    ctx.fillStyle = '#05070b';
+    ctx.fillStyle = canvasBackground;
     ctx.fillRect(0, 0, logicalWidth, logicalHeight);
     ctx.font = '18px monospace';
     ctx.textBaseline = 'top';
@@ -164,13 +167,13 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
           cell.isBgRGB(),
           cell.isBgPalette(),
           cell.getBgColor(),
-          '#05070b',
+          canvasBackground,
           false,
           true,
         );
         const foreground = inverse ? bg : fg;
         const background = inverse ? fg : bg;
-        if (background !== '#05070b') {
+        if (background !== canvasBackground) {
           ctx.fillStyle = background;
           ctx.fillRect(
             col * CELL_WIDTH,

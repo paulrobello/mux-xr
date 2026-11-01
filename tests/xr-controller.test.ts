@@ -1008,6 +1008,45 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('reverses normal-grip pitch without changing position or trigger depth', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    const gamepad = connectController(0, [0, 0, 0, -1]);
+    hit(workspace, { inputAction: 'grabInput', dragHandle: true }, 'squeezestart');
+    const before = keyboard.quaternion.clone();
+    const position = keyboard.position.clone();
+    const initialRelative = controller
+      .getWorldQuaternion(new THREE.Quaternion())
+      .invert()
+      .multiply(before);
+    fakeXR.frame?.(0);
+    const expectedUp = controller
+      .getWorldQuaternion(new THREE.Quaternion())
+      .multiply(
+        initialRelative.multiply(
+          new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.9 / 60),
+        ),
+      );
+    expect(keyboard.quaternion.angleTo(expectedUp)).toBeLessThan(0.000001);
+    expect(keyboard.position.distanceTo(position)).toBeLessThan(0.000001);
+    const afterUp = keyboard.quaternion.clone();
+
+    controller.dispatchEvent({ type: 'squeezeend' } as never);
+    (gamepad.axes as number[])[3] = 1;
+    hit(workspace, { inputAction: 'grabInput', dragHandle: true }, 'squeezestart');
+    const beforeDown = keyboard.quaternion.clone();
+    const depthBeforeDown = keyboard.position.clone();
+    fakeXR.frame?.(1000);
+    expect(keyboard.quaternion.angleTo(beforeDown)).toBeGreaterThan(0.01);
+    expect(keyboard.position.distanceTo(depthBeforeDown)).toBeLessThan(0.000001);
+    expect(afterUp.angleTo(keyboard.quaternion)).toBeGreaterThan(0.01);
+    workspace.dispose();
+    container.remove();
+  });
+
   it('resizes a selected grid only on explicit Apply and exposes color modes', () => {
     const { workspace, actions, left, right, container } = fixture();
     workspace.selectTerminal('pane-b');

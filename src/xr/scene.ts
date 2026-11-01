@@ -660,7 +660,7 @@ export function createWorkspaceScene(
               new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -horizontal),
             )
             .multiply(
-              new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), vertical * 0.9),
+              new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -vertical * 0.9),
             );
         }
       }

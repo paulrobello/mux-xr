@@ -310,4 +310,36 @@ describe('terminal color modes', () => {
       );
     }
   });
+
+  it('turns blue foregrounds into readable muted teal while preserving original colors', async () => {
+    const { terminalColor } = await import('../src/terminal/colors');
+    const parse = (color: string): [number, number, number] => {
+      const channels = color.slice(1).match(/../g);
+      if (!channels) throw new Error(`Invalid color: ${color}`);
+      return channels.map((channel) => Number.parseInt(channel, 16)) as [number, number, number];
+    };
+    expect(terminalColor('original', false, true, 4, '#000')).toBe('#0000ee');
+    expect(terminalColor('original', false, true, 12, '#000')).toBe('#5c5cff');
+    expect(terminalColor('original', true, false, 0x0000ff, '#000')).toBe('rgb(0,0,255)');
+    for (let index = 0; index < 256; index += 1)
+      expect(terminalColor('comfort', false, true, index, '#000')).toMatch(/^#[0-9a-f]{6}$/i);
+    const blue = parse(terminalColor('comfort', false, true, 4, '#000'));
+    const brightBlue = parse(terminalColor('comfort', false, true, 12, '#000'));
+    expect(brightBlue[1]).toBeGreaterThan(blue[1]);
+    for (const [isRgb, value] of [
+      [false, 4],
+      [false, 12],
+      [true, 0x0000ff],
+    ] as const) {
+      const [red, green, blue] = parse(terminalColor('comfort', isRgb, !isRgb, value, '#000'));
+      expect(green).toBeGreaterThan(red);
+      expect(Math.abs(green - blue)).toBeLessThanOrEqual(16);
+      expect(blue - red).toBeLessThan(40);
+      expect(0.2126 * red + 0.7152 * green + 0.0722 * blue).toBeGreaterThan(140);
+    }
+    const monochromeForeground = terminalColor('monochrome', false, false, 0, '#d8e1ef');
+    expect(monochromeForeground.slice(1, 3)).toBe(monochromeForeground.slice(3, 5));
+    expect(monochromeForeground.slice(3, 5)).toBe(monochromeForeground.slice(5, 7));
+    expect(terminalColor('monochrome', false, false, 0, '#070707', false, true)).toBe('#070707');
+  });
 });

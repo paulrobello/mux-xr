@@ -12,9 +12,8 @@ const LABEL_MAX_WIDTH_RATIO = 0.86;
 const LABEL_MIN_FONT_SIZE_RATIO = 0.22;
 const LABEL_GLYPH_WIDTH_FACTOR = 0.55;
 
-// Every XR label code point is covered by one of these local fonts. The unicode resolver is
-// intentionally not configured because its default fallback data is CDN-backed.
-configureTextBuilder({ defaultFontURL: LABEL_FONT_URL });
+// The LAN streamer's policy forbids blob workers. Typesetting must stay on the main thread.
+configureTextBuilder({ defaultFontURL: LABEL_FONT_URL, useWorker: false });
 
 export interface ScalableLabelOptions {
   wrap?: boolean;
