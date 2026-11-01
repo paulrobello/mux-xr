@@ -56,7 +56,40 @@ describe('mux XR local UI state', () => {
       endpoint: 'WSS://LAN',
       background: 'black',
       gazeEmphasis: false,
+      arrangement: 'arc',
     });
+    expect(validateSettings({ arrangement: 'invalid' }).arrangement).toBe('arc');
+  });
+
+  it('applies an explicit 3D arrangement only when terminals are attached', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const arranged: string[] = [];
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onArrange: (pattern) => arranged.push(pattern),
+    });
+    const select = query<HTMLSelectElement>(root, '[data-arrangement]');
+    const apply = query<HTMLButtonElement>(root, '[data-action="apply-arrangement"]');
+    expect(select.value).toBe('arc');
+    expect(apply.disabled).toBe(true);
+    select.value = 'grid';
+    select.dispatchEvent(new Event('change'));
+    expect(arranged).toEqual([]);
+    expect(ui.getSettings().arrangement).toBe('arc');
+    ui.setAttachedPaneIds(['pane-a']);
+    expect(apply.disabled).toBe(false);
+    apply.click();
+    expect(arranged).toEqual(['grid']);
+    expect(ui.getSettings().arrangement).toBe('grid');
+    ui.destroy();
+    const restored = mountWorkspaceUI(root, { onConnect: () => undefined });
+    expect(restored.getSettings().arrangement).toBe('grid');
+    restored.setArrangement('sphere');
+    expect(query<HTMLSelectElement>(root, '[data-arrangement]').value).toBe('sphere');
+    expect(restored.getSettings().arrangement).toBe('sphere');
+    restored.destroy();
+    localStorage.clear();
   });
 
   it('keeps gaze keyboard routing opt-in and persists changes from browser and XR', () => {

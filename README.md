@@ -69,6 +69,12 @@ The 3D preview toolbar always exposes **Smaller panel**, **Larger panel** and **
 
 Terminal grid size is changed only from the selected pane in browser Workspace Settings with numeric columns/rows and Apply, or from the native HUD Terminal settings. Native presets are 80x24, 100x30, 120x36 and 160x48, with ±1 and ±10 draft controls plus Apply. Columns and rows are bounded to 2..300 and 2..150. The controls are disabled while disconnected, and only an explicit Apply sends a resize; actual dimensions come back from the server as read-only state. Terminal colors are a saved global preference with Comfortable (default), Original and Monochrome modes. The native keyboard uses self-hosted OFL Noto Sans and Symbols 2 through Troika SDF 0.52.5; unsupported visual glyphs render as `?` while retaining the original title. Keyboard Backing is a saved browser/native-header toggle: off leaves key buttons visible, while the logical grabbable plane remains and can occlude gaze so the input target is retained. The native FPS HUD is an actual frame counter updated about every 500 ms, not a capacity benchmark.
 
+## Spatial arrangements
+
+Use **Workspace settings → 3D arrangement → Apply arrangement** in the browser, or **Arrange** on the XR HUD. Choose **Row**, **Grid**, **Arc** or **Sphere**. Browser Apply opens the 3D preview. Sphere distributes panels over the front of a spherical surface, curving horizontally and vertically as more terminals are attached, with every panel facing the viewer.
+
+Presets apply to currently attached terminals around your current position and heading. They preserve each panel's physical size, text zoom, input target and remote grid. You can continue grabbing, rotating and scaling afterward. Opening another terminal does not reset existing panels. The last chosen preset is saved locally, but applying it remains explicit. Named saved layouts and animated restoration remain roadmap work.
+
 ## Verification
 
 - `make checkall`: format/lint, TypeScript, unit tests and production build.
@@ -86,6 +92,7 @@ The observatory's editable high/low sources, deterministic generator, hashes and
 See [the verification report](docs/verification.md), [DESIGN.md](DESIGN.md), [PRD.md](PRD.md) and the [phase plans](plans/phase-0-live-terminal.md) for scope and dependencies.
 
 The streamer's strict policy blocks blob workers, so Troika typesetting runs on the main thread. Label visibility is checked against the actual served build. Comfort colors replace blue-dominant terminal foregrounds with lighter, low-chroma teal; Original keeps source colors and Monochrome uses neutral foregrounds/backgrounds. Physical color-depth perception still needs a headset check.
+
 ## Frontend updates
 
 Production builds include a content fingerprint in the page and a same-origin `version.json` manifest. The frontend checks immediately and every 30 seconds with a five-second request timeout and cache bypass. A changed build shows a compact **Update available / Reload** notice in the browser and an **Update: Reload** action on the XR HUD. Updates never reload automatically. Reload exits the immersive session first, then loads a fresh page with a cache-busting URL. Terminal processes remain running, and saved device preferences and commands remain in local storage.

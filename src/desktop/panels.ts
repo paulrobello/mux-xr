@@ -10,6 +10,7 @@ export interface DesktopPanels {
   select(id: string | null): void;
   setImmersive(enabled: boolean): void;
   showTerminals(): void;
+  showPreview(): void;
   dispose(): void;
 }
 
@@ -148,6 +149,10 @@ export function createDesktopPanels(
     dispose,
     showTerminals() {
       previewing = false;
+      updateMode();
+    },
+    showPreview() {
+      previewing = true;
       updateMode();
     },
   };

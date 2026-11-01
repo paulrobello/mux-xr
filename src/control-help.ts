@@ -19,6 +19,10 @@ export function getKeyHelp(key: string): string | undefined {
 export function getControlHelp(data: Record<string, unknown>): string | undefined {
   if (typeof data.key === 'string') return getKeyHelp(data.key);
   switch (data.inputAction) {
+    case 'arrange':
+      return data.pattern === 'sphere'
+        ? 'Arrange terminals on a sphere in front of you'
+        : `Arrange terminals in a ${String(data.pattern)}; sizes and input target stay unchanged`;
     case 'reloadUpdate':
       return 'Exit XR and reload the available update';
     case 'keyboardBackground':
@@ -45,7 +49,9 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
           ? 'Browse workspaces, sessions, windows and panes'
           : data.mode === 'terminal'
             ? 'Open terminal grid and color settings'
-            : 'Open saved quick commands';
+            : data.mode === 'arrange'
+              ? 'Arrange attached terminals in a spatial pattern'
+              : 'Open saved quick commands';
     case 'exit':
       return 'Exit immersive mode or the 3D preview';
     case 'close':

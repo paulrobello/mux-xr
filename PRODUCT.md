@@ -49,3 +49,5 @@ Reference repos: par-term-emu-core-rust, pardeck, par-dots and webxr1. Fixtures 
 4. Animation supports spatial understanding while the user's viewpoint stays under their control.
 
 Frontend builds poll a same-origin version manifest and offer an explicit Reload action in browser and XR. The page never reloads merely because an update is detected. Reload ends XR before refreshing the viewer, preserving terminal processes and saved local preferences.
+
+Attached terminal panels can be arranged as Row, Grid, Arc or a front-hemisphere Sphere from browser settings or the native XR Arrange menu. Presets position and orient panels around the current viewer, preserving their individual sizes, input target and terminal grid. Each panel remains directly manipulable afterward. Named saved 3D layouts are still roadmap scope.

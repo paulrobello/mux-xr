@@ -202,3 +202,7 @@ Each panel presents one live pane with a readable terminal surface, title label,
 ### Update notices
 
 Version availability uses a compact inline browser notice and a small action attached to the movable XR HUD. It does not interrupt monitoring or change terminal/input focus. Reload is explicit, ends the current immersive session, and then refreshes the viewer. No centered modal or automatic reload is used.
+
+### Spatial arrangements
+
+The native Arrange surface uses four labeled choices in the existing grabbable panel style. Browser settings use a compact select and explicit Apply action that opens the 3D preview. Row, Grid, Arc and Sphere affect attached terminal roots only. Sphere occupies the forward hemisphere, with panels facing the viewer. Presets preserve physical scale and intentional input targeting. Subsequent manual placement remains under the user's control.

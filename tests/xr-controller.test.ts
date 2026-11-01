@@ -226,6 +226,133 @@ describe('native XR controller event routing', () => {
     }
   });
 
+  it.each(['row', 'grid', 'arc', 'sphere'] as const)(
+    'arranges %s around the current viewer without changing input, scale or terminal grids',
+    (pattern) => {
+      const { workspace, actions, container, left, right } = fixture();
+      workspace.camera.position.set(2, 1.8, 3);
+      workspace.camera.rotation.set(0.25, 0.7, 0);
+      workspace.selectTerminal('pane-b');
+      workspace.showInput('keyboard');
+      const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls') as THREE.Group;
+      const keyboardPosition = keyboard.position.clone();
+      const target = workspace.state.inputTargetId;
+      const panel = workspace.scene.getObjectByName('terminal-panel-pane-b') as THREE.Group;
+      panel.scale.setScalar(1.3);
+      panel.userData.fontZoom = 1.25;
+      vi.clearAllMocks();
+      workspace.arrangeTerminals(pattern);
+      expect(workspace.state.arrangement).toBe(pattern);
+      expect(workspace.state.selectedTerminalId).toBe('pane-b');
+      expect(workspace.state.inputTargetId).toBe(target);
+      expect(keyboard.position.distanceTo(keyboardPosition)).toBeLessThan(1e-9);
+      expect(panel.scale.x).toBe(1.3);
+      expect(panel.userData.fontZoom).toBe(1.25);
+      for (const id of ['pane-a', 'pane-b']) {
+        const root = workspace.scene.getObjectByName(`terminal-panel-${id}`) as THREE.Group;
+        const towardEye = workspace.camera.position.clone().sub(root.position).normalize();
+        const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(root.quaternion);
+        expect(normal.dot(towardEye)).toBeGreaterThan(0.999);
+      }
+      expect(actions.selectPane).not.toHaveBeenCalled();
+      expect(actions.resizeGrid).not.toHaveBeenCalled();
+      expect(left.resizeGrid).not.toHaveBeenCalled();
+      expect(right.resizeGrid).not.toHaveBeenCalled();
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      workspace.dispose();
+      container.remove();
+    },
+  );
+
+  it('routes the native Arrange menu and keeps the arranged panels grabbable', () => {
+    const { workspace, actions, container } = fixture();
+    hit(workspace, { inputAction: 'openInput', mode: 'arrange' });
+    const menu = workspace.scene.getObjectByName('xr-arrange-controls') as THREE.Group;
+    const position = menu.position.clone();
+    hit(workspace, { inputAction: 'arrange', pattern: 'sphere' });
+    expect(workspace.state.arrangement).toBe('sphere');
+    expect(
+      workspace.scene.getObjectByName('xr-arrange-controls')?.position.distanceTo(position),
+    ).toBeLessThan(1e-9);
+    workspace.hideInput();
+    hit(workspace, { terminalTitle: true, terminalId: 'pane-b' }, 'squeezestart');
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-b') as THREE.Group;
+    const start = panel.position.clone();
+    (fakeXR.controllers[0] as THREE.Group).position.x += 0.2;
+    fakeXR.frame?.(16);
+    expect(panel.position.x - start.x).toBeCloseTo(0.2);
+    expect(actions.resizeGrid).not.toHaveBeenCalled();
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('rebases both held controllers when an arrangement is applied', () => {
+    const { workspace, container } = fixture();
+    connectController(0);
+    connectController(1);
+    const first = fakeXR.controllers[0] as THREE.Group;
+    const second = fakeXR.controllers[1] as THREE.Group;
+    aimController(
+      first,
+      objectWithData(workspace, { inputAction: 'fontZoom', direction: -1, terminalId: 'pane-a' }),
+    );
+    aimController(
+      second,
+      objectWithData(workspace, { inputAction: 'fontZoom', direction: 1, terminalId: 'pane-a' }),
+    );
+    first.dispatchEvent({ type: 'squeezestart' } as never);
+    second.dispatchEvent({ type: 'squeezestart' } as never);
+    workspace.arrangeTerminals('grid');
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+    const position = panel.position.clone();
+    const orientation = panel.quaternion.clone();
+    fakeXR.frame?.(0);
+    fakeXR.frame?.(16);
+    expect(panel.position.distanceTo(position)).toBeLessThan(1e-9);
+    expect(panel.quaternion.angleTo(orientation)).toBeLessThan(1e-6);
+    second.position.x += 0.2;
+    fakeXR.frame?.(32);
+    expect(panel.scale.x).toBeGreaterThan(1);
+    second.dispatchEvent({ type: 'squeezeend' } as never);
+    const handedOff = panel.position.clone();
+    fakeXR.frame?.(48);
+    expect(panel.position.distanceTo(handedOff)).toBeLessThan(1e-9);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('clears the native pattern highlight when recovery restores the default layout', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('arrange');
+    hit(workspace, { inputAction: 'arrange', pattern: 'sphere' });
+    const active = objectWithData(workspace, {
+      inputAction: 'arrange',
+      pattern: 'sphere',
+    }) as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+    expect(active.material.color.getHex()).toBe(0x68d6ff);
+    workspace.resetLayout();
+    expect(workspace.state.arrangement).toBeNull();
+    const reset = objectWithData(workspace, {
+      inputAction: 'arrange',
+      pattern: 'sphere',
+    }) as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+    expect(reset.material.color.getHex()).toBe(0xffffff);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('does not rearrange existing panels when another terminal is attached', () => {
+    const { workspace, container } = fixture();
+    workspace.arrangeTerminals('sphere');
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+    const position = panel.position.clone();
+    workspace.addTerminal(surface(pane('pane-c')));
+    expect(panel.position.distanceTo(position)).toBeLessThan(1e-9);
+    workspace.dispose();
+    container.remove();
+  });
+
   it('keeps the update control XR-only and routes one explicit reload without ending XR', () => {
     const { workspace, actions, container } = fixture();
     fakeXR.presenting = false;

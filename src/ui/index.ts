@@ -2,6 +2,7 @@ import type {
   BackgroundMode,
   KeyModifiers,
   PaneDescriptor,
+  PanelArrangement,
   QuickCommand,
   TerminalColorMode,
   TerminalStatus,
@@ -28,6 +29,7 @@ export interface UICallbacks {
   onKeyboardBackgroundChange?(enabled: boolean): void;
   onResizeGrid?(paneId: string, cols: number, rows: number): boolean;
   onReloadApp?(): void;
+  onArrange?(pattern: PanelArrangement): void;
 }
 
 export interface WorkspaceSettings {
@@ -38,6 +40,7 @@ export interface WorkspaceSettings {
   gazeInput: boolean;
   colorMode: TerminalColorMode;
   keyboardBackground: boolean;
+  arrangement: PanelArrangement;
 }
 
 export interface WorkspaceUI {
@@ -63,6 +66,7 @@ export interface WorkspaceUI {
   setKeyboardBackgroundEnabled(enabled: boolean, persist?: boolean): void;
   getCommandsForPane(paneId: string): QuickCommand[];
   setUpdateAvailable(available: boolean): void;
+  setArrangement(pattern: PanelArrangement, persist?: boolean): void;
 }
 
 export interface CommandStore {
@@ -80,6 +84,7 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   gazeInput: false,
   colorMode: 'comfort',
   keyboardBackground: true,
+  arrangement: 'arc',
 };
 
 export function workspaceScope(endpoint: string, workspaceId: string): string {
@@ -118,6 +123,13 @@ export function validateSettings(value: unknown): WorkspaceSettings {
         ? candidate.colorMode
         : 'comfort',
     keyboardBackground: candidate.keyboardBackground !== false,
+    arrangement:
+      candidate.arrangement === 'row' ||
+      candidate.arrangement === 'grid' ||
+      candidate.arrangement === 'sphere' ||
+      candidate.arrangement === 'arc'
+        ? candidate.arrangement
+        : DEFAULT_SETTINGS.arrangement,
   };
 }
 
@@ -285,6 +297,11 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     root.querySelector('.stage-head')?.after(updateNotice);
   }
   const settingsPanel = root.querySelector<HTMLElement>('[data-settings]');
+  let arrangementSelect: HTMLSelectElement | null = null;
+  let arrangementApply: HTMLButtonElement | null = null;
+  const updateArrangementAvailability = (): void => {
+    if (arrangementApply) arrangementApply.disabled = attachedPaneIds.length === 0;
+  };
   if (settingsPanel) {
     const colorLabel = document.createElement('label');
     colorLabel.textContent = 'Terminal colors';
@@ -314,6 +331,25 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       grid,
       settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
     );
+    const arrangement = document.createElement('div');
+    arrangement.dataset.arrangementControls = 'true';
+    arrangement.innerHTML =
+      '<label for="arrangement-pattern">3D arrangement</label><select id="arrangement-pattern" data-arrangement aria-label="3D terminal arrangement"><option value="row">Row</option><option value="grid">Grid</option><option value="arc">Arc</option><option value="sphere">Sphere</option></select><small>Applies to attached terminals in 3D. Sphere uses a front hemisphere. Terminals remain individually adjustable.</small><button data-action="apply-arrangement" class="secondary" title="Apply this 3D arrangement to attached terminals">Apply arrangement</button>';
+    settingsPanel.insertBefore(
+      arrangement,
+      settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
+    );
+    arrangementSelect = arrangement.querySelector('[data-arrangement]');
+    arrangementApply = arrangement.querySelector('[data-action="apply-arrangement"]');
+    if (!arrangementSelect || !arrangementApply) throw new Error('Missing arrangement controls');
+    const select = arrangementSelect;
+    select.value = settings.arrangement;
+    arrangementApply.addEventListener('click', () => {
+      const pattern = select.value as PanelArrangement;
+      settings = { ...settings, arrangement: pattern };
+      saveSettings();
+      callbacks.onArrange?.(pattern);
+    });
   }
   const editor = document.createElement('div');
   editor.className = 'command-editor';
@@ -339,6 +375,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   };
   clearModifiers();
   clearGridControls();
+  updateArrangementAvailability();
   const actionHelp: Record<string, string> = {
     demo: 'Preview synthetic terminals without running commands',
     xr: 'Enter immersive VR with controller input',
@@ -777,6 +814,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       }
       if (capturedTarget && !ids.includes(capturedTarget)) closeInput();
       renderPanes();
+      updateArrangementAvailability();
     },
     openInput(mode) {
       inputMode = mode;
@@ -816,6 +854,11 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     setKeyboardBackgroundEnabled(enabled, persist = true) {
       settings = { ...settings, keyboardBackground: enabled };
       qs<HTMLInputElement>('[data-keyboard-background]').checked = enabled;
+      if (persist) saveSettings();
+    },
+    setArrangement(pattern, persist = true) {
+      settings = { ...settings, arrangement: pattern };
+      if (arrangementSelect) arrangementSelect.value = pattern;
       if (persist) saveSettings();
     },
     getCommandsForPane(paneId) {

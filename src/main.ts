@@ -262,6 +262,10 @@ ui = mountWorkspaceUI(app, {
   },
   onSettingsChange: applySettings,
   onResetLayout: () => scene.resetLayout(),
+  onArrange: (pattern) => {
+    desktop.showPreview();
+    scene.arrangeTerminals(pattern);
+  },
   onDemo: startDemo,
 });
 scene = createWorkspaceScene(ui.sceneHost, actions);
@@ -274,6 +278,8 @@ const stopPresentation = scene.subscribe((state) => {
     ui.setGazeInputEnabled(state.gazeInputEnabled);
     ui.setKeyboardBackgroundEnabled(state.keyboardBackgroundEnabled, false);
     ui.setTerminalColorMode(state.terminalColorMode, false);
+    if (state.arrangement && state.arrangement !== ui.getSettings().arrangement)
+      ui.setArrangement(state.arrangement);
   }
   desktop.setImmersive(state.xrMode !== 'desktop');
   if (state.xrMode !== 'desktop') ui.closeInput();
@@ -316,6 +322,14 @@ Object.assign(window, {
       panes: snapshot.panes,
       attached: [...surfaces.keys()],
       scene: { ...scene.state },
+      panels: scene.scene.children
+        .filter((object) => object.name.startsWith('terminal-panel-'))
+        .map((object) => ({
+          id: object.userData.terminalId as string,
+          position: object.position.toArray(),
+          quaternion: object.quaternion.toArray(),
+          scale: object.scale.x,
+        })),
     }),
     getControlHints: () => scene.getControlHints(),
     checkForUpdate: () => updateChecker?.poll() ?? Promise.resolve(),

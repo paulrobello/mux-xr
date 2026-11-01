@@ -42,6 +42,8 @@ export interface TerminalSurface {
 
 export type BackgroundMode = 'black' | 'gradient' | 'observatory';
 
+export type PanelArrangement = 'row' | 'grid' | 'arc' | 'sphere';
+
 export interface QuickCommand {
   id: string;
   label: string;

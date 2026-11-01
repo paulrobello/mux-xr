@@ -3,6 +3,7 @@ import type {
   BackgroundMode,
   KeyModifiers,
   PaneDescriptor,
+  PanelArrangement,
   QuickCommand,
   TerminalColorMode,
   TerminalSurface,
@@ -11,10 +12,11 @@ import type {
 import { getControlHelp } from '../control-help';
 import { terminalKeyLabel } from '../terminal/protocol';
 import { type SemanticKey, semanticKeyboardLayout } from '../ui';
+import { calculateArrangement } from './arrangements';
 import { createFrameCounter } from './fps';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 
-type InputMode = 'commands' | 'keyboard' | 'panes' | 'terminal';
+type InputMode = 'commands' | 'keyboard' | 'panes' | 'terminal' | 'arrange';
 
 export interface PanelTransform {
   position: THREE.Vector3;
@@ -42,6 +44,7 @@ export interface WorkspaceSceneState {
   inputTargetId: string | null;
   inputTargetTitle: string | null;
   updateAvailable: boolean;
+  arrangement: PanelArrangement | null;
 }
 
 export interface WorkspaceScene {
@@ -65,6 +68,7 @@ export interface WorkspaceScene {
   exitXR(): Promise<void>;
   setUpdateAvailable(available: boolean): void;
   resetLayout(): void;
+  arrangeTerminals(pattern: PanelArrangement): void;
   scaleSelectedPanel(direction: number): void;
   getControlHints(): Array<{
     label: string;
@@ -368,6 +372,7 @@ export function createWorkspaceScene(
     inputTargetId: null,
     inputTargetTitle: null,
     updateAvailable: false,
+    arrangement: null,
   };
   let disposed = false;
   let frameHandle = 0;
@@ -892,7 +897,9 @@ export function createWorkspaceScene(
       ? `Target: ${mutableState.inputTargetTitle}`
       : 'No target selected';
     const title = createLabelButton(
-      `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? 'Keyboard' : mode === 'terminal' ? 'Terminal settings' : `Panes · ${hierarchyLevel}`} · ${targetTitle}`,
+      mode === 'arrange'
+        ? 'Arrange terminals'
+        : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? 'Keyboard' : mode === 'terminal' ? 'Terminal settings' : `Panes · ${hierarchyLevel}`} · ${targetTitle}`,
       0.9,
       0.12,
       { inputAction: 'grabInput' },
@@ -900,7 +907,35 @@ export function createWorkspaceScene(
     title.userData.dragHandle = true;
     title.position.y = 0.56;
     inputRoot.add(title);
-    if (mode === 'panes') {
+    if (mode === 'arrange') {
+      const status = createLabelButton(
+        panels.size
+          ? `${panels.size} terminals · keep sizes and input target`
+          : 'Open terminals first',
+        1.5,
+        0.1,
+        { inputAction: 'noop' },
+      );
+      status.position.y = 0.36;
+      inputRoot.add(status);
+      if (panels.size) {
+        const patterns: Array<[string, PanelArrangement]> = [
+          ['Row', 'row'],
+          ['Grid', 'grid'],
+          ['Arc', 'arc'],
+          ['Sphere', 'sphere'],
+        ];
+        patterns.forEach(([label, pattern], index) => {
+          const button = createLabelButton(label, 0.65, 0.14, {
+            inputAction: 'arrange',
+            pattern,
+          });
+          button.position.set(index % 2 ? 0.38 : -0.38, 0.16 - Math.floor(index / 2) * 0.2, 0);
+          setModifierVisual(button, mutableState.arrangement === pattern);
+          inputRoot?.add(button);
+        });
+      }
+    } else if (mode === 'panes') {
       const visible = availablePanes.filter(
         (pane) =>
           hierarchyLevel === 'workspace' ||
@@ -1147,6 +1182,7 @@ export function createWorkspaceScene(
       ['Keyboard', { inputAction: 'openInput', mode: 'keyboard' }],
       ['Panes', { inputAction: 'openInput', mode: 'panes' }],
       ['Terminal', { inputAction: 'openInput', mode: 'terminal' }],
+      ['Arrange', { inputAction: 'openInput', mode: 'arrange' }],
       ['Exit', { inputAction: 'exit' }],
       ['Black', { inputAction: 'background', background: 'black' }],
       ['Gradient', { inputAction: 'background', background: 'gradient' }],
@@ -1271,6 +1307,10 @@ export function createWorkspaceScene(
     }
     if (action === 'background') {
       setBackground(hit.userData.background as BackgroundMode);
+      return true;
+    }
+    if (action === 'arrange') {
+      arrangeTerminals(hit.userData.pattern as PanelArrangement);
       return true;
     }
     if (action === 'keyboardBackground') {
@@ -1634,6 +1674,7 @@ export function createWorkspaceScene(
       mutableState.focusedTerminalId = panel.id;
     }
     setSelectedVisual();
+    if (inputRoot && inputMode === 'arrange') refreshInputRoot('arrange');
     notify();
   };
   const removeTerminal = (id: string): void => {
@@ -1644,6 +1685,7 @@ export function createWorkspaceScene(
     disposeObject(panel.root);
     panel.texture.dispose();
     panels.delete(id);
+    if (inputRoot && inputMode === 'arrange') refreshInputRoot('arrange');
     dragStates.forEach((drag, controller) => {
       if (drag.object.userData.terminalId === id) releaseGrab(controller);
     });
@@ -1775,7 +1817,12 @@ export function createWorkspaceScene(
     quickCommands = commands.map((command) => ({ ...command }));
   };
   const showInput = (mode: InputMode): void => {
-    if (!renderer?.xr.isPresenting && mode !== 'panes' && mode !== 'terminal') {
+    if (
+      !renderer?.xr.isPresenting &&
+      mode !== 'panes' &&
+      mode !== 'terminal' &&
+      mode !== 'arrange'
+    ) {
       hideInput();
       if (mode === 'commands') actions.openCommands();
       else actions.openKeyboard();
@@ -1871,7 +1918,39 @@ export function createWorkspaceScene(
   const exitXR = async (): Promise<void> => {
     if (activeSession) await activeSession.end();
   };
+  const arrangeTerminals = (pattern: PanelArrangement): void => {
+    if (!panels.size) return;
+    const ordered = [...panels.values()];
+    const poses = calculateArrangement(
+      pattern,
+      ordered.map(({ root }) => ({
+        width: (PANEL_WIDTH + 0.3) * root.scale.x,
+        height: (PANEL_HEIGHT + 0.3) * root.scale.x,
+      })),
+    );
+    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    view.updateMatrixWorld(true);
+    const eye = view.getWorldPosition(new THREE.Vector3());
+    const forward = view.getWorldDirection(new THREE.Vector3());
+    const yaw = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0),
+      Math.atan2(-forward.x, -forward.z),
+    );
+    ordered.forEach((panel, index) => {
+      panel.root.position.copy(poses[index].position).applyQuaternion(yaw).add(eye);
+      panel.root.quaternion.copy(yaw).multiply(poses[index].quaternion);
+    });
+    for (const [controller, drag] of dragStates)
+      if (ordered.some((panel) => panel.root === drag.object)) captureGrab(controller, drag.object);
+    for (const [object, pair] of pairGrabs)
+      if (ordered.some((panel) => panel.root === object))
+        beginPairGrab(object, ...pair.controllers);
+    mutableState.arrangement = pattern;
+    if (inputRoot && inputMode === 'arrange') refreshInputRoot('arrange');
+    notify();
+  };
   const resetLayout = (): void => {
+    mutableState.arrangement = null;
     for (const panel of panels.values()) {
       panel.root.position.copy(panel.defaultPosition);
       panel.root.rotation.set(0, panel.defaultPosition.x < 0 ? 0.06 : -0.06, 0);
@@ -1903,6 +1982,7 @@ export function createWorkspaceScene(
       }
     }
     resetInputPose();
+    if (inputRoot && inputMode === 'arrange') refreshInputRoot('arrange');
     notify();
   };
   const getControlHints = (): Array<{
@@ -2015,6 +2095,7 @@ export function createWorkspaceScene(
     enterXR,
     exitXR,
     setUpdateAvailable,
+    arrangeTerminals,
     resetLayout,
     scaleSelectedPanel,
     getControlHints,
