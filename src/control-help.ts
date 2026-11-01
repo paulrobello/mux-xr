@@ -17,27 +17,13 @@ export function getKeyHelp(key: string): string | undefined {
 }
 
 export function getControlHelp(data: Record<string, unknown>): string | undefined {
-  if (data.terminalTitle) return 'Select this pane; grip to move and rotate it';
+  if (data.terminalTitle) return 'Grip to move/rotate. Two grips resize.';
   if (typeof data.key === 'string') return getKeyHelp(data.key);
   switch (data.inputAction) {
     case 'gazeInput':
       return 'Toggle head-gaze keyboard targeting after a short dwell; off uses manual selection';
     case 'grabInput':
-      return 'Grip to move this menu; stick turns or lifts; grip plus trigger pushes or pulls';
-    case 'inputScale':
-      return Number(data.direction) < 0 ? 'Shrink this input menu' : 'Enlarge this input menu';
-    case 'inputReset':
-      return 'Restore this input menu to a compact position in front of you';
-    case 'selectedScale':
-      return Number(data.direction) < 0
-        ? 'Shrink the selected panel from this safe control'
-        : 'Enlarge the selected panel; browser view is bounded';
-    case 'resetLayout':
-      return 'Restore all panel positions and sizes';
-    case 'scale':
-      return Number(data.direction) < 0
-        ? 'Shrink panel; terminal grid stays unchanged'
-        : 'Enlarge panel; terminal grid stays unchanged';
+      return 'Grip to move/rotate. Two grips resize.';
     case 'fontZoom':
       return Number(data.direction) < 0
         ? 'Zoom text out; terminal grid stays unchanged'

@@ -342,24 +342,6 @@ function createKeyStrip(): THREE.Group {
   return group;
 }
 
-function createRecoveryControls(): THREE.Group {
-  const group = new THREE.Group();
-  group.name = 'xr-recovery-controls';
-  const controls: Array<[string, Record<string, unknown>]> = [
-    ['Smaller', { inputAction: 'selectedScale', direction: -1 }],
-    ['Larger', { inputAction: 'selectedScale', direction: 1 }],
-    ['Reset layout', { inputAction: 'resetLayout' }],
-  ];
-  controls.forEach(([label, data], index) => {
-    const button = createLabelButton(label, 0.32, 0.1, { ...data, recoveryControl: true });
-    button.position.x = (index - 1) * 0.36;
-    (button.material as THREE.MeshBasicMaterial).depthTest = false;
-    button.renderOrder = 1000;
-    group.add(button);
-  });
-  return group;
-}
-
 function isControlVisible(object: THREE.Object3D): boolean {
   for (let current: THREE.Object3D | null = object; current; current = current.parent)
     if (!current.visible) return false;
@@ -458,6 +440,68 @@ export function createWorkspaceScene(
       gamepad?: Gamepad;
     }
   >();
+  const pairGrabs = new Map<
+    THREE.Group,
+    {
+      controllers: [THREE.Group, THREE.Group];
+      distance: number;
+      direction: THREE.Vector3;
+      midpoint: THREE.Vector3;
+      position: THREE.Vector3;
+      quaternion: THREE.Quaternion;
+      scale: number;
+    }
+  >();
+  let recenterSince: number | null = null;
+  let recenterLatched = false;
+  const captureGrab = (controller: THREE.Group, object: THREE.Group): void => {
+    controller.updateMatrixWorld(true);
+    object.updateMatrixWorld(true);
+    const rotation = controller.getWorldQuaternion(new THREE.Quaternion());
+    dragStates.set(controller, {
+      object,
+      localOffset: object
+        .getWorldPosition(new THREE.Vector3())
+        .sub(controller.getWorldPosition(new THREE.Vector3()))
+        .applyQuaternion(rotation.clone().invert()),
+      relativeRotation: rotation
+        .clone()
+        .invert()
+        .multiply(object.getWorldQuaternion(new THREE.Quaternion())),
+      gamepad: controllerGamepads.get(controller),
+    });
+  };
+  const releaseGrab = (controller: THREE.Group): void => {
+    const object = dragStates.get(controller)?.object;
+    dragStates.delete(controller);
+    if (!object) return;
+    const pair = pairGrabs.get(object);
+    if (!pair) return;
+    pairGrabs.delete(object);
+    for (const remaining of pair.controllers)
+      if (remaining !== controller && dragStates.has(remaining)) captureGrab(remaining, object);
+  };
+  const beginPairGrab = (object: THREE.Group, first: THREE.Group, second: THREE.Group): void => {
+    first.updateMatrixWorld(true);
+    second.updateMatrixWorld(true);
+    const a = first.getWorldPosition(new THREE.Vector3());
+    const b = second.getWorldPosition(new THREE.Vector3());
+    const direction = b.clone().sub(a);
+    const distance = direction.length();
+    if (distance < 0.05) {
+      dragStates.delete(second);
+      return;
+    }
+    pairGrabs.set(object, {
+      controllers: [first, second],
+      distance,
+      direction: direction.normalize(),
+      midpoint: a.add(b).multiplyScalar(0.5),
+      position: object.position.clone(),
+      quaternion: object.quaternion.clone(),
+      scale: object.scale.x,
+    });
+  };
   const availablePanes: PaneDescriptor[] = [];
   const controllerGamepads = new Map<THREE.Group, Gamepad>();
   const disconnectedControllers = new Set<THREE.Group>();
@@ -486,13 +530,6 @@ export function createWorkspaceScene(
     quaternion: THREE.Quaternion;
     scale: number;
   } | null = null;
-  const updateRecoveryVisibility = (): void => {
-    const immersive = Boolean(renderer?.xr.isPresenting);
-    const hudRecovery = hudRoot?.getObjectByName('xr-recovery-controls');
-    if (hudRecovery) hudRecovery.visible = immersive && !inputRoot;
-    const inputRecovery = inputRoot?.getObjectByName('xr-recovery-controls');
-    if (inputRecovery) inputRecovery.visible = immersive;
-  };
   const pointer = new THREE.Vector2();
   const clearArmedModifiers = (): void => {
     inputRoot?.traverse((object) => {
@@ -588,8 +625,47 @@ export function createWorkspaceScene(
         ? 1 / 60
         : THREE.MathUtils.clamp((time - previousRenderTime) / 1000, 0, 0.05);
     previousRenderTime = time;
-    updateRecoveryVisibility();
+    if (renderer?.xr.isPresenting) {
+      const bothSticks =
+        heldControllers.size === 0 &&
+        controllerRoots.length === 2 &&
+        controllerRoots.every(
+          (controller) =>
+            controller.visible &&
+            !disconnectedControllers.has(controller) &&
+            controllerGamepads.get(controller)?.buttons[3]?.pressed,
+        );
+      if (!bothSticks) {
+        recenterSince = null;
+        recenterLatched = false;
+      } else if (recenterSince === null) recenterSince = time;
+      else if (!recenterLatched && time - recenterSince >= 1000) {
+        resetLayout();
+        recenterLatched = true;
+      }
+    }
+    for (const [object, pair] of pairGrabs) {
+      const [first, second] = pair.controllers;
+      first.updateMatrixWorld(true);
+      second.updateMatrixWorld(true);
+      const a = first.getWorldPosition(new THREE.Vector3());
+      const b = second.getWorldPosition(new THREE.Vector3());
+      const direction = b.clone().sub(a);
+      const distance = direction.length();
+      if (distance < 0.05) continue;
+      const rotation = new THREE.Quaternion().setFromUnitVectors(
+        pair.direction,
+        direction.divideScalar(distance),
+      );
+      object.position.copy(pair.position).add(a.add(b).multiplyScalar(0.5).sub(pair.midpoint));
+      object.quaternion.copy(rotation).multiply(pair.quaternion);
+      const limits = object.userData.scaleLimits as [number, number];
+      object.scale.setScalar(
+        THREE.MathUtils.clamp((pair.scale * distance) / pair.distance, limits[0], limits[1]),
+      );
+    }
     for (const [controller, drag] of dragStates) {
+      if (pairGrabs.has(drag.object)) continue;
       controller.updateMatrixWorld(true);
       const controllerPosition = new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
       const controllerQuaternion = controller.getWorldQuaternion(new THREE.Quaternion());
@@ -671,6 +747,8 @@ export function createWorkspaceScene(
     }
     if (renderer?.xr.isPresenting) {
       let hover: THREE.Object3D | null = null;
+      let bodyHover: THREE.Object3D | null = null;
+      let controlTargeted = false;
       const nextHovered = new Map<THREE.Group, THREE.Object3D>();
       for (const controller of controllerRoots) {
         if (!controller.visible || disconnectedControllers.has(controller)) continue;
@@ -690,13 +768,16 @@ export function createWorkspaceScene(
           contact.visible = Boolean(target?.object);
         }
         const object = target?.object;
+        if (object?.userData.labelText !== undefined) {
+          controlTargeted = true;
+          if (object.userData.helpText) hover ??= object;
+        } else if (object?.userData.helpText) bodyHover ??= object;
         if (
           object &&
           object.userData.labelText !== undefined &&
           (object.userData.inputAction || object.userData.key)
         ) {
           nextHovered.set(controller, object);
-          if (object.userData.helpText) hover ??= object;
         }
       }
       const allHovered = new Set(nextHovered.values());
@@ -713,7 +794,7 @@ export function createWorkspaceScene(
       }
       hoveredByController.clear();
       for (const [controller, object] of nextHovered) hoveredByController.set(controller, object);
-      showHover(hover);
+      showHover(hover ?? (controlTargeted ? null : bodyHover));
     }
     updateHoverPosition();
     observatory.rotation.y = time * 0.00001;
@@ -735,13 +816,15 @@ export function createWorkspaceScene(
   };
   const clearInputRoot = (): void => {
     if (!inputRoot) return;
+    for (const [controller, drag] of [...dragStates])
+      if (drag.object === inputRoot) releaseGrab(controller);
+    pairGrabs.delete(inputRoot);
     for (const [controller, object] of hoveredByController)
       if (inputRoot.getObjectById(object.id)) hoveredByController.delete(controller);
     if (hoveredControl && inputRoot.getObjectById(hoveredControl.id)) showHover(null);
     scene.remove(inputRoot);
     disposeObject(inputRoot);
     inputRoot = null;
-    updateRecoveryVisibility();
   };
   const clearInputCapture = (): void => {
     mutableState.inputTargetId = null;
@@ -764,6 +847,9 @@ export function createWorkspaceScene(
   };
   const refreshInputRoot = (mode: 'commands' | 'keyboard' | 'panes'): void => {
     inputMode = mode;
+    const previousRoot = inputRoot;
+    const previousPair = previousRoot ? pairGrabs.get(previousRoot) : undefined;
+    if (previousRoot) pairGrabs.delete(previousRoot);
     const grabbedControllers = inputRoot
       ? [...dragStates.entries()]
           .filter(([, drag]) => drag.object === inputRoot)
@@ -780,15 +866,16 @@ export function createWorkspaceScene(
     clearInputRoot();
     inputRoot = new THREE.Group();
     inputRoot.name = `xr-${mode}-controls`;
+    inputRoot.userData.scaleLimits = [0.18, 0.9];
     if (inputTransform) {
       inputRoot.position.copy(inputTransform.position);
       inputRoot.quaternion.copy(inputTransform.quaternion);
       inputRoot.scale.setScalar(inputTransform.scale);
     } else resetInputPose();
     for (const controller of grabbedControllers) {
-      const drag = dragStates.get(controller);
-      if (drag) drag.object = inputRoot;
+      captureGrab(controller, inputRoot);
     }
+    if (previousPair) beginPairGrab(inputRoot, ...previousPair.controllers);
     const modeCommands = createLabelButton('Commands', 0.28, 0.09, {
       inputAction: 'mode',
       mode: 'commands',
@@ -810,11 +897,6 @@ export function createWorkspaceScene(
     );
     gazeToggle.position.set(0, 0.84, 0);
     inputRoot.add(gazeToggle);
-    const recovery = createRecoveryControls();
-    recovery.position.y = 1;
-    inputRoot.add(recovery);
-    const hudRecovery = hudRoot?.getObjectByName('xr-recovery-controls');
-    if (hudRecovery) hudRecovery.visible = false;
     const targetTitle = mutableState.inputTargetTitle
       ? `Target: ${mutableState.inputTargetTitle}`
       : 'No target selected';
@@ -948,22 +1030,9 @@ export function createWorkspaceScene(
           inputRoot?.add(button);
         });
       });
-      const inputSmaller = createLabelButton('Smaller', 0.28, 0.08, {
-        inputAction: 'inputScale',
-        direction: -1,
-      });
-      const inputLarger = createLabelButton('Larger', 0.28, 0.08, {
-        inputAction: 'inputScale',
-        direction: 1,
-      });
-      const inputReset = createLabelButton('Reset', 0.24, 0.08, { inputAction: 'inputReset' });
-      inputSmaller.position.set(-0.32, -0.53, 0);
-      inputLarger.position.set(0, -0.53, 0);
-      inputReset.position.set(0.29, -0.53, 0);
-      inputRoot.add(inputSmaller, inputLarger, inputReset);
     }
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
-    close.position.set(0, -0.82, 0);
+    close.position.set(0, -0.66, 0);
     const black = createLabelButton('Black', 0.22, 0.08, {
       inputAction: 'background',
       background: 'black',
@@ -976,9 +1045,9 @@ export function createWorkspaceScene(
       inputAction: 'background',
       background: 'observatory',
     });
-    black.position.set(-0.38, -0.69, 0);
-    gradient.position.set(-0.08, -0.69, 0);
-    observatory.position.set(0.3, -0.69, 0);
+    black.position.set(-0.38, -0.53, 0);
+    gradient.position.set(-0.08, -0.53, 0);
+    observatory.position.set(0.3, -0.53, 0);
     inputRoot.add(close, black, gradient, observatory);
     inputRoot.updateMatrixWorld(true);
     const bounds = new THREE.Box3();
@@ -998,13 +1067,14 @@ export function createWorkspaceScene(
     backing.position.copy(center);
     backing.position.z = -0.015;
     backing.userData.inputAction = 'grabInput';
+    backing.userData.helpText = getControlHelp({ inputAction: 'grabInput' });
     inputRoot.add(backing);
     scene.add(inputRoot);
-    updateRecoveryVisibility();
   };
   const createHud = (): void => {
     hudRoot = new THREE.Group();
     hudRoot.name = 'xr-workspace-hud';
+    hudRoot.userData.scaleLimits = [0.25, 1.4];
     hudRoot.position.set(0, 0.78, -1.35);
     hudRoot.scale.setScalar(0.62);
     const controls: Array<[string, Record<string, unknown>]> = [
@@ -1022,11 +1092,15 @@ export function createWorkspaceScene(
       button.position.x = (index - (controls.length - 1) / 2) * 0.31;
       hudRoot?.add(button);
     });
-    const recovery = createRecoveryControls();
-    recovery.position.y = 0.2;
-    hudRoot.add(recovery);
+    const backing = new THREE.Mesh(
+      new THREE.PlaneGeometry(controls.length * 0.31 + 0.08, 0.15),
+      new THREE.MeshBasicMaterial({ color: 0x0d1720 }),
+    );
+    backing.position.z = -0.015;
+    backing.userData.inputAction = 'grabInput';
+    backing.userData.helpText = 'Two grips resize. Hold both stick clicks 1s to recenter.';
+    hudRoot.add(backing);
     scene.add(hudRoot);
-    updateRecoveryVisibility();
   };
   const panelFitsPreview = (panel: TerminalPanel): boolean => {
     camera.updateMatrixWorld(true);
@@ -1121,36 +1195,6 @@ export function createWorkspaceScene(
       setGazeInputEnabled(!mutableState.gazeInputEnabled);
       return true;
     }
-    if (action === 'selectedScale' || action === 'inputScale') {
-      if (action === 'inputScale' && inputRoot)
-        inputRoot.scale.setScalar(
-          THREE.MathUtils.clamp(
-            inputRoot.scale.x + (hit.userData.direction as number) * 0.05,
-            0.18,
-            0.75,
-          ),
-        );
-      else scaleSelectedPanel(hit.userData.direction as number);
-      return true;
-    }
-    if (action === 'resetLayout' || action === 'inputReset') {
-      if (action === 'inputReset' && inputRoot) {
-        resetInputPose();
-        return true;
-      }
-      resetLayout();
-      return true;
-    }
-    if (action === 'scale') {
-      let parent: THREE.Object3D | null = hit;
-      while (parent && !parent.userData.terminalId) parent = parent.parent;
-      const panel = parent ? panels.get(parent.userData.terminalId as string) : undefined;
-      if (panel) {
-        const direction = hit.userData.direction as number;
-        resizePanel(panel, direction);
-      }
-      return true;
-    }
     if (action === 'fontZoom') {
       let parent: THREE.Object3D | null = hit;
       while (parent && !parent.userData.terminalId) parent = parent.parent;
@@ -1230,16 +1274,8 @@ export function createWorkspaceScene(
     const targets = [...panels.values()].map((panel) => panel.root);
     if (inputRoot) targets.push(inputRoot);
     if (hudRoot) targets.push(hudRoot);
-    const recoveryControls: THREE.Object3D[] = [];
-    for (const root of [hudRoot, inputRoot])
-      root?.traverse((object) => {
-        if (object.userData.recoveryControl && isControlVisible(object))
-          recoveryControls.push(object);
-      });
-    const recoveryIntersection = raycaster.intersectObjects(recoveryControls, false)[0];
     const hits = raycaster.intersectObjects(targets, true);
-    const intersection =
-      recoveryIntersection ?? hits.find((entry) => isControlVisible(entry.object));
+    const intersection = hits.find((entry) => isControlVisible(entry.object));
     const hit = intersection?.object;
     lastRayDistance = intersection?.distance ?? CONTROLLER_RAY_LENGTH;
     if (!hit) return null;
@@ -1258,6 +1294,8 @@ export function createWorkspaceScene(
     return { terminalId, kind: key ? 'key' : 'terminal', object: hit };
   };
   const targetFromController = (root: THREE.Group): InputTarget | null => {
+    scene.updateMatrixWorld(true);
+    root.updateMatrixWorld(true);
     tempMatrix.identity().extractRotation(root.matrixWorld);
     raycaster.ray.origin.setFromMatrixPosition(root.matrixWorld);
     raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix).normalize();
@@ -1318,6 +1356,7 @@ export function createWorkspaceScene(
         onControllerSelect(root);
       };
       const onSqueeze = (event: Event): void => {
+        if (heldControllers.has(root) || disconnectedControllers.has(root)) return;
         heldControllers.add(root);
         const target = targetFromController(root);
         if (!target) return;
@@ -1329,39 +1368,30 @@ export function createWorkspaceScene(
           inputRoot.getObjectById(target.object.id)
         )
           object = inputRoot;
+        else if (hudRoot && target.object && hudRoot.getObjectById(target.object.id))
+          object = hudRoot;
         else if (target.terminalId && target.object) {
           const panel = panels.get(target.terminalId);
           if (panel?.root.getObjectById(target.object.id)) object = panel.root;
         }
         if (!object) return;
-        if (
-          [...dragStates.entries()].some(
-            ([other, drag]) => other !== root && drag.object === object,
-          )
-        )
-          return;
         if (object.userData.terminalId) selectTerminal(object.userData.terminalId as string);
-        object.updateMatrixWorld(true);
-        const objectWorld = new THREE.Vector3().setFromMatrixPosition(object.matrixWorld);
-        const controllerWorld = new THREE.Vector3().setFromMatrixPosition(root.matrixWorld);
-        const controllerRotation = root.getWorldQuaternion(new THREE.Quaternion());
-        dragStates.set(root, {
-          object,
-          localOffset: objectWorld
-            .sub(controllerWorld)
-            .applyQuaternion(controllerRotation.clone().invert()),
-          relativeRotation: controllerRotation
-            .clone()
-            .invert()
-            .multiply(object.getWorldQuaternion(new THREE.Quaternion())),
-          gamepad:
-            controllerGamepads.get(root) ??
-            (event as Event & { data?: { gamepad?: Gamepad } }).data?.gamepad,
-        });
+        const other = [...dragStates.entries()].find(
+          ([controller, drag]) => controller !== root && drag.object === object,
+        )?.[0];
+        if (!controllerGamepads.has(root)) {
+          const gamepad = (event as Event & { data?: { gamepad?: Gamepad } }).data?.gamepad;
+          if (gamepad) controllerGamepads.set(root, gamepad);
+        }
+        captureGrab(root, object);
+        if (other) {
+          captureGrab(other, object);
+          beginPairGrab(object, other, root);
+        }
       };
       const onSqueezeEnd = (): void => {
         heldControllers.delete(root);
-        dragStates.delete(root);
+        releaseGrab(root);
       };
       const onConnected = (event: Event): void => {
         disconnectedControllers.delete(root);
@@ -1375,7 +1405,8 @@ export function createWorkspaceScene(
         rayLine.visible = false;
         contact.visible = false;
         controllerGamepads.delete(root);
-        dragStates.delete(root);
+        releaseGrab(root);
+        recenterSince = null;
         const previous = hoveredByController.get(root);
         hoveredByController.delete(root);
         if (previous && ![...hoveredByController.values()].includes(previous)) {
@@ -1416,6 +1447,7 @@ export function createWorkspaceScene(
     const root = new THREE.Group();
     root.name = `terminal-panel-${surface.pane.id}`;
     root.userData.terminalId = surface.pane.id;
+    root.userData.scaleLimits = [0.6, 1.8];
     root.position.copy(defaultPosition);
     root.rotation.y = index % 2 === 0 ? 0.06 : -0.06;
     const texture = createCanvasTexture(surface);
@@ -1424,6 +1456,7 @@ export function createWorkspaceScene(
       new THREE.MeshBasicMaterial({ map: texture }),
     );
     screen.name = 'terminal-surface';
+    screen.userData.helpText = getControlHelp({ terminalTitle: true });
     root.add(screen);
     const frame = new THREE.Mesh(
       new THREE.BoxGeometry(PANEL_WIDTH + 0.035, PANEL_HEIGHT + 0.06, 0.035),
@@ -1436,16 +1469,6 @@ export function createWorkspaceScene(
     keyStrip.traverse((child: THREE.Object3D) => {
       child.userData.terminalId = surface.pane.id;
     });
-    const scaleDown = createLabelButton('−', 0.1, 0.1, {
-      inputAction: 'scale',
-      direction: -1,
-      terminalId: surface.pane.id,
-    });
-    const scaleUp = createLabelButton('+', 0.1, 0.1, {
-      inputAction: 'scale',
-      direction: 1,
-      terminalId: surface.pane.id,
-    });
     const fontDown = createLabelButton('A−', 0.12, 0.1, {
       inputAction: 'fontZoom',
       direction: -1,
@@ -1456,8 +1479,6 @@ export function createWorkspaceScene(
       direction: 1,
       terminalId: surface.pane.id,
     });
-    scaleDown.position.set(-0.79, 0.38, 0.02);
-    scaleUp.position.set(0.79, 0.38, 0.02);
     fontDown.position.set(-0.79, 0.22, 0.02);
     fontUp.position.set(0.79, 0.22, 0.02);
     root.userData.fontZoom = 1;
@@ -1466,7 +1487,7 @@ export function createWorkspaceScene(
       terminalTitle: true,
     });
     titleLabel.position.set(0, 0.47, 0.02);
-    root.add(selection, keyStrip, scaleDown, scaleUp, fontDown, fontUp, titleLabel);
+    root.add(selection, keyStrip, fontDown, fontUp, titleLabel);
     const panel: TerminalPanel = {
       id: surface.pane.id,
       surface,
@@ -1501,7 +1522,7 @@ export function createWorkspaceScene(
     panel.texture.dispose();
     panels.delete(id);
     dragStates.forEach((drag, controller) => {
-      if (drag.object.userData.terminalId === id) dragStates.delete(controller);
+      if (drag.object.userData.terminalId === id) releaseGrab(controller);
     });
     if (mutableState.inputTargetId === id) {
       clearInputCapture();
@@ -1641,7 +1662,7 @@ export function createWorkspaceScene(
         scale: inputRoot.scale.x,
       };
     dragStates.forEach((drag, controller) => {
-      if (drag.object === inputRoot) dragStates.delete(controller);
+      if (drag.object === inputRoot) releaseGrab(controller);
     });
     clearInputRoot();
     clearInputCapture();
@@ -1672,7 +1693,6 @@ export function createWorkspaceScene(
     renderer.xr.setReferenceSpaceType('local-floor');
     await renderer.xr.setSession(session as Parameters<typeof renderer.xr.setSession>[0]);
     mutableState.xrMode = mode;
-    updateRecoveryVisibility();
     if (mode === 'ar') {
       observatory.visible = false;
       scene.background = null;
@@ -1687,6 +1707,9 @@ export function createWorkspaceScene(
       hideInput();
       inputTransform = null;
       dragStates.clear();
+      pairGrabs.clear();
+      recenterSince = null;
+      recenterLatched = false;
       heldControllers.clear();
       controllerGamepads.clear();
       previousRenderTime = null;
@@ -1694,6 +1717,11 @@ export function createWorkspaceScene(
       showHover(null);
       gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
       mutableState.xrMode = 'desktop';
+      if (hudRoot) {
+        hudRoot.position.set(0, 0.78, -1.35);
+        hudRoot.quaternion.identity();
+        hudRoot.scale.setScalar(0.62);
+      }
       camera.position.copy(desktopCameraPosition);
       camera.quaternion.copy(desktopCameraQuaternion);
       observatory.visible = mutableState.background === 'observatory';
@@ -1709,6 +1737,30 @@ export function createWorkspaceScene(
       panel.root.scale.setScalar(1);
     }
     dragStates.clear();
+    pairGrabs.clear();
+    if (hudRoot) {
+      hudRoot.position.set(0, 0.78, -1.35);
+      hudRoot.quaternion.identity();
+      hudRoot.scale.setScalar(0.62);
+    }
+    if (renderer?.xr.isPresenting) {
+      const view = renderer.xr.getCamera();
+      view.updateMatrixWorld(true);
+      const eye = view.getWorldPosition(new THREE.Vector3());
+      const rotation = view.getWorldQuaternion(new THREE.Quaternion());
+      for (const panel of panels.values()) {
+        panel.root.position
+          .copy(panel.defaultPosition)
+          .add(new THREE.Vector3(0, -1.52, 0))
+          .applyQuaternion(rotation)
+          .add(eye);
+        panel.root.quaternion.premultiply(rotation);
+      }
+      if (hudRoot) {
+        hudRoot.position.set(0, -0.65, -1.35).applyQuaternion(rotation).add(eye);
+        hudRoot.quaternion.copy(rotation);
+      }
+    }
     resetInputPose();
     notify();
   };
@@ -1790,6 +1842,7 @@ export function createWorkspaceScene(
     hoveredControl = null;
     hoveredByController.clear();
     dragStates.clear();
+    pairGrabs.clear();
     canvas.title = '';
     scene.remove(hoverHelp);
     disposeObject(hoverHelp);

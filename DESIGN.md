@@ -141,7 +141,7 @@ Desktop UI uses a full-height application frame with a top bar, a sidebar for mu
 
 Desktop terminals use flat canvases at their logical text size, with scrolling rather than shrinking an entire terminal into a narrow card. At ordinary widths panels stack. A 3D preview toggle exposes the spatial scene. Canvas backing resolution follows device density up to 2x.
 
-In XR, terminal panels are movable spatial surfaces. Input opens as an explicit commands, keyboard, or panes surface near the workspace, and panel scale and font zoom are separate controls. Do not imply a fixed radial layout or a maximum panel count beyond the two-pane readability acceptance target.
+In XR, every UI root is a movable spatial surface: panes, keyboard, commands, hierarchy and the workspace HUD. Grip one controller to move and rotate a root, use thumbstick X to turn and Y to lift, and hold grip plus trigger to push or pull with thumbstick Y. Grip the same surface with both controllers to resize by hand spread, rotate by hand direction and move by midpoint. The default keyboard remains small, and transforms persist while typing, retargeting and switching modes. XR has no dedicated physical resize or reset controls. If UI space is lost, with no grips held, hold both thumbstick clicks (button 3) for one second to recenter all panes, HUD and input surfaces near the current headset position and reset physical scale. This does not resize the PTY. Desktop 3D preview keeps its mouse Smaller, Larger and Reset layout toolbar. Do not imply a fixed radial layout or a maximum panel count beyond the two-pane readability acceptance target.
 
 ## Elevation & Depth
 
@@ -181,7 +181,7 @@ The form language is compact and gently softened. Desktop containers use an 8px 
 Non-obvious controls explain their action on browser hover or controller-ray hover. Spatial hints use the existing dark label treatment, face the viewer and stay outside ray picking. Hover feedback never sends terminal input or changes its target.
 
 ### XR Terminal Panel
-Each panel presents one live pane with a readable terminal surface, title label, key strip, scale controls, and font zoom controls. Selection is explicit by default and independent from gaze emphasis. Optional Gaze input uses a short head-directed dwell to retarget the keyboard, with a visible target caption. The observatory background is peripheral architecture and a distant planet, never a competing focal surface.
+Each panel presents one live pane with a readable terminal surface, title label, key strip and local A± font zoom controls. The whole panel is a grabbable transform root, as are the keyboard, commands, hierarchy and workspace HUD surfaces. Selection is explicit by default and independent from gaze emphasis. Optional Gaze input uses a short head-directed dwell to retarget the keyboard, with a visible target caption. Hover help on non-obvious surfaces explains the gesture controls. The observatory background is peripheral architecture and a distant planet, never a competing focal surface.
 
 ## Do's and Don'ts
 

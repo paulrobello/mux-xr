@@ -313,10 +313,13 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
       'recovery control left the viewport',
     );
     assert(
-      (await currentHints()).some(
-        (hint) => hint.inputAction === 'scale' && hint.label === '−' && hint.terminalId === '%1',
+      !(await currentHints()).some(
+        (hint) =>
+          hint.inputAction === 'scale' ||
+          hint.inputAction === 'inputScale' ||
+          hint.inputAction === 'selectedScale',
       ),
-      'attached shrink control left the preview',
+      'spatial transform buttons remain in the scene',
     );
     await page.screenshot({
       path: join(REVIEW_DIR, `${viewport.name}-bounded-panel.png`),

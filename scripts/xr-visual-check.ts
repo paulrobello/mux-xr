@@ -18,12 +18,16 @@ type VisualMetrics = {
   renderer: string;
   controllerRayDistance: number;
   highlightedColor: string;
+  xrTransformButtons: string[];
+  pairGrip: { scaleBefore: number; scaleAfter: number; moved: number };
 };
 
 type FixtureWindow = Window & {
   __muxXRVisualFixture?: {
     metrics: () => VisualMetrics;
     highlightController: () => void;
+    simulatePairGrip: () => void;
+    releasePairGrip: () => void;
   };
 };
 
@@ -229,6 +233,8 @@ async function createFixture(page: Page): Promise<void> {
     scene.selectTerminal('%fixture-a');
     scene.showInput('keyboard');
 
+    let pairStartPosition: import('three').Vector3 | null = null;
+    let pairStartScale = 0;
     const fixtureWindow = window as FixtureWindow;
     fixtureWindow.__muxXRVisualFixture = {
       metrics: () => {
@@ -271,6 +277,17 @@ async function createFixture(page: Page): Promise<void> {
           }
         ).__muxXRVisualControllers;
         const controller = controllers[0];
+        const xrTransformButtons: string[] = [];
+        scene.scene.traverse((object: import('three').Object3D) => {
+          if (
+            object.name.startsWith('xr-') &&
+            ['inputScale', 'inputReset', 'selectedScale', 'resetLayout'].includes(
+              String(object.userData.inputAction),
+            )
+          ) {
+            xrTransformButtons.push(String(object.userData.inputAction));
+          }
+        });
         const highlightedKey = (() => {
           let result: import('three').Object3D | undefined;
           keyboard.traverse((object: import('three').Object3D) => {
@@ -311,6 +328,12 @@ async function createFixture(page: Page): Promise<void> {
           renderer: rendererName,
           controllerRayDistance: Number(controller.userData.rayDistance ?? 0),
           highlightedColor,
+          xrTransformButtons,
+          pairGrip: {
+            scaleBefore: pairStartScale,
+            scaleAfter: keyboard.scale.x,
+            moved: pairStartPosition ? keyboard.position.distanceTo(pairStartPosition) : 0,
+          },
         };
       },
       highlightController: () => {
@@ -338,6 +361,59 @@ async function createFixture(page: Page): Promise<void> {
         controller.quaternion.copy(orientation);
         controller.updateMatrixWorld(true);
         controller.dispatchEvent({ type: 'connected' } as never);
+      },
+      simulatePairGrip: () => {
+        const THREE = (window as unknown as { __muxXRVisualThree: VisualThree }).__muxXRVisualThree;
+        const controllers = (
+          window as unknown as {
+            __muxXRVisualControllers: Array<InstanceType<VisualThree['Group']>>;
+          }
+        ).__muxXRVisualControllers;
+        const keyboard = scene.scene.getObjectByName('xr-keyboard-controls');
+        if (!keyboard) throw new Error('Actual scene did not create xr-keyboard-controls');
+        const targets: import('three').Object3D[] = [];
+        keyboard.traverse((object: import('three').Object3D) => {
+          if (object.userData.key === 'a' || object.userData.key === 'Shift') targets.push(object);
+        });
+        if (targets.length < 2) throw new Error('Keyboard grip targets missing');
+        keyboard.updateMatrixWorld(true);
+        targets.sort(
+          (a, b) =>
+            a.getWorldPosition(new THREE.Vector3()).x - b.getWorldPosition(new THREE.Vector3()).x,
+        );
+        const aim = (
+          controller: InstanceType<VisualThree['Group']>,
+          target: import('three').Object3D,
+        ): void => {
+          const orientation = target.getWorldQuaternion(new THREE.Quaternion());
+          controller.position.copy(
+            target
+              .getWorldPosition(new THREE.Vector3())
+              .add(new THREE.Vector3(0, 0, 0.3).applyQuaternion(orientation)),
+          );
+          controller.quaternion.copy(orientation);
+        };
+        aim(controllers[0], targets[0]);
+        aim(controllers[1], targets[1]);
+        controllers[0].dispatchEvent({ type: 'connected' } as never);
+        controllers[1].dispatchEvent({ type: 'connected' } as never);
+        controllers[0].dispatchEvent({ type: 'squeezestart' } as never);
+        pairStartScale = keyboard.scale.x;
+        pairStartPosition = keyboard.position.clone();
+        controllers[1].dispatchEvent({ type: 'squeezestart' } as never);
+        controllers[0].position.x -= 0.15;
+        controllers[1].position.x += 0.15;
+        controllers[1].position.y += 0.12;
+      },
+      releasePairGrip: () => {
+        const controllers = (
+          window as unknown as {
+            __muxXRVisualControllers: Array<InstanceType<VisualThree['Group']>>;
+          }
+        ).__muxXRVisualControllers;
+        controllers[0].dispatchEvent({ type: 'squeezeend' } as never);
+        controllers[1].dispatchEvent({ type: 'squeezeend' } as never);
+        scene.resetLayout();
       },
     };
   });
@@ -368,6 +444,28 @@ async function main(): Promise<void> {
       if (!fixture) throw new Error('XR visual fixture did not initialize');
       return fixture.metrics();
     });
+    await page.evaluate(() => {
+      const fixture = (window as FixtureWindow).__muxXRVisualFixture;
+      if (!fixture) throw new Error('XR visual fixture did not initialize');
+      fixture.simulatePairGrip();
+    });
+    await page.waitForFunction(
+      () => {
+        const metric = (window as FixtureWindow).__muxXRVisualFixture?.metrics();
+        return (
+          metric &&
+          metric.pairGrip.scaleAfter > metric.pairGrip.scaleBefore &&
+          metric.pairGrip.moved > 0.01
+        );
+      },
+      undefined,
+      { timeout: 5000 },
+    );
+    const gripped = await page.evaluate(() => {
+      const fixture = (window as FixtureWindow).__muxXRVisualFixture;
+      if (!fixture) throw new Error('XR visual fixture did not initialize');
+      return fixture.metrics();
+    });
     assert(
       metrics.keyboard.visibleKeys >= 40,
       `Expected all keyboard keys, got ${metrics.keyboard.visibleKeys}`,
@@ -384,11 +482,23 @@ async function main(): Promise<void> {
       metrics.keyboard.projectedHeight > 0.2 && metrics.keyboard.projectedHeight < 1.8,
       'Keyboard is not a bounded in-view height',
     );
+    assert(
+      metrics.xrTransformButtons.length === 0,
+      `XR transform buttons remain: ${metrics.xrTransformButtons.join(', ')}`,
+    );
+    assert(
+      gripped.pairGrip.scaleAfter > gripped.pairGrip.scaleBefore,
+      'Pair grip did not scale keyboard',
+    );
+    assert(gripped.pairGrip.moved > 0.01, 'Pair grip did not move keyboard');
     assert(metrics.renderer !== 'unknown', 'WebGL debug renderer information is unavailable');
     assert(
       !/swiftshader/i.test(metrics.renderer),
       `SwiftShader renderer detected: ${metrics.renderer}`,
     );
+    await page.screenshot({ path: join(REVIEW_DIR, 'quest-keyboard-gripped.png') });
+    await page.evaluate(() => (window as FixtureWindow).__muxXRVisualFixture?.releasePairGrip());
+    await page.waitForTimeout(100);
     await page.screenshot({ path: KEYBOARD_SCREENSHOT });
     await page.evaluate(() => {
       const fixture = (window as FixtureWindow).__muxXRVisualFixture;
@@ -423,6 +533,8 @@ async function main(): Promise<void> {
             controllerRayDistance: highlighted.controllerRayDistance,
             highlightedColor: highlighted.highlightedColor,
           },
+          pairGrip: gripped.pairGrip,
+          xrTransformButtons: metrics.xrTransformButtons,
           screenshotPaths: [KEYBOARD_SCREENSHOT, HIGHLIGHT_SCREENSHOT],
           pageErrors,
           limitations: [
@@ -435,6 +547,17 @@ async function main(): Promise<void> {
         2,
       ),
     );
+  } catch (error) {
+    console.error(
+      'XR fixture state:',
+      await page
+        .evaluate(() => (window as FixtureWindow).__muxXRVisualFixture?.metrics())
+        .catch(() => null),
+    );
+    await page
+      .screenshot({ path: join(REVIEW_DIR, 'quest-keyboard-failure.png') })
+      .catch(() => undefined);
+    throw error;
   } finally {
     await context.close();
     await browser.close();

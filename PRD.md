@@ -14,7 +14,7 @@ A LAN-only Quest 3 workspace for monitoring par-mux terminals and issuing occasi
 
 ## Goals
 
-- At least two readable live panes, with move, physical resize, rotation and local font zoom.
+- At least two readable live panes, with movable XR UI roots, physical scale, rotation and local font zoom. Pane, keyboard, commands, hierarchy and workspace HUD surfaces transform as units.
 - Hierarchy navigation: daemon > workspace > session > window/tab > pane. One pane per MVP panel.
 - Explicit command target, global/workspace quick commands, terminal key strip and virtual keyboard.
 - Passthrough and VR with black, gradient and one polished silent sci-fi observatory.
@@ -36,11 +36,11 @@ Public hosting/tunnels, physical keyboard dependency, ambient sound, arbitrary r
 
 ## Architecture Direction
 
-TypeScript + Vite + Three.js. One terminal emulator and canvas surface per displayed pane. Reuse the core's generated protobuf schema and codec. Canvas textures feed XR meshes, updated only when output changes. Desktop mode displays the terminal canvases flat at their logical size, with a separate 3D preview. DOM controls offer the same operations for setup, debugging and desktop use. Input presentation is mode-specific: browser and 3D preview use the compact DOM drawer, while immersive XR uses native scene input only. Panel recovery controls remain independent of panel scale. XR controls must be native scene content, not DOM overlays presumed visible in immersion.
+TypeScript + Vite + Three.js. One terminal emulator and canvas surface per displayed pane. Reuse the core's generated protobuf schema and codec. Canvas textures feed XR meshes, updated only when output changes. Desktop mode displays the terminal canvases flat at their logical size, with a separate 3D preview. DOM controls offer the same operations for setup, debugging and desktop use. Input presentation is mode-specific: browser and 3D preview use the compact DOM drawer, while immersive XR uses native scene input only. Every XR UI root (pane, keyboard, commands, hierarchy and workspace HUD) is a grabbable transform unit. XR controls must be native scene content, not DOM overlays presumed visible in immersion. Desktop mouse preview retains its Smaller, Larger and Reset layout toolbar; XR does not add dedicated physical resize or reset buttons.
 
 Typed boundaries separate terminal transport, hierarchy metadata, local settings, controls and XR rendering. Headset-local storage is versioned and validated. Connections reject input while disconnected, never replay unsent commands, and detach without killing panes. Menu targets start at the selected pane and follow later explicit pane selections. Gaze changes the keyboard target only when Gaze input is enabled. Use a 350 ms head-directed dwell and retain the last pane target when looking at the keyboard. Closing/removing a panel withdraws its viewer connection.
 
-Only explicit grid resize changes rows/columns. Grabbing, zooming, gazing or changing backgrounds does not send a resize. Preserve existing streamer authentication/origin configuration. LAN HTTPS/WSS must be trusted by the headset; no credentials or trust changes are silently provisioned. Initial planned local ports are 4240 (app) and 4241 (isolated verification), subject to reservation before use.
+One-controller grip moves and rotates an XR root, thumbstick X turns it and Y lifts it, and grip plus trigger pushes or pulls with thumbstick Y. Two-controller grip resizes from hand spread, rotates from hand direction and moves from the midpoint. Transforms persist while typing, retargeting and switching modes. If all grips are released, holding both thumbstick clicks (button 3) for one second recenters every pane, the HUD and input surfaces near the current headset position and resets physical scale. Only explicit grid resize changes rows/columns. Grabbing, scaling, zooming, gazing or changing backgrounds does not send a PTY resize. Preserve existing streamer authentication/origin configuration. LAN HTTPS/WSS must be trusted by the headset; no credentials or trust changes are silently provisioned. Initial planned local ports are 4240 (app) and 4241 (isolated verification), subject to reservation before use.
 
 ### Upstream Dependencies
 

@@ -125,6 +125,41 @@ function hit(
   controller.dispatchEvent({ type: event } as never);
 }
 
+function objectWithData(
+  workspace: ReturnType<typeof createWorkspaceScene>,
+  data: Record<string, unknown>,
+): THREE.Object3D {
+  let result: THREE.Object3D | undefined;
+  workspace.scene.traverse((object) => {
+    if (!result && Object.entries(data).every(([key, value]) => object.userData[key] === value))
+      result = object;
+  });
+  if (!result) throw new Error(`Control not found: ${JSON.stringify(data)}`);
+  return result;
+}
+
+function aimController(controller: THREE.Group, target: THREE.Object3D, distance = 0.3): void {
+  const orientation = target.getWorldQuaternion(new THREE.Quaternion());
+  controller.position.copy(
+    target
+      .getWorldPosition(new THREE.Vector3())
+      .add(new THREE.Vector3(0, 0, distance).applyQuaternion(orientation)),
+  );
+  controller.quaternion.copy(orientation);
+}
+
+function connectController(index: number, axes = [0, 0, 0, 0]): Gamepad {
+  const gamepad = {
+    axes,
+    buttons: [{ pressed: false }, { pressed: false }, { pressed: false }, { pressed: false }],
+  } as unknown as Gamepad;
+  (fakeXR.controllers[index] as THREE.Group).dispatchEvent({
+    type: 'connected',
+    data: { gamepad },
+  } as never);
+  return gamepad;
+}
+
 describe('native XR controller event routing', () => {
   beforeEach(() => {
     fakeXR.presenting = true;
@@ -183,7 +218,7 @@ describe('native XR controller event routing', () => {
     }
   });
 
-  it('bounds preview growth and keeps independent recovery controls usable', () => {
+  it('bounds desktop panel growth without exposing XR recovery controls', () => {
     fakeXR.presenting = false;
     const { workspace, right, container } = fixture();
     workspace.selectTerminal('pane-b');
@@ -199,18 +234,20 @@ describe('native XR controller event routing', () => {
           expect(Math.abs(point.x)).toBeLessThanOrEqual(0.981);
           expect(Math.abs(point.y)).toBeLessThanOrEqual(0.981);
         }
-    panel.scale.setScalar(1.8);
-    workspace.scaleSelectedPanel(-1);
-    expect(panel.scale.x).toBeCloseTo(1.7);
     fakeXR.presenting = true;
     fakeXR.frame?.(16);
-    hit(workspace, { inputAction: 'resetLayout' });
-    expect(panel.scale.x).toBe(1);
-    panel.scale.setScalar(1.8);
-    panel.position.z = -0.4;
     workspace.showInput('keyboard');
-    hit(workspace, { inputAction: 'selectedScale', direction: -1 }, 'selectstart', 1);
-    expect(panel.scale.x).toBeCloseTo(1.7);
+    const xrRoots = [
+      workspace.scene.getObjectByName('xr-keyboard-controls'),
+      workspace.scene.getObjectByName('xr-workspace-hud'),
+    ];
+    for (const root of xrRoots) {
+      root?.traverse((object) => {
+        expect(['inputScale', 'inputReset', 'selectedScale', 'resetLayout']).not.toContain(
+          object.userData.inputAction,
+        );
+      });
+    }
     expect(right.resizeGrid).not.toHaveBeenCalled();
     workspace.dispose();
     container.remove();
@@ -237,17 +274,16 @@ describe('native XR controller event routing', () => {
     pointer('pointerdown', enter);
     expect(actions.selectPane).toHaveBeenLastCalledWith('pane-b');
     expect(actions.sendKey).toHaveBeenLastCalledWith('Enter', undefined);
-    const shrink = workspace
+    const fontDown = workspace
       .getControlHints()
       .find(
         (hint) =>
-          hint.inputAction === 'scale' && hint.label === '−' && hint.terminalId === 'pane-b',
+          hint.inputAction === 'fontZoom' && hint.label === 'A−' && hint.terminalId === 'pane-b',
       );
-    if (!shrink) throw new Error('Scale target missing');
-    pointer('pointermove', shrink);
-    expect(workspace.canvas.title).toContain('Shrink panel');
-    pointer('pointerdown', shrink);
-    expect(workspace.scene.getObjectByName('terminal-panel-pane-b')?.scale.x).toBeLessThan(1);
+    if (!fontDown) throw new Error('Font zoom target missing');
+    pointer('pointermove', fontDown);
+    expect(workspace.canvas.title).toContain('text');
+    pointer('pointerdown', fontDown);
     expect(right.resizeGrid).not.toHaveBeenCalled();
     workspace.canvas.dispatchEvent(new PointerEvent('pointerleave'));
     expect(workspace.canvas.title).toBe('');
@@ -309,7 +345,7 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('grips the title owner and leaves the workspace HUD fixed', () => {
+  it('grips panel and HUD roots as movable workspace objects', () => {
     const { workspace, actions, container } = fixture();
     workspace.selectTerminal('pane-a');
     const paneA = workspace.scene.getObjectByName('terminal-panel-pane-a');
@@ -329,7 +365,7 @@ describe('native XR controller event routing', () => {
     hit(workspace, { inputAction: 'gazeInput' }, 'squeezestart');
     controller.position.y += 0.2;
     fakeXR.frame?.(32);
-    expect(hud.position.distanceTo(originalHud)).toBeLessThan(0.000001);
+    expect(hud.position.distanceTo(originalHud)).toBeGreaterThan(0.01);
     expect(workspace.state.gazeInputEnabled).toBe(false);
     expect(actions.sendKey).not.toHaveBeenCalled();
     workspace.dispose();
@@ -456,7 +492,7 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('keeps the native keyboard compact, headset-relative, and independently scalable', () => {
+  it('keeps the native keyboard compact and omits physical transform buttons', () => {
     const { workspace, container } = fixture();
     workspace.showInput('keyboard');
     const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
@@ -464,9 +500,10 @@ describe('native XR controller event routing', () => {
     const before = new THREE.Box3().setFromObject(keyboard);
     expect(before.getSize(new THREE.Vector3()).x).toBeLessThanOrEqual(1.1);
     expect(keyboard.position.length()).toBeGreaterThan(0.5);
-    const initialScale = keyboard.scale.x;
-    hit(workspace, { inputAction: 'inputScale', direction: -1 });
-    expect(keyboard.scale.x).toBeLessThan(initialScale);
+    const transformActions = new Set(['inputScale', 'inputReset', 'resetLayout', 'selectedScale']);
+    keyboard.traverse((object) =>
+      expect(transformActions.has(String(object.userData.inputAction))).toBe(false),
+    );
     workspace.dispose();
     container.remove();
   });
@@ -507,13 +544,22 @@ describe('native XR controller event routing', () => {
         ).toBe(false);
       }
     }
-    workspace.hideInput();
+    const viewRotation = workspace.camera.getWorldQuaternion(new THREE.Quaternion());
+    const eye = workspace.camera.getWorldPosition(new THREE.Vector3());
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+    if (!panel || !hud) throw new Error('Workspace roots missing');
+    keyboard.position.x += 1;
+    panel.position.x -= 1;
+    hud.position.x += 1;
     workspace.resetLayout();
-    workspace.camera.position.x += 2;
-    workspace.camera.updateMatrixWorld(true);
-    workspace.showInput('keyboard');
-    const reopened = workspace.scene.getObjectByName('xr-keyboard-controls');
-    expect(reopened?.position.x).toBeCloseTo(expected.x + 2, 5);
+    expect(keyboard.position.distanceTo(expected)).toBeLessThan(0.000001);
+    const expectedPanel = new THREE.Vector3(-0.87, 1.5 - 1.52, -1.5)
+      .applyQuaternion(viewRotation)
+      .add(eye);
+    const expectedHud = new THREE.Vector3(0, -0.65, -1.35).applyQuaternion(viewRotation).add(eye);
+    expect(panel.position.distanceTo(expectedPanel)).toBeLessThan(0.6);
+    expect(hud.position.distanceTo(expectedHud)).toBeLessThan(0.6);
     workspace.dispose();
     container.remove();
   });
@@ -588,7 +634,7 @@ describe('native XR controller event routing', () => {
       const gamepad = { axes: [0, 0, 1, 0], buttons: [{ pressed: false }] } as unknown as Gamepad;
       controller.dispatchEvent({ type: 'connected', data: { gamepad } } as never);
       fakeXR.frame?.(0);
-      hit(workspace, { inputAction: 'grabInput' }, 'squeezestart');
+      hit(workspace, { inputAction: 'grabInput', dragHandle: true }, 'squeezestart');
       const initial = keyboard.quaternion.clone();
       for (let frame = 1; frame <= hz; frame += 1) fakeXR.frame?.((frame * 1000) / hz);
       const angle = initial.angleTo(keyboard.quaternion);
@@ -606,7 +652,7 @@ describe('native XR controller event routing', () => {
   it('preserves a held keyboard transform through Shift and pane retargeting', () => {
     const { workspace, container } = fixture();
     workspace.showInput('keyboard');
-    hit(workspace, { inputAction: 'grabInput' }, 'squeezestart');
+    hit(workspace, { inputAction: 'grabInput', dragHandle: true }, 'squeezestart');
     const grip = fakeXR.controllers[0] as THREE.Group;
     const trigger = fakeXR.controllers[1] as THREE.Group;
     grip.position.x += 0.2;
@@ -631,6 +677,243 @@ describe('native XR controller event routing', () => {
     grip.position.y += 0.1;
     fakeXR.frame?.(32);
     expect(refreshed?.position.y).toBeGreaterThan(position.y + 0.09);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('uses two-controller grip for shared-root translation, rotation, and scale', () => {
+    const { workspace, actions, container } = fixture();
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    workspace.scene.updateMatrixWorld(true);
+    const keyA = objectWithData(workspace, { inputAction: 'key', key: 'a' });
+    const shift = objectWithData(workspace, { inputAction: 'key', key: 'Shift' });
+    const left = fakeXR.controllers[0] as THREE.Group;
+    const right = fakeXR.controllers[1] as THREE.Group;
+    connectController(0);
+    connectController(1);
+    aimController(left, keyA);
+    left.dispatchEvent({ type: 'squeezestart' } as never);
+    const initialScale = keyboard.scale.x;
+    const initialPosition = keyboard.position.clone();
+    expect(initialScale).toBeCloseTo(0.38, 4);
+    aimController(right, shift);
+    right.dispatchEvent({ type: 'squeezestart' } as never);
+    expect(keyboard.scale.x).toBeCloseTo(initialScale, 6);
+    left.position.x -= 0.2;
+    right.position.x += 0.2;
+    right.position.y += 0.08;
+    fakeXR.frame?.(16);
+    expect(keyboard.scale.x).toBeGreaterThan(initialScale);
+    expect(keyboard.position.distanceTo(initialPosition)).toBeGreaterThan(0.01);
+    expect(keyboard.quaternion.angleTo(new THREE.Quaternion())).toBeGreaterThan(0.01);
+    const scaleWhilePairHeld = keyboard.scale.x;
+    right.dispatchEvent({ type: 'squeezeend' } as never);
+    const releasedPosition = keyboard.position.clone();
+    fakeXR.frame?.(24);
+    expect(keyboard.position.distanceTo(releasedPosition)).toBeLessThan(0.000001);
+    left.position.x -= 0.1;
+    fakeXR.frame?.(32);
+    expect(keyboard.scale.x).toBeCloseTo(scaleWhilePairHeld, 6);
+    expect(keyboard.position.x).toBeLessThan(initialPosition.x);
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('rebases one-hand pose on disconnect and preserves ownership across menu refresh', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    const left = fakeXR.controllers[0] as THREE.Group;
+    const right = fakeXR.controllers[1] as THREE.Group;
+    const keyA = objectWithData(workspace, { inputAction: 'key', key: 'a' });
+    const shift = objectWithData(workspace, { inputAction: 'key', key: 'Shift' });
+    connectController(0);
+    connectController(1);
+    aimController(left, keyA);
+    aimController(right, shift);
+    left.dispatchEvent({ type: 'squeezestart' } as never);
+    right.dispatchEvent({ type: 'squeezestart' } as never);
+    const pairScale = keyboard.scale.x;
+    workspace.showInput('commands');
+    const refreshed = workspace.scene.getObjectByName('xr-commands-controls');
+    if (!refreshed) throw new Error('Commands menu missing');
+    expect(refreshed.scale.x).toBeCloseTo(pairScale, 6);
+    workspace.selectTerminal('pane-b');
+    const refreshedAfterSelection = workspace.scene.getObjectByName('xr-commands-controls');
+    if (!refreshedAfterSelection) throw new Error('Commands menu missing after selection');
+    expect(refreshedAfterSelection.scale.x).toBeCloseTo(pairScale, 6);
+    const poseAfterRefresh = refreshedAfterSelection.position.clone();
+    const rotationAfterRefresh = refreshedAfterSelection.quaternion.clone();
+    fakeXR.frame?.(32);
+    expect(refreshedAfterSelection.position.distanceTo(poseAfterRefresh)).toBeLessThan(0.000001);
+    expect(refreshedAfterSelection.quaternion.angleTo(rotationAfterRefresh)).toBeLessThan(0.000001);
+    right.dispatchEvent({ type: 'disconnected' } as never);
+    const beforeMove = refreshedAfterSelection.position.clone();
+    left.position.y += 0.15;
+    fakeXR.frame?.(48);
+    expect(refreshedAfterSelection.position.y).toBeGreaterThan(beforeMove.y + 0.1);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('disposes a grabbed input root when its target pane is removed', () => {
+    const { workspace, actions, right, container } = fixture();
+    workspace.selectTerminal('pane-a');
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    const keyA = objectWithData(workspace, { inputAction: 'key', key: 'a' });
+    const shift = objectWithData(workspace, { inputAction: 'key', key: 'Shift' });
+    if (!keyboard) throw new Error('Keyboard missing');
+    connectController(0);
+    connectController(1);
+    aimController(fakeXR.controllers[0] as THREE.Group, keyA);
+    aimController(fakeXR.controllers[1] as THREE.Group, shift);
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezestart' } as never);
+    (fakeXR.controllers[1] as THREE.Group).dispatchEvent({ type: 'squeezestart' } as never);
+    const remainingScale = (workspace.scene.getObjectByName('terminal-panel-pane-b') as THREE.Group)
+      .scale.x;
+    workspace.removeTerminal('pane-a');
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+    (fakeXR.controllers[0] as THREE.Group).position.x -= 0.4;
+    (fakeXR.controllers[1] as THREE.Group).position.x += 0.4;
+    fakeXR.frame?.(64);
+    expect(
+      (workspace.scene.getObjectByName('terminal-panel-pane-b') as THREE.Group).scale.x,
+    ).toBeCloseTo(remainingScale, 6);
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    expect(right.resizeGrid).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it.each([
+    [
+      'terminal',
+      'terminal-panel-pane-a',
+      undefined,
+      { terminalTitle: true, terminalId: 'pane-a' },
+      { inputAction: 'fontZoom', terminalId: 'pane-a' },
+    ],
+    [
+      'keyboard',
+      'xr-keyboard-controls',
+      'keyboard',
+      { inputAction: 'key', key: 'a' },
+      { inputAction: 'key', key: 'Shift' },
+    ],
+    [
+      'commands',
+      'xr-commands-controls',
+      'commands',
+      { inputAction: 'pane', paneId: 'pane-a' },
+      { inputAction: 'mode', mode: 'keyboard' },
+    ],
+    [
+      'panes',
+      'xr-panes-controls',
+      'panes',
+      { inputAction: 'hierarchyNext' },
+      { inputAction: 'mode', mode: 'keyboard' },
+    ],
+    [
+      'hud',
+      'xr-workspace-hud',
+      undefined,
+      { inputAction: 'openInput', mode: 'commands' },
+      { inputAction: 'openInput', mode: 'keyboard' },
+    ],
+  ])(
+    'pair-grips the %s root without activating controls or resizing PTY',
+    (_label, rootName, mode, firstData, secondData) => {
+      const { workspace, actions, right, container } = fixture();
+      if (mode) workspace.showInput(mode as 'commands' | 'keyboard' | 'panes');
+      const root = workspace.scene.getObjectByName(rootName);
+      if (!root) throw new Error(`${rootName} missing`);
+      const first = objectWithData(workspace, firstData);
+      const second = objectWithData(workspace, secondData);
+      connectController(0);
+      connectController(1);
+      aimController(fakeXR.controllers[0] as THREE.Group, first);
+      aimController(fakeXR.controllers[1] as THREE.Group, second);
+      const initialScale = root.scale.x;
+      const initialPosition = root.position.clone();
+      (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezestart' } as never);
+      (fakeXR.controllers[1] as THREE.Group).dispatchEvent({ type: 'squeezestart' } as never);
+      (fakeXR.controllers[0] as THREE.Group).position.x -= 0.2;
+      (fakeXR.controllers[1] as THREE.Group).position.x += 0.2;
+      (fakeXR.controllers[1] as THREE.Group).position.y += 0.1;
+      fakeXR.frame?.(16);
+      expect(root.scale.x).not.toBeCloseTo(initialScale, 6);
+      expect(root.position.distanceTo(initialPosition)).toBeGreaterThan(0.01);
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      expect(right.resizeGrid).not.toHaveBeenCalled();
+      workspace.dispose();
+      container.remove();
+    },
+  );
+
+  it('allows physical transform reset only through both-stick hold while ungripped', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+    if (!keyboard || !panel || !hud) throw new Error('XR roots missing');
+    const transformActions = new Set(['inputScale', 'inputReset', 'selectedScale', 'resetLayout']);
+    workspace.scene.traverse((object) => {
+      if (object.name.startsWith('xr-'))
+        expect(transformActions.has(String(object.userData.inputAction))).toBe(false);
+    });
+    const leftPad = connectController(0, [0, 0, 0, 0]);
+    const rightPad = connectController(1, [0, 0, 0, 0]);
+    const originalKeyboard = keyboard.position.clone();
+    const viewRotation = workspace.camera.getWorldQuaternion(new THREE.Quaternion());
+    const eye = workspace.camera.getWorldPosition(new THREE.Vector3());
+    const expectedPanel = new THREE.Vector3(-0.87, -0.02, -1.5)
+      .applyQuaternion(viewRotation)
+      .add(eye);
+    const expectedHud = new THREE.Vector3(0, -0.65, -1.35).applyQuaternion(viewRotation).add(eye);
+    (leftPad.buttons as unknown as Array<{ pressed: boolean }>)[3].pressed = true;
+    (rightPad.buttons as unknown as Array<{ pressed: boolean }>)[3].pressed = true;
+    keyboard.position.x += 0.5;
+    panel.position.x -= 0.5;
+    hud.position.x += 0.5;
+    fakeXR.frame?.(0);
+    for (let frame = 1; frame <= 25; frame += 1) fakeXR.frame?.(frame * 50);
+    expect(keyboard.position.distanceTo(originalKeyboard)).toBeLessThan(0.001);
+    expect(panel.position.distanceTo(expectedPanel)).toBeLessThan(0.6);
+    expect(hud.position.distanceTo(expectedHud)).toBeLessThan(0.6);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('does not recenter while a controller grip is held', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    const target = objectWithData(workspace, { inputAction: 'key', key: 'a' });
+    const originalPosition = keyboard.position.clone();
+    const held = fakeXR.controllers[0] as THREE.Group;
+    const other = fakeXR.controllers[1] as THREE.Group;
+    const heldPad = connectController(0);
+    const otherPad = connectController(1);
+    aimController(held, target);
+    held.dispatchEvent({ type: 'squeezestart' } as never);
+    held.position.x += 0.3;
+    fakeXR.frame?.(16);
+    const grippedPosition = keyboard.position.clone();
+    (heldPad.buttons as unknown as Array<{ pressed: boolean }>)[3].pressed = true;
+    (otherPad.buttons as unknown as Array<{ pressed: boolean }>)[3].pressed = true;
+    for (let frame = 1; frame <= 25; frame += 1) fakeXR.frame?.(frame * 50);
+    expect(keyboard.position.distanceTo(grippedPosition)).toBeLessThan(0.000001);
+    expect(keyboard.position.distanceTo(originalPosition)).toBeGreaterThan(0.01);
+    held.dispatchEvent({ type: 'squeezeend' } as never);
+    other.visible = false;
     workspace.dispose();
     container.remove();
   });
@@ -667,6 +950,25 @@ describe('native XR controller event routing', () => {
     (fakeXR.controllers[0] as THREE.Group).position.set(20, 20, 20);
     fakeXR.frame?.(48);
     expect(material.color.getHex()).toBe(0xffffff);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('keeps passive grip help clear while the other ray targets a key', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('keyboard');
+    hit(workspace, { inputAction: 'key', key: 'a' }, 'hover');
+    const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+    const body = hud?.children.find((object) => object.userData.inputAction === 'grabInput');
+    if (!body) throw new Error('HUD body missing');
+    aimController(fakeXR.controllers[1] as THREE.Group, body);
+    fakeXR.frame?.(16);
+    expect(workspace.scene.getObjectByName('xr-hover-help')?.visible).toBe(false);
+    const key = objectWithData(workspace, { inputAction: 'key', key: 'a' }) as THREE.Mesh<
+      THREE.PlaneGeometry,
+      THREE.MeshBasicMaterial
+    >;
+    expect(key.material.color.getHex()).toBe(0x9deaff);
     workspace.dispose();
     container.remove();
   });

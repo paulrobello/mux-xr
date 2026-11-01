@@ -24,7 +24,7 @@ LAN-only. No published hosting or tunnels. The daemon hierarchy is workspace, se
 
 ## Capabilities and Constraints
 
-- Move, resize and rotate panels. Physical scale and font zoom are separate from explicit terminal grid resizing.
+- Move, resize and rotate every XR UI root as a unit, including pane, keyboard, commands, hierarchy and workspace HUD surfaces. One-controller grip moves and rotates, thumbstick X turns and Y lifts, grip plus trigger pushes or pulls, and two-controller grip resizes, rotates and moves from the hand spread, direction and midpoint. XR transforms persist while typing, retargeting and switching modes. Physical scale and local text zoom are separate from explicit terminal grid resizing. Desktop mouse 3D preview retains Smaller, Larger and Reset layout toolbar controls; XR has no dedicated physical resize or reset buttons.
 - Browse the mux hierarchy and display panes from multiple branches at once.
 - Global and workspace-specific command lists, with label, text and optional Enter, following pardeck.
 - Head-directed gaze emphasis is independent of input. Manual input targeting is the default. The optional Gaze input toggle lets a short head-gaze dwell select the keyboard target and retains the last target while looking at the keyboard.

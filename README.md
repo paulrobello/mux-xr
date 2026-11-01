@@ -50,7 +50,7 @@ To serve an already running compatible daemon, run the streamer in a par-mux pan
 
 Stop that streamer with Ctrl-C in its owning pane. The prepared preview's exact private socket and pane IDs are recorded in `.local/runtime.json`; its shell panes are ordinary live shells. Preserve existing authentication configuration and shared services. No published hosting or tunnels are required.
 
-The endpoint is prefilled from the page origin, and a custom endpoint is remembered. The dedicated preview panes use the account's configured Homebrew Bash login shell. On Quest, open the preview and press Connect. Choose two pane leaves, then Enter XR. Use trigger to select controls and grip on a panel or input menu to move/rotate it. While gripping, the thumbstick turns horizontally and lifts vertically. Hold grip plus trigger to push/pull with the vertical stick, without typing. The compact spatial keyboard has its own Smaller/Larger/Reset controls and a grabbable title bar. Panel ± controls adjust physical size, A± controls local text zoom. Commands opens saved quick commands and their editor. Keyboard opens text entry and terminal keys. Both follow your pane selection, with optional Gaze input available in XR and browser settings. Shift shows uppercase letters and US-layout symbols, including `$`, then resets after a character. Settings offers passthrough and the three silent backgrounds.
+The endpoint is prefilled from the page origin, and a custom endpoint is remembered. The dedicated preview panes use the account's configured Homebrew Bash login shell. On Quest, open the preview and press Connect. Choose two pane leaves, then Enter XR. Every XR UI surface (pane, keyboard, commands, hierarchy and workspace HUD) is a grabbable root: grip one controller to move and rotate it, use thumbstick X to turn and Y to lift, and hold grip plus trigger to push or pull with thumbstick Y. Grip the same surface with both controllers to resize by spreading or bringing hands together, rotate by changing hand direction, and move it with the hand midpoint. Transforms persist while typing, retargeting and switching modes. The default keyboard remains small. Each terminal's A± controls zoom its text locally. Commands opens saved quick commands and their editor. Keyboard opens text entry and terminal keys. Both follow your pane selection, with optional Gaze input available in XR and browser settings. Shift shows uppercase letters and US-layout symbols, including `$`, then resets after a character. Settings offers passthrough and the three silent backgrounds.
 
 ## Spatial controls
 
@@ -58,7 +58,6 @@ Mouse clicks in 3D preview and controller triggers in VR use the same actions, w
 
 | Control | Action |
 | --- | --- |
-| `−` / `+` | Shrink or enlarge the physical panel. |
 | `A−` / `A+` | Zoom terminal text out or in locally. |
 | Esc, Tab, arrows, Enter | Send that terminal key to the pane containing the strip. |
 | Ctrl / Alt | Arm a modifier for the next strip key. |
@@ -66,7 +65,7 @@ Mouse clicks in 3D preview and controller triggers in VR use the same actions, w
 | Black / Gradient / Observatory | Change the VR background. |
 | Exit | Return to flat terminals in the browser, or end the immersive session in VR. |
 
-The 3D preview toolbar always exposes **Smaller panel**, **Larger panel** and **Reset layout**, independently of pane geometry. Preview enlargement is bounded to keep the panel and attached controls inside the viewport. In VR, separate recovery controls remain available on the workspace HUD or above an open input panel. Panel scale and text zoom leave terminal rows and columns unchanged. Neighboring panels' default control positions are separated so resize buttons do not overlap.
+The 3D preview toolbar always exposes **Smaller panel**, **Larger panel** and **Reset layout**, independently of pane geometry. Preview enlargement is bounded to keep the panel and attached controls inside the viewport. In VR, there are no dedicated physical resize or reset buttons. Hover help on each surface explains its gesture controls. If UI space is lost, release all grips and hold both thumbstick clicks for one second to recenter every pane, the HUD and input surfaces near the current headset position and reset physical scale. This recovery does not resize the PTY. Surface scale and text zoom leave terminal rows and columns unchanged.
 
 ## Verification
 
