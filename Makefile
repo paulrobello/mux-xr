@@ -1,4 +1,4 @@
-.PHONY: install build test lint fmt typecheck checkall checkall-ci asset-check e2e production-label-check live-check real-app-check dev dev-start dev-stop dev-restart preview pre-commit
+.PHONY: install build test lint fmt typecheck checkall checkall-ci asset-check e2e production-label-check update-notice-check live-check real-app-check dev dev-start dev-stop dev-restart preview pre-commit
 
 install:
 	bun install --frozen-lockfile
@@ -20,6 +20,8 @@ e2e:
 	bun run e2e
 production-label-check:
 	bun run scripts/production-label-check.ts
+update-notice-check:
+	bun run scripts/update-notice-check.ts
 live-check:
 	bun run scripts/live-terminal-check.ts
 real-app-check:

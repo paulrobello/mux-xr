@@ -10,12 +10,17 @@ import type {
 import { createDemoSurface, demoSnapshot } from './demo';
 import { createDesktopPanels, type DesktopPanels } from './desktop/panels';
 import { loadObservatory } from './environment';
+import { reloadAfterXR } from './reload';
 import { createTerminalSurface } from './terminal';
 import { mountWorkspaceUI, type WorkspaceSettings, type WorkspaceUI } from './ui';
+import { createUpdateChecker, type UpdateChecker } from './update-check';
 import { createWorkspaceScene, type WorkspaceScene } from './xr';
 
 const app = document.querySelector<HTMLElement>('#app');
 if (!app) throw new Error('Application mount is missing');
+const runningBuildId =
+  document.querySelector<HTMLMetaElement>('meta[name="build-fingerprint"]')?.content ??
+  'development';
 const surfaces = new Map<string, TerminalSurface>();
 let snapshot: WorkspaceSnapshot = { panes: [] };
 let selectedId: string | null = null;
@@ -30,6 +35,31 @@ let scene: WorkspaceScene;
 let desktop: DesktopPanels;
 let disposeEnvironment: (() => void) | undefined;
 let applyingSettings = false;
+let updateChecker: UpdateChecker | undefined;
+let reloading = false;
+
+async function reloadApp(): Promise<void> {
+  if (reloading) return;
+  reloading = true;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await reloadAfterXR(
+      () =>
+        Promise.race([
+          scene.exitXR(),
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => reject(new Error('XR exit timed out')), 10_000);
+          }),
+        ]),
+      window.location,
+    );
+  } catch {
+    reloading = false;
+    notice('Could not exit XR. Leave immersive mode, then try Reload again.');
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 function notice(message: string): void {
   ui.setConnection('disconnected', message);
@@ -186,6 +216,9 @@ async function connect(nextEndpoint: string): Promise<void> {
 }
 
 const actions: WorkspaceActions = {
+  reloadApp: () => {
+    void reloadApp();
+  },
   selectPane,
   closePane,
   sendText: (text) => {
@@ -207,6 +240,9 @@ const actions: WorkspaceActions = {
 };
 
 ui = mountWorkspaceUI(app, {
+  onReloadApp: () => {
+    void reloadApp();
+  },
   onConnect: (value) => {
     void connect(value);
   },
@@ -259,6 +295,7 @@ else if (params.get('server')) void connect(params.get('server') ?? '');
 window.addEventListener(
   'pagehide',
   () => {
+    updateChecker?.dispose();
     detachAll();
     stopPresentation();
     desktop.dispose();
@@ -272,6 +309,7 @@ window.addEventListener(
 Object.assign(window, {
   __muxXR: {
     getState: () => ({
+      buildId: runningBuildId,
       demo,
       endpoint,
       selectedId,
@@ -280,9 +318,23 @@ Object.assign(window, {
       scene: { ...scene.state },
     }),
     getControlHints: () => scene.getControlHints(),
+    checkForUpdate: () => updateChecker?.poll() ?? Promise.resolve(),
     startDemo,
     connect,
     selectPane,
     closePane,
   },
 });
+
+if (/^[a-f0-9]{64}$/.test(runningBuildId)) {
+  updateChecker = createUpdateChecker({
+    runningBuildId,
+    url: new URL('/version.json', window.location.href).href,
+    onChange: (manifest) => {
+      ui.setUpdateAvailable(manifest !== null);
+      scene.setUpdateAvailable(manifest !== null);
+      if (scene.state.xrMode === 'desktop') window.dispatchEvent(new Event('resize'));
+    },
+  });
+  updateChecker.start();
+}

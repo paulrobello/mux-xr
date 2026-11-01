@@ -20,6 +20,7 @@ A LAN-only Quest 3 workspace for monitoring par-mux terminals and issuing occasi
 - Passthrough and VR with black, gradient and one polished silent sci-fi observatory.
 - Head-directed gaze emphasis plus a separate default-off toggle for dwell-based keyboard targeting.
 - Headset-local settings. Measure higher panel capacity using real workload shapes.
+- Detect new frontend builds with a bounded same-origin manifest poll and a user-controlled Reload action in browser/XR. End immersion before reload; never reload automatically.
 
 ## Non-Goals
 

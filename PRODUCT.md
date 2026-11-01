@@ -47,3 +47,5 @@ Reference repos: par-term-emu-core-rust, pardeck, par-dots and webxr1. Fixtures 
 2. Existing par-mux owns terminal processes and terminal state.
 3. Local presentation changes do not disturb desktop selection or terminal sizing.
 4. Animation supports spatial understanding while the user's viewpoint stays under their control.
+
+Frontend builds poll a same-origin version manifest and offer an explicit Reload action in browser and XR. The page never reloads merely because an update is detected. Reload ends XR before refreshing the viewer, preserving terminal processes and saved local preferences.

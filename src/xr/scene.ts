@@ -41,6 +41,7 @@ export interface WorkspaceSceneState {
   rendererError: string | null;
   inputTargetId: string | null;
   inputTargetTitle: string | null;
+  updateAvailable: boolean;
 }
 
 export interface WorkspaceScene {
@@ -61,6 +62,8 @@ export interface WorkspaceScene {
   showInput(mode: InputMode): void;
   hideInput(): void;
   enterXR(mode: 'vr' | 'ar'): Promise<void>;
+  exitXR(): Promise<void>;
+  setUpdateAvailable(available: boolean): void;
   resetLayout(): void;
   scaleSelectedPanel(direction: number): void;
   getControlHints(): Array<{
@@ -364,6 +367,7 @@ export function createWorkspaceScene(
     rendererError,
     inputTargetId: null,
     inputTargetTitle: null,
+    updateAvailable: false,
   };
   let disposed = false;
   let frameHandle = 0;
@@ -464,6 +468,7 @@ export function createWorkspaceScene(
   let commandPage = 0;
   let inputRoot: THREE.Group | null = null;
   let hudRoot: THREE.Group | null = null;
+  let updateNotice: THREE.Mesh | null = null;
   let activeSession: XrSessionLike | null = null;
   let inputMode: InputMode = 'commands';
   let panePage = 0;
@@ -768,6 +773,8 @@ export function createWorkspaceScene(
       showHover(hover ?? (controlTargeted ? null : bodyHover), time);
     }
     if (!renderer?.xr.isPresenting && hoveredControl) showHover(hoveredControl, time);
+    if (updateNotice)
+      updateNotice.visible = mutableState.updateAvailable && Boolean(renderer?.xr.isPresenting);
     updateHoverPosition();
     observatory.rotation.y = time * 0.00001;
     renderer?.render(scene, camera);
@@ -1151,6 +1158,10 @@ export function createWorkspaceScene(
       button.position.x = (index - (controls.length - 1) / 2) * 0.31;
       hudRoot?.add(button);
     });
+    updateNotice = createLabelButton('Update: Reload', 0.42, 0.09, { inputAction: 'reloadUpdate' });
+    updateNotice.position.set(0, 0.16, 0);
+    updateNotice.visible = false;
+    hudRoot.add(updateNotice);
     const backing = new THREE.Mesh(
       new THREE.PlaneGeometry(controls.length * 0.31 + 0.08, 0.15),
       new THREE.MeshBasicMaterial({ color: 0x0d1720 }),
@@ -1166,6 +1177,12 @@ export function createWorkspaceScene(
     fpsLabel.position.set(1.12, 0.13, 0);
     hudRoot.add(fpsLabel);
     scene.add(hudRoot);
+  };
+  const setUpdateAvailable = (available: boolean): void => {
+    if (mutableState.updateAvailable === available) return;
+    mutableState.updateAvailable = available;
+    if (updateNotice) updateNotice.visible = available && Boolean(renderer?.xr.isPresenting);
+    notify();
   };
   const panelFitsPreview = (panel: TerminalPanel): boolean => {
     camera.updateMatrixWorld(true);
@@ -1295,6 +1312,10 @@ export function createWorkspaceScene(
     }
     if (action === 'gazeInput') {
       setGazeInputEnabled(!mutableState.gazeInputEnabled);
+      return true;
+    }
+    if (action === 'reloadUpdate') {
+      actions.reloadApp?.();
       return true;
     }
     if (action === 'fontZoom') {
@@ -1847,6 +1868,9 @@ export function createWorkspaceScene(
       notify();
     });
   };
+  const exitXR = async (): Promise<void> => {
+    if (activeSession) await activeSession.end();
+  };
   const resetLayout = (): void => {
     for (const panel of panels.values()) {
       panel.root.position.copy(panel.defaultPosition);
@@ -1989,6 +2013,8 @@ export function createWorkspaceScene(
     showInput,
     hideInput,
     enterXR,
+    exitXR,
+    setUpdateAvailable,
     resetLayout,
     scaleSelectedPanel,
     getControlHints,

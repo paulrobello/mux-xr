@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { QuickCommand } from '../src/contracts';
 import {
   createCommandStore,
@@ -23,6 +23,22 @@ const query = <T extends Element>(root: ParentNode, selector: string): T => {
 };
 
 describe('mux XR local UI state', () => {
+  it('shows the update notice only when available and reloads on explicit click', () => {
+    const root = document.createElement('div');
+    const onReloadApp = vi.fn();
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined, onReloadApp });
+    const notice = query<HTMLElement>(root, '[data-update-notice]');
+    expect(notice.hidden).toBe(true);
+    ui.setUpdateAvailable(true);
+    expect(notice.hidden).toBe(false);
+    query<HTMLButtonElement>(notice, '[data-action="reload-update"]').click();
+    expect(onReloadApp).toHaveBeenCalledOnce();
+    ui.setUpdateAvailable(false);
+    expect(notice.hidden).toBe(true);
+    expect(onReloadApp).toHaveBeenCalledOnce();
+    ui.destroy();
+  });
+
   it('falls back safely for malformed or outdated settings', () => {
     expect(validateSettings(null)).toMatchObject({
       version: 1,

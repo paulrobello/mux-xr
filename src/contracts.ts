@@ -67,4 +67,5 @@ export interface WorkspaceActions {
   resizeGrid?(paneId: string, cols: number, rows: number): boolean;
   setTerminalColorMode?(mode: TerminalColorMode): void;
   setKeyboardBackground?(enabled: boolean): void;
+  reloadApp?(): void;
 }

@@ -198,3 +198,7 @@ Each panel presents one live pane with a readable terminal surface, title label,
 - **Don't** use bright gradients, ornamental neon, or decorative glows that compete with pane content.
 - **Don't** invent headset acceptance claims from desktop or emulator evidence.
 - **Don't** turn the workspace into a fixed radial menu or elaborate window choreography for MVP.
+
+### Update notices
+
+Version availability uses a compact inline browser notice and a small action attached to the movable XR HUD. It does not interrupt monitoring or change terminal/input focus. Reload is explicit, ends the current immersive session, and then refreshes the viewer. No centered modal or automatic reload is used.

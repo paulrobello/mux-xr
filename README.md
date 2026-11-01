@@ -86,3 +86,8 @@ The observatory's editable high/low sources, deterministic generator, hashes and
 See [the verification report](docs/verification.md), [DESIGN.md](DESIGN.md), [PRD.md](PRD.md) and the [phase plans](plans/phase-0-live-terminal.md) for scope and dependencies.
 
 The streamer's strict policy blocks blob workers, so Troika typesetting runs on the main thread. Label visibility is checked against the actual served build. Comfort colors replace blue-dominant terminal foregrounds with lighter, low-chroma teal; Original keeps source colors and Monochrome uses neutral foregrounds/backgrounds. Physical color-depth perception still needs a headset check.
+## Frontend updates
+
+Production builds include a content fingerprint in the page and a same-origin `version.json` manifest. The frontend checks immediately and every 30 seconds with a five-second request timeout and cache bypass. A changed build shows a compact **Update available / Reload** notice in the browser and an **Update: Reload** action on the XR HUD. Updates never reload automatically. Reload exits the immersive session first, then loads a fresh page with a cache-busting URL. Terminal processes remain running, and saved device preferences and commands remain in local storage.
+
+The identifier covers the bundled application and public assets, so a font or environment asset update also triggers the notice. Development uses Vite's existing reload behavior rather than production polling.

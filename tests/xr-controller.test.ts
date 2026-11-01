@@ -87,6 +87,7 @@ function fixture() {
     resizeGrid: vi.fn(() => true),
     setTerminalColorMode: vi.fn(),
     setKeyboardBackground: vi.fn(),
+    reloadApp: vi.fn(),
   };
   const container = document.createElement('div');
   const workspace = createWorkspaceScene(container, actions);
@@ -223,6 +224,70 @@ describe('native XR controller event routing', () => {
       container.remove();
       vi.unstubAllGlobals();
     }
+  });
+
+  it('keeps the update control XR-only and routes one explicit reload without ending XR', () => {
+    const { workspace, actions, container } = fixture();
+    fakeXR.presenting = false;
+    workspace.setUpdateAvailable(true);
+    const notice = objectWithData(workspace, { inputAction: 'reloadUpdate' });
+    expect(notice.visible).toBe(false);
+    expect(() => hit(workspace, { inputAction: 'reloadUpdate' })).toThrow('Control not found');
+    workspace.showInput('keyboard');
+    const inputRoot = workspace.scene.getObjectByName('xr-keyboard-controls');
+    const targetId = workspace.state.inputTargetId;
+    fakeXR.presenting = true;
+    fakeXR.frame?.(16);
+    expect(notice.visible).toBe(true);
+    hit(workspace, { inputAction: 'reloadUpdate' });
+    expect(actions.reloadApp).toHaveBeenCalledOnce();
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    expect(workspace.state.inputTargetId).toBe(targetId);
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBe(inputRoot);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('exitXR awaits the active session end and propagates rejection', async () => {
+    let resolveEnd: (() => void) | undefined;
+    const end = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveEnd = resolve;
+        }),
+    );
+    const session = {
+      addEventListener: vi.fn(),
+      end,
+    };
+    vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+    const { workspace, container } = fixture();
+    await workspace.enterXR('vr');
+    let settled = false;
+    const exiting = workspace.exitXR().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(end).toHaveBeenCalledOnce();
+    expect(settled).toBe(false);
+    resolveEnd?.();
+    await exiting;
+    expect(settled).toBe(true);
+    workspace.dispose();
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it('exitXR propagates an active session end rejection', async () => {
+    const failure = new Error('session end failed');
+    const session = { addEventListener: vi.fn(), end: vi.fn(async () => Promise.reject(failure)) };
+    vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+    const { workspace, container } = fixture();
+    await workspace.enterXR('vr');
+    await expect(workspace.exitXR()).rejects.toBe(failure);
+    workspace.dispose();
+    container.remove();
+    vi.unstubAllGlobals();
   });
 
   it('bounds desktop panel growth without exposing XR recovery controls', () => {

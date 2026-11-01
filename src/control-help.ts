@@ -19,6 +19,8 @@ export function getKeyHelp(key: string): string | undefined {
 export function getControlHelp(data: Record<string, unknown>): string | undefined {
   if (typeof data.key === 'string') return getKeyHelp(data.key);
   switch (data.inputAction) {
+    case 'reloadUpdate':
+      return 'Exit XR and reload the available update';
     case 'keyboardBackground':
       return 'Show or hide the keyboard backing';
     case 'terminalColors':
