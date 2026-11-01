@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+test-results/
+.local/
+.impeccable/review/
+.impeccable/mocks/
+.impeccable/questions/
+.env
+.env.*
+!.env.example
+*.local.*
+*.log
+.DS_Store
+.superpowers/
+.parsight/
+__pycache__/

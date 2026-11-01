@@ -1,0 +1,229 @@
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+body {
+  overflow: hidden;
+  background: #080c12;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+.scene-host {
+  position: relative;
+  width: 100%;
+  height: calc(100% - 140px);
+  min-height: 400px;
+  overflow: hidden;
+  border-radius: 8px;
+}
+.attached-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.attached-selector > button:first-child {
+  border: 0;
+  padding: 8px 12px;
+  background: #17212d;
+  color: #c9d8e3;
+  border-radius: 4px;
+}
+.attached-selector.active > button:first-child {
+  background: #203c48;
+  color: #a7eeef;
+}
+.command-editor {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.mux-ui .command-editor > input,
+.mux-ui .command-editor > label {
+  grid-column: 1 / -1;
+}
+.mux-ui .command-editor button {
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid #3a5363;
+  border-radius: 4px;
+  background: #192b38;
+  color: #dcebf2;
+}
+.mux-ui .command-editor button:hover {
+  background: #264455;
+}
+.mux-ui .command-editor button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.mux-ui .key.active {
+  background: #315c6d;
+  border-color: #8be0ea;
+  color: #fff;
+}
+.mux-ui .tree details {
+  margin: 2px 0 2px 9px;
+}
+.mux-ui .tree summary {
+  padding: 7px 2px;
+  color: #b8cbd6;
+  cursor: pointer;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.mux-ui .tree-daemon {
+  color: #7e96a6;
+  padding: 3px 5px 8px;
+  font-size: 11px;
+}
+.mux-ui .tree-pane {
+  max-width: 100%;
+}
+.mux-ui .tree-pane > span:last-child {
+  min-width: 0;
+}
+.mux-ui .connection {
+  min-width: 0;
+  max-width: 45%;
+}
+.mux-ui .status-copy {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.command-editor input[type="text"],
+.command-editor textarea,
+.command-editor input:not([type]) {
+  width: 100%;
+  box-sizing: border-box;
+  background: #0b1016;
+  color: #dce7ed;
+  border: 1px solid #344857;
+  padding: 8px;
+  border-radius: 4px;
+}
+.mux-ui .command-editor > label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #b4c5cf;
+}
+.command-edit {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.command-edit svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+}
+.drawer {
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+}
+.mux-ui [hidden] {
+  display: none;
+}
+::selection {
+  background: #315c71;
+  color: #f1fcff;
+}
+@media (max-width: 760px) {
+  .scene-host {
+    height: 55vh;
+    min-height: 320px;
+  }
+}
+@media (max-width: 600px) {
+  .mux-ui .mux-top {
+    height: auto;
+    min-height: 74px;
+    padding: 12px;
+    gap: 9px;
+    flex-wrap: wrap;
+  }
+  .mux-ui .brand {
+    flex: 1;
+  }
+  .mux-ui .top-actions {
+    margin-left: 0;
+  }
+  .mux-ui .connection {
+    order: 3;
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+  .mux-ui .mux-body {
+    display: flex;
+    flex-direction: column;
+    height: calc(100% - 91px);
+    overflow-y: auto;
+  }
+  .mux-ui .sidebar {
+    flex: none;
+    max-height: 280px;
+    border-right: 0;
+    border-bottom: 1px solid #293746;
+    padding: 12px;
+  }
+  .mux-ui .tree {
+    max-height: 125px;
+  }
+  .mux-ui .setup {
+    padding-top: 10px;
+  }
+  .mux-ui .side-heading {
+    padding-bottom: 5px;
+  }
+  .mux-ui .stage {
+    flex: 1;
+    min-width: 0;
+    padding: 16px 12px;
+    overflow: visible;
+  }
+  .mux-ui .stage-tools {
+    flex-wrap: wrap;
+  }
+  .mux-ui .panes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .mux-ui .scene-host {
+    height: 330px;
+    min-height: 330px;
+  }
+  .mux-ui .drawer {
+    right: 8px;
+    bottom: 8px;
+    width: calc(100% - 16px);
+    max-height: calc(100% - 16px);
+    padding: 12px;
+  }
+  .mux-ui .command-row {
+    flex-wrap: wrap;
+  }
+  .mux-ui .command-row select {
+    min-width: 100px;
+  }
+  .mux-ui .key-row {
+    gap: 2px;
+  }
+  .mux-ui .key {
+    min-width: 0;
+    padding: 4px 2px;
+    font-size: 10px;
+  }
+}

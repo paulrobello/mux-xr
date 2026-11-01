@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Build output, dependencies and private local runtime state"
+paths = ['''(^|/)node_modules/''', '''(^|/)dist/''', '''(^|/)\.local/''', '''(^|/)\.git/''', '''(^|/)\.impeccable/questions/''']

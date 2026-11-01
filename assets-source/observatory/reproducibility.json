@@ -1,0 +1,24 @@
+{
+  "pass": true,
+  "blender": "5.2.2 LTS",
+  "independentFreshProcesses": 2,
+  "primarySha256": "fd6a89965fc78bbbc8720d272f6b7b4131717e51ebec6e10e4011cb82a352daa",
+  "rebuildSha256": "fd6a89965fc78bbbc8720d272f6b7b4131717e51ebec6e10e4011cb82a352daa",
+  "byteIdentical": true,
+  "normalization": "Cyclic canonical triangle indices, triangle sorting, UV quantization at 1e-6. Winding and positions preserved.",
+  "commands": [
+    "Blender --background --factory-startup --python-exit-code 1 --python scripts/assets/build-observatory.py",
+    "Blender --background --factory-startup --python-exit-code 1 --python scripts/assets/build-observatory.py -- --repro --no-render"
+  ],
+  "previewBinding": {
+    "glbSha256": "fd6a89965fc78bbbc8720d272f6b7b4131717e51ebec6e10e4011cb82a352daa",
+    "files": {
+      "high-eye.png": "ab86ef6b6322fba70158a3afc45102c35e0b037b443c8ecab0e90df404327fd7",
+      "low-eye.png": "b97ff788cb2495c21e79d25b65ec5fcfa686fb1cc4b7d7e0582edfe0158b7069",
+      "low-interior.png": "9454d4ef04a7555df7adaff44aafee851a632ce2ddef52775ae08a14456db945",
+      "reimport-eye.png": "187f82cb0f5b6069480a92ef297a2f97cff2e43f22103a1c39c59da6fdc85bc8",
+      "review-sheet.png": "2525d65058b9734c0cd794a2cf16da11ce97713389f95cebab3a5d054a2e1a32"
+    }
+  },
+  "runtimeAndOwnerApproval": "pending"
+}

@@ -1,0 +1,48 @@
+# Mux XR
+
+<!-- impeccable:product-schema 1 -->
+
+## Platform
+
+web
+
+## Stack
+
+TypeScript, Vite and Three.js, following par-dots' direct WebXR runtime and webxr1's interaction patterns. This is the lead's implementation choice under the approved MVP build. Reuse par-term's binary streaming protocol and an established terminal emulator.
+
+## Users
+
+Paul uses Meta Quest 3 to monitor terminals running on his computer, with occasional commands. Controllers come first. Hand tracking is on the roadmap. A physical keyboard is not part of the workflow.
+
+## Product Purpose
+
+Display at least two readable, live par-mux panes in a movable spatial workspace. Make occasional input practical through global and workspace quick commands, terminal keys and a virtual keyboard.
+
+## Operating Context
+
+LAN-only. No published hosting or tunnels. The daemon hierarchy is workspace, session, window/tab, pane. Each MVP panel displays one pane. The headset browser stores commands and preferences.
+
+## Capabilities and Constraints
+
+- Move, resize and rotate panels. Physical scale and font zoom are separate from explicit terminal grid resizing.
+- Browse the mux hierarchy and display panes from multiple branches at once.
+- Global and workspace-specific command lists, with label, text and optional Enter, following pardeck.
+- Explicit input focus is independent of head-directed gaze emphasis. Never redirect commands merely because the user looks elsewhere.
+- Passthrough, pure black, gradient and a quiet sci-fi observatory. No ambient sound.
+- Benchmark actual panel capacity on Quest 3. Two readable panes is the acceptance target, not an invented maximum.
+- Named saved 3D layouts, elaborate radial menus/window choreography, whole-window splits and hand tracking are post-MVP.
+
+## Brand Commitments
+
+Expressive motion in controls and panels, with a restrained sci-fi world that keeps text and controls visually primary. The approved environment is a dark orbital observatory with peripheral architecture and a distant planet. Blender may be used where useful.
+
+## Evidence on Hand
+
+Reference repos: par-term-emu-core-rust, pardeck, par-dots and webxr1. Fixtures must be visibly labeled as demonstrations. Desktop and emulator evidence never substitutes for actual Quest acceptance.
+
+## Product Principles
+
+1. Monitoring stays readable and input stays intentionally targeted.
+2. Existing par-mux owns terminal processes and terminal state.
+3. Local presentation changes do not disturb desktop selection or terminal sizing.
+4. Animation supports spatial understanding while the user's viewpoint stays under their control.

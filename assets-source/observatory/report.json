@@ -1,0 +1,140 @@
+{
+  "pieceId": "observatory",
+  "version": 1,
+  "route": "scripted",
+  "blender": "5.2.2 LTS",
+  "authoringAgent": {
+    "harness": "Codex",
+    "model": "gpt-6-astra"
+  },
+  "license": "Original project-authored geometry and procedural color map. MIT project default. No external assets.",
+  "coordinateFrame": {
+    "units": "metres",
+    "up": "+Y",
+    "forward": "-Z",
+    "origin": [0, 0, 0],
+    "eye": [0, 1.6, 0],
+    "planetCenter": [13, 12, -69],
+    "planetRadius": 11
+  },
+  "high": {
+    "objects": 292,
+    "vertices": 36602,
+    "triangles": 71576,
+    "bounds": {
+      "min": [-109.71113586425781, -18.987321853637695, -149.8394775390625],
+      "max": [109.42334747314453, 84.57122802734375, 7.40500020980835]
+    },
+    "terminalVolumeIntersections": []
+  },
+  "lowBeforeBatching": {
+    "objects": 292,
+    "vertices": 12170,
+    "triangles": 22712,
+    "bounds": {
+      "min": [-109.71113586425781, -18.987321853637695, -149.8394775390625],
+      "max": [109.42334747314453, 84.57122802734375, 7.40500020980835]
+    },
+    "terminalVolumeIntersections": []
+  },
+  "exported": {
+    "triangles": 22712,
+    "drawCalls": 10,
+    "materials": 10,
+    "meshes": 10,
+    "nodes": 11,
+    "embeddedImages": 1,
+    "bytes": 2528120,
+    "root": "observatory",
+    "externalReferences": 0
+  },
+  "reimport": {
+    "objects": 10,
+    "vertices": 36231,
+    "triangles": 22712,
+    "bounds": {
+      "min": [-109.71113586425781, -18.987321853637695, -149.8394775390625],
+      "max": [109.42334747314453, 84.57122802734375, 7.405000686645508]
+    }
+  },
+  "texture": {
+    "role": "baseColor and emissive color",
+    "size": [2048, 1024],
+    "transfer": "sRGB",
+    "method": "Deterministic analytic equirectangular color field, materialized to PNG. No Blender-only shader at runtime.",
+    "decodedBaseBytes": 8388608,
+    "normalOrORMMaps": "Not used. Geometry retains bevels, PBR metallic and roughness are scalar constants."
+  },
+  "lods": {
+    "count": 1,
+    "reason": "Single static background comfortably below triangle cap. No additional LOD required by project contract."
+  },
+  "determinism": {
+    "method": "Canonical cyclic triangle indices and sorted triangles; UVs quantized to 1e-6 to remove exporter float roundoff. Verify two fresh process GLB hashes.",
+    "check": "See reproducibility.json for independent build comparison."
+  },
+  "render": {
+    "backend": "Cycles CPU",
+    "samples": 12,
+    "dimensions": [960, 600],
+    "timingClaim": false,
+    "cameraPosition": [0, 1.6, 1],
+    "cameraTarget": [0, 2, -10],
+    "lensMm": 21
+  },
+  "validation": {
+    "pass": true,
+    "checks": [
+      "GLB parses",
+      "single stable root",
+      "triangle budget",
+      "draw-call budget",
+      "material budget",
+      "embedded textures",
+      "texture dimension budget",
+      "byte budget",
+      "no exported lights or cameras",
+      "finite transforms",
+      "clean Blender reimport",
+      "reimport bounds within 1 mm",
+      "terminal volume clear"
+    ]
+  },
+  "approval": {
+    "concept": "Recorded by root in docs/blender-kit-project.md",
+    "ownerVisual": "pending",
+    "runtimeQuest": "pending root integration and real-device review"
+  },
+  "files": [
+    {
+      "path": "assets-source/observatory/observatory-high.blend",
+      "sha256": "86939bd428b4dffbead1261244d97ffb7aa036cac7105aabdbcd8b06930c1533",
+      "bytes": 1942694
+    },
+    {
+      "path": "assets-source/observatory/observatory-low.blend",
+      "sha256": "2562809529c6c6ed69a235d16840567e92de17547d1cd7c2f1b173f9f2d3f640",
+      "bytes": 1698216
+    },
+    {
+      "path": "assets-source/observatory/staging/observatory.glb",
+      "sha256": "fd6a89965fc78bbbc8720d272f6b7b4131717e51ebec6e10e4011cb82a352daa",
+      "bytes": 2528120
+    },
+    {
+      "path": "assets-source/observatory/maps/planet-basecolor.png",
+      "sha256": "f785512060885bb4fd4474eb75287ba94c0bb98f43fbec5efc58bdd67c78e713",
+      "bytes": 1242348
+    },
+    {
+      "path": "scripts/assets/build-observatory.py",
+      "sha256": "7f46887b540c84b13e7c2d024db661380e455672f8e9c271c354ad9d645f7af0",
+      "bytes": 18789
+    },
+    {
+      "path": "scripts/assets/observatory_lib.py",
+      "sha256": "129bbffbf0a54cb4016d622417990fe6c1e87128a5205c965200669c0b8a5ca9",
+      "bytes": 6926
+    }
+  ]
+}

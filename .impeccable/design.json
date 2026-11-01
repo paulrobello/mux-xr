@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-01T00:00:00-07:00",
+  "title": "Design System: Mux XR",
+  "extensions": {
+    "colorMeta": {
+      "space-black": { "role": "neutral", "displayName": "Space Black", "canonical": "#080c12", "tonalRamp": ["#020509", "#050a10", "#080c12", "#0b1016", "#17212d", "#203c48", "#315c6d", "#edf7fa"] },
+      "accent-cyan": { "role": "primary", "displayName": "Signal Cyan", "canonical": "#8be0ea", "tonalRamp": ["#082f38", "#0b5662", "#147785", "#269aa6", "#53bdc7", "#8be0ea", "#c2f4f5", "#f1fcff"] },
+      "panel-navy": { "role": "neutral", "displayName": "Panel Navy", "canonical": "#17212d", "tonalRamp": ["#080c12", "#0b1016", "#17212d", "#192b38", "#203c48", "#315c6d", "#7e96a6", "#dce7ed"] },
+      "selection-blue": { "role": "secondary", "displayName": "Selection Blue", "canonical": "#315c6d", "tonalRamp": ["#0b1b24", "#102b37", "#1a3b49", "#315c6d", "#4c7888", "#7e96a6", "#b4c5cf", "#edf7fa"] }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Compact UI Title", "purpose": "Panel names, mode titles, and compact workspace headings." },
+      "label": { "displayName": "Functional Label", "purpose": "Keys, quick commands, hierarchy summaries, and status metadata." }
+    },
+    "shadows": [],
+    "motion": [
+      { "name": "gaze-dwell", "value": "350ms", "purpose": "Dwell threshold for XR gaze emphasis; emphasis is not input focus." }
+    ],
+    "breakpoints": [
+      { "name": "mobile-wide", "value": "760px" },
+      { "name": "mobile", "value": "600px" }
+    ]
+  },
+  "components": [
+    { "name": "Control Button", "kind": "button", "refersTo": "button-control", "description": "Compact desktop action button.", "html": "<button class=\"ds-control-button\">Connect</button>", "css": ".ds-control-button { min-height: 34px; padding: 7px 10px; border: 1px solid #3a5363; border-radius: 4px; background: #192b38; color: #dcebf2; font: inherit; transition: background-color .2s ease, border-color .2s ease; } .ds-control-button:hover { background: #264455; } .ds-control-button:focus-visible { border-color: #8be0ea; outline: 2px solid #8be0ea; outline-offset: 2px; }" },
+    { "name": "Attached Selector", "kind": "chip", "refersTo": "button-selected", "description": "Shows the currently attached mux target.", "html": "<button class=\"ds-attached-selector\">Workspace A</button>", "css": ".ds-attached-selector { padding: 8px 12px; border: 0; border-radius: 4px; background: #17212d; color: #c9d8e3; } .ds-attached-selector:hover, .ds-attached-selector:focus-visible { background: #203c48; color: #a7eeef; outline: 2px solid #8be0ea; outline-offset: 2px; }" },
+    { "name": "Text Field", "kind": "input", "refersTo": "input-field", "description": "Recessed command and text entry field.", "html": "<input class=\"ds-input-field\" type=\"text\" placeholder=\"Command\" />", "css": ".ds-input-field { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #344857; border-radius: 4px; background: #0b1016; color: #dce7ed; font: inherit; } .ds-input-field::placeholder { color: #7e96a6; } .ds-input-field:focus-visible { border-color: #8be0ea; outline: 2px solid #8be0ea; outline-offset: 1px; }" },
+    { "name": "Hierarchy Summary", "kind": "nav", "refersTo": "button-control", "description": "Indented mux tree row for workspace navigation.", "html": "<button class=\"ds-tree-summary\">▸ session / window / pane</button>", "css": ".ds-tree-summary { display: block; width: 100%; padding: 7px 2px; border: 0; background: transparent; color: #b8cbd6; text-align: left; font-size: 12px; } .ds-tree-summary:hover, .ds-tree-summary:focus-visible { color: #edf7fa; background: #17212d; outline: 2px solid #8be0ea; outline-offset: -2px; }" },
+    { "name": "Active Key", "kind": "button", "refersTo": "button-selected", "description": "Virtual terminal key with armed state.", "html": "<button class=\"ds-key ds-key-active\">Ctrl</button>", "css": ".ds-key { min-width: 32px; padding: 4px 6px; border: 1px solid #3a5363; border-radius: 4px; background: #192b38; color: #dcebf2; font-size: 11px; } .ds-key:hover, .ds-key:focus-visible { background: #264455; outline: 2px solid #8be0ea; outline-offset: 1px; } .ds-key-active { background: #315c6d; border-color: #8be0ea; color: #fff; }" },
+    { "name": "Terminal Panel", "kind": "custom", "refersTo": "terminal-panel", "description": "Readable spatial surface for one live mux pane.", "html": "<section class=\"ds-terminal-panel\"><header>pane-1</header><pre>ready_</pre></section>", "css": ".ds-terminal-panel { width: 320px; padding: 10px; border: 1px solid #3a5363; border-radius: 4px; background: #17212d; color: #edf7fa; } .ds-terminal-panel header { margin-bottom: 8px; color: #a7eeef; font: 600 12px system-ui, sans-serif; } .ds-terminal-panel pre { margin: 0; color: #dce7ed; font: 12px ui-monospace, SFMono-Regular, monospace; }" },
+    { "name": "Mode Switch", "kind": "nav", "refersTo": "button-control", "description": "Explicit commands, keyboard, and panes input mode control.", "html": "<nav class=\"ds-mode-switch\"><button>Commands</button><button>Keyboard</button><button>Panes</button></nav>", "css": ".ds-mode-switch { display: inline-flex; gap: 8px; } .ds-mode-switch button { padding: 7px 10px; border: 1px solid #3a5363; border-radius: 4px; background: #192b38; color: #dcebf2; font: inherit; } .ds-mode-switch button:hover, .ds-mode-switch button:focus-visible { background: #264455; outline: 2px solid #8be0ea; outline-offset: 1px; }" }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Orbital Observatory",
+    "overview": "Mux XR is a functional monitoring instrument wrapped in a restrained sci-fi observatory. The interface stays dark and low-glare so live terminal text remains the visual priority. Controls are compact, legible, and deliberately targeted for controller use in mixed reality, while the world contributes only enough atmosphere to establish orientation.\n\nThe system uses blue-black tonal layering, cool blue-gray text, and a scarce cyan selection signal. Motion may clarify panel selection and gaze emphasis, but the user's viewpoint remains under their control. Passthrough, pure black, gradient, and observatory backgrounds are explicit modes, not competing visual identities.",
+    "keyCharacteristics": ["Terminal content and intentional input stay primary.", "Quiet sci-fi atmosphere with no ambient sound dependency.", "Flat, dark controls with restrained cyan state emphasis.", "Spatial panels, quick commands, and virtual keyboard target readability at Quest scale; owner check pending."],
+    "rules": [
+      { "name": "The Signal Rarity Rule", "body": "Cyan is a state signal, not decoration. Reserve it for selection, focus, and active interaction.", "section": "colors" },
+      { "name": "The Readability Rule", "body": "Never trade terminal legibility for atmosphere, especially in XR where panels must remain readable at physical scale.", "section": "typography" },
+      { "name": "The Tonal Depth Rule", "body": "Use a darker or lighter surface step before adding glow, blur, or shadow. Depth should support orientation and interaction.", "section": "elevation" }
+    ],
+    "dos": ["Do keep live terminal text and targeted input visually primary.", "Do use the existing blue-black palette and cyan only for interaction state.", "Do preserve 4px control corners and 8px container corners.", "Do support black, gradient, observatory, and passthrough modes as explicit choices.", "Do keep motion expressive enough to explain selection while leaving viewpoint control to the user."],
+    "donts": ["Don't redirect commands because gaze moved; input focus must remain explicit.", "Don't add ambient sound as part of the visual system.", "Don't use bright gradients, ornamental neon, or decorative glows that compete with pane content.", "Don't invent headset acceptance claims from desktop or emulator evidence.", "Don't turn the workspace into a fixed radial menu or elaborate window choreography for MVP."]
+  }
+}

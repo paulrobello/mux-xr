@@ -1,0 +1,191 @@
+---
+name: Mux XR
+description: A quiet sci-fi observatory for readable terminal monitoring and intentionally targeted input.
+colors:
+  space-black: "#080c12"
+  field-black: "#0b1016"
+  panel-navy: "#17212d"
+  control-navy: "#192b38"
+  selected-teal: "#203c48"
+  hover-blue: "#264455"
+  selection-blue: "#315c6d"
+  border-slate: "#3a5363"
+  divider-slate: "#293746"
+  muted-blue-gray: "#7e96a6"
+  body-blue-gray: "#b4c5cf"
+  text-blue-gray: "#c9d8e3"
+  text-cool: "#dce7ed"
+  text-bright: "#edf7fa"
+  accent-cyan: "#8be0ea"
+  observatory-deep: "#050a10"
+rounded:
+  sm: "4px"
+  md: "8px"
+spacing:
+  xs: "2px"
+  sm: "8px"
+  md: "12px"
+  lg: "14px"
+  xl: "16px"
+typography:
+  body:
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "14px"
+    lineHeight: "1.4"
+  title:
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "26px"
+    fontWeight: 600
+    lineHeight: "normal"
+    letterSpacing: "-0.02em"
+  label:
+    fontFamily: "system-ui, sans-serif"
+    fontSize: "12px"
+    fontWeight: 600
+  terminal:
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"
+    fontSize: "18px"
+components:
+  button-control:
+    backgroundColor: "{colors.control-navy}"
+    textColor: "{colors.text-cool}"
+    rounded: "{rounded.sm}"
+    padding: "7px 10px"
+    height: "34px"
+  button-control-hover:
+    backgroundColor: "{colors.hover-blue}"
+    textColor: "{colors.text-cool}"
+    rounded: "{rounded.sm}"
+  button-selected:
+    backgroundColor: "{colors.selection-blue}"
+    textColor: "{colors.text-bright}"
+    rounded: "{rounded.sm}"
+  input-field:
+    backgroundColor: "{colors.field-black}"
+    textColor: "{colors.text-cool}"
+    rounded: "{rounded.sm}"
+    padding: "8px"
+  terminal-panel:
+    backgroundColor: "{colors.panel-navy}"
+    textColor: "{colors.text-bright}"
+    rounded: "{rounded.sm}"
+---
+
+# Design System: Mux XR
+
+## Overview
+
+**Creative North Star: "The Quiet Orbital Observatory"**
+
+Mux XR is a functional monitoring instrument wrapped in a restrained sci-fi observatory. The interface stays dark and low-glare so live terminal text remains the visual priority. Controls are compact, legible, and deliberately targeted for controller use in mixed reality, while the world contributes only enough atmosphere to establish orientation.
+
+The system uses blue-black tonal layering, cool blue-gray text, and a scarce cyan selection signal. Motion may clarify panel selection and gaze emphasis, but the user's viewpoint remains under their control. Passthrough, pure black, gradient, and observatory backgrounds are explicit modes, not competing visual identities.
+
+**Key Characteristics:**
+- Terminal content and intentional input stay primary.
+- Quiet sci-fi atmosphere with no ambient sound dependency.
+- Flat, dark controls with restrained cyan state emphasis.
+- Spatial panels, quick commands, and virtual keyboard target readability at Quest scale; owner check pending.
+
+## Colors
+
+The palette is a deep blue-black field with cool slate controls and a cyan signal reserved for selection, focus, and active states.
+
+### Primary
+- **Signal Cyan** (`#8be0ea`): Selected and focused states, including active keys and panel emphasis.
+
+### Secondary
+- **Selection Blue** (`#315c6d`): Filled active controls and selection surfaces.
+- **Hover Blue** (`#264455`): Desktop hover feedback on actionable controls.
+
+### Tertiary
+- **Selected Teal** (`#203c48`): Attached or active selector background.
+
+### Neutral
+- **Space Black** (`#080c12`): Desktop application field.
+- **Field Black** (`#0b1016`): Text-entry surfaces and recessed fields.
+- **Panel Navy** (`#17212d`): Attached selector and terminal-adjacent surfaces.
+- **Control Navy** (`#192b38`): Primary control fill.
+- **Text Cool** (`#dce7ed`): Control and input text.
+- **Text Bright** (`#edf7fa`): High-priority labels and terminal-facing text.
+- **Muted Blue-Gray** (`#7e96a6`): Secondary hierarchy and daemon metadata.
+- **Border Slate** (`#3a5363`): Control outlines.
+- **Divider Slate** (`#293746`): Sidebar and structural separators.
+
+### Named Rules
+**The Signal Rarity Rule.** Cyan is a state signal, not decoration. Reserve it for selection, focus, and active interaction.
+
+## Typography
+
+**Display Font:** system UI sans-serif
+**Body Font:** inherited system UI sans-serif
+**Label/Mono Font:** terminal renderer's established terminal face; UI labels remain system UI.
+
+**Character:** Compact, neutral, and highly legible. Text hierarchy comes from cool-blue contrast and measured size changes rather than expressive type treatments.
+
+### Hierarchy
+- **Title** (600, approximately 12–16px): Panel names, mode titles, and compact workspace headings.
+- **Body** (400, inherited size): Explanatory UI copy and input labels.
+- **Label** (600, 10–12px): Keys, quick commands, hierarchy summaries, and status metadata.
+- **Terminal** (renderer-defined): Live pane content; preserve monospace readability and avoid decorative substitutions.
+
+### Named Rules
+**The Readability Rule.** Never trade terminal legibility for atmosphere, especially in XR where panels must remain readable at physical scale.
+
+## Layout
+
+Desktop UI uses a full-height application frame with a top bar, a sidebar for mux hierarchy, and a stage for controls and spatial content. The scene host fills the remaining viewport and uses an 8px radius. The command editor is a three-column grid with 8px gaps, while mobile collapses into a vertically scrolling body, moves the sidebar above the stage, and keeps the XR scene at a stable 330px height. Control groups use 8–16px spacing and wrap rather than compressing labels.
+
+In XR, terminal panels are movable spatial surfaces. Input opens as an explicit commands, keyboard, or panes surface near the workspace, and panel scale and font zoom are separate controls. Do not imply a fixed radial layout or a maximum panel count beyond the two-pane readability acceptance target.
+
+## Elevation & Depth
+
+The system is tonal rather than shadow-led. CSS surfaces distinguish field, panel, control, hover, and selected states through blue-black value steps and borders. Three.js provides depth through panel placement, frame geometry, observatory architecture, and background modes. No broad decorative drop-shadow vocabulary is established.
+
+### Named Rules
+**The Tonal Depth Rule.** Use a darker or lighter surface step before adding glow, blur, or shadow. Depth should support orientation and interaction.
+
+## Shapes
+
+The form language is compact and gently softened. Desktop containers use an 8px radius, while buttons, inputs, keys, labels, and XR controls use a tighter 4px radius. Borders are thin and cool slate. Preserve rectangular silhouettes and clear hit targets; do not turn functional controls into pills.
+
+## Components
+
+### Buttons
+- **Shape:** Tight rectangular corners (4px), 34px minimum height for desktop controls.
+- **Primary:** Control navy fill, cool text, and 7px 10px padding.
+- **Hover / Focus:** Hover shifts to hover blue. Focus and active states use selection blue with the cyan signal border where applicable.
+- **Secondary / Ghost:** Use the same compact geometry with tonal or border contrast, not a new shape language.
+
+### Inputs / Fields
+- **Style:** Recessed field black, 1px slate border, 4px radius, and 8px internal padding.
+- **Focus:** Increase border contrast toward the cyan signal without adding a persistent glow.
+- **Disabled:** Preserve hierarchy with reduced opacity and no misleading active color.
+
+### Navigation
+- **Style:** The mux hierarchy is a compact tree in the sidebar. Summaries use 12px cool blue-gray text, 7px vertical padding, and indentation to communicate workspace/session/window/pane structure.
+
+### Cards / Containers
+- **Corner Style:** 8px for the scene host and larger application containers, 4px for controls and labels.
+- **Background:** Layer space black, field black, panel navy, and control navy by function.
+- **Border:** Use slate borders for interactive controls and divider slate for structural separation.
+- **Internal Padding:** Use 8px, 12px, or 16px based on density and viewport.
+
+### XR Terminal Panel
+Each panel presents one live pane with a readable terminal surface, title label, key strip, scale controls, and font zoom controls. Selection is explicit and independent from gaze emphasis. The observatory background is peripheral architecture and a distant planet, never a competing focal surface.
+
+## Do's and Don'ts
+
+### Do:
+- **Do** keep live terminal text and targeted input visually primary.
+- **Do** use the existing blue-black palette and cyan only for interaction state.
+- **Do** preserve 4px control corners and 8px container corners.
+- **Do** support black, gradient, observatory, and passthrough modes as explicit choices.
+- **Do** keep motion expressive enough to explain selection while leaving viewpoint control to the user.
+
+### Don't:
+- **Don't** redirect commands because gaze moved; input focus must remain explicit.
+- **Don't** add ambient sound as part of the visual system.
+- **Don't** use bright gradients, ornamental neon, or decorative glows that compete with pane content.
+- **Don't** invent headset acceptance claims from desktop or emulator evidence.
+- **Don't** turn the workspace into a fixed radial menu or elaborate window choreography for MVP.
