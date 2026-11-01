@@ -264,6 +264,18 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
       (await page.locator('#endpoint').inputValue()) === new URL(BASE_URL).origin,
       'endpoint was not prefilled from serving origin',
     );
+    await page.locator('[data-pane="%1"]').waitFor({ state: 'visible', timeout: 10_000 });
+    await page.locator('[data-pane="%2"]').waitFor({ state: 'visible', timeout: 10_000 });
+    await page.waitForFunction(
+      () => {
+        const attached = (
+          window as unknown as { __muxXR: { getState(): { attached: string[] } } }
+        ).__muxXR.getState().attached;
+        return attached.includes('%1') && attached.includes('%2');
+      },
+      undefined,
+      { timeout: 10000 },
+    );
     await page.locator('#endpoint').fill(`${BASE_URL}/stream`);
     await page.locator('[data-action="connect"]').click();
     await page.locator('[data-pane="%1"]').waitFor({ state: 'visible', timeout: 10_000 });
@@ -625,7 +637,10 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
       'keyboard background did not persist',
     );
     await page.locator('[data-background]').selectOption('black');
-    await page.locator('[data-gaze]').uncheck();
+    assert(
+      (await page.locator('[data-gaze]').count()) === 0,
+      'independent gaze emphasis control should be absent',
+    );
     assert(
       !(await page.locator('[data-gaze-input]').isChecked()),
       'gaze keyboard input must default off',
@@ -664,7 +679,10 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
       (await page.locator('[data-background]').inputValue()) === 'black',
       'background setting did not apply',
     );
-    assert(!(await page.locator('[data-gaze]').isChecked()), 'gaze setting did not apply');
+    assert(
+      (await page.locator('[data-gaze]').count()) === 0,
+      'independent gaze emphasis control should be absent',
+    );
     await page.screenshot({
       path: join(REVIEW_DIR, `${viewport.name}-settings.png`),
       fullPage: true,
