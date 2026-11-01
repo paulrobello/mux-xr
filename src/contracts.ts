@@ -13,6 +13,8 @@ export interface PaneDescriptor {
 
 export type TerminalStatus = 'connecting' | 'connected' | 'disconnected' | 'exited' | 'closed';
 
+export type TerminalColorMode = 'comfort' | 'original' | 'monochrome';
+
 export interface KeyModifiers {
   ctrl?: boolean;
   alt?: boolean;
@@ -26,12 +28,14 @@ export interface TerminalSurface {
   readonly cols: number;
   readonly rows: number;
   readonly status: TerminalStatus;
+  readonly canResizeGrid: boolean;
   connect(): void;
   sendText(text: string): boolean;
   sendKey(key: string, modifiers?: KeyModifiers): boolean;
   paste(text: string): boolean;
   focus(focused: boolean): void;
-  resizeGrid(cols: number, rows: number): void;
+  resizeGrid(cols: number, rows: number): boolean;
+  setColorMode(mode: TerminalColorMode): void;
   subscribe(listener: () => void): () => void;
   dispose(): void;
 }
@@ -60,4 +64,7 @@ export interface WorkspaceActions {
   openKeyboard(): void;
   openCommands(): void;
   exitPreview?(): void;
+  resizeGrid?(paneId: string, cols: number, rows: number): boolean;
+  setTerminalColorMode?(mode: TerminalColorMode): void;
+  setKeyboardBackground?(enabled: boolean): void;
 }

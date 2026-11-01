@@ -36,8 +36,10 @@ export const demoSnapshot: WorkspaceSnapshot = {
 
 export function createDemoSurface(pane: PaneDescriptor): TerminalSurface {
   const canvas = document.createElement('canvas');
-  canvas.width = 1120;
-  canvas.height = 672;
+  let cols = pane.cols ?? 80;
+  let rows = pane.rows ?? 24;
+  canvas.width = cols * 14;
+  canvas.height = rows * 28;
   const listeners = new Set<() => void>();
   let revision = 0;
   let status: TerminalStatus = 'connected';
@@ -106,14 +108,39 @@ export function createDemoSurface(pane: PaneDescriptor): TerminalSurface {
     get status() {
       return status;
     },
-    cols: 80,
-    rows: 24,
+    get cols() {
+      return cols;
+    },
+    get rows() {
+      return rows;
+    },
+    get canResizeGrid() {
+      return status === 'connected';
+    },
     connect: () => undefined,
     sendText: send,
     sendKey: send,
     paste: send,
     focus: () => undefined,
-    resizeGrid: () => undefined,
+    resizeGrid: (nextCols, nextRows) => {
+      if (status !== 'connected') return false;
+      if (
+        !Number.isInteger(nextCols) ||
+        !Number.isInteger(nextRows) ||
+        nextCols < 2 ||
+        nextCols > 300 ||
+        nextRows < 2 ||
+        nextRows > 150
+      )
+        return false;
+      cols = nextCols;
+      rows = nextRows;
+      canvas.width = cols * 14;
+      canvas.height = rows * 28;
+      paint();
+      return true;
+    },
+    setColorMode: () => undefined,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

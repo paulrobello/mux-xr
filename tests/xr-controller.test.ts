@@ -1,3 +1,5 @@
+vi.mock('../src/xr/labels', () => import('./helpers/labels'));
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fakeXR = vi.hoisted(() => ({
@@ -63,7 +65,9 @@ function surface(descriptor: PaneDescriptor): TerminalSurface {
     sendKey: () => true,
     paste: () => true,
     focus() {},
-    resizeGrid: vi.fn(),
+    resizeGrid: vi.fn(() => true),
+    canResizeGrid: true,
+    setColorMode: vi.fn(),
     dispose() {},
     subscribe(_next) {
       return () => undefined;
@@ -80,6 +84,9 @@ function fixture() {
     runCommand: vi.fn(),
     openKeyboard: vi.fn(),
     openCommands: vi.fn(),
+    resizeGrid: vi.fn(() => true),
+    setTerminalColorMode: vi.fn(),
+    setKeyboardBackground: vi.fn(),
   };
   const container = document.createElement('div');
   const workspace = createWorkspaceScene(container, actions);
@@ -269,7 +276,7 @@ describe('native XR controller event routing', () => {
       );
     pointer('pointermove', enter);
     expect(workspace.canvas.title).toContain('Send Enter');
-    expect(workspace.scene.getObjectByName('xr-hover-help')?.visible).toBe(true);
+    expect(workspace.scene.getObjectByName('xr-hover-help')?.visible).toBe(false);
     expect(actions.sendKey).not.toHaveBeenCalled();
     pointer('pointerdown', enter);
     expect(actions.selectPane).toHaveBeenLastCalledWith('pane-b');
@@ -292,19 +299,23 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('shows controller-ray hover help without sending input', () => {
+  it('delays compact action hints and hides them while gripping', () => {
     const { workspace, actions, container } = fixture();
     hit(workspace, { key: 'Tab', terminalId: 'pane-b' }, 'hover');
-    fakeXR.presenting = true;
-    fakeXR.frame?.(16);
-    expect(workspace.scene.getObjectByName('xr-hover-help')?.visible).toBe(true);
-    expect(workspace.canvas.title).toContain('Send Tab');
-    expect(actions.sendKey).not.toHaveBeenCalled();
-    const controller = fakeXR.controllers[0] as THREE.Group;
-    controller.position.set(20, 20, 20);
-    (fakeXR.controllers[1] as THREE.Group).visible = false;
-    fakeXR.frame?.(32);
+    fakeXR.frame?.(0);
+    fakeXR.frame?.(699);
     expect(workspace.scene.getObjectByName('xr-hover-help')?.visible).toBe(false);
+    fakeXR.frame?.(701);
+    const tooltip = workspace.scene.getObjectByName(
+      'xr-hover-help',
+    ) as THREE.Mesh<THREE.PlaneGeometry>;
+    expect(tooltip.visible).toBe(true);
+    expect(tooltip.geometry.parameters.width).toBeLessThanOrEqual(0.32);
+    expect(tooltip.geometry.parameters.height).toBeLessThanOrEqual(0.05);
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezestart' } as never);
+    fakeXR.frame?.(750);
+    expect(tooltip.visible).toBe(false);
     workspace.dispose();
     container.remove();
   });
@@ -573,11 +584,13 @@ describe('native XR controller event routing', () => {
     const gamepad = { axes: [0, 0, 0, -1], buttons: [{ pressed: false }] } as unknown as Gamepad;
     controller.dispatchEvent({ type: 'connected', data: { gamepad } } as never);
     hit(workspace, { inputAction: 'key', key: 'a' }, 'squeezestart');
-    const y = keyboard.position.y;
+    const position = keyboard.position.clone();
+    const rotation = keyboard.quaternion.clone();
     controller.dispatchEvent({ type: 'selectstart' } as never);
     fakeXR.frame?.(16);
     expect(actions.sendKey).not.toHaveBeenCalled();
-    expect(keyboard.position.y).toBeGreaterThan(y);
+    expect(keyboard.position.distanceTo(position)).toBeLessThan(0.000001);
+    expect(keyboard.quaternion.angleTo(rotation)).toBeGreaterThan(0.001);
     controller.dispatchEvent({ type: 'squeezeend' } as never);
     workspace.dispose();
     container.remove();
@@ -969,6 +982,73 @@ describe('native XR controller event routing', () => {
       THREE.MeshBasicMaterial
     >;
     expect(key.material.color.getHex()).toBe(0x9deaff);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('rolls around the controller laser axis in grip-trigger mode', () => {
+    const { workspace, actions, container } = fixture();
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    keyboard.rotation.set(0.2, 0.45, -0.1);
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    const pad = connectController(0, [0, 0, 1, 0]);
+    (pad.buttons as unknown as Array<{ pressed: boolean }>)[0].pressed = true;
+    hit(workspace, { inputAction: 'key', key: 'a' }, 'squeezestart');
+    const before = keyboard.quaternion.clone();
+    const axis = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion);
+    const position = keyboard.position.clone();
+    fakeXR.frame?.(0);
+    const expected = new THREE.Quaternion().setFromAxisAngle(axis, 0.9 / 60).multiply(before);
+    expect(keyboard.quaternion.angleTo(expected)).toBeLessThan(0.000001);
+    expect(keyboard.position.distanceTo(position)).toBeLessThan(0.000001);
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('resizes a selected grid only on explicit Apply and exposes color modes', () => {
+    const { workspace, actions, left, right, container } = fixture();
+    workspace.selectTerminal('pane-b');
+    workspace.showInput('terminal');
+    hit(workspace, { inputAction: 'gridPreset', cols: 120, rows: 36 });
+    expect(actions.resizeGrid).not.toHaveBeenCalled();
+    hit(workspace, { inputAction: 'gridApply' });
+    expect(actions.resizeGrid).toHaveBeenCalledExactlyOnceWith('pane-b', 120, 36);
+    expect(left.resizeGrid).not.toHaveBeenCalled();
+    expect(right.cols).toBe(80);
+    hit(workspace, { inputAction: 'terminalColors', colorMode: 'monochrome' });
+    expect(actions.setTerminalColorMode).toHaveBeenLastCalledWith('monochrome');
+    expect(workspace.state.terminalColorMode).toBe('monochrome');
+    expect(left.setColorMode).toHaveBeenCalledWith('monochrome');
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('can hide keyboard backing without losing keys or grip support, and shows measured FPS', () => {
+    const { workspace, actions, container } = fixture();
+    workspace.showInput('keyboard');
+    hit(workspace, { inputAction: 'keyboardBackground' });
+    expect(actions.setKeyboardBackground).toHaveBeenLastCalledWith(false);
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    const backing = keyboard?.getObjectByName('input-backdrop') as THREE.Mesh<
+      THREE.PlaneGeometry,
+      THREE.MeshBasicMaterial
+    >;
+    expect(backing.material.opacity).toBe(0);
+    expect(backing.material.depthWrite).toBe(false);
+    hit(workspace, { inputAction: 'key', key: 'a' });
+    expect(actions.sendKey).toHaveBeenLastCalledWith('a', undefined);
+    hit(workspace, { inputAction: 'grabInput', dragHandle: true }, 'squeezestart');
+    const current = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!current) throw new Error('Keyboard missing');
+    const before = current.position.clone();
+    (fakeXR.controllers[0] as THREE.Group).position.x += 0.2;
+    for (let frame = 0; frame <= 60; frame += 1) fakeXR.frame?.((frame * 1000) / 60);
+    expect(current.position.x).toBeCloseTo(before.x + 0.2, 5);
+    expect(workspace.state.fps).toBe(60);
+    expect(workspace.scene.getObjectByName('xr-fps-counter')?.userData.labelText).toBe('FPS 60');
     workspace.dispose();
     container.remove();
   });

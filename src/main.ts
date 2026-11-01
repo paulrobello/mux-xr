@@ -2,6 +2,7 @@ import './styles.css';
 import type {
   KeyModifiers,
   QuickCommand,
+  TerminalColorMode,
   TerminalSurface,
   WorkspaceActions,
   WorkspaceSnapshot,
@@ -10,7 +11,7 @@ import { createDemoSurface, demoSnapshot } from './demo';
 import { createDesktopPanels, type DesktopPanels } from './desktop/panels';
 import { loadObservatory } from './environment';
 import { createTerminalSurface } from './terminal';
-import { mountWorkspaceUI, type WorkspaceUI } from './ui';
+import { mountWorkspaceUI, type WorkspaceSettings, type WorkspaceUI } from './ui';
 import { createWorkspaceScene, type WorkspaceScene } from './xr';
 
 const app = document.querySelector<HTMLElement>('#app');
@@ -28,6 +29,7 @@ let ui: WorkspaceUI;
 let scene: WorkspaceScene;
 let desktop: DesktopPanels;
 let disposeEnvironment: (() => void) | undefined;
+let applyingSettings = false;
 
 function notice(message: string): void {
   ui.setConnection('disconnected', message);
@@ -47,7 +49,10 @@ function selectPane(id: string): void {
     scene.addTerminal(surface);
     surface.subscribe(() => {
       if (selectedId === id) ui.setConnection(surface.status, `${pane.title} · ${surface.status}`);
+      ui.setTerminalGrid(id, surface.cols, surface.rows, surface.canResizeGrid);
     });
+    surface.setColorMode(ui.getSettings().colorMode);
+    ui.setTerminalGrid(id, surface.cols, surface.rows, surface.canResizeGrid);
     surface.connect();
     ui.setAttachedPaneIds([...surfaces.keys()]);
   }
@@ -90,6 +95,33 @@ function runCommand(command: QuickCommand, paneId: string): void {
   }
   if (command.sendNewline && !surface.sendKey('Enter'))
     notice('Connection lost before Enter was sent.');
+}
+
+function resizeGrid(paneId: string, cols: number, rows: number): boolean {
+  return surfaces.get(paneId)?.resizeGrid(cols, rows) ?? false;
+}
+
+function setTerminalColorMode(mode: TerminalColorMode): void {
+  ui.setTerminalColorMode(mode);
+}
+
+function setKeyboardBackground(enabled: boolean): void {
+  ui.setKeyboardBackgroundEnabled(enabled);
+}
+
+function applySettings(settings: WorkspaceSettings): void {
+  if (!scene || applyingSettings) return;
+  applyingSettings = true;
+  try {
+    scene.setTerminalColorMode(settings.colorMode);
+    scene.setKeyboardBackgroundEnabled(settings.keyboardBackground);
+    scene.setGazeInputEnabled(settings.gazeInput);
+    scene.setGazeEnabled(settings.gazeEmphasis);
+    scene.setBackground(settings.background);
+    for (const surface of surfaces.values()) surface.setColorMode(settings.colorMode);
+  } finally {
+    applyingSettings = false;
+  }
 }
 
 function detachAll(): void {
@@ -169,6 +201,9 @@ const actions: WorkspaceActions = {
   },
   openKeyboard: () => ui.openInput('keyboard'),
   exitPreview: () => desktop.showTerminals(),
+  resizeGrid,
+  setTerminalColorMode,
+  setKeyboardBackground,
 };
 
 ui = mountWorkspaceUI(app, {
@@ -181,6 +216,7 @@ ui = mountWorkspaceUI(app, {
   onSendText: sendText,
   onSendKey: sendKey,
   onRunCommand: runCommand,
+  onResizeGrid: resizeGrid,
   onCommandsChange: syncCommands,
   onEnterXR: () => {
     void scene.enterXR('vr').catch((error: Error) => notice(error.message));
@@ -188,11 +224,7 @@ ui = mountWorkspaceUI(app, {
   onPassthrough: () => {
     void scene.enterXR('ar').catch((error: Error) => notice(error.message));
   },
-  onSettingsChange: (settings) => {
-    scene?.setGazeInputEnabled(settings.gazeInput);
-    scene?.setBackground(settings.background);
-    scene?.setGazeEnabled(settings.gazeEmphasis);
-  },
+  onSettingsChange: applySettings,
   onResetLayout: () => scene.resetLayout(),
   onDemo: startDemo,
 });
@@ -202,14 +234,15 @@ desktop = createDesktopPanels(ui.sceneHost, selectPane, {
   onReset: () => scene.resetLayout(),
 });
 const stopPresentation = scene.subscribe((state) => {
-  ui.setGazeInputEnabled(state.gazeInputEnabled);
+  if (!applyingSettings) {
+    ui.setGazeInputEnabled(state.gazeInputEnabled);
+    ui.setKeyboardBackgroundEnabled(state.keyboardBackgroundEnabled, false);
+    ui.setTerminalColorMode(state.terminalColorMode, false);
+  }
   desktop.setImmersive(state.xrMode !== 'desktop');
   if (state.xrMode !== 'desktop') ui.closeInput();
 });
-const settings = ui.getSettings();
-scene.setGazeInputEnabled(settings.gazeInput);
-scene.setBackground(settings.background);
-scene.setGazeEnabled(settings.gazeEmphasis);
+applySettings(ui.getSettings());
 void loadObservatory(scene)
   .then((dispose) => {
     disposeEnvironment = dispose;

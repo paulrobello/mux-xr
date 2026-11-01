@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ConnectedSchema,
   OutputSchema,
+  ResizeSchema,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
 
@@ -224,6 +225,37 @@ describe('terminal surface lifecycle', () => {
     surface.dispose();
   });
 
+  it('validates resize requests and adopts only the server echo', async () => {
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    expect(surface.resizeGrid(Number.NaN, 30)).toBe(false);
+    expect(surface.resizeGrid(100, 1)).toBe(false);
+    expect(surface.cols).toBe(80);
+    surface.connect();
+    const ws = MockSocket.instances[0];
+    ws.open();
+    ws.message(
+      frame(
+        create(ServerMessageSchema, {
+          message: { case: 'connected', value: create(ConnectedSchema, { cols: 80, rows: 24 }) },
+        }),
+      ),
+    );
+    expect(surface.canResizeGrid).toBe(true);
+    expect(surface.resizeGrid(100, 30)).toBe(true);
+    expect(ws.sent).toHaveLength(1);
+    expect(surface.cols).toBe(80);
+    ws.message(
+      frame(
+        create(ServerMessageSchema, {
+          message: { case: 'resize', value: create(ResizeSchema, { cols: 100, rows: 30 }) },
+        }),
+      ),
+    );
+    expect([surface.cols, surface.rows]).toEqual([100, 30]);
+    surface.dispose();
+  });
+
   it('supersamples at capped density without changing logical terminal size', async () => {
     Object.assign(window, { devicePixelRatio: 3 });
     const { createTerminalSurface } = await import('../src/terminal/surface');
@@ -254,9 +286,28 @@ describe('terminal surface lifecycle', () => {
     });
     const { createTerminalSurface } = await import('../src/terminal/surface');
     const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    surface.setColorMode('original');
     expect(paintStyles).toContain('rgb(17,34,51)');
     expect(paintStyles).toContain('#cd0000');
     expect(paintTextStyles).toContain('#cd0000');
     surface.dispose();
+  });
+});
+
+describe('terminal color modes', () => {
+  it('maps ANSI 256 colors and keeps comfort and monochrome readable', async () => {
+    const { terminalColor } = await import('../src/terminal/colors');
+    expect(terminalColor('original', false, true, 196, '#000')).toBe('#ff0000');
+    expect(terminalColor('original', false, true, 46, '#000')).toBe('#00ff00');
+    expect(terminalColor('original', false, true, 232, '#000')).toBe('#080808');
+    expect(terminalColor('original', false, true, 255, '#000')).toBe('#eeeeee');
+    expect(terminalColor('comfort', true, false, 0x0000ff, '#000')).not.toBe('#0000ff');
+    expect(terminalColor('monochrome', true, false, 0x0000ff, '#000')).toBe('#787878');
+    for (const mode of ['comfort', 'original', 'monochrome'] as const) {
+      expect(terminalColor(mode, false, true, 0, '#05070b', false, true)).toBe('#000000');
+      expect(terminalColor(mode, true, false, 0, '#05070b', false, true)).toBe(
+        mode === 'original' ? 'rgb(0,0,0)' : '#000000',
+      );
+    }
   });
 });

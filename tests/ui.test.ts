@@ -71,6 +71,60 @@ describe('mux XR local UI state', () => {
     localStorage.clear();
   });
 
+  it('persists comfort settings and targets the selected pane for grid resize', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const resized: Array<[string, number, number]> = [];
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onResizeGrid: (id, cols, rows) => {
+        resized.push([id, cols, rows]);
+        return true;
+      },
+    });
+    ui.update({
+      panes: [
+        {
+          id: 'pane-a',
+          workspaceId: 'w',
+          workspaceName: 'W',
+          sessionId: 's',
+          sessionName: 'S',
+          windowId: 'win',
+          windowName: 'Win',
+          title: 'A',
+        },
+      ],
+    });
+    ui.setActivePane('pane-a');
+    ui.setTerminalGrid('pane-a', 80, 24, true);
+    query<HTMLSelectElement>(root, '[data-color-mode]').value = 'monochrome';
+    query<HTMLSelectElement>(root, '[data-color-mode]').dispatchEvent(new Event('change'));
+    const keyboardBackground = query<HTMLInputElement>(root, '[data-keyboard-background]');
+    keyboardBackground.click();
+    keyboardBackground.dispatchEvent(new Event('change'));
+    query<HTMLInputElement>(root, '[data-grid-cols]').value = '0';
+    query<HTMLButtonElement>(root, '[data-action="apply-grid"]').click();
+    expect(resized).toEqual([]);
+    expect(query<HTMLElement>(root, '[data-grid-status]').textContent).toContain('2–300');
+    query<HTMLInputElement>(root, '[data-grid-cols]').value = '100';
+    query<HTMLInputElement>(root, '[data-grid-rows]').value = '30';
+    query<HTMLButtonElement>(root, '[data-action="apply-grid"]').click();
+    expect(resized).toEqual([['pane-a', 100, 30]]);
+    ui.setTerminalGrid('pane-a', 80, 24, false);
+    expect(query<HTMLButtonElement>(root, '[data-action="apply-grid"]').disabled).toBe(true);
+    ui.setAttachedPaneIds([]);
+    expect(query<HTMLElement>(root, '[data-grid-caption]').textContent).toContain('No terminal');
+    ui.destroy();
+    const restored = mountWorkspaceUI(root, { onConnect: () => undefined });
+    expect(restored.getSettings()).toMatchObject({
+      colorMode: 'monochrome',
+      keyboardBackground: false,
+    });
+    restored.destroy();
+    localStorage.clear();
+  });
+
   it('prefills the serving origin and restores a saved custom endpoint', () => {
     localStorage.clear();
     const root = document.createElement('div');

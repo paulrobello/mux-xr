@@ -11,12 +11,13 @@ import {
   MuxTreeWindowSchema,
   MuxTreeWorkspaceSchema,
   OutputSchema,
+  ResizeSchema,
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
 
 type Viewport = { name: string; width: number; height: number };
-type Frame = { paneId: string; case: string; data?: string };
+type Frame = { paneId: string; case: string; data?: string; cols?: number; rows?: number };
 type FixtureState = { frames: Frame[]; closed: string[]; sockets: number };
 
 const BASE_URL = process.env.MUX_XR_BASE_URL ?? 'http://127.0.0.1:4240';
@@ -129,7 +130,12 @@ function outputFrame(text: string): Buffer {
   );
 }
 
-function decodeClientMessage(message: string | Buffer): { case: string; data?: string } {
+function decodeClientMessage(message: string | Buffer): {
+  case: string;
+  data?: string;
+  cols?: number;
+  rows?: number;
+} {
   const bytes = Buffer.isBuffer(message) ? message : Buffer.from(message, 'binary');
   assert(bytes.length > 1, 'fixture received an empty client frame');
   const decoded = fromBinary(ClientMessageSchema, new Uint8Array(bytes.subarray(1)));
@@ -137,6 +143,12 @@ function decodeClientMessage(message: string | Buffer): { case: string; data?: s
     return {
       case: decoded.message.case,
       data: new TextDecoder().decode(decoded.message.value.data),
+    };
+  if (decoded.message.case === 'resize')
+    return {
+      case: decoded.message.case,
+      cols: decoded.message.value.cols,
+      rows: decoded.message.value.rows,
     };
   assert(decoded.message.case !== undefined, 'fixture received an empty client message');
   return { case: decoded.message.case };
@@ -155,6 +167,17 @@ async function installFixture(page: Page, state: FixtureState): Promise<void> {
       const decoded = decodeClientMessage(message);
       state.frames.push({ paneId, ...decoded });
       if (decoded.case === 'muxTreeRequest') ws.send(snapshotFrame());
+      if (decoded.case === 'resize' && decoded.cols && decoded.rows)
+        ws.send(
+          serverFrame(
+            create(ServerMessageSchema, {
+              message: {
+                case: 'resize',
+                value: create(ResizeSchema, { cols: decoded.cols, rows: decoded.rows }),
+              },
+            }),
+          ),
+        );
     });
     if (session) {
       ws.send(connectedFrame(paneId));
@@ -221,10 +244,22 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
   const page = await context.newPage();
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
+  page.on('requestfailed', (request) =>
+    console.error(
+      'Browser request failed:',
+      request.url().slice(0, 200),
+      request.failure()?.errorText,
+    ),
+  );
   const state: FixtureState = { frames: [], closed: [], sockets: 0 };
   await installFixture(page, state);
   const execute = async (): Promise<Record<string, unknown>> => {
-    await page.goto(BASE_URL, { waitUntil: 'networkidle', timeout: 15_000 });
+    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.waitForFunction(
+      () => Boolean((window as unknown as { __muxXR?: unknown }).__muxXR),
+      undefined,
+      { timeout: 15000 },
+    );
     assert(
       (await page.locator('#endpoint').inputValue()) === new URL(BASE_URL).origin,
       'endpoint was not prefilled from serving origin',
@@ -518,6 +553,77 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
     assert(state.closed.includes('%2'), 'detaching pane B did not close its viewer socket');
 
     await page.locator('[data-action="settings"]').click();
+    await page.locator('[data-color-mode]').selectOption('monochrome');
+    await page.locator('[data-keyboard-background]').uncheck();
+    assert(
+      await page.evaluate(() => {
+        const state = (
+          window as unknown as {
+            __muxXR: {
+              getState(): {
+                scene: { terminalColorMode: string; keyboardBackgroundEnabled: boolean };
+              };
+            };
+          }
+        ).__muxXR.getState();
+        return (
+          state.scene.terminalColorMode === 'monochrome' && !state.scene.keyboardBackgroundEnabled
+        );
+      }),
+      'color or keyboard background setting did not reach scene',
+    );
+    await page.locator('[data-grid-cols]').fill('120');
+    await page.locator('[data-grid-rows]').fill('36');
+    const resizeStart = state.frames.filter((frame) => frame.case === 'resize').length;
+    await page.locator('[data-action="apply-grid"]').click();
+    let deadline = Date.now() + 5000;
+    while (
+      state.frames.filter((frame) => frame.case === 'resize').length <= resizeStart &&
+      Date.now() < deadline
+    )
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    assert(
+      state.frames.filter((frame) => frame.case === 'resize').length > resizeStart,
+      'resize request did not reach fixture',
+    );
+    await waitForText(page, '[data-grid-caption]', /120 × 36/);
+    assert(
+      state.frames.filter((frame) => frame.case === 'resize').length === resizeStart + 1,
+      'unexpected resize count after explicit request',
+    );
+    await page.locator('[data-grid-cols]').fill('80');
+    await page.locator('[data-grid-rows]').fill('24');
+    await page.locator('[data-action="apply-grid"]').click();
+    deadline = Date.now() + 5000;
+    while (
+      state.frames.filter((frame) => frame.case === 'resize').length <= resizeStart + 1 &&
+      Date.now() < deadline
+    )
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    assert(
+      state.frames.filter((frame) => frame.case === 'resize').length > resizeStart + 1,
+      'restore resize request did not reach fixture',
+    );
+    await waitForText(page, '[data-grid-caption]', /80 × 24/);
+    assert(
+      state.frames.filter((frame) => frame.case === 'resize').length === resizeStart + 2,
+      'restore emitted unexpected resize messages',
+    );
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(
+      () => Boolean((window as unknown as { __muxXR?: unknown }).__muxXR),
+      undefined,
+      { timeout: 15000 },
+    );
+    await page.locator('[data-action="settings"]').click();
+    assert(
+      (await page.locator('[data-color-mode]').inputValue()) === 'monochrome',
+      'color mode did not persist',
+    );
+    assert(
+      !(await page.locator('[data-keyboard-background]').isChecked()),
+      'keyboard background did not persist',
+    );
     await page.locator('[data-background]').selectOption('black');
     await page.locator('[data-gaze]').uncheck();
     assert(

@@ -1,5 +1,12 @@
 import { Terminal } from '@xterm/xterm';
-import type { KeyModifiers, PaneDescriptor, TerminalStatus, TerminalSurface } from '../contracts';
+import type {
+  KeyModifiers,
+  PaneDescriptor,
+  TerminalColorMode,
+  TerminalStatus,
+  TerminalSurface,
+} from '../contracts';
+import { terminalColor } from './colors';
 import {
   createFocusMessage,
   createInputMessage,
@@ -15,6 +22,21 @@ const INITIAL_RETRY_MS = 500;
 const MAX_RETRIES = 8;
 const CELL_WIDTH = 11;
 const LINE_HEIGHT = 21;
+export const MIN_GRID_COLS = 2;
+export const MAX_GRID_COLS = 300;
+export const MIN_GRID_ROWS = 2;
+export const MAX_GRID_ROWS = 150;
+
+export function validGrid(cols: number, rows: number): boolean {
+  return (
+    Number.isInteger(cols) &&
+    Number.isInteger(rows) &&
+    cols >= MIN_GRID_COLS &&
+    cols <= MAX_GRID_COLS &&
+    rows >= MIN_GRID_ROWS &&
+    rows <= MAX_GRID_ROWS
+  );
+}
 
 export function terminalKeyBytes(
   key: string,
@@ -96,44 +118,13 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   let retry: ReturnType<typeof setTimeout> | null = null;
   let appCursor = false;
   let readonly = false;
+  let colorMode: TerminalColorMode = 'comfort';
   let generation = 0;
   const listeners = new Set<() => void>();
   const notify = (): void => {
     revision += 1;
     paint();
     for (const listener of listeners) listener();
-  };
-  const color = (
-    isRgb: boolean,
-    isPalette: boolean,
-    value: number,
-    fallback: string,
-    bright: boolean,
-  ): string => {
-    const ansi = [
-      '#000000',
-      '#cd0000',
-      '#00cd00',
-      '#cdcd00',
-      '#0000ee',
-      '#cd00cd',
-      '#00cdcd',
-      '#e5e5e5',
-      '#7f7f7f',
-      '#ff0000',
-      '#00ff00',
-      '#ffff00',
-      '#5c5cff',
-      '#ff00ff',
-      '#00ffff',
-      '#ffffff',
-    ];
-    if (isPalette) {
-      const palette = bright && (value & 15) < 8 ? (value & 15) + 8 : value & 15;
-      return ansi[palette] ?? fallback;
-    }
-    if (isRgb) return `rgb(${(value >> 16) & 255},${(value >> 8) & 255},${value & 255})`;
-    return fallback;
   };
   const paint = (): void => {
     const logicalWidth = cols * CELL_WIDTH;
@@ -159,14 +150,24 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
         const cell = line.getCell(col);
         if (!cell || cell.getWidth() === 0) continue;
         const inverse = Boolean(cell.isInverse());
-        const fg = color(
+        const fg = terminalColor(
+          colorMode,
           cell.isFgRGB(),
           cell.isFgPalette(),
           cell.getFgColor(),
           '#d8e1ef',
           Boolean(cell.isBold()),
+          false,
         );
-        const bg = color(cell.isBgRGB(), cell.isBgPalette(), cell.getBgColor(), '#05070b', false);
+        const bg = terminalColor(
+          colorMode,
+          cell.isBgRGB(),
+          cell.isBgPalette(),
+          cell.getBgColor(),
+          '#05070b',
+          false,
+          true,
+        );
         const foreground = inverse ? bg : fg;
         const background = inverse ? fg : bg;
         if (background !== '#05070b') {
@@ -258,8 +259,10 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             ready = true;
             readonly = connected.readonly ?? false;
             retries = 0;
-            cols = connected.cols || cols;
-            rows = connected.rows || rows;
+            if (validGrid(connected.cols, connected.rows)) {
+              cols = connected.cols;
+              rows = connected.rows;
+            }
             terminal.resize(cols, rows);
             terminal.reset();
             if (connected.initialScreen?.length) terminal.write(connected.initialScreen, notify);
@@ -271,6 +274,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             terminal.write(msg.message.value.data, notify);
             break;
           case 'resize':
+            if (!validGrid(msg.message.value.cols, msg.message.value.rows)) break;
             cols = msg.message.value.cols;
             rows = msg.message.value.rows;
             terminal.resize(cols, rows);
@@ -323,6 +327,9 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     get status() {
       return status;
     },
+    get canResizeGrid() {
+      return ready && socket?.readyState === WebSocket.OPEN && !readonly && !disposed;
+    },
     connect,
     sendText: (text) => send(createInputMessage(text)),
     sendKey: (key, modifiers) =>
@@ -338,11 +345,12 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       return send(createFocusMessage(focused));
     },
     resizeGrid: (nextCols, nextRows) => {
-      if (!ready || readonly) return;
-      cols = nextCols;
-      rows = nextRows;
-      terminal.resize(cols, rows);
-      send(createResizeMessage(cols, rows));
+      if (!validGrid(nextCols, nextRows) || !ready || readonly || disposed) return false;
+      return send(createResizeMessage(nextCols, nextRows));
+    },
+    setColorMode: (mode) => {
+      if (colorMode === mode) return;
+      colorMode = mode;
       notify();
     },
     subscribe: (listener) => {

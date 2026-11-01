@@ -17,13 +17,20 @@ export function getKeyHelp(key: string): string | undefined {
 }
 
 export function getControlHelp(data: Record<string, unknown>): string | undefined {
-  if (data.terminalTitle) return 'Grip to move/rotate. Two grips resize.';
   if (typeof data.key === 'string') return getKeyHelp(data.key);
   switch (data.inputAction) {
+    case 'keyboardBackground':
+      return 'Show or hide the keyboard backing';
+    case 'terminalColors':
+      return 'Choose terminal color presentation';
+    case 'gridPreset':
+      return 'Choose a grid preset, then Apply';
+    case 'gridStep':
+      return 'Edit the grid draft, then Apply';
+    case 'gridApply':
+      return 'Resize the selected terminal grid';
     case 'gazeInput':
       return 'Toggle head-gaze keyboard targeting after a short dwell; off uses manual selection';
-    case 'grabInput':
-      return 'Grip to move/rotate. Two grips resize.';
     case 'fontZoom':
       return Number(data.direction) < 0
         ? 'Zoom text out; terminal grid stays unchanged'
@@ -34,7 +41,9 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
         ? 'Open terminal text entry and keyboard'
         : data.mode === 'panes'
           ? 'Browse workspaces, sessions, windows and panes'
-          : 'Open saved quick commands';
+          : data.mode === 'terminal'
+            ? 'Open terminal grid and color settings'
+            : 'Open saved quick commands';
     case 'exit':
       return 'Exit immersive mode or the 3D preview';
     case 'close':

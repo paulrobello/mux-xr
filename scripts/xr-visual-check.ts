@@ -16,6 +16,9 @@ type VisualMetrics = {
     allCornersInView: boolean;
   };
   renderer: string;
+  sdfLabels: number;
+  fps: number | null;
+  fpsText: string;
   controllerRayDistance: number;
   highlightedColor: string;
   xrTransformButtons: string[];
@@ -28,6 +31,8 @@ type FixtureWindow = Window & {
     highlightController: () => void;
     simulatePairGrip: () => void;
     releasePairGrip: () => void;
+    setView: (distance: number, yaw: number) => Promise<void>;
+    setBacking: (enabled: boolean) => Promise<void>;
   };
 };
 
@@ -211,7 +216,9 @@ async function createFixture(page: Page): Promise<void> {
           return true;
         },
         focus: () => undefined,
-        resizeGrid: () => undefined,
+        canResizeGrid: true,
+        setColorMode: () => undefined,
+        resizeGrid: () => true,
         subscribe: (listener: () => void) => {
           listeners.add(listener);
           return () => listeners.delete(listener);
@@ -232,6 +239,27 @@ async function createFixture(page: Page): Promise<void> {
     scene.setAvailablePanes(surfaces.map((surface) => surface.pane));
     scene.selectTerminal('%fixture-a');
     scene.showInput('keyboard');
+    const waitLabels = async (): Promise<void> => {
+      const promises: Promise<void>[] = [];
+      const pending = new Set<string>();
+      scene.scene.traverse((object: import('three').Object3D) => {
+        if (object.userData.labelSyncPromise) {
+          const label = object.userData.labelText;
+          pending.add(label);
+          promises.push(object.userData.labelSyncPromise.then(() => pending.delete(label)));
+        }
+      });
+      await Promise.race([
+        Promise.all(promises),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`Local SDF labels did not sync: ${[...pending].join(', ')}`)),
+            12000,
+          ),
+        ),
+      ]);
+    };
+    await waitLabels();
 
     let pairStartPosition: import('three').Vector3 | null = null;
     let pairStartScale = 0;
@@ -326,6 +354,11 @@ async function createFixture(page: Page): Promise<void> {
             ),
           },
           renderer: rendererName,
+          sdfLabels: keyboard.children.filter(
+            (object: import('three').Object3D) => object.userData.labelTextObject?.textRenderInfo,
+          ).length,
+          fps: scene.state.fps,
+          fpsText: scene.scene.getObjectByName('xr-fps-counter')?.userData.labelText ?? '',
           controllerRayDistance: Number(controller.userData.rayDistance ?? 0),
           highlightedColor,
           xrTransformButtons,
@@ -405,6 +438,19 @@ async function createFixture(page: Page): Promise<void> {
         controllers[1].position.x += 0.15;
         controllers[1].position.y += 0.12;
       },
+      setView: async (distance: number, yaw: number) => {
+        const keyboard = scene.scene.getObjectByName('xr-keyboard-controls');
+        if (!keyboard) throw new Error('Keyboard missing');
+        for (const object of scene.scene.children)
+          if (object.name.startsWith('terminal-panel-')) object.visible = false;
+        keyboard.position.set(0, 1.4, -distance);
+        keyboard.rotation.set(0, yaw, 0);
+        await waitLabels();
+      },
+      setBacking: async (enabled: boolean) => {
+        scene.setKeyboardBackgroundEnabled(enabled);
+        await waitLabels();
+      },
       releasePairGrip: () => {
         const controllers = (
           window as unknown as {
@@ -434,11 +480,28 @@ async function main(): Promise<void> {
   const page = await context.newPage();
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
+  page.on('console', (message) => {
+    if (message.type() === 'error' || message.type() === 'warning')
+      console.error('Browser:', message.text().slice(0, 1500));
+  });
+  page.on('requestfailed', (request) =>
+    console.error('Failed request:', request.url().slice(0, 200), request.failure()?.errorText),
+  );
   try {
+    await page.route('**/*', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.protocol.startsWith('http') && url.origin !== new URL(BASE_URL).origin) {
+        pageErrors.push(`Unexpected external request: ${url.origin}`);
+        await route.abort();
+      } else await route.fallback();
+    });
     await installModuleRoutes(page);
     await page.goto(`${BASE_URL}/__xr-native-fixture.html`, { waitUntil: 'domcontentloaded' });
     await createFixture(page);
     await page.waitForTimeout(500);
+    await page.waitForFunction(
+      () => ((window as FixtureWindow).__muxXRVisualFixture?.metrics().fps ?? 0) > 0,
+    );
     const metrics = await page.evaluate(() => {
       const fixture = (window as FixtureWindow).__muxXRVisualFixture;
       if (!fixture) throw new Error('XR visual fixture did not initialize');
@@ -491,6 +554,8 @@ async function main(): Promise<void> {
       'Pair grip did not scale keyboard',
     );
     assert(gripped.pairGrip.moved > 0.01, 'Pair grip did not move keyboard');
+    assert(metrics.sdfLabels >= 59, `SDF label meshes missing: ${metrics.sdfLabels}`);
+    assert(metrics.fpsText.startsWith('FPS '), 'FPS HUD missing');
     assert(metrics.renderer !== 'unknown', 'WebGL debug renderer information is unavailable');
     assert(
       !/swiftshader/i.test(metrics.renderer),
@@ -520,6 +585,25 @@ async function main(): Promise<void> {
       `Key A was not highlighted: ${highlighted.highlightedColor}`,
     );
     await page.screenshot({ path: HIGHLIGHT_SCREENSHOT });
+    for (const [name, distance, yaw] of [
+      ['near', 0.7, 0],
+      ['far', 2, 0],
+      ['oblique', 1.5, 0.5],
+    ] as const) {
+      await page.evaluate(
+        async ({ distance, yaw }) => {
+          await (window as FixtureWindow).__muxXRVisualFixture?.setView(distance, yaw);
+        },
+        { distance, yaw },
+      );
+      await page.waitForTimeout(100);
+      await page.screenshot({ path: join(REVIEW_DIR, `quest-keyboard-sdf-${name}.png`) });
+    }
+    await page.evaluate(async () => {
+      await (window as FixtureWindow).__muxXRVisualFixture?.setView(1.15, 0);
+      await (window as FixtureWindow).__muxXRVisualFixture?.setBacking(false);
+    });
+    await page.screenshot({ path: join(REVIEW_DIR, 'quest-keyboard-buttons-only.png') });
     assert(pageErrors.length === 0, `Page errors: ${pageErrors.join('; ')}`);
     console.log(
       JSON.stringify(
@@ -528,6 +612,9 @@ async function main(): Promise<void> {
           simulatedXR: true,
           baseUrl: BASE_URL,
           renderer: metrics.renderer,
+          sdfLabels: metrics.sdfLabels,
+          fps: metrics.fps,
+          fpsText: metrics.fpsText,
           keyboard: metrics.keyboard,
           highlighted: {
             controllerRayDistance: highlighted.controllerRayDistance,

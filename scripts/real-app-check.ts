@@ -34,6 +34,13 @@ type RealResult = {
   gridsAfter: Array<{ id: string; cols: number; rows: number }>;
   markersSeen: Record<string, boolean>;
   zeroResizeMessages: number;
+  baselineZeroResizeMessages: number;
+  explicitGridResize: {
+    requested: { cols: number; rows: number };
+    observed: { cols: number; rows: number };
+    restored: { cols: number; rows: number };
+    totalWireResize: number;
+  };
   screenshotPaths: string[];
   errors: string[];
 };
@@ -93,6 +100,14 @@ async function waitFor<T>(
   throw new Error(message);
 }
 
+async function waitForText(page: Page, selector: string, pattern: RegExp): Promise<void> {
+  await page.waitForFunction(
+    ({ selector, source, flags }) =>
+      new RegExp(source, flags).test(document.querySelector(selector)?.textContent ?? ''),
+    { selector, source: pattern.source, flags: pattern.flags },
+  );
+}
+
 async function main(): Promise<void> {
   assert(PRIVATE_TEST, 'MUX_XR_PRIVATE_TEST=1 is required before issuing commands');
   await mkdir(REVIEW_DIR, { recursive: true });
@@ -117,6 +132,7 @@ async function main(): Promise<void> {
   const snapshots: MuxTreeSnapshot[] = [];
   const screenshotPaths: string[] = [];
   let zeroResizeMessages = 0;
+  let baselineZeroResizeMessages = 0;
   let metadataProbeReady = false;
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('websocket', (socket) => {
@@ -277,6 +293,57 @@ async function main(): Promise<void> {
     screenshotPaths.push(keyboardPath);
     await page.locator('[data-action="close-drawer"]').click();
     await page.locator('[data-action="settings"]').click();
+    baselineZeroResizeMessages = zeroResizeMessages;
+    const paneBInitial = gridsBefore.find((grid) => grid.id === paneIds[1]) ?? gridsBefore[1];
+    const paneAInitial = gridsBefore.find((grid) => grid.id === paneIds[0]) ?? gridsBefore[0];
+    await page.locator('[data-grid-cols]').fill('100');
+    await page.locator('[data-grid-rows]').fill('30');
+    await page.locator('[data-action="apply-grid"]').click();
+    await waitFor(
+      () => zeroResizeMessages,
+      (count) => count >= baselineZeroResizeMessages + 1,
+      'selected pane B resize was not sent',
+    );
+    await waitForText(page, '[data-grid-caption]', /100 × 30/);
+    await page.locator('[data-action="refresh"]').click();
+    await waitFor(
+      () => snapshotPanes(snapshots.at(-1) ?? snapshots[0]),
+      (panes) =>
+        panes.some((pane) => pane.id === paneIds[1] && pane.cols === 100 && pane.rows === 30),
+      'tree snapshot did not observe pane B 100x30',
+    );
+    const paneAAfterResize = snapshotPanes(snapshots.at(-1) ?? snapshots[0]).find(
+      (pane) => pane.id === paneIds[0],
+    );
+    assert(
+      paneAAfterResize?.cols === paneAInitial.cols && paneAAfterResize.rows === paneAInitial.rows,
+      'pane A changed during pane B resize',
+    );
+    await page.locator('[data-grid-cols]').fill(String(paneBInitial.cols));
+    await page.locator('[data-grid-rows]').fill(String(paneBInitial.rows));
+    await page.locator('[data-action="apply-grid"]').click();
+    await waitFor(
+      () => zeroResizeMessages,
+      (count) => count >= baselineZeroResizeMessages + 2,
+      'pane B restore resize was not sent',
+    );
+    await waitForText(
+      page,
+      '[data-grid-caption]',
+      new RegExp(`${paneBInitial.cols} × ${paneBInitial.rows}`),
+    );
+    await page.locator('[data-action="refresh"]').click();
+    await waitFor(
+      () => snapshotPanes(snapshots.at(-1) ?? snapshots[0]),
+      (panes) =>
+        panes.some(
+          (pane) =>
+            pane.id === paneIds[1] &&
+            pane.cols === paneBInitial.cols &&
+            pane.rows === paneBInitial.rows,
+        ),
+      'tree snapshot did not observe pane B restore',
+    );
     const settingsPath = join(REVIEW_DIR, 'real-app-settings.png');
     await page.screenshot({ path: settingsPath, fullPage: true });
     screenshotPaths.push(settingsPath);
@@ -332,11 +399,25 @@ async function main(): Promise<void> {
         [paneIds[0]]: (outputs.get(paneIds[0]) ?? '').includes(firstMarker),
         [paneIds[1]]: (outputs.get(paneIds[1]) ?? '').includes(secondMarker),
       },
-      zeroResizeMessages,
+      zeroResizeMessages: baselineZeroResizeMessages,
+      baselineZeroResizeMessages,
+      explicitGridResize: {
+        requested: { cols: 100, rows: 30 },
+        observed: { cols: 100, rows: 30 },
+        restored: { cols: paneBInitial.cols, rows: paneBInitial.rows },
+        totalWireResize: zeroResizeMessages - baselineZeroResizeMessages,
+      },
       screenshotPaths,
       errors,
     };
-    assert(zeroResizeMessages === 0, `unexpected client resize messages: ${zeroResizeMessages}`);
+    assert(
+      baselineZeroResizeMessages === 0,
+      `unexpected baseline client resize messages: ${baselineZeroResizeMessages}`,
+    );
+    assert(
+      zeroResizeMessages === 2,
+      `expected exactly two explicit client resize messages: ${zeroResizeMessages}`,
+    );
     assert(
       frames
         .filter((frame) => frame.case === 'input')
