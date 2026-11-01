@@ -13,9 +13,15 @@ export interface DesktopPanels {
   dispose(): void;
 }
 
+export interface DesktopPanelCallbacks {
+  onScale?(direction: number): void;
+  onReset?(): void;
+}
+
 export function createDesktopPanels(
   host: HTMLElement,
   onSelect: (id: string) => void,
+  callbacks: DesktopPanelCallbacks = {},
 ): DesktopPanels {
   const root = document.createElement('section');
   root.className = 'desktop-terminal-workspace';
@@ -27,7 +33,22 @@ export function createDesktopPanels(
   preview.textContent = '3D preview';
   preview.title = 'Show the workspace in 3D';
   preview.setAttribute('aria-pressed', 'false');
-  toolbar.append(preview);
+  const scaleDown = document.createElement('button');
+  scaleDown.type = 'button';
+  scaleDown.dataset.action = 'desktop-scale-down';
+  scaleDown.textContent = 'Smaller panel';
+  scaleDown.title = 'Make the selected panel smaller';
+  const scaleUp = document.createElement('button');
+  scaleUp.type = 'button';
+  scaleUp.dataset.action = 'desktop-scale-up';
+  scaleUp.textContent = 'Larger panel';
+  scaleUp.title = 'Enlarge the selected panel, bounded by the browser view';
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.dataset.action = 'desktop-reset-layout';
+  reset.textContent = 'Reset layout';
+  reset.title = 'Restore all panel positions and sizes';
+  toolbar.append(preview, scaleDown, scaleUp, reset);
   const grid = document.createElement('div');
   grid.className = 'mux-desktop-panels';
   root.append(toolbar, grid);
@@ -38,6 +59,7 @@ export function createDesktopPanels(
   );
   let immersive = false;
   let previewing = false;
+  let selectedPaneId: string | null = null;
   const updateMode = (): void => {
     host.classList.toggle('is-3d-preview', previewing);
     host.classList.toggle('is-immersive', immersive);
@@ -47,12 +69,17 @@ export function createDesktopPanels(
     preview.textContent = previewing ? 'Show terminals' : '3D preview';
     preview.title = previewing ? 'Show terminal panels' : 'Show the workspace in 3D';
     preview.setAttribute('aria-pressed', String(previewing));
+    scaleDown.hidden = scaleUp.hidden = reset.hidden = !previewing || immersive;
+    scaleDown.disabled = scaleUp.disabled = !selectedPaneId;
     if (previewing || immersive) window.dispatchEvent(new Event('resize'));
   };
   preview.addEventListener('click', () => {
     previewing = !previewing;
     updateMode();
   });
+  scaleDown.addEventListener('click', () => callbacks.onScale?.(-1));
+  scaleUp.addEventListener('click', () => callbacks.onScale?.(1));
+  reset.addEventListener('click', () => callbacks.onReset?.());
   const panels = new Map<string, { element: HTMLElement; unsubscribe: () => void }>();
 
   const updateSize = (surface: TerminalSurface, canvas: HTMLCanvasElement): void => {
@@ -95,6 +122,8 @@ export function createDesktopPanels(
     panels.delete(id);
   };
   const select = (id: string | null): void => {
+    selectedPaneId = id;
+    scaleDown.disabled = scaleUp.disabled = !selectedPaneId;
     for (const [paneId, panel] of panels) {
       panel.element.classList.toggle('active', paneId === id);
       panel.element.querySelector('button')?.setAttribute('aria-pressed', String(paneId === id));

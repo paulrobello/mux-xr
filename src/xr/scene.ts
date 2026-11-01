@@ -50,6 +50,7 @@ export interface WorkspaceScene {
   hideInput(): void;
   enterXR(mode: 'vr' | 'ar'): Promise<void>;
   resetLayout(): void;
+  scaleSelectedPanel(direction: number): void;
   getControlHints(): Array<{
     label: string;
     help: string;
@@ -338,6 +339,30 @@ function createKeyStrip(): THREE.Group {
   return group;
 }
 
+function createRecoveryControls(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'xr-recovery-controls';
+  const controls: Array<[string, Record<string, unknown>]> = [
+    ['Smaller', { inputAction: 'selectedScale', direction: -1 }],
+    ['Larger', { inputAction: 'selectedScale', direction: 1 }],
+    ['Reset layout', { inputAction: 'resetLayout' }],
+  ];
+  controls.forEach(([label, data], index) => {
+    const button = createLabelButton(label, 0.32, 0.1, { ...data, recoveryControl: true });
+    button.position.x = (index - 1) * 0.36;
+    (button.material as THREE.MeshBasicMaterial).depthTest = false;
+    button.renderOrder = 1000;
+    group.add(button);
+  });
+  return group;
+}
+
+function isControlVisible(object: THREE.Object3D): boolean {
+  for (let current: THREE.Object3D | null = object; current; current = current.parent)
+    if (!current.visible) return false;
+  return true;
+}
+
 function createObservatory(scene: THREE.Scene): THREE.Group {
   const group = new THREE.Group();
   group.name = 'quiet-orbital-observatory';
@@ -437,6 +462,13 @@ export function createWorkspaceScene(
   let hierarchySessionId: string | null = null;
   let hierarchyWindowId: string | null = null;
   let gazeState: GazeState = { candidateId: null, emphasizedId: null, since: 0 };
+  const updateRecoveryVisibility = (): void => {
+    const immersive = Boolean(renderer?.xr.isPresenting);
+    const hudRecovery = hudRoot?.getObjectByName('xr-recovery-controls');
+    if (hudRecovery) hudRecovery.visible = immersive && !inputRoot;
+    const inputRecovery = inputRoot?.getObjectByName('xr-recovery-controls');
+    if (inputRecovery) inputRecovery.visible = immersive;
+  };
   const pointer = new THREE.Vector2();
   const clearArmedModifiers = (): void => {
     inputRoot?.traverse((object) => {
@@ -452,6 +484,8 @@ export function createWorkspaceScene(
   hoverHelp.name = 'xr-hover-help';
   hoverHelp.visible = false;
   hoverHelp.raycast = () => undefined;
+  (hoverHelp.material as THREE.MeshBasicMaterial).depthTest = false;
+  hoverHelp.renderOrder = 1001;
   scene.add(hoverHelp);
   let hoveredControl: THREE.Object3D | null = null;
   const showHover = (object: THREE.Object3D | null): void => {
@@ -525,6 +559,7 @@ export function createWorkspaceScene(
   };
   const render = (time = 0): void => {
     if (disposed) return;
+    updateRecoveryVisibility();
     for (const [controller, drag] of dragStates) {
       controller.updateMatrixWorld(true);
       const position = new THREE.Vector3()
@@ -597,6 +632,7 @@ export function createWorkspaceScene(
     scene.remove(inputRoot);
     disposeObject(inputRoot);
     inputRoot = null;
+    updateRecoveryVisibility();
   };
   const clearInputCapture = (): void => {
     mutableState.inputTargetId = null;
@@ -623,6 +659,11 @@ export function createWorkspaceScene(
     modeCommands.position.set(-0.2, 0.7, 0);
     modeKeyboard.position.set(0.2, 0.7, 0);
     inputRoot.add(modeCommands, modeKeyboard);
+    const recovery = createRecoveryControls();
+    recovery.position.y = 0.9;
+    inputRoot.add(recovery);
+    const hudRecovery = hudRoot?.getObjectByName('xr-recovery-controls');
+    if (hudRecovery) hudRecovery.visible = false;
     const targetTitle = mutableState.inputTargetTitle
       ? `Target: ${mutableState.inputTargetTitle}`
       : 'No target selected';
@@ -769,6 +810,7 @@ export function createWorkspaceScene(
     observatory.position.set(0.3, -0.55, 0);
     inputRoot.add(close, black, gradient, observatory);
     scene.add(inputRoot);
+    updateRecoveryVisibility();
   };
   const createHud = (): void => {
     hudRoot = new THREE.Group();
@@ -789,7 +831,46 @@ export function createWorkspaceScene(
       button.position.x = (index - (controls.length - 1) / 2) * 0.31;
       hudRoot?.add(button);
     });
+    const recovery = createRecoveryControls();
+    recovery.position.y = 0.2;
+    hudRoot.add(recovery);
     scene.add(hudRoot);
+    updateRecoveryVisibility();
+  };
+  const panelFitsPreview = (panel: TerminalPanel): boolean => {
+    camera.updateMatrixWorld(true);
+    panel.root.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(panel.root);
+    for (const x of [bounds.min.x, bounds.max.x])
+      for (const y of [bounds.min.y, bounds.max.y])
+        for (const z of [bounds.min.z, bounds.max.z]) {
+          const point = new THREE.Vector3(x, y, z).project(camera);
+          if (point.z < -1 || point.z > 1 || Math.abs(point.x) > 0.98 || Math.abs(point.y) > 0.98)
+            return false;
+        }
+    return true;
+  };
+  const resizePanel = (panel: TerminalPanel, direction: number): void => {
+    const current = panel.root.scale.x;
+    const next = Math.max(0.6, Math.min(1.8, current + direction * 0.1));
+    panel.root.scale.setScalar(next);
+    if (!renderer?.xr.isPresenting && next > current && !panelFitsPreview(panel)) {
+      let low = current;
+      let high = next;
+      for (let step = 0; step < 12; step += 1) {
+        const middle = (low + high) / 2;
+        panel.root.scale.setScalar(middle);
+        if (panelFitsPreview(panel)) low = middle;
+        else high = middle;
+      }
+      panel.root.scale.setScalar(low);
+    }
+    notify();
+  };
+  const scaleSelectedPanel = (direction: number): void => {
+    const selected = mutableState.selectedTerminalId;
+    const panel = selected ? panels.get(selected) : undefined;
+    if (panel) resizePanel(panel, direction);
   };
   const handleInputTarget = (hit: THREE.Object3D): boolean => {
     const action = hit.userData.inputAction as string | undefined;
@@ -799,7 +880,9 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'mode') {
-      refreshInputRoot(hit.userData.mode as 'commands' | 'keyboard');
+      const mode = hit.userData.mode as 'commands' | 'keyboard';
+      if (renderer?.xr.isPresenting) refreshInputRoot(mode);
+      else showInput(mode);
       return true;
     }
     if (action === 'hierarchyNext') {
@@ -842,15 +925,21 @@ export function createWorkspaceScene(
       setBackground(hit.userData.background as BackgroundMode);
       return true;
     }
+    if (action === 'selectedScale') {
+      scaleSelectedPanel(hit.userData.direction as number);
+      return true;
+    }
+    if (action === 'resetLayout') {
+      resetLayout();
+      return true;
+    }
     if (action === 'scale') {
       let parent: THREE.Object3D | null = hit;
       while (parent && !parent.userData.terminalId) parent = parent.parent;
       const panel = parent ? panels.get(parent.userData.terminalId as string) : undefined;
       if (panel) {
         const direction = hit.userData.direction as number;
-        panel.root.scale.setScalar(
-          Math.max(0.6, Math.min(1.8, panel.root.scale.x + direction * 0.1)),
-        );
+        resizePanel(panel, direction);
       }
       return true;
     }
@@ -932,8 +1021,15 @@ export function createWorkspaceScene(
     const targets = [...panels.values()].map((panel) => panel.root);
     if (inputRoot) targets.push(inputRoot);
     if (hudRoot) targets.push(hudRoot);
+    const recoveryControls: THREE.Object3D[] = [];
+    for (const root of [hudRoot, inputRoot])
+      root?.traverse((object) => {
+        if (object.userData.recoveryControl && isControlVisible(object))
+          recoveryControls.push(object);
+      });
+    const recoveryHit = raycaster.intersectObjects(recoveryControls, false)[0]?.object;
     const hits = raycaster.intersectObjects(targets, true);
-    const hit = hits[0]?.object;
+    const hit = recoveryHit ?? hits.find((entry) => isControlVisible(entry.object))?.object;
     if (!hit) return null;
     if (hit.userData.inputAction)
       return { terminalId: mutableState.focusedTerminalId ?? '', kind: 'keyboard', object: hit };
@@ -1228,6 +1324,12 @@ export function createWorkspaceScene(
     quickCommands = commands.map((command) => ({ ...command }));
   };
   const showInput = (mode: 'commands' | 'keyboard' | 'panes'): void => {
+    if (!renderer?.xr.isPresenting && mode !== 'panes') {
+      hideInput();
+      if (mode === 'commands') actions.openCommands();
+      else actions.openKeyboard();
+      return;
+    }
     const targetId = mutableState.focusedTerminalId ?? mutableState.selectedTerminalId;
     mutableState.inputTargetId = targetId;
     mutableState.inputTargetTitle =
@@ -1235,8 +1337,6 @@ export function createWorkspaceScene(
     menuCommands = quickCommands.map((command) => ({ ...command }));
     commandPage = 0;
     clearArmedModifiers();
-    if (mode === 'commands') actions.openCommands();
-    else if (mode === 'keyboard') actions.openKeyboard();
     refreshInputRoot(mode);
   };
   const hideInput = (): void => {
@@ -1265,6 +1365,7 @@ export function createWorkspaceScene(
     renderer.xr.setReferenceSpaceType('local-floor');
     await renderer.xr.setSession(session as Parameters<typeof renderer.xr.setSession>[0]);
     mutableState.xrMode = mode;
+    updateRecoveryVisibility();
     if (mode === 'ar') {
       observatory.visible = false;
       scene.background = null;
@@ -1276,6 +1377,7 @@ export function createWorkspaceScene(
     notify();
     session.addEventListener('end', () => {
       activeSession = null;
+      hideInput();
       mutableState.xrMode = 'desktop';
       camera.position.copy(desktopCameraPosition);
       camera.quaternion.copy(desktopCameraQuaternion);
@@ -1291,6 +1393,7 @@ export function createWorkspaceScene(
       panel.root.rotation.set(0, panel.defaultPosition.x < 0 ? 0.06 : -0.06, 0);
       panel.root.scale.setScalar(1);
     }
+    notify();
   };
   const getControlHints = (): Array<{
     label: string;
@@ -1312,7 +1415,7 @@ export function createWorkspaceScene(
     for (const root of roots)
       root.traverse((object) => {
         const help = object.userData.helpText as string | undefined;
-        if (!help) return;
+        if (!help || !isControlVisible(object)) return;
         const point = object.getWorldPosition(new THREE.Vector3()).project(camera);
         if (point.z < -1 || point.z > 1 || Math.abs(point.x) > 1 || Math.abs(point.y) > 1) return;
         result.push({
@@ -1382,6 +1485,7 @@ export function createWorkspaceScene(
     hideInput,
     enterXR,
     resetLayout,
+    scaleSelectedPanel,
     getControlHints,
     dispose,
     subscribe(listener) {

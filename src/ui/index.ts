@@ -49,6 +49,7 @@ export interface WorkspaceUI {
   readonly sceneHost: HTMLElement;
   setAttachedPaneIds(ids: string[]): void;
   openInput(mode: 'commands' | 'keyboard'): void;
+  closeInput(): void;
   getCommandsForPane(paneId: string): QuickCommand[];
 }
 
@@ -651,6 +652,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       if (mode === 'keyboard')
         qs<HTMLElement>('[data-keyboard]').scrollIntoView({ block: 'nearest' });
     },
+    closeInput,
     getCommandsForPane(paneId) {
       const pane = snapshot.panes.find((item) => item.id === paneId);
       const workspace = pane?.workspaceId ?? 'default';

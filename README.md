@@ -54,7 +54,7 @@ The endpoint is prefilled from the page origin, and a custom endpoint is remembe
 
 ## Spatial controls
 
-Mouse clicks in 3D preview and controller triggers in VR use the same actions. Hover with the mouse or aim a controller ray at a non-obvious control to see its explanation. DOM icon and modifier buttons also have browser hover titles.
+Mouse clicks in 3D preview and controller triggers in VR use the same actions, with one input presenter per mode. Browser Keyboard/Commands use the compact DOM drawer; immersive VR uses spatial controls only. Hover with the mouse or aim a controller ray at a non-obvious control to see its explanation. DOM icon and modifier buttons also have browser hover titles.
 
 | Control | Action |
 | --- | --- |
@@ -66,7 +66,7 @@ Mouse clicks in 3D preview and controller triggers in VR use the same actions. H
 | Black / Gradient / Observatory | Change the VR background. |
 | Exit | Return to flat terminals in the browser, or end the immersive session in VR. |
 
-Panel scale and text zoom leave terminal rows and columns unchanged. Neighboring panels' default control positions are separated so resize buttons do not overlap.
+The 3D preview toolbar always exposes **Smaller panel**, **Larger panel** and **Reset layout**, independently of pane geometry. Preview enlargement is bounded to keep the panel and attached controls inside the viewport. In VR, separate recovery controls remain available on the workspace HUD or above an open input panel. Panel scale and text zoom leave terminal rows and columns unchanged. Neighboring panels' default control positions are separated so resize buttons do not overlap.
 
 ## Verification
 

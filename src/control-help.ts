@@ -19,6 +19,12 @@ export function getKeyHelp(key: string): string | undefined {
 export function getControlHelp(data: Record<string, unknown>): string | undefined {
   if (typeof data.key === 'string') return getKeyHelp(data.key);
   switch (data.inputAction) {
+    case 'selectedScale':
+      return Number(data.direction) < 0
+        ? 'Shrink the selected panel from this safe control'
+        : 'Enlarge the selected panel; browser view is bounded';
+    case 'resetLayout':
+      return 'Restore all panel positions and sizes';
     case 'scale':
       return Number(data.direction) < 0
         ? 'Shrink panel; terminal grid stays unchanged'

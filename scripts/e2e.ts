@@ -270,10 +270,66 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
     const stripStart = state.frames.length;
     await page.mouse.click(stripEnter.clientX, stripEnter.clientY);
     await observedInputFrames(page, state, '%1', stripStart, '\r');
-    const black = hints.find((hint) => hint.inputAction === 'background' && hint.label === 'Black');
+    const currentHints = async (): Promise<Hint[]> =>
+      page.evaluate(() =>
+        (window as unknown as { __muxXR: { getControlHints(): Hint[] } }).__muxXR.getControlHints(),
+      );
+    const keyboardHud = (await currentHints()).find(
+      (hint) => hint.inputAction === 'openInput' && hint.label === 'Keyboard',
+    );
+    assert(keyboardHud, 'Keyboard HUD target missing');
+    await page.mouse.click(keyboardHud.clientX, keyboardHud.clientY);
+    assert(
+      await page.locator('[data-keyboard]').isVisible(),
+      'HUD did not open the compact keyboard',
+    );
+    assert(
+      !(await currentHints()).some((hint) => hint.inputAction === 'key'),
+      'HUD opened a duplicate spatial keyboard in the browser',
+    );
+    await page.screenshot({
+      path: join(REVIEW_DIR, `${viewport.name}-single-keyboard.png`),
+      fullPage: true,
+    });
+    await page.locator('[data-action="close-drawer"]').click();
+    const commandsHud = (await currentHints()).find(
+      (hint) => hint.inputAction === 'openInput' && hint.label === 'Commands',
+    );
+    assert(commandsHud, 'Commands HUD target missing');
+    await page.mouse.click(commandsHud.clientX, commandsHud.clientY);
+    assert(await page.locator('[data-command-label]').isVisible(), 'HUD Commands editor missing');
+    assert(!(await page.locator('[data-keyboard]').isVisible()), 'HUD Commands shows keyboard');
+    await page.locator('[data-action="close-drawer"]').click();
+    for (let step = 0; step < 25; step += 1)
+      await page.locator('[data-action="desktop-scale-up"]').click();
+    const recovery = page.locator('[data-action="desktop-scale-down"]');
+    const recoveryBounds = await recovery.boundingBox();
+    assert(
+      recoveryBounds &&
+        recoveryBounds.x >= 0 &&
+        recoveryBounds.x + recoveryBounds.width <= viewport.width &&
+        recoveryBounds.y >= 0 &&
+        recoveryBounds.y + recoveryBounds.height <= viewport.height,
+      'recovery control left the viewport',
+    );
+    assert(
+      (await currentHints()).some(
+        (hint) => hint.inputAction === 'scale' && hint.label === '−' && hint.terminalId === '%1',
+      ),
+      'attached shrink control left the preview',
+    );
+    await page.screenshot({
+      path: join(REVIEW_DIR, `${viewport.name}-bounded-panel.png`),
+      fullPage: true,
+    });
+    await recovery.click();
+    await page.locator('[data-action="desktop-reset-layout"]').click();
+    const black = (await currentHints()).find(
+      (hint) => hint.inputAction === 'background' && hint.label === 'Black',
+    );
     assert(black, 'background HUD target missing');
     await page.mouse.click(black.clientX, black.clientY);
-    const exit = hints.find((hint) => hint.inputAction === 'exit');
+    const exit = (await currentHints()).find((hint) => hint.inputAction === 'exit');
     assert(exit, 'Exit HUD target missing');
 
     await page.waitForFunction(

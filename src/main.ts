@@ -196,9 +196,13 @@ ui = mountWorkspaceUI(app, {
   onDemo: startDemo,
 });
 scene = createWorkspaceScene(ui.sceneHost, actions);
-desktop = createDesktopPanels(ui.sceneHost, selectPane);
+desktop = createDesktopPanels(ui.sceneHost, selectPane, {
+  onScale: (direction) => scene.scaleSelectedPanel(direction),
+  onReset: () => scene.resetLayout(),
+});
 const stopPresentation = scene.subscribe((state) => {
   desktop.setImmersive(state.xrMode !== 'desktop');
+  if (state.xrMode !== 'desktop') ui.closeInput();
 });
 const settings = ui.getSettings();
 scene.setBackground(settings.background);

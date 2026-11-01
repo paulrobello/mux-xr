@@ -36,7 +36,7 @@ Public hosting/tunnels, physical keyboard dependency, ambient sound, arbitrary r
 
 ## Architecture Direction
 
-TypeScript + Vite + Three.js. One terminal emulator and canvas surface per displayed pane. Reuse the core's generated protobuf schema and codec. Canvas textures feed XR meshes, updated only when output changes. Desktop mode displays the terminal canvases flat at their logical size, with a separate 3D preview. DOM controls offer the same operations for setup, debugging and desktop use. XR controls must be native scene content, not DOM overlays presumed visible in immersion.
+TypeScript + Vite + Three.js. One terminal emulator and canvas surface per displayed pane. Reuse the core's generated protobuf schema and codec. Canvas textures feed XR meshes, updated only when output changes. Desktop mode displays the terminal canvases flat at their logical size, with a separate 3D preview. DOM controls offer the same operations for setup, debugging and desktop use. Input presentation is mode-specific: browser and 3D preview use the compact DOM drawer, while immersive XR uses native scene input only. Panel recovery controls remain independent of panel scale. XR controls must be native scene content, not DOM overlays presumed visible in immersion.
 
 Typed boundaries separate terminal transport, hierarchy metadata, local settings, controls and XR rendering. Headset-local storage is versioned and validated. Connections reject input while disconnected, never replay unsent commands, and detach without killing panes. Menu targets start at the selected pane and follow later explicit pane selections. Gaze never changes an input target. Closing/removing a panel withdraws its viewer connection.
 

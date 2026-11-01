@@ -97,10 +97,18 @@ function hit(
   workspace: ReturnType<typeof createWorkspaceScene>,
   data: Record<string, unknown>,
   event = 'selectstart',
+  distance = 0.3,
 ): void {
   let button: THREE.Object3D | undefined;
   workspace.scene.traverse((object) => {
-    if (!button && Object.entries(data).every(([key, value]) => object.userData[key] === value))
+    let visible = true;
+    for (let parent: THREE.Object3D | null = object; parent; parent = parent.parent)
+      if (!parent.visible) visible = false;
+    if (
+      visible &&
+      !button &&
+      Object.entries(data).every(([key, value]) => object.userData[key] === value)
+    )
       button = object;
   });
   if (!button) throw new Error(`Control not found: ${JSON.stringify(data)}`);
@@ -110,7 +118,7 @@ function hit(
   controller.position.copy(
     button
       .getWorldPosition(new THREE.Vector3())
-      .add(new THREE.Vector3(0, 0, 0.3).applyQuaternion(orientation)),
+      .add(new THREE.Vector3(0, 0, distance).applyQuaternion(orientation)),
   );
   controller.quaternion.copy(orientation);
   workspace.scene.updateMatrixWorld(true);
@@ -119,7 +127,7 @@ function hit(
 
 describe('native XR controller event routing', () => {
   beforeEach(() => {
-    fakeXR.presenting = false;
+    fakeXR.presenting = true;
     fakeXR.controllers.forEach((controller) => {
       const object = controller as THREE.Group;
       object.position.set(0, 0, 0);
@@ -128,7 +136,88 @@ describe('native XR controller event routing', () => {
     });
   });
 
+  it('uses one keyboard presentation for the current mode', () => {
+    fakeXR.presenting = false;
+    const { workspace, actions, container } = fixture();
+    workspace.selectTerminal('pane-a');
+    workspace.showInput('keyboard');
+    expect(actions.openKeyboard).toHaveBeenCalledTimes(1);
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+    workspace.showInput('panes');
+    hit(workspace, { inputAction: 'mode', mode: 'keyboard' });
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+    expect(workspace.scene.getObjectByName('xr-panes-controls')).toBeUndefined();
+    expect(actions.openKeyboard).toHaveBeenCalledTimes(2);
+    fakeXR.presenting = true;
+    workspace.showInput('keyboard');
+    expect(actions.openKeyboard).toHaveBeenCalledTimes(2);
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeDefined();
+    workspace.showInput('commands');
+    expect(actions.openCommands).not.toHaveBeenCalled();
+    expect(workspace.scene.getObjectByName('xr-commands-controls')).toBeDefined();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('clears native input when an immersive session ends', async () => {
+    const listeners = new Map<string, () => void>();
+    const session = {
+      addEventListener: (name: string, listener: () => void) => listeners.set(name, listener),
+    };
+    vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+    const { workspace, container } = fixture();
+    try {
+      await workspace.enterXR('vr');
+      workspace.selectTerminal('pane-a');
+      workspace.showInput('keyboard');
+      expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeDefined();
+      fakeXR.presenting = false;
+      listeners.get('end')?.();
+      expect(workspace.state.xrMode).toBe('desktop');
+      expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+      expect(workspace.state.inputTargetId).toBeNull();
+    } finally {
+      workspace.dispose();
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('bounds preview growth and keeps independent recovery controls usable', () => {
+    fakeXR.presenting = false;
+    const { workspace, right, container } = fixture();
+    workspace.selectTerminal('pane-b');
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-b');
+    if (!panel) throw new Error('Pane B missing');
+    for (let step = 0; step < 30; step += 1) workspace.scaleSelectedPanel(1);
+    expect(panel.scale.x).toBeLessThan(1.8);
+    const bounds = new THREE.Box3().setFromObject(panel);
+    for (const x of [bounds.min.x, bounds.max.x])
+      for (const y of [bounds.min.y, bounds.max.y])
+        for (const z of [bounds.min.z, bounds.max.z]) {
+          const point = new THREE.Vector3(x, y, z).project(workspace.camera);
+          expect(Math.abs(point.x)).toBeLessThanOrEqual(0.981);
+          expect(Math.abs(point.y)).toBeLessThanOrEqual(0.981);
+        }
+    panel.scale.setScalar(1.8);
+    workspace.scaleSelectedPanel(-1);
+    expect(panel.scale.x).toBeCloseTo(1.7);
+    fakeXR.presenting = true;
+    fakeXR.frame?.(16);
+    hit(workspace, { inputAction: 'resetLayout' });
+    expect(panel.scale.x).toBe(1);
+    panel.scale.setScalar(1.8);
+    panel.position.z = -0.4;
+    workspace.showInput('keyboard');
+    hit(workspace, { inputAction: 'selectedScale', direction: -1 }, 'selectstart', 1);
+    expect(panel.scale.x).toBeCloseTo(1.7);
+    expect(right.resizeGrid).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
   it('routes browser hover and clicks through the terminal control actions', () => {
+    fakeXR.presenting = false;
     const { workspace, actions, container, right } = fixture();
     Object.defineProperty(workspace.canvas, 'getBoundingClientRect', {
       value: () => ({ left: 0, top: 0, width: 1000, height: 700 }),

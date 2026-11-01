@@ -180,6 +180,21 @@ describe('mux XR local UI state', () => {
     ui.destroy();
   });
 
+  it('closes the input drawer and clears held modifiers', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    ui.openInput('keyboard');
+    const shift = query<HTMLButtonElement>(root, '[data-key="Shift"]');
+    shift.click();
+    expect(shift.classList.contains('active')).toBe(true);
+    ui.closeInput();
+    expect(query<HTMLElement>(root, '[data-drawer]').hidden).toBe(true);
+    expect(shift.classList.contains('active')).toBe(false);
+    expect(query<HTMLButtonElement>(root, '[data-key="a"]').textContent).toBe('a');
+    ui.destroy();
+  });
+
   it('renders lowercase base keys and restores them after Shift', () => {
     const root = document.createElement('div');
     document.body.append(root);
