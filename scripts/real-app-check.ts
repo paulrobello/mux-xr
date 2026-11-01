@@ -109,6 +109,10 @@ async function main(): Promise<void> {
   const errors: string[] = [];
   const frames: WireFrame[] = [];
   const outputs = new Map<string, string>();
+  const connectedPanes = new Set<string>();
+  const runPrefix = `MUX_XR_${Date.now()}_`;
+  const firstMarker = `${runPrefix}A`;
+  const secondMarker = `${runPrefix}B`;
   const snapshots: MuxTreeSnapshot[] = [];
   const screenshotPaths: string[] = [];
   let zeroResizeMessages = 0;
@@ -123,6 +127,8 @@ async function main(): Promise<void> {
       if (typeof payload === 'string') return;
       try {
         const message = decodeServerMessage(toArrayBuffer(Buffer.from(payload)));
+        if (paneId !== 'metadata' && message.message.case === 'connected')
+          connectedPanes.add(paneId);
         if (message.message.case === 'muxTreeSnapshot') {
           snapshots.push(message.message.value);
           if (url.searchParams.get('metadata') === '1') {
@@ -221,10 +227,15 @@ async function main(): Promise<void> {
     await page.locator(`[data-pane="${paneIds[0]}"]`).click();
     await page.locator(`[data-pane="${paneIds[1]}"]`).click();
     assert((await page.locator('[data-select]').count()) >= 2, 'real app did not attach two panes');
-    const sessionsAfterAttach = await sessionCount(page);
-    assert(
-      sessionsAfterAttach === 2,
-      `pane attach created ${sessionsAfterAttach} sessions instead of two viewer streams`,
+    await waitFor(
+      () => paneIds.every((id) => connectedPanes.has(id)),
+      Boolean,
+      'both pane streams did not complete their handshakes',
+    );
+    const sessionsAfterAttach = await waitFor(
+      () => sessionCount(page),
+      (count) => count === 2,
+      'pane attach did not create exactly two viewer streams',
     );
     const overviewPath = join(REVIEW_DIR, 'real-app-overview.png');
     await page.screenshot({ path: overviewPath, fullPage: true });
@@ -232,24 +243,24 @@ async function main(): Promise<void> {
     await page.locator(`[data-pane="${paneIds[0]}"]`).click();
     await page.locator('[data-action="commands"]').click();
     await page.locator('[data-command-label]').fill('Real global marker');
-    await page.locator('[data-command-text]').fill("printf '%s%s\\n' 'PART1' 'PART2'");
+    await page.locator('[data-command-text]').fill(`printf '%s%s\\n' '${runPrefix}' 'A'`);
     await page.locator('[data-action="save-command"]').click();
     await page.locator('[data-command-select]').selectOption({ label: 'Real global marker' });
     await page.locator('[data-action="run-command"]').click();
     await waitFor(
       () => outputs.get(paneIds[0]) ?? '',
-      (text) => text.includes('PART1PART2'),
+      (text) => text.includes(firstMarker),
       'first real command output marker not observed',
     );
     await page.locator('[data-action="close-drawer"]').click();
     await page.locator(`[data-pane="${paneIds[1]}"]`).click();
     await page.locator('[data-action="commands"]').click();
-    await page.locator('[data-compose]').fill("printf '%s%s\\n' 'PART3' 'PART4'");
+    await page.locator('[data-compose]').fill(`printf '%s%s\\n' '${runPrefix}' 'B'`);
     await page.locator('[data-action="send-text"]').click();
     await page.locator('[data-key="Enter"]').click();
     await waitFor(
       () => outputs.get(paneIds[1]) ?? '',
-      (text) => text.includes('PART3PART4'),
+      (text) => text.includes(secondMarker),
       'second real command output marker not observed',
     );
     const keyboardPath = join(REVIEW_DIR, 'real-app-keyboard.png');
@@ -305,8 +316,8 @@ async function main(): Promise<void> {
       gridsBefore,
       gridsAfter,
       markersSeen: {
-        [paneIds[0]]: (outputs.get(paneIds[0]) ?? '').includes('PART1PART2'),
-        [paneIds[1]]: (outputs.get(paneIds[1]) ?? '').includes('PART3PART4'),
+        [paneIds[0]]: (outputs.get(paneIds[0]) ?? '').includes(firstMarker),
+        [paneIds[1]]: (outputs.get(paneIds[1]) ?? '').includes(secondMarker),
       },
       zeroResizeMessages,
       screenshotPaths,
@@ -317,7 +328,7 @@ async function main(): Promise<void> {
       frames
         .filter((frame) => frame.case === 'input')
         .every(
-          (frame) => !frame.data?.includes('PART1PART2') && !frame.data?.includes('PART3PART4'),
+          (frame) => !frame.data?.includes(firstMarker) && !frame.data?.includes(secondMarker),
         ),
       'full marker appeared in client input',
     );

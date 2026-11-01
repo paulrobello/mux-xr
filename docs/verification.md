@@ -27,6 +27,26 @@ The focused `make live-check` diagnostic separately sent distinct split-marker c
 
 Raw logs and screenshots are preserved locally under `.local/evidence` and `.impeccable/review`. Temporary fleet scratch trees and private remote daemons were removed after the run. An earlier diagnostic using an older daemon reported zero geometry and was excluded from grid-preservation acceptance.
 
+## LAN and published release qualification
+
+Paul explicitly approved the application firewall rule on November 1, 2026. The rule was applied only to `/Users/localuser/Repos/mux-xr/.local/bin/streamer-candidate`, preserving the approved binary hash. The app allow entry is present. HTTPS immediately became reachable from test-mac, confirming the earlier inbound connectivity problem was resolved by that change. No other application rule or global firewall setting changed.
+
+The complete real-app check then passed from test-mac to `https://192.0.2.10:4240` over HTTPS/WSS. It reproduced zero metadata sessions, two attached viewer streams, distinct command output on both panes, zero Resize messages and positive unchanged 80×24 grids. There were no page errors. Browser probing also confirmed `isSecureContext` and `navigator.xr`. test-mac load was 1.782 before and after.
+
+A separate run against the official [core 0.76.0 release](https://github.com/paulrobello/par-term-emu-core-rust/releases/tag/v0.76.0), using a fresh private daemon and streamer on test-mac, passed those same assertions. Both downloads matched their published checksums:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `par-mux-v0.76.0-aarch64-apple-darwin.tar.gz` | `6ad8c9e9205c71f3c70eb675dd1fb749f0e14075dec0008feb970b291333ec72` |
+| Extracted `par-mux` | `81d840a5cce96a87fe612f730e1b5b82a8ff41397ddaef60bb8594c0bcbdba2a` |
+| `par-term-streamer-mux-macos-aarch64` | `94a4eccb8279c7e9c5184d78f23124bb52cdb98ab05fa9d70d5e206e9cd1d969` |
+
+The release tag resolves to `676e44f237eebf1c01c0843481ec8b00fceb43d1`; the downloaded daemon reports `0.76.0+761624a`, and the streamer reports `0.76.0`. test-mac load was 1.959 before and after this run. The live LAN preview retains its original approved candidate binary, while release compatibility was tested separately. Shared services were not restarted.
+
+The LAN run exposed a test timing assumption: attached panel controls can exist before the remote stream handshake completes. The verifier now waits for both actual handshakes and two server sessions. Command output markers are unique per run, excluding stale screen seeds as a source of success. An initial test launched under a detached mux also encountered macOS outbound Local Network Privacy attribution; the same browser and API probe succeeded through foreground SSH without changing privacy settings. Failed diagnostic attempts were excluded from acceptance.
+
+Accepted logs are `.local/evidence/lan-full-app.log`, `release-full-app.log` and `lan-release-summary.json`. Temporary remote daemons, browsers, copied packages and scratch trees were cleaned up after qualification.
+
 ## Visual and asset checks
 
 Desktop, tablet and mobile captures were reviewed. The interface uses a nested hierarchy, readable two-panel framing, a themed command editor and responsive input controls. The final mechanical Impeccable detector returned no findings. The observatory is an original, deterministic Blender asset with editable sources, 22,712 triangles, ten draw calls and a 2,528,120-byte runtime GLB. Its technical validator and source/runtime byte comparison pass.
@@ -35,6 +55,6 @@ Desktop, tablet and mobile captures were reviewed. The interface uses a nested h
 
 Quest 3 hardware acceptance is pending: two-panel physical readability, controller ray and grip behavior, passthrough, virtual keyboard comfort, observatory taste and frame pacing. No maximum pane count or production-scale performance improvement is claimed. Black and gradient modes provide simpler backgrounds for comparison.
 
-The LAN preview reuses the existing IWSDK development certificate. It is self-signed and its SANs cover localhost, not the LAN address. HTTPS/WSS can be tested with an explicit development-certificate exception, but headset trust and WebXR entry must be confirmed by the owner. Local HTTPS responds successfully, but requests to both LAN interfaces time out. The macOS firewall is enabled and has no allow entry for the dedicated candidate binary. Incoming-connection permission was requested from Paul and remains pending. No trust store, firewall, credential or shared service configuration was changed.
+The LAN preview reuses the existing IWSDK development certificate. It is self-signed and its SANs cover localhost, not the LAN address. HTTPS/WSS can be tested with an explicit development-certificate exception, but headset trust and WebXR entry must be confirmed by the owner. LAN HTTPS/WSS now pass after the explicitly approved application firewall rule. No trust store, credential or shared service configuration was changed.
 
-Both the matching daemon and streamer are required for complete geometry metadata. A published `0.75` version string alone is insufficient. The candidates above are gated local builds, not published release artifacts. Held-pane exit/respawn state remains a separately tracked enhancement.
+Both the matching daemon and streamer are required for complete geometry metadata. A published `0.75` version string alone is insufficient. The original candidate hashes above describe gated local builds. Official 0.76.0 release artifacts were additionally qualified as recorded above. Held-pane exit/respawn metadata shipped upstream in 0.76.0, while viewer status badges remain a separately tracked enhancement.

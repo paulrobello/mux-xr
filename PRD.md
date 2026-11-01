@@ -5,7 +5,7 @@
 | Product | Mux XR |
 | Repo | /Users/localuser/Repos/mux-xr |
 | Owner | Paul Robello |
-| Status | Approved direction, MVP implementation active |
+| Status | MVP test build ready; owner Quest acceptance pending |
 | Date | October 31, 2026, Etc/GMT+8 |
 
 ## Overview
@@ -44,8 +44,8 @@ Only explicit grid resize changes rows/columns. Grabbing, zooming, gazing or cha
 
 ### Upstream Dependencies
 
-- [Full hierarchy/layout streaming](https://board.example.test/board?card=01a19579caef72cb9ccc955871ab48c7): implemented and gated in core local main `95dbb69f`; metadata-only selector is `/ws?metadata=1`. Required for production hierarchy navigation. Integrate that supported contract rather than a second mux-control bridge.
-- [Pane lifecycle streaming](https://board.example.test/board?card=01a1957a2aa8739abc2c5cb116818793): non-blocking follow-up for accurate exited/running status and late-join state. Do not infer exit from silence or label a connection as proof of a running process.
+- [Full hierarchy/layout streaming](https://board.example.test/board?card=01a19579caef72cb9ccc955871ab48c7): implemented in core `95dbb69f` and published in 0.76.0; metadata-only selector is `/ws?metadata=1`. Required for production hierarchy navigation. Integrate that supported contract rather than a second mux-control bridge.
+- [Pane lifecycle streaming](https://board.example.test/board?card=01a1957a2aa8739abc2c5cb116818793): shipped upstream in 0.76.0 for accurate exited/running status and late-join state. Viewer badges remain a non-blocking follow-up. Do not infer exit from silence or label a connection as proof of a running process.
 
 ## Phases
 
