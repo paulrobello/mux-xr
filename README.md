@@ -75,6 +75,12 @@ Terminal windows can shrink to 0.3×, half the previous 0.6× minimum. The upper
 
 In XR, press **B on the right controller** while pointing at a terminal to enter Focus mode. With no terminal under the ray, it uses the active pane. The pane moves in front of your current view at a distance fitted to its size, while the other terminals fade out. Its placement stays fixed as your head moves, and the keyboard and HUD remain available. Press B again to restore its exact original position, rotation and scale and fade the other terminals back in. B is ignored while either grip is held. Selecting a different pane, applying an arrangement, recentering or leaving XR safely ends Focus mode. This never resizes the terminal grid or stops its process.
 
+## Automatic terminal detail
+
+In XR, the pane under your head-directed gaze always uses full raster quality, even with Gaze input off. Nearby terminals remain full quality. More distant terminals use half or quarter raster resolution and reduced update rates, with immediate restoration when looked at. This changes rendering only: keyboard targeting, selection highlights, terminal grids and UI label sharpness stay independent. Hidden focus-mode terminals continue receiving and parsing output. Desktop terminals return to full quality.
+
+The observatory exterior adds stable star clusters and diffuse cloud bands. The existing authored planet texture loads through a self-hosted fallback without changing the security policy. See the [measured capacity comparison](docs/performance/terminal-lod-2026-11-02.md) for workload, limits and before/after results.
+
 ## Terminal mouse input
 
 For TUIs that enable mouse tracking, point at the terminal and press the controller trigger for a left click. Hold the trigger and move the ray to drag, then release it. Movement is sent only over the captured pane, and the release stays with that pane. Grip suppresses mouse input and safely ends an existing drag before window manipulation. Desktop terminal canvases also support pointer click/drag. Mouse coordinates follow the remote grid, physical transforms and local text zoom. Disabled tracking, read-only and disconnected streams reject mouse input.

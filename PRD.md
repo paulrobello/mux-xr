@@ -47,6 +47,8 @@ Spatial arrangement presets are available for currently attached terminals throu
 
 Right-controller B toggles temporary Focus mode for the aimed terminal, falling back to the active pane. The pane moves to a size-fitted position centered on the current view and remains world-stable. Other terminals fade out and reject ray/gaze input while the keyboard and HUD remain available. Exiting restores the pane's exact original transform and fades other terminals in. Grip suppresses B activation. Arrangement/recenter actions and XR exit restore visibility without changing terminal grids or processes.
 
+Distance-based rendering LOD is independent of gaze keyboard targeting. The head-gazed pane always remains full fidelity. Medium/far panes reduce raster density and refresh cadence, hidden panes retain live parser state without painting, and desktop returns to full resolution. This never changes PTY grids, input selection or spatial UI text quality. Higher physical Quest capacity remains measured owner acceptance, not inferred from desktop pane counts.
+
 ### Upstream Dependencies
 
 - [Full hierarchy/layout streaming](https://board.example.test/board?card=01a19579caef72cb9ccc955871ab48c7): implemented in core `95dbb69f` and published in 0.76.0; metadata-only selector is `/ws?metadata=1`. Required for production hierarchy navigation. Integrate that supported contract rather than a second mux-control bridge.

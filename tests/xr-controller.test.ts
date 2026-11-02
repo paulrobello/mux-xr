@@ -1766,6 +1766,46 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('promotes the head-gazed far pane without changing manual input focus', () => {
+    const { workspace, actions, left, right, container } = fixture();
+    left.setRenderQuality = vi.fn();
+    right.setRenderQuality = vi.fn();
+    workspace.camera.position.set(0, 1.6, 0);
+    workspace.camera.rotation.set(0, 0, 0);
+    const a = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    const b = workspace.scene.getObjectByName('terminal-panel-pane-b');
+    if (!a || !b) throw new Error('Terminal roots missing');
+    a.position.set(-6, 1.6, -10);
+    b.position.set(6, 1.6, -10);
+    workspace.setGazeInputEnabled(false);
+    workspace.selectTerminal('pane-a');
+    for (let frame = 0; frame < 20; frame += 1) fakeXR.frame?.(frame * 20);
+    expect(right.setRenderQuality).toHaveBeenLastCalledWith('low');
+    workspace.camera.lookAt(b.position);
+    fakeXR.frame?.(420);
+    expect(right.setRenderQuality).toHaveBeenLastCalledWith('full');
+    expect(workspace.state.renderGazeTerminalId).toBe('pane-b');
+    expect(workspace.state.selectedTerminalId).toBe('pane-a');
+    expect(workspace.state.gazeInputEnabled).toBe(false);
+    expect(actions.resizeGrid).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('suspends hidden focus-mode panes and restores full raster quality outside XR', () => {
+    const { workspace, right, container } = fixture();
+    right.setRenderQuality = vi.fn();
+    workspace.toggleFocusMode('pane-a');
+    fakeXR.frame?.(0);
+    expect(right.setRenderQuality).toHaveBeenLastCalledWith('hidden');
+    fakeXR.presenting = false;
+    fakeXR.frame?.(20);
+    expect(right.setRenderQuality).toHaveBeenLastCalledWith('full');
+    expect(workspace.state.renderGazeTerminalId).toBeNull();
+    workspace.dispose();
+    container.remove();
+  });
+
   it('uses a B-button edge, ignores grip-suppressed presses, and exits without an aim hit', () => {
     const { workspace, container } = fixture();
     const gamepad = connectController(0);

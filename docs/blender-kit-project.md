@@ -16,7 +16,7 @@ One rigid background piece, `observatory`, rendered in Three.js 0.186.1 on Quest
 - Contract report/provenance and hashes in assets-source/observatory; preview render(s) for technical review.
 - Portable PBR materials/textures, with maps baked if procedural detail is used. Preserve high/low source distinction. No dependencies on a Blender-only shader in the runtime.
 
-The asset agent owns only these paths. Root owns the runtime loader and fallback. Loader materials are immutable per scene instance and fully disposed on teardown. Failure preserves the existing procedural black/gradient fallback and a concise diagnostic.
+The asset agent owns only these paths. Root owns the runtime loader and fallback. The runtime owns each loaded scene instance and may adjust its presentation materials without changing Blender sources. Owned geometry, materials and textures are disposed on teardown. Failure preserves the existing procedural black/gradient fallback and a concise diagnostic.
 
 ## Budgets and Validation
 
@@ -25,3 +25,7 @@ Background budget: <=60,000 triangles, <=16 materials/draw calls, <=2048px textu
 ## Invocation and Resource Window
 
 Use /Applications/Blender.app/Contents/MacOS/Blender headless with --python-exit-code 1. Initial CPU authoring/export/static checks used dev-workstation load-tolerant booking 01a1958be47f722780e7554b21004123, which is closed. Future runs need a fresh reservation. GPU rendering and timing measurements require an appropriate booked window and actual host-load verification. Use deterministic seeds and record Blender version.
+
+## Runtime exterior overlay — 2026-11-02
+
+The authored GLB and its hashes remain unchanged. Runtime adds three lightweight exterior draws (seeded stars, a precomputed 512×256 galactic field and an orbital trail) within the camera clipping distance. The existing authored planet PNG is copied byte-for-byte to public/assets/observatory-planet.png as a self-hosted fallback for browsers whose CSP blocks the GLB ImageBitmap blob fetch. make asset-check compares this copy with its source. No new generated model, paid asset, ambient sound or security-policy change is introduced. Owner creative and physical Quest acceptance remain separate.

@@ -37,6 +37,7 @@ let ui: WorkspaceUI;
 let scene: WorkspaceScene;
 let desktop: DesktopPanels;
 let disposeEnvironment: (() => void) | undefined;
+const environmentAbort = new AbortController();
 let applyingSettings = false;
 let updateChecker: UpdateChecker | undefined;
 let reloading = false;
@@ -341,7 +342,7 @@ const stopPresentation = scene.subscribe((state) => {
   maybeReloadUpdate();
 });
 applySettings(ui.getSettings());
-void loadObservatory(scene)
+void loadObservatory(scene, environmentAbort.signal)
   .then((dispose) => {
     disposeEnvironment = dispose;
   })
@@ -359,6 +360,7 @@ window.addEventListener(
   'pagehide',
   () => {
     updateChecker?.dispose();
+    environmentAbort.abort();
     detachAll();
     stopPresentation();
     desktop.dispose();
@@ -394,6 +396,9 @@ Object.assign(window, {
         rows: surface.rows,
         writable: surface.canResizeGrid,
         mouseTracking: surface.mouseTracking ?? 'none',
+        renderQuality: surface.renderQuality ?? 'full',
+        canvasWidth: surface.canvas.width,
+        canvasHeight: surface.canvas.height,
       })),
     }),
     getControlHints: () => scene.getControlHints(),

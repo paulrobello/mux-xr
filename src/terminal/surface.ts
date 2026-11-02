@@ -5,6 +5,7 @@ import type {
   TerminalColorMode,
   TerminalMouseInput,
   TerminalMouseTrackingMode,
+  TerminalRenderQuality,
   TerminalStatus,
   TerminalSurface,
 } from '../contracts';
@@ -23,6 +24,10 @@ import {
 type SocketLike = WebSocket;
 const INITIAL_RETRY_MS = 500;
 const MAX_RETRY_MS = 5000;
+const QUALITY_INTERVAL_MS: Record<Exclude<TerminalRenderQuality, 'full' | 'hidden'>, number> = {
+  medium: 1000 / 15,
+  low: 1000 / 5,
+};
 export const MIN_GRID_COLS = 2;
 export const MAX_GRID_COLS = 300;
 export const MIN_GRID_ROWS = 2;
@@ -124,7 +129,11 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   let retries = 0;
   let retry: ReturnType<typeof setTimeout> | null = null;
   let paintFrame: number | ReturnType<typeof setTimeout> | null = null;
+  let paintFrameKind: 'raf' | 'timeout' | null = null;
   let pendingPaintGuard: (() => boolean) | null = null;
+  let pendingPaint = false;
+  let renderQuality: TerminalRenderQuality = 'full';
+  let lastPaintAt = 0;
   let appCursor = false;
   let readonly = false;
   let colorMode: TerminalColorMode = 'comfort';
@@ -141,7 +150,11 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   };
   const painter = createTerminalPainter(canvas, terminal);
   const paint = (emit = true): void => {
-    if (!painter.paint(cols, rows, colorMode)) return;
+    if (renderQuality === 'hidden') return;
+    pendingPaint = false;
+    const scale = renderQuality === 'full' ? 1 : renderQuality === 'medium' ? 0.5 : 0.25;
+    if (!painter.paint(cols, rows, colorMode, scale)) return;
+    lastPaintAt = Date.now();
     if (emit) {
       revision += 1;
       notify();
@@ -149,34 +162,59 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   };
   const cancelPaint = (): void => {
     if (paintFrame === null) return;
-    if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function')
+    if (
+      paintFrameKind === 'raf' &&
+      typeof window !== 'undefined' &&
+      typeof window.cancelAnimationFrame === 'function'
+    )
       window.cancelAnimationFrame(paintFrame as number);
     else clearTimeout(paintFrame as ReturnType<typeof setTimeout>);
     paintFrame = null;
+    paintFrameKind = null;
     pendingPaintGuard = null;
   };
   const queuePaint = (isCurrent: () => boolean = () => true): void => {
     if (disposed || paused || !isCurrent()) return;
+    pendingPaint = true;
     pendingPaintGuard = isCurrent;
+    if (renderQuality === 'hidden') return;
     if (paintFrame !== null) return;
     const frame = (): void => {
       paintFrame = null;
+      paintFrameKind = null;
       const guard = pendingPaintGuard;
       pendingPaintGuard = null;
       if (disposed || paused || !guard?.()) return;
       paint();
     };
-    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    const interval = renderQuality === 'full' ? 0 : QUALITY_INTERVAL_MS[renderQuality];
+    const delay = Math.max(0, interval - (Date.now() - lastPaintAt));
+    if (delay > 0) {
+      paintFrame = setTimeout(frame, delay);
+      paintFrameKind = 'timeout';
+    } else if (
+      typeof window !== 'undefined' &&
+      typeof window.requestAnimationFrame === 'function'
+    ) {
       paintFrame = window.requestAnimationFrame(frame);
+      paintFrameKind = 'raf';
     } else {
       paintFrame = setTimeout(frame, 0);
+      paintFrameKind = 'timeout';
     }
   };
   const flush = (): void => {
-    if (paintFrame === null) return;
+    if (paintFrame === null && !pendingPaint) return;
     const guard = pendingPaintGuard;
-    cancelPaint();
-    if (!disposed && !paused && guard?.()) paint();
+    if (disposed || paused || renderQuality === 'hidden') return;
+    const interval = renderQuality === 'full' ? 0 : QUALITY_INTERVAL_MS[renderQuality];
+    if (Date.now() - lastPaintAt < interval) {
+      if (paintFrame === null) queuePaint(guard ?? (() => true));
+      return;
+    }
+    if (paintFrame !== null) cancelPaint();
+    pendingPaintGuard = null;
+    if (guard?.() ?? pendingPaint) paint();
   };
   const setStatus = (next: TerminalStatus): void => {
     if (status !== next) {
@@ -276,7 +314,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             rows = msg.message.value.rows;
             terminal.resize(cols, rows);
             cancelPaint();
-            paint();
+            queuePaint();
             break;
           case 'modeChanged': {
             if (msg.message.value.mode === 'application_cursor')
@@ -358,6 +396,18 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     get canResizeGrid() {
       return ready && socket?.readyState === WebSocket.OPEN && !readonly && !disposed;
     },
+    get renderQuality() {
+      return renderQuality;
+    },
+    setRenderQuality: (quality) => {
+      if (renderQuality === quality || disposed) return;
+      renderQuality = quality;
+      painter.invalidate();
+      cancelPaint();
+      pendingPaint = true;
+      if (!paused && quality === 'full') paint();
+      else if (!paused && quality !== 'hidden') queuePaint();
+    },
     get mouseTracking() {
       if (serverMouseModeKnown) return serverMouseMode ?? 'none';
       if (mouseTrackingDisabled) return 'none';
@@ -415,10 +465,11 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       return send(createResizeMessage(nextCols, nextRows));
     },
     setColorMode: (mode) => {
-      if (colorMode === mode) return;
+      if (colorMode === mode || disposed) return;
       colorMode = mode;
       cancelPaint();
-      paint();
+      if (renderQuality === 'full') paint();
+      else queuePaint();
     },
     subscribe: (listener) => {
       listeners.add(listener);

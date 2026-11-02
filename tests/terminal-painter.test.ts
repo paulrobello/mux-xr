@@ -117,6 +117,21 @@ describe('terminal painter', () => {
     expect(painter.paint(5, 3, 'monochrome')).toBe(true);
   });
 
+  it('uses the optional resolution scale without changing logical canvas size', () => {
+    const f = fixture(4, 2);
+    const painter = createTerminalPainter(f.canvas, f.terminal as never);
+    painter.paint(4, 2, 'comfort', 1);
+    expect(f.canvas.width).toBe(44);
+    expect(f.canvas.height).toBe(42);
+    (f.context.calls as string[]).length = 0;
+    expect(painter.paint(4, 2, 'comfort', 0.5)).toBe(true);
+    expect(f.canvas.width).toBe(22);
+    expect(f.canvas.height).toBe(21);
+    expect(f.canvas.style.width).toBe('44px');
+    expect(f.canvas.style.height).toBe('42px');
+    expect(painter.dirtyRows).toEqual(new Uint8Array([1, 1]));
+  });
+
   it('invalidates all rows when density changes and tracks viewport scrolling', () => {
     const f = fixture();
     f.lines[0][0] = cell({ chars: 'top' });

@@ -7,6 +7,7 @@ import type {
   QuickCommand,
   TerminalColorMode,
   TerminalMouseInput,
+  TerminalRenderQuality,
   TerminalSurface,
   WorkspaceActions,
 } from '../contracts';
@@ -24,6 +25,7 @@ import { createFrameCounter } from './fps';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
+import { terminalQualityAtDistance } from './terminal-lod';
 import { createTerminalTexture, type TerminalTexture } from './terminal-texture';
 
 type InputMode = 'commands' | 'keyboard' | 'panes' | 'terminal' | 'arrange' | 'command-editor';
@@ -50,6 +52,7 @@ export interface WorkspaceSceneState {
   xrMode: 'desktop' | 'vr' | 'ar';
   focusedTerminalId: string | null;
   focusModeTerminalId: string | null;
+  renderGazeTerminalId: string | null;
   rendererError: string | null;
   inputTargetId: string | null;
   inputTargetTitle: string | null;
@@ -175,6 +178,12 @@ const PANEL_WIDTH = 1.42;
 const PANEL_HEIGHT = 0.8;
 const ACCENT = 0x68d6ff;
 const CONTROLLER_RAY_LENGTH = 8;
+const QUALITY_RANK: Record<TerminalRenderQuality, number> = {
+  hidden: 0,
+  low: 1,
+  medium: 2,
+  full: 3,
+};
 
 interface XrSessionLike {
   addEventListener(type: string, listener: () => void): void;
@@ -206,6 +215,9 @@ interface TerminalPanel {
   status: string;
   title: string;
   error: string | null;
+  renderQuality: TerminalRenderQuality;
+  pendingQuality: TerminalRenderQuality | null;
+  qualitySince: number;
 }
 
 function disposeObject(object: THREE.Object3D): void {
@@ -450,6 +462,7 @@ export function createWorkspaceScene(
     xrMode: 'desktop',
     focusedTerminalId: null,
     focusModeTerminalId: null,
+    renderGazeTerminalId: null,
     rendererError,
     inputTargetId: null,
     inputTargetTitle: null,
@@ -460,6 +473,13 @@ export function createWorkspaceScene(
   let disposed = false;
   let frameHandle = 0;
   const raycaster = new THREE.Raycaster();
+  const fidelityRay = new THREE.Raycaster();
+  const fidelityHits: THREE.Intersection[] = [];
+  const terminalScreens: THREE.Mesh[] = [];
+  const fidelityEye = new THREE.Vector3();
+  const fidelityDirection = new THREE.Vector3();
+  const fidelityPosition = new THREE.Vector3();
+  const fidelityScale = new THREE.Vector3();
   const controllerRoots: THREE.Group[] = [];
   const controllerListeners: Array<{
     root: THREE.Group;
@@ -560,6 +580,7 @@ export function createWorkspaceScene(
     }
   >();
   let previousRenderTime: number | null = null;
+  let lodWasPresenting = false;
   const frameCounter = createFrameCounter();
   let fpsLabel: THREE.Mesh | null = null;
   let gridDraft: { target: string; cols: number; rows: number } | null = null;
@@ -934,9 +955,61 @@ export function createWorkspaceScene(
       drag.object.position.copy(finalPosition);
       drag.object.quaternion.copy(controllerQuaternion).multiply(drag.relativeRotation);
     }
+    if (renderer?.xr.isPresenting) {
+      scene.updateMatrixWorld(true);
+      const fidelityView = renderer.xr.getCamera();
+      fidelityView.updateWorldMatrix(true, false);
+      fidelityView.getWorldPosition(fidelityEye);
+      fidelityView.getWorldDirection(fidelityDirection);
+      let renderGazeId: string | null = null;
+      if (renderer?.xr.isPresenting) {
+        fidelityRay.set(fidelityEye, fidelityDirection);
+        fidelityRay.far = camera.far;
+        fidelityHits.length = 0;
+        fidelityRay.intersectObjects(terminalScreens, false, fidelityHits);
+        const hit = fidelityHits.find((entry) => isControlVisible(entry.object));
+        renderGazeId = (hit?.object.parent?.userData.terminalId as string | undefined) ?? null;
+      }
+      mutableState.renderGazeTerminalId = renderGazeId;
+      for (const panel of panels.values()) {
+        let quality: TerminalRenderQuality = 'full';
+        if (renderer?.xr.isPresenting) {
+          if (!panel.root.visible || panel.root.userData.focusHidden) quality = 'hidden';
+          else if (panel.id !== renderGazeId) {
+            panel.root.getWorldPosition(fidelityPosition);
+            panel.root.getWorldScale(fidelityScale);
+            quality = terminalQualityAtDistance(
+              fidelityPosition.distanceTo(fidelityEye) / Math.max(0.01, Math.abs(fidelityScale.y)),
+              panel.renderQuality,
+            );
+          }
+        }
+        if (quality === panel.renderQuality) panel.pendingQuality = null;
+        else {
+          const immediate =
+            quality === 'hidden' || QUALITY_RANK[quality] > QUALITY_RANK[panel.renderQuality];
+          if (panel.pendingQuality !== quality) {
+            panel.pendingQuality = quality;
+            panel.qualitySince = time;
+          }
+          if (immediate || time - panel.qualitySince >= 250) {
+            panel.renderQuality = quality;
+            panel.pendingQuality = null;
+            panel.surface.setRenderQuality?.(quality);
+          }
+        }
+      }
+    } else if (lodWasPresenting) {
+      mutableState.renderGazeTerminalId = null;
+      for (const panel of panels.values()) {
+        panel.renderQuality = 'full';
+        panel.pendingQuality = null;
+        panel.surface.setRenderQuality?.('full');
+      }
+    }
+    lodWasPresenting = Boolean(renderer?.xr.isPresenting);
     if (mutableState.gazeInputEnabled) {
       const gazeCamera = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
-      scene.updateMatrixWorld(true);
       gazeCamera.updateMatrixWorld(true);
       raycaster.far = camera.far;
       const origin = new THREE.Vector3().setFromMatrixPosition(gazeCamera.matrixWorld);
@@ -979,7 +1052,7 @@ export function createWorkspaceScene(
       for (const controller of controllerRoots) {
         if (!controller.visible || disconnectedControllers.has(controller)) continue;
         controller.updateMatrixWorld(true);
-        const target = targetFromController(controller);
+        const target = targetFromController(controller, false);
         moveMouse(controller, target);
         const distance =
           (controller.userData.rayDistance as number | undefined) ?? CONTROLLER_RAY_LENGTH;
@@ -1857,7 +1930,9 @@ export function createWorkspaceScene(
       reach = Math.max(reach, raycaster.ray.origin.distanceTo(reachPosition) + 3 * root.scale.x);
     }
     raycaster.far = Math.min(camera.far, reach);
-    const targets = [...panels.values()].map((panel) => panel.root);
+    const targets = [...panels.values()]
+      .filter((panel) => panel.root.visible && !panel.root.userData.focusHidden)
+      .map((panel) => panel.root);
     if (inputRoot) targets.push(inputRoot);
     if (hudRoot) targets.push(hudRoot);
     const hits = raycaster.intersectObjects(targets, true);
@@ -1879,9 +1954,8 @@ export function createWorkspaceScene(
     const key = hit.userData.key as string | undefined;
     return { terminalId, kind: key ? 'key' : 'terminal', object: hit, uv: intersection?.uv };
   };
-  const targetFromController = (root: THREE.Group): InputTarget | null => {
-    scene.updateMatrixWorld(true);
-    root.updateMatrixWorld(true);
+  const targetFromController = (root: THREE.Group, updateWorld = true): InputTarget | null => {
+    if (updateWorld) scene.updateMatrixWorld(true);
     tempMatrix.identity().extractRotation(root.matrixWorld);
     raycaster.ray.origin.setFromMatrixPosition(root.matrixWorld);
     raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix).normalize();
@@ -2172,6 +2246,9 @@ export function createWorkspaceScene(
       status: String(surface.status),
       title: surface.pane.title,
       error: surface.error,
+      renderQuality: 'full',
+      pendingQuality: null,
+      qualitySince: 0,
     };
     syncPanelGrid(panel);
     panel.unsubscribe = surface.subscribe(() => {
@@ -2210,6 +2287,7 @@ export function createWorkspaceScene(
       }
     });
     panels.set(panel.id, panel);
+    terminalScreens.push(screen);
     scene.add(root);
     if (!mutableState.selectedTerminalId) {
       mutableState.selectedTerminalId = panel.id;
@@ -2223,6 +2301,7 @@ export function createWorkspaceScene(
   const removeTerminal = (id: string): void => {
     const panel = panels.get(id);
     if (!panel) return;
+    terminalScreens.splice(terminalScreens.indexOf(panel.screen), 1);
     paneFocus.remove(panel.root);
     mutableState.focusModeTerminalId = paneFocus.activeId;
     for (const [source, capture] of mouseCaptures) if (capture.id === id) releaseMouse(source);
@@ -2458,6 +2537,12 @@ export function createWorkspaceScene(
       showHover(null);
       gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
       mutableState.xrMode = 'desktop';
+      mutableState.renderGazeTerminalId = null;
+      for (const panel of panels.values()) {
+        panel.renderQuality = 'full';
+        panel.pendingQuality = null;
+        panel.surface.setRenderQuality?.('full');
+      }
       if (hudRoot) {
         hudRoot.position.set(0, 0.78, -1.35);
         hudRoot.quaternion.identity();

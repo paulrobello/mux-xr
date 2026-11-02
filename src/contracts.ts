@@ -23,6 +23,7 @@ export type TerminalStatus =
   | 'closed';
 
 export type TerminalColorMode = 'comfort' | 'original' | 'monochrome';
+export type TerminalRenderQuality = 'full' | 'medium' | 'low' | 'hidden';
 
 export interface KeyModifiers {
   ctrl?: boolean;
@@ -52,6 +53,8 @@ export interface TerminalSurface {
   readonly status: TerminalStatus;
   readonly error: string | null;
   readonly canResizeGrid: boolean;
+  readonly renderQuality?: TerminalRenderQuality;
+  setRenderQuality?(quality: TerminalRenderQuality): void;
   connect(): void;
   disconnect(): void;
   flush?(): void;

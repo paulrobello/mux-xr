@@ -14,7 +14,12 @@ type PainterContext = CanvasRenderingContext2D;
 
 export interface TerminalPainter {
   readonly dirtyRows: Uint8Array;
-  paint(cols: number, rows: number, colorMode: TerminalColorMode): boolean;
+  paint(
+    cols: number,
+    rows: number,
+    colorMode: TerminalColorMode,
+    resolutionScale?: number,
+  ): boolean;
   invalidate(): void;
 }
 
@@ -148,8 +153,10 @@ export function createTerminalPainter(
     get dirtyRows(): Uint8Array {
       return dirtyRows;
     },
-    paint(cols, rows, colorMode): boolean {
-      const density = Math.min(typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1, 2);
+    paint(cols, rows, colorMode, resolutionScale = 1): boolean {
+      const scale = resolutionScale > 0 ? resolutionScale : 1;
+      const density =
+        Math.min(typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1, 2) * scale;
       const dimensionsChanged = cols !== cachedCols || rows !== cachedRows;
       if (dimensionsChanged) {
         cachedCols = cols;

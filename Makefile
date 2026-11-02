@@ -1,4 +1,4 @@
-.PHONY: install build test lint fmt typecheck checkall checkall-ci asset-check e2e production-label-check update-notice-check arrangement-check focus-mode-check live-check real-app-check dev dev-start dev-stop dev-restart preview pre-commit
+.PHONY: install build test lint fmt typecheck checkall checkall-ci asset-check e2e production-label-check update-notice-check arrangement-check focus-mode-check terminal-capacity-check live-check real-app-check dev dev-start dev-stop dev-restart preview pre-commit
 
 install:
 	bun install --frozen-lockfile
@@ -26,6 +26,8 @@ arrangement-check:
 	bun run scripts/arrangement-check.ts
 focus-mode-check:
 	bun run scripts/focus-mode-check.ts
+terminal-capacity-check:
+	bun run scripts/terminal-capacity-check.ts
 live-check:
 	bun run scripts/live-terminal-check.ts
 real-app-check:
@@ -33,6 +35,7 @@ real-app-check:
 asset-check:
 	uv run --no-project python scripts/assets/check-observatory.py
 	cmp assets-source/observatory/staging/observatory.glb public/assets/observatory.glb
+	cmp assets-source/observatory/maps/planet-basecolor.png public/assets/observatory-planet.png
 dev dev-start:
 	bun run dev
 preview:

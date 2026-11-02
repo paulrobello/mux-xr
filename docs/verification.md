@@ -252,3 +252,12 @@ An initial native rendered check exposed duplicate Troika shader declarations ca
 Run `make focus-mode-check` only with `MUX_XR_PRIVATE_TEST=1`, an explicit `MUX_XR_BASE_URL`, and an owned `MUX_XR_TEST_ROOT` copied from dist. It writes a generated actual-main XR shim into that test root. The shim renders with the native GPU but does not establish physical headset acceptance.
 
 The final `make checkall-ci` passed 198 tests across 24 files, strict TypeScript, production build, asset checks, secret scan and dependency audit. The final actual-main native focus fixture passed and the desktop/tablet/mobile protocol fixtures each passed 46 frames with zero page errors. These are functional native-GPU checks, not new frame-time or Quest capacity measurements.
+
+
+## Gaze-prioritized terminal LOD and exterior space
+
+The full parity gate passes 212 tests across 27 files, strict TypeScript, production build, asset/provenance checks, secret scanning and dependency audit. Focused tests cover raster scaling, 60 Hz flush throttling, hidden output/promotion, independent rendering gaze, input/grid preservation, distance hysteresis, async asset cancellation and resource disposal. An immediate full-quality color preference repaint regression and a TextureLoader import error were caught and fixed before acceptance.
+
+Matched native M4 Mac mini runs used 6/12/18 actual terminal surfaces at149×54, device scale2, two-second warmup and eight-second spinner/log phases. At18 panes render-callback p95 fell12.6→6.8ms, uploads959.5→305.5MiB, and canvasRGBA footprint510.5→69.1MiB. Display p95 remained16.8ms and long-frame outliers remain. All corresponding packet/byte counts match, with loads below15 before/after. No real/default mux server was used. See docs/performance/terminal-lod-2026-11-02.md for all counts, limits and source hashes. These comparisons do not establish a physical Quest maximum.
+
+The final desktop/tablet/mobile protocol fixtures pass46frames/errors0 each, and the native focus regression retains520 title foreground pixels, exact restore and no page/font/shader errors. Rendered exterior and workspace captures were inspected. The final space has three added draws, textured planet detail and static colored stars/cloud bands. The original clipped star positions were beyond the camera far plane. The fallback PNG preserves the existing owned map hash, and CSP remains unchanged. New owner creative/Quest comfort acceptance remains pending.
