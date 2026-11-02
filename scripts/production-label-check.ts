@@ -80,7 +80,7 @@ try {
       }
     ).__muxXR.getControlHints(),
   );
-  const controls = ['Commands', 'Keyboard', 'Terminal']
+  const controls = ['Commands', 'Widgets', 'Terminal']
     .map((label) => hints.find((h) => h.label === label && h.inputAction === 'openInput'))
     .filter(Boolean);
   if (controls.length !== 3) throw new Error('Production HUD controls missing');
