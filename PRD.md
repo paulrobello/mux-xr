@@ -84,3 +84,11 @@ Actual Quest 3 acceptance checks controller targeting, both readable panels, pas
 ## Open Questions and Design Stress Test
 
 The interview settled all MVP product choices. The following are implementation facts to verify, not new requirements: compatible upstream API/version; headset availability/trust setup; benchmark-supported capacity; final observatory asset cost. The unavailable grilling skill is replaced by this explicit stress test: distinguish gaze from command focus, display size from PTY size, view detach from process kill, stream sessions from mux sessions, and synthetic browser evidence from physical-headset acceptance. Each distinction has an acceptance check above.
+
+## November 2 refinement
+
+Persist clock presence and yaw-relative transforms with the keyboard/HUD. Restore them in desktop preview and XR. Automatically enter XR where browser policy permits, retain activation/manual fallback, suppress duplicate entry and allow notice dismissal. Tooltip placement remains stable through head motion and clears control bounds.
+
+Sharper gaze applies only within a configurable saved maximum physical distance. Filtering controls expose applicable anisotropy levels up to the actual device cap. Per-server/pane curvature is adjustable 0–100° without PTY resize, with valid UV picking and depth-aware arrangement spacing. Controller stick and browser wheel scroll local history or a mouse-aware TUI, with grip suppression.
+
+Radial menus and glass remain a rendered design review. Proposed A toggles Keyboard/Commands/Layout/Warp/Widgets, with trigger selection, center Cancel and B focus preserved. Native prototypes use current geometry, fonts, colors and background. Glass chrome is feasible with conservative alpha; refractive glass and whole-terminal transparency need physical readability and performance acceptance.

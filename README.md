@@ -109,7 +109,7 @@ Arrangement spacing measures each window's current grid geometry, title and cont
 
 The native HUD replaces its Keyboard button with **Widgets**. A still toggles the keyboard. Widgets adds a local-time digital or analog 3D clock. Grip either clock to move, rotate, push/pull or scale it like other UI. Its × closes only that clock. Grip stick left/right now uses the reversed yaw and laser-axis roll directions.
 
-Keyboard and main-panel position, rotation and scale save on final grip release and XR exit. The next XR session restores them relative to the new headset position and heading. Both-stick recovery clears those saved poses while retaining commands and other preferences. Clock positions are currently session-local.
+Keyboard and main-panel position, rotation and scale save on final grip release and XR exit. The next XR session restores them relative to the new headset position and heading. Both-stick recovery clears those saved poses while retaining commands and other preferences. Clock presence, position, rotation and scale now persist locally, including desktop preview and XR reload. Closing a clock removes its saved entry.
 
 Arrangements keep the full terminal bounds above the Observatory deck or passthrough floor. Black and Gradient keep unrestricted vertical layouts. Stars use varied-size circular soft sprites in one draw call, with no flashing or audio.
 
@@ -145,3 +145,13 @@ Terminal updates compare visible cells and repaint only changed rows, including 
 `MUX_XR_PRIVATE_TEST=1 MUX_XR_BASE_URL=http://127.0.0.1:4241 bun run scripts/terminal-texture-check.ts` checks actual WebGL pixels against the canvas reference using an isolated Vite server. It loads a blank fixture, verifies partial updates, orientation, resizing and UV transforms, and does not connect to a mux daemon.
 
 `MUX_XR_BASE_URL=http://127.0.0.1:4241 MUX_XR_PRIVATE_TEST=1 bun run scripts/stream-lifecycle-check.ts` exercises four streams with every WebSocket intercepted. It covers a 3 MiB seed, manual disconnect, rejected input, reconnect without replay, close and reopen. Use an isolated static preview. `MUX_XR_SKIP_LIFECYCLE=1` measures a fixed four-pane, 149×54 workload with 6,400 packets. `MUX_XR_BASELINE=1` runs the same diagnostic against an older build. Timings describe desktop canvas cost and frame pacing, not Quest capacity or a headset FPS gate.
+
+## XR refinement controls
+
+Grip-plus-trigger stick left/right uses its original roll direction again. Grip-only yaw keeps the newer reversed direction. XR startup is single-flight and tries automatic entry when supported and permitted. Browser activation requirements retain a first-interaction/manual entry fallback. Successful entry clears old errors. Click a notice or its × above the HUD to dismiss it. Tooltips choose a stable pose when shown and clear the control bounds instead of rotating with every head movement.
+
+Filtering shows anisotropy only for mipmap modes and hides values beyond the device cap. Sharper gaze has a saved maximum distance, default 3 m, adjustable in browser settings or native Filtering. It uses physical distance and remains independent of Gaze input. Anisotropy primarily affects oblique minification. Higher values can look alike front-on, and base-level sharper gaze bypasses mip smoothing.
+
+Terminal settings → Warp adjusts the selected pane from flat to 100° curvature. Browser Workspace Settings has the same selected-pane slider. Curvature is saved per server/pane, preserves the remote grid and mouse UV mapping, and is included in layout spacing/floor checks. Point at a terminal and use either controller's stick up/down to scroll. Grip suppresses scrolling. Ordinary shells use local scrollback. Mouse-aware TUIs receive raw SGR wheel reports. Browser wheel scrolling works in both flat terminals and the 3D preview.
+
+The [radial design notes](design/radial-menus.md) and [rendered comparison](https://artifacts.example.test/a/01a19e0a856b745388c896d401016f04) compare five-action menus and glass treatment using the actual scene. Production A remains Keyboard until a radial direction is selected. The [core 0.77 review](docs/core-0.77-review.md) records relevant release additions and opt-in boundaries.

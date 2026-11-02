@@ -19,6 +19,13 @@ export function getKeyHelp(key: string): string | undefined {
 export function getControlHelp(data: Record<string, unknown>): string | undefined {
   if (typeof data.key === 'string') return getKeyHelp(data.key);
   switch (data.inputAction) {
+    case 'dismissNotice':
+      return 'Clear this message';
+    case 'filterDistance':
+      return 'Set the maximum distance for sharper gaze';
+    case 'curvature':
+    case 'curvatureStep':
+      return 'Bend this screen without changing the terminal grid';
     case 'toggleWidget':
       return 'Show or hide this movable clock';
     case 'closeWidget':

@@ -174,7 +174,7 @@ try {
     for (const [index, mode] of (
       ['nearest', 'linear', 'mipmap-nearest', 'mipmap-linear'] as const
     ).entries()) {
-      owned.setFiltering({ mode, anisotropy: 16, gazeClarity: true });
+      owned.setFiltering({ mode, anisotropy: 16, gazeClarity: true, gazeMaxDistance: 3 });
       frame(owned.texture, 0.006, 2.62);
       if (owned.texture.minFilter !== expectedFilters[index])
         throw new Error(`Wrong sampler: ${mode}`);
@@ -184,20 +184,30 @@ try {
         anisotropy: owned.texture.anisotropy,
       });
     }
-    owned.setFiltering({ mode: 'mipmap-linear', anisotropy: 4, gazeClarity: true });
+    owned.setFiltering({
+      mode: 'mipmap-linear',
+      anisotropy: 4,
+      gazeClarity: true,
+      gazeMaxDistance: 3,
+    });
     const gazeVersion = owned.texture.version;
     setTerminalMaterialFiltering(
       material,
-      { mode: 'mipmap-linear', anisotropy: 4, gazeClarity: true },
+      { mode: 'mipmap-linear', anisotropy: 4, gazeClarity: true, gazeMaxDistance: 3 },
       true,
     );
     if (owned.texture.version !== gazeVersion) throw new Error('Gaze caused a texture reupload');
     const gazePixels = frame(owned.texture, 0.006, 2.62);
     const freshLinear = createTerminalTexture({ canvas: source, dirtyRows }, renderer);
-    freshLinear.setFiltering({ mode: 'linear', anisotropy: 4, gazeClarity: false });
+    freshLinear.setFiltering({
+      mode: 'linear',
+      anisotropy: 4,
+      gazeClarity: false,
+      gazeMaxDistance: 3,
+    });
     setTerminalMaterialFiltering(
       material,
-      { mode: 'linear', anisotropy: 4, gazeClarity: false },
+      { mode: 'linear', anisotropy: 4, gazeClarity: false, gazeMaxDistance: 3 },
       false,
     );
     const gazeLinearMeanAbsDelta = delta(gazePixels, frame(freshLinear.texture, 0.006, 2.62));

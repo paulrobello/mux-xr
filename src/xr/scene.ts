@@ -41,7 +41,16 @@ import { measurePanelBounds } from './panel-bounds';
 import { terminalQualityAtDistance } from './terminal-lod';
 import { createTerminalMaterial, setTerminalMaterialFiltering } from './terminal-material';
 import { createTerminalTexture, type TerminalTexture } from './terminal-texture';
+import {
+  createCurvedTerminalGeometry,
+  createCurvedTerminalSelection,
+  getTerminalWarpBounds,
+  terminalWarpPoint,
+  warpGeometryPositions,
+} from './terminal-warp';
+import { createTerminalWarpStore } from './terminal-warp-store';
 import { applyUIPose, captureUIPose, createUIPoseStore, type UIPoseName } from './ui-poses';
+import { createWidgetPoseStore } from './widget-poses';
 import { type ClockWidget, createClockWidget, type WidgetKind } from './widgets';
 
 type InputMode =
@@ -52,7 +61,8 @@ type InputMode =
   | 'arrange'
   | 'command-editor'
   | 'widgets'
-  | 'filtering';
+  | 'filtering'
+  | 'warp';
 
 export interface PanelTransform {
   position: THREE.Vector3;
@@ -99,6 +109,8 @@ export interface WorkspaceScene {
   setGazeInputEnabled(enabled: boolean): void;
   setTerminalColorMode(mode: TerminalColorMode): void;
   setTerminalFiltering(filtering: TerminalFiltering): void;
+  setTerminalCurvature(id: string, degrees: number): void;
+  getTerminalCurvature(id: string): number;
   setKeyboardBackgroundEnabled(enabled: boolean): void;
   setAvailablePanes(panes: PaneDescriptor[]): void;
   setQuickCommands(commands: QuickCommand[]): void;
@@ -227,11 +239,11 @@ interface TerminalPanel {
   id: string;
   surface: TerminalSurface;
   root: THREE.Group;
-  screen: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+  screen: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   texture: THREE.Texture;
   textureSource: TerminalTexture;
   frame: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>;
-  selection: THREE.Mesh<THREE.ShapeGeometry, THREE.MeshBasicMaterial>;
+  selection: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   unsubscribe: () => void;
   defaultPosition: THREE.Vector3;
   titleLabel: THREE.Mesh;
@@ -249,6 +261,8 @@ interface TerminalPanel {
   filterVersion: number;
   filterGaze: boolean;
   filterGazeAt: number;
+  curvature: number;
+  geometryCurvature: number;
 }
 
 function disposeObject(object: THREE.Object3D): void {
@@ -377,7 +391,7 @@ function selectionGeometry(width: number, height: number): THREE.ShapeGeometry {
   return new THREE.ShapeGeometry(shape);
 }
 
-function createSelection(): THREE.Mesh<THREE.ShapeGeometry, THREE.MeshBasicMaterial> {
+function createSelection(): THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial> {
   const material = new THREE.MeshBasicMaterial({
     color: ACCENT,
     transparent: true,
@@ -483,6 +497,18 @@ export function createWorkspaceScene(
   const panels = new Map<string, TerminalPanel>();
   const widgets = new Map<WidgetKind, ClockWidget>();
   const poseStore = createUIPoseStore();
+  const widgetPoseStore = createWidgetPoseStore();
+  const warpStore = createTerminalWarpStore();
+  const warpKey = (surface: TerminalSurface): string =>
+    JSON.stringify([
+      surface.serverId ?? 'demo',
+      surface.pane.workspaceId,
+      surface.pane.sessionId,
+      surface.pane.windowId,
+      surface.pane.id,
+    ]);
+  scene.userData.maxAnisotropy = renderer?.capabilities.getMaxAnisotropy() ?? 1;
+  let widgetRestorePending = true;
   let poseRestorePending = false;
   let keyboardPoseRestored = true;
   let filterVersion = 0;
@@ -640,6 +666,8 @@ export function createWorkspaceScene(
   };
   let updateNotice: THREE.Mesh | null = null;
   let statusNotice: THREE.Mesh | null = null;
+  let statusDismiss: THREE.Mesh | null = null;
+  let xrStartPromise: Promise<void> | null = null;
   let activeSession: XrSessionLike | null = null;
   let inputMode: InputMode = 'commands';
   let panePage = 0;
@@ -654,6 +682,7 @@ export function createWorkspaceScene(
     }
   >();
   const keyboardButtonDown = new Set<THREE.Group>();
+  const scrollDue = new Map<THREE.Group, number>();
   let keyboardResume: {
     mode: 'keyboard' | 'command-editor';
     target: string | null;
@@ -800,17 +829,8 @@ export function createWorkspaceScene(
       return;
     }
     if (target?.object !== panel.screen) return;
-    const localRay = raycaster.ray.clone().applyMatrix4(panel.screen.matrixWorld.clone().invert());
-    const point = localRay.intersectPlane(
-      new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
-      new THREE.Vector3(),
-    );
-    if (!point) return;
-    const geometry = panel.screen.geometry.parameters;
-    const cell = cellAtUV(
-      panel,
-      new THREE.Vector2(point.x / geometry.width + 0.5, point.y / geometry.height + 0.5),
-    );
+    if (!target.uv) return;
+    const cell = cellAtUV(panel, target.uv);
     if (cell.col === capture.col && cell.row === capture.row) return;
     capture.col = cell.col;
     capture.row = cell.row;
@@ -826,17 +846,20 @@ export function createWorkspaceScene(
   hoverHelp.raycast = () => undefined;
   scene.add(hoverHelp);
   let hoveredControl: THREE.Object3D | null = null;
+  let hoverPlaced = false;
   let hoverSince = 0;
   const showHover = (object: THREE.Object3D | null, now = performance.now()): void => {
     const help = object?.userData.helpText as string | undefined;
     if (!help || dragStates.size) {
       hoveredControl = null;
+      hoverPlaced = false;
       hoverHelp.visible = false;
       canvas.title = '';
       return;
     }
     if (hoveredControl !== object) {
       hoveredControl = object;
+      hoverPlaced = false;
       hoverSince = now;
     }
     canvas.title = help;
@@ -844,7 +867,7 @@ export function createWorkspaceScene(
     if (hoverHelp.visible) updateLabel(hoverHelp, help);
   };
   const updateHoverPosition = (): void => {
-    if (!hoveredControl || !hoverHelp.visible) return;
+    if (!hoveredControl || !hoverHelp.visible || hoverPlaced) return;
     let owner: THREE.Object3D = hoveredControl;
     while (owner.parent) owner = owner.parent;
     if (owner !== scene) {
@@ -860,10 +883,18 @@ export function createWorkspaceScene(
       .distanceTo(view.getWorldPosition(new THREE.Vector3()));
     const tooltipScale = THREE.MathUtils.clamp(distance / 1.4, 0.3, 6);
     hoverHelp.scale.setScalar(tooltipScale);
-    hoverHelp.position
-      .copy(hoveredControl.getWorldPosition(new THREE.Vector3()))
-      .addScaledVector(up, 0.075 * tooltipScale);
+    const bounds = new THREE.Box3().setFromObject(hoveredControl);
+    const center = bounds.getCenter(new THREE.Vector3());
+    const extent = bounds.getSize(new THREE.Vector3()).multiplyScalar(0.5);
+    const projectedHalfHeight =
+      Math.abs(up.x) * extent.x + Math.abs(up.y) * extent.y + Math.abs(up.z) * extent.z;
     hoverHelp.quaternion.copy(view.getWorldQuaternion(new THREE.Quaternion()));
+    hoverHelp.position.copy(center).addScaledVector(up, projectedHalfHeight + 0.045 * tooltipScale);
+    hoverHelp.position.addScaledVector(
+      new THREE.Vector3(0, 0, 1).applyQuaternion(hoverHelp.quaternion),
+      0.018 * tooltipScale,
+    );
+    hoverPlaced = true;
   };
   const setPointerRay = (event: PointerEvent): boolean => {
     const bounds = canvas.getBoundingClientRect();
@@ -967,6 +998,20 @@ export function createWorkspaceScene(
         );
       poseRestorePending = false;
     }
+    if (widgetRestorePending) {
+      for (const [kind, pose] of Object.entries(widgetPoseStore.read())) {
+        const widget = widgets.get(kind as WidgetKind) ?? addWidget(kind as WidgetKind);
+        applyUIPose(
+          widget.root,
+          renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera,
+          pose,
+          [0.25, 2],
+        );
+      }
+      widgetRestorePending = false;
+      mutableState.widgets = [...widgets.keys()];
+      notify();
+    }
     const nowMs = Date.now();
     for (const widget of widgets.values()) widget.update(nowMs);
     (scene.userData.updateEnvironment as ((delta: number) => void) | undefined)?.(deltaSeconds);
@@ -1029,6 +1074,33 @@ export function createWorkspaceScene(
           );
         }
       }
+      for (const controller of controllerRoots) {
+        const pad = controllerGamepads.get(controller);
+        if (
+          !pad ||
+          !controller.visible ||
+          disconnectedControllers.has(controller) ||
+          gripActive() ||
+          mouseCaptures.size ||
+          pad.buttons[3]?.pressed ||
+          (inputRoot && inputMode !== 'keyboard')
+        ) {
+          scrollDue.delete(controller);
+          continue;
+        }
+        const axis = pad.axes.length >= 4 ? pad.axes[3] : (pad.axes.at(-1) ?? 0);
+        if (Math.abs(axis) < 0.35) {
+          scrollDue.delete(controller);
+          continue;
+        }
+        if (time < (scrollDue.get(controller) ?? 0)) continue;
+        const target = targetFromController(controller);
+        const panel = target?.terminalId ? panels.get(target.terminalId) : undefined;
+        if (panel && target?.uv && target.object === panel.screen) {
+          actions.scrollTerminal?.(panel.id, Math.sign(axis) * 3, cellAtUV(panel, target.uv));
+          scrollDue.set(controller, time + 160 / Math.abs(axis));
+        }
+      }
       const bothSticks =
         heldControllers.size === 0 &&
         controllerRoots.length === 2 &&
@@ -1084,7 +1156,7 @@ export function createWorkspaceScene(
         const vertical = -applyDeadzone(y) * deltaSeconds;
         if (gamepad.buttons[0]?.pressed) {
           drag.relativeRotation.premultiply(
-            new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, -1), -horizontal),
+            new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, -1), horizontal),
           );
           drag.localOffset.z = THREE.MathUtils.clamp(drag.localOffset.z - vertical * 0.8, -6, -0.3);
         } else {
@@ -1120,9 +1192,12 @@ export function createWorkspaceScene(
       }
       mutableState.renderGazeTerminalId = renderGazeId;
       for (const panel of panels.values()) {
-        if (panel.id === renderGazeId) panel.filterGazeAt = time;
+        const distance = panel.screen.getWorldPosition(fidelityPosition).distanceTo(fidelityEye);
+        const inRange = distance <= mutableState.filtering.gazeMaxDistance;
+        if (panel.id === renderGazeId && inRange) panel.filterGazeAt = time;
         const filterGaze =
-          panel.id === renderGazeId || (panel.filterGaze && time - panel.filterGazeAt < 250);
+          inRange &&
+          (panel.id === renderGazeId || (panel.filterGaze && time - panel.filterGazeAt < 250));
         if (filterGaze !== panel.filterGaze || panel.filterVersion !== filterVersion) {
           setTerminalMaterialFiltering(panel.screen.material, mutableState.filtering, filterGaze);
           panel.filterGaze = filterGaze;
@@ -1277,6 +1352,17 @@ export function createWorkspaceScene(
   resize();
   if (renderer) renderer.setAnimationLoop((time: number) => render(time));
   window.addEventListener('resize', resize);
+  const onWheel = (event: WheelEvent): void => {
+    if (renderer?.xr.isPresenting || !setPointerRay(event as unknown as PointerEvent)) return;
+    const target = targetFromRay();
+    const panel = target?.terminalId ? panels.get(target.terminalId) : undefined;
+    if (!panel || target?.object !== panel.screen || !target.uv) return;
+    const unit = event.deltaMode === 1 ? 1 : event.deltaMode === 2 ? panel.surface.rows : 1 / 40;
+    const lines = Math.sign(event.deltaY) * Math.max(1, Math.round(Math.abs(event.deltaY) * unit));
+    if (actions.scrollTerminal?.(panel.id, lines, cellAtUV(panel, target.uv)))
+      event.preventDefault();
+  };
+  canvas.addEventListener('wheel', onWheel, { passive: false });
   canvas.addEventListener('pointerdown', onPointerDown);
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerleave', onPointerLeave);
@@ -1312,7 +1398,12 @@ export function createWorkspaceScene(
     widget.root.quaternion.copy(rotation);
     widget.root.scale.setScalar(1);
   };
-  const removeWidget = (kind: WidgetKind): void => {
+  const saveWidgetPose = (kind: WidgetKind, widget: ClockWidget): void => {
+    const view = renderer?.xr.isPresenting || activeSession ? renderer?.xr.getCamera() : camera;
+    if (view && !widgetPoseStore.save(kind, captureUIPose(widget.root, view)))
+      setNotice('Widget position could not be saved on this device');
+  };
+  const removeWidget = (kind: WidgetKind, persist = true): void => {
     const widget = widgets.get(kind);
     if (!widget) return;
     for (const [controller, drag] of dragStates)
@@ -1323,15 +1414,12 @@ export function createWorkspaceScene(
     widget.root.removeFromParent();
     widget.dispose();
     widgets.delete(kind);
+    if (persist) widgetPoseStore.remove(kind);
     mutableState.widgets = [...widgets.keys()];
     if (!disposed && inputRoot && inputMode === 'widgets') refreshInputRoot('widgets');
     notify();
   };
-  const toggleWidget = (kind: WidgetKind): void => {
-    if (widgets.has(kind)) {
-      removeWidget(kind);
-      return;
-    }
+  const addWidget = (kind: WidgetKind): ClockWidget => {
     const widget = createClockWidget(kind);
     widget.root.traverse((object) => {
       if (!object.userData.inputAction) object.userData.inputAction = 'grabWidget';
@@ -1339,6 +1427,15 @@ export function createWorkspaceScene(
     widgets.set(kind, widget);
     scene.add(widget.root);
     placeWidget(widget);
+    return widget;
+  };
+  const toggleWidget = (kind: WidgetKind): void => {
+    if (widgets.has(kind)) {
+      removeWidget(kind);
+      return;
+    }
+    const widget = addWidget(kind);
+    saveWidgetPose(kind, widget);
     mutableState.widgets = [...widgets.keys()];
     hideInput();
     notify();
@@ -1464,9 +1561,11 @@ export function createWorkspaceScene(
           ? 'Widgets'
           : mode === 'filtering'
             ? 'Terminal filtering'
-            : mode === 'arrange'
-              ? 'Arrange terminals'
-              : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? 'Keyboard' : mode === 'terminal' ? 'Terminal settings' : `Panes · ${hierarchyLevel}`} · ${targetTitle}`,
+            : mode === 'warp'
+              ? 'Terminal curvature'
+              : mode === 'arrange'
+                ? 'Arrange terminals'
+                : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? 'Keyboard' : mode === 'terminal' ? 'Terminal settings' : `Panes · ${hierarchyLevel}`} · ${targetTitle}`,
       0.9,
       0.12,
       { inputAction: 'grabInput' },
@@ -1729,6 +1828,40 @@ export function createWorkspaceScene(
       });
       filteringButton.position.set(0.65, 0.55, 0);
       inputRoot.add(filteringButton);
+      const warpButton = createLabelButton('Warp', 0.65, 0.09, {
+        inputAction: 'openInput',
+        mode: 'warp',
+      });
+      warpButton.position.set(-0.65, 0.55, 0);
+      inputRoot.add(warpButton);
+    } else if (mode === 'warp') {
+      const target = mutableState.inputTargetId;
+      const degrees = target ? getTerminalCurvature(target) : 0;
+      const caption = createLabelButton(
+        target ? `Curvature: ${degrees}°` : 'Select a terminal',
+        1.4,
+        0.14,
+        { inputAction: 'noop' },
+      );
+      caption.position.y = 0.3;
+      inputRoot.add(caption);
+      for (const [index, value] of [0, 15, 30, 45, 60, 90, 100].entries()) {
+        const button = createLabelButton(value === 0 ? 'Flat' : `${value}°`, 0.35, 0.12, {
+          inputAction: 'curvature',
+          degrees: value,
+        });
+        button.position.set(((index % 4) - 1.5) * 0.4, 0.08 - Math.floor(index / 4) * 0.18, 0);
+        setModifierVisual(button, degrees === value);
+        inputRoot.add(button);
+      }
+      for (const [index, delta] of [-5, 5].entries()) {
+        const button = createLabelButton(delta < 0 ? 'Curve less' : 'Curve more', 0.7, 0.12, {
+          inputAction: 'curvatureStep',
+          delta,
+        });
+        button.position.set(index ? 0.4 : -0.4, -0.36, 0);
+        inputRoot.add(button);
+      }
     } else if (mode === 'widgets') {
       for (const [index, kind] of (['digital-clock', 'analog-clock'] as const).entries()) {
         const name = kind === 'digital-clock' ? 'Digital clock' : 'Analog clock';
@@ -1757,15 +1890,25 @@ export function createWorkspaceScene(
         setModifierVisual(button, mutableState.filtering.mode === filterMode);
         inputRoot?.add(button);
       });
-      ([1, 2, 4, 8, 16] as const).forEach((anisotropy, index) => {
-        const button = createLabelButton(anisotropy === 1 ? 'Off' : `${anisotropy}x`, 0.26, 0.1, {
-          inputAction: 'filterAnisotropy',
-          anisotropy,
+      const mipMode = mutableState.filtering.mode.startsWith('mipmap-');
+      const maximum = Number(scene.userData.maxAnisotropy ?? 1);
+      if (mipMode) {
+        const levels = ([1, 2, 4, 8, 16] as const).filter((value) => value <= maximum);
+        levels.forEach((anisotropy, index) => {
+          const button = createLabelButton(anisotropy === 1 ? 'Off' : `${anisotropy}x`, 0.26, 0.1, {
+            inputAction: 'filterAnisotropy',
+            anisotropy,
+          });
+          button.position.set((index - (levels.length - 1) / 2) * 0.3, -0.1, 0);
+          setModifierVisual(button, mutableState.filtering.anisotropy === anisotropy);
+          inputRoot?.add(button);
         });
-        button.position.set((index - 2) * 0.3, -0.1, 0);
-        setModifierVisual(button, mutableState.filtering.anisotropy === anisotropy);
-        inputRoot?.add(button);
-      });
+        const hint = createLabelButton(`Oblique smoothing · device max ${maximum}x`, 1.45, 0.055, {
+          inputAction: 'noop',
+        });
+        hint.position.y = -0.19;
+        inputRoot.add(hint);
+      }
       const gaze = createLabelButton(
         `Sharper gaze: ${mutableState.filtering.gazeClarity ? 'on' : 'off'}`,
         1.2,
@@ -1775,6 +1918,24 @@ export function createWorkspaceScene(
       gaze.position.y = -0.28;
       setModifierVisual(gaze, mutableState.filtering.gazeClarity);
       inputRoot.add(gaze);
+      if (mipMode && mutableState.filtering.gazeClarity) {
+        const distance = createLabelButton(
+          `Sharpen within ${mutableState.filtering.gazeMaxDistance.toFixed(2)} m`,
+          1.08,
+          0.08,
+          { inputAction: 'noop' },
+        );
+        distance.position.y = -0.42;
+        inputRoot.add(distance);
+        for (const [index, delta] of [-0.25, 0.25].entries()) {
+          const button = createLabelButton(delta < 0 ? '−' : '+', 0.15, 0.1, {
+            inputAction: 'filterDistance',
+            delta,
+          });
+          button.position.set(index ? 0.7 : -0.7, -0.42, 0);
+          inputRoot.add(button);
+        }
+      }
     } else {
       const unit = 0.13;
       for (const key of keyboardKeys) {
@@ -1873,12 +2034,16 @@ export function createWorkspaceScene(
     updateNotice.visible = false;
     hudRoot.add(updateNotice);
     statusNotice = createLabelButton(mutableState.notice ?? '', 1.4, 0.075, {
-      inputAction: 'noop',
+      inputAction: 'dismissNotice',
       wrap: true,
     });
     statusNotice.position.set(0, 0.3, 0);
     statusNotice.visible = Boolean(mutableState.notice);
     hudRoot.add(statusNotice);
+    statusDismiss = createLabelButton('×', 0.075, 0.075, { inputAction: 'dismissNotice' });
+    statusDismiss.position.set(0.78, 0.3, 0);
+    statusDismiss.visible = Boolean(mutableState.notice);
+    hudRoot.add(statusDismiss);
     const backing = new THREE.Mesh(
       new THREE.PlaneGeometry(totalWidth + 0.08, 0.15),
       new THREE.MeshBasicMaterial({ color: 0x0d1720 }),
@@ -1904,6 +2069,7 @@ export function createWorkspaceScene(
   const setNotice = (message: string | null): void => {
     if (mutableState.notice === message) return;
     mutableState.notice = message;
+    if (statusDismiss) statusDismiss.visible = Boolean(message);
     if (statusNotice) {
       statusNotice.visible = Boolean(message);
       updateLabel(statusNotice, message ?? '');
@@ -2054,6 +2220,10 @@ export function createWorkspaceScene(
       refreshInputRoot('panes');
       return true;
     }
+    if (action === 'dismissNotice') {
+      setNotice(null);
+      return true;
+    }
     if (action === 'openInput') {
       showInput(hit.userData.mode as InputMode);
       return true;
@@ -2080,6 +2250,24 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'grabWidget') return true;
+    if (action === 'curvature' || action === 'curvatureStep') {
+      const id = mutableState.inputTargetId;
+      if (id)
+        setTerminalCurvature(
+          id,
+          action === 'curvature'
+            ? Number(hit.userData.degrees)
+            : getTerminalCurvature(id) + Number(hit.userData.delta),
+        );
+      return true;
+    }
+    if (action === 'filterDistance') {
+      setTerminalFiltering({
+        ...mutableState.filtering,
+        gazeMaxDistance: mutableState.filtering.gazeMaxDistance + Number(hit.userData.delta),
+      });
+      return true;
+    }
     if (action === 'filterMode' || action === 'filterAnisotropy' || action === 'filterGaze') {
       setTerminalFiltering({
         ...mutableState.filtering,
@@ -2415,6 +2603,11 @@ export function createWorkspaceScene(
             (inputMode === 'keyboard' || inputMode === 'command-editor')
           )
             saveUIPose('keyboard', object);
+          if (object.userData.widgetKind) {
+            const kind = object.userData.widgetKind as WidgetKind;
+            const widget = widgets.get(kind);
+            if (widget) saveWidgetPose(kind, widget);
+          }
         }
       };
       const onConnected = (event: Event): void => {
@@ -2480,15 +2673,41 @@ export function createWorkspaceScene(
   const syncPanelGrid = (panel: TerminalPanel): void => {
     const width = (PANEL_WIDTH * panel.surface.cols) / 80;
     const height = (PANEL_HEIGHT * panel.surface.rows) / 24;
-    if (width === panel.width && height === panel.height) return;
+    if (
+      width === panel.width &&
+      height === panel.height &&
+      panel.curvature === panel.geometryCurvature
+    )
+      return;
     panel.width = width;
     panel.height = height;
+    panel.geometryCurvature = panel.curvature;
+    const radians = THREE.MathUtils.degToRad(panel.curvature);
+    const span = { width, height, radians };
+    const bent = radians > 0;
+    panel.root.userData.curvatureDegrees = panel.curvature;
+    panel.root.userData.curvatureDepth = getTerminalWarpBounds(span).depth;
     panel.screen.geometry.dispose();
-    panel.screen.geometry = new THREE.PlaneGeometry(width, height);
+    panel.screen.geometry = bent
+      ? createCurvedTerminalGeometry(span)
+      : new THREE.PlaneGeometry(width, height);
     panel.frame.geometry.dispose();
-    panel.frame.geometry = new THREE.BoxGeometry(width + 0.035, height + 0.06, 0.035);
+    panel.frame.geometry = new THREE.BoxGeometry(
+      width + 0.035,
+      height + 0.06,
+      0.035,
+      bent ? 32 : 1,
+    );
+    if (bent) warpGeometryPositions(panel.frame.geometry, span);
     panel.selection.geometry.dispose();
-    panel.selection.geometry = selectionGeometry(width, height);
+    panel.selection.geometry = bent
+      ? createCurvedTerminalSelection({
+          width: width + 0.07,
+          height: height + 0.07,
+          radians,
+          border: 0.03,
+        })
+      : selectionGeometry(width, height);
     panel.titleLabel.position.y = height / 2 + 0.07;
     const strip = panel.root.getObjectByName('terminal-key-strip');
     if (strip) strip.position.y = -(height - PANEL_HEIGHT) / 2;
@@ -2499,6 +2718,22 @@ export function createWorkspaceScene(
     }
     panel.connectionButton.position.set(0.24, -(height / 2 + 0.24), 0.02);
     panel.closeButton.position.set(-0.24, -(height / 2 + 0.24), 0.02);
+    const followCurve = (object: THREE.Object3D): void => {
+      const flatX = object.position.x;
+      const point = terminalWarpPoint(flatX, span);
+      object.position.x = point.x;
+      object.position.z = 0.02 + point.z;
+      object.rotation.y = radians ? -(flatX / width) * radians : 0;
+    };
+    for (const child of panel.root.children)
+      if (child.userData.inputAction === 'fontZoom') followCurve(child);
+    followCurve(panel.connectionButton);
+    followCurve(panel.closeButton);
+    strip?.children.forEach((child) => {
+      child.userData.flatX ??= child.position.x;
+      child.position.x = Number(child.userData.flatX);
+      followCurve(child);
+    });
   };
   const addTerminal = (surface: TerminalSurface): void => {
     if (panels.has(surface.pane.id)) return;
@@ -2604,6 +2839,8 @@ export function createWorkspaceScene(
       filterVersion,
       filterGaze: false,
       filterGazeAt: 0,
+      curvature: warpStore.get(warpKey(surface)),
+      geometryCurvature: -1,
     };
     syncPanelGrid(panel);
     panel.unsubscribe = surface.subscribe(() => {
@@ -2706,8 +2943,22 @@ export function createWorkspaceScene(
     setSelectedVisual();
     notify();
   };
+  const getTerminalCurvature = (id: string): number => panels.get(id)?.curvature ?? 0;
+  const setTerminalCurvature = (id: string, degrees: number): void => {
+    const panel = panels.get(id);
+    if (!panel || !Number.isFinite(degrees)) return;
+    panel.curvature = THREE.MathUtils.clamp(degrees, 0, 100);
+    syncPanelGrid(panel);
+    if (!warpStore.set(warpKey(panel.surface), panel.curvature))
+      setNotice('Curvature could not be saved on this device');
+    if (inputRoot && inputMode === 'warp') refreshInputRoot('warp');
+    notify();
+  };
   const setTerminalFiltering = (filtering: TerminalFiltering): void => {
-    const next = validateTerminalFiltering(filtering);
+    const next = validateTerminalFiltering({
+      ...filtering,
+      anisotropy: Math.min(filtering.anisotropy, Number(scene.userData.maxAnisotropy ?? 1)),
+    });
     if (JSON.stringify(next) === JSON.stringify(mutableState.filtering)) return;
     mutableState.filtering = next;
     filterVersion += 1;
@@ -2824,7 +3075,8 @@ export function createWorkspaceScene(
       mode !== 'terminal' &&
       mode !== 'arrange' &&
       mode !== 'widgets' &&
-      mode !== 'filtering'
+      mode !== 'filtering' &&
+      mode !== 'warp'
     ) {
       hideInput();
       if (mode === 'commands') actions.openCommands();
@@ -2879,7 +3131,7 @@ export function createWorkspaceScene(
     clearInputCapture();
     notify();
   };
-  const enterXR = async (mode: 'vr' | 'ar'): Promise<void> => {
+  const startXR = async (mode: 'vr' | 'ar'): Promise<void> => {
     if (!renderer) throw new Error('WebGL is unavailable');
     const xr = (
       navigator as Navigator & {
@@ -2897,6 +3149,7 @@ export function createWorkspaceScene(
     );
     activeSession = session;
     poseRestorePending = true;
+    widgetRestorePending = true;
     keyboardPoseRestored = false;
     keyboardResume = null;
     hideInput();
@@ -2908,8 +3161,15 @@ export function createWorkspaceScene(
     desktopCameraPosition.copy(camera.position);
     desktopCameraQuaternion.copy(camera.quaternion);
     renderer.xr.setReferenceSpaceType('local-floor');
-    await renderer.xr.setSession(session as Parameters<typeof renderer.xr.setSession>[0]);
+    try {
+      await renderer.xr.setSession(session as Parameters<typeof renderer.xr.setSession>[0]);
+    } catch (error) {
+      activeSession = null;
+      await session.end().catch(() => undefined);
+      throw error;
+    }
     mutableState.xrMode = mode;
+    setNotice(null);
     if (mode === 'ar') {
       observatory.visible = false;
       scene.background = null;
@@ -2920,6 +3180,7 @@ export function createWorkspaceScene(
     }
     notify();
     session.addEventListener('end', () => {
+      for (const [kind, widget] of widgets) saveWidgetPose(kind, widget);
       if (hudRoot) saveUIPose('hud', hudRoot);
       if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
         saveUIPose('keyboard', inputRoot);
@@ -2934,6 +3195,7 @@ export function createWorkspaceScene(
       recenterSince = null;
       recenterLatched = false;
       heldControllers.clear();
+      scrollDue.clear();
       controllerGamepads.clear();
       controllerHandedness.clear();
       focusButtonDown.clear();
@@ -2964,6 +3226,15 @@ export function createWorkspaceScene(
       setBackground(mutableState.background);
       notify();
     });
+  };
+  const enterXR = (mode: 'vr' | 'ar'): Promise<void> => {
+    if (activeSession || mutableState.xrMode !== 'desktop') return Promise.resolve();
+    if (xrStartPromise) return xrStartPromise;
+    const pending = startXR(mode).finally(() => {
+      if (xrStartPromise === pending) xrStartPromise = null;
+    });
+    xrStartPromise = pending;
+    return pending;
   };
   const exitXR = async (): Promise<void> => {
     if (activeSession) await activeSession.end();
@@ -3024,7 +3295,16 @@ export function createWorkspaceScene(
     const bounds = ordered.map(({ root }) => measurePanelBounds(root));
     const poses = calculateArrangement(
       pattern,
-      bounds.map((bound) => bound.size),
+      bounds.map((bound, index) => {
+        const panel = ordered[index];
+        const depth = Number(panel.root.userData.curvatureDepth ?? 0) * panel.root.scale.z;
+        return depth > 0
+          ? {
+              width: Math.max(bound.size.width, panel.width * panel.root.scale.x) + 2 * depth,
+              height: bound.size.height + 2 * depth,
+            }
+          : bound.size;
+      }),
     );
     const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
     view.updateMatrixWorld(true);
@@ -3136,7 +3416,10 @@ export function createWorkspaceScene(
       }
     }
     resetInputPose();
-    for (const widget of widgets.values()) placeWidget(widget);
+    for (const [kind, widget] of widgets) {
+      placeWidget(widget);
+      saveWidgetPose(kind, widget);
+    }
     const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
     keepLayoutAboveFloor(
       [...panels.values()].map((panel) => panel.root),
@@ -3189,6 +3472,7 @@ export function createWorkspaceScene(
     paneFocus.dispose();
     window.cancelAnimationFrame(frameHandle);
     window.removeEventListener('resize', resize);
+    canvas.removeEventListener('wheel', onWheel);
     canvas.removeEventListener('pointerdown', onPointerDown);
     canvas.removeEventListener('pointermove', onPointerMove);
     canvas.removeEventListener('pointerleave', onPointerLeave);
@@ -3197,7 +3481,7 @@ export function createWorkspaceScene(
     canvas.removeEventListener('lostpointercapture', onPointerUp);
     renderer?.setAnimationLoop(null);
     for (const id of [...panels.keys()]) removeTerminal(id);
-    for (const kind of [...widgets.keys()]) removeWidget(kind);
+    for (const kind of [...widgets.keys()]) removeWidget(kind, false);
     for (const {
       root,
       onSelect,
@@ -3220,6 +3504,7 @@ export function createWorkspaceScene(
     }
     controllerListeners.length = 0;
     controllerRoots.length = 0;
+    scrollDue.clear();
     controllerGamepads.clear();
     controllerHandedness.clear();
     focusButtonDown.clear();
@@ -3260,6 +3545,8 @@ export function createWorkspaceScene(
     setGazeInputEnabled,
     setTerminalColorMode,
     setTerminalFiltering,
+    getTerminalCurvature,
+    setTerminalCurvature,
     setKeyboardBackgroundEnabled,
     setAvailablePanes,
     setQuickCommands,

@@ -180,10 +180,20 @@ describe('mux XR local UI state', () => {
       mode: 'mipmap-linear',
       anisotropy: 4,
       gazeClarity: true,
+      gazeMaxDistance: 3,
     });
     const mode = query<HTMLSelectElement>(root, '[data-filter-mode]');
     const anisotropy = query<HTMLSelectElement>(root, '[data-filter-anisotropy]');
     const gaze = query<HTMLInputElement>(root, '[data-filter-gaze]');
+    const distance = query<HTMLInputElement>(root, '[data-filter-distance]');
+    const distanceRow = query<HTMLElement>(root, '[data-filter-distance-row]');
+    const anisotropyRow = query<HTMLElement>(root, '[data-filter-anisotropy-row]');
+    expect(distance.min).toBe('0.25');
+    expect(distance.max).toBe('20');
+    expect(distance.step).toBe('0.25');
+    expect(distance.value).toBe('3');
+    expect(distanceRow.hidden).toBe(false);
+    expect(anisotropyRow.hidden).toBe(false);
     expect([...mode.options].map((option) => option.value)).toEqual([
       'nearest',
       'linear',
@@ -194,26 +204,40 @@ describe('mux XR local UI state', () => {
       mode.value = value;
       mode.dispatchEvent(new Event('change'));
       expect(ui.getSettings().filtering.mode).toBe(value);
+      expect(anisotropyRow.hidden).toBe(value === 'nearest' || value === 'linear');
+      expect(distanceRow.hidden).toBe(value === 'nearest' || value === 'linear' || !gaze.checked);
     }
     for (const value of ['1', '2', '4', '8', '16']) {
       anisotropy.value = value;
       anisotropy.dispatchEvent(new Event('change'));
       expect(ui.getSettings().filtering.anisotropy).toBe(Number(value));
     }
+    distance.value = '6.25';
+    distance.dispatchEvent(new Event('change'));
+    expect(ui.getSettings().filtering.gazeMaxDistance).toBe(6.25);
     gaze.checked = false;
     gaze.dispatchEvent(new Event('change'));
     expect(ui.getSettings().filtering.gazeClarity).toBe(false);
+    expect(distanceRow.hidden).toBe(true);
+    ui.setFilteringCapabilities(4);
+    expect(
+      query<HTMLOptionElement>(root, '[data-filter-anisotropy] option[value="8"]').hidden,
+    ).toBe(true);
+    expect(
+      query<HTMLOptionElement>(root, '[data-filter-anisotropy] option[value="4"]').hidden,
+    ).toBe(false);
     ui.destroy();
     const restored = mountWorkspaceUI(root, { onConnect: () => undefined });
     expect(query<HTMLSelectElement>(root, '[data-filter-mode]').value).toBe('mipmap-linear');
-    expect(query<HTMLSelectElement>(root, '[data-filter-anisotropy]').value).toBe('16');
+    expect(query<HTMLSelectElement>(root, '[data-filter-anisotropy]').value).toBe('4');
     expect(query<HTMLInputElement>(root, '[data-filter-gaze]').checked).toBe(false);
     expect(restored.getSettings().filtering).toEqual({
       mode: 'mipmap-linear',
-      anisotropy: 16,
+      anisotropy: 4,
       gazeClarity: false,
+      gazeMaxDistance: 6.25,
     });
-    expect(changes.length).toBe(10);
+    expect(changes.length).toBe(12);
     restored.destroy();
     localStorage.clear();
   });
@@ -237,6 +261,7 @@ describe('mux XR local UI state', () => {
       mode: 'mipmap-linear',
       anisotropy: 4,
       gazeClarity: true,
+      gazeMaxDistance: 3,
     });
     const root = document.createElement('div');
     const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
@@ -256,6 +281,7 @@ describe('mux XR local UI state', () => {
       mode: 'mipmap-linear',
       anisotropy: 16,
       gazeClarity: true,
+      gazeMaxDistance: 3,
     });
     expect(restored.getSettings().background).toBe('black');
     restored.destroy();
@@ -300,12 +326,14 @@ describe('mux XR local UI state', () => {
     localStorage.clear();
     const root = document.createElement('div');
     const resized: Array<[string, number, number]> = [];
+    const curved: Array<[string, number]> = [];
     const ui = mountWorkspaceUI(root, {
       onConnect: () => undefined,
       onResizeGrid: (id, cols, rows) => {
         resized.push([id, cols, rows]);
         return true;
       },
+      onTerminalCurvature: (id, degrees) => curved.push([id, degrees]),
     });
     ui.update({
       panes: [
@@ -319,10 +347,33 @@ describe('mux XR local UI state', () => {
           windowName: 'Win',
           title: 'A',
         },
+        {
+          id: 'pane-b',
+          workspaceId: 'w',
+          workspaceName: 'W',
+          sessionId: 's',
+          sessionName: 'S',
+          windowId: 'win',
+          windowName: 'Win',
+          title: 'B',
+        },
       ],
     });
     ui.setActivePane('pane-a');
     ui.setTerminalGrid('pane-a', 80, 24, true);
+    const curvature = query<HTMLInputElement>(root, '[data-terminal-curvature]');
+    expect(curvature.disabled).toBe(false);
+    expect(curvature.value).toBe('0');
+    curvature.value = '35';
+    curvature.dispatchEvent(new Event('input'));
+    expect(curved).toEqual([['pane-a', 35]]);
+    expect(resized).toEqual([]);
+    ui.setActivePane('pane-b');
+    expect(curvature.value).toBe('0');
+    ui.setTerminalCurvature('pane-b', 70);
+    expect(curvature.value).toBe('70');
+    ui.setActivePane('pane-a');
+    expect(curvature.value).toBe('35');
     query<HTMLSelectElement>(root, '[data-color-mode]').value = 'monochrome';
     query<HTMLSelectElement>(root, '[data-color-mode]').dispatchEvent(new Event('change'));
     const keyboardBackground = query<HTMLInputElement>(root, '[data-keyboard-background]');
@@ -340,6 +391,7 @@ describe('mux XR local UI state', () => {
     expect(query<HTMLButtonElement>(root, '[data-action="apply-grid"]').disabled).toBe(true);
     ui.setAttachedPaneIds([]);
     expect(query<HTMLElement>(root, '[data-grid-caption]').textContent).toContain('No terminal');
+    expect(curvature.disabled).toBe(true);
     ui.destroy();
     const restored = mountWorkspaceUI(root, { onConnect: () => undefined });
     expect(restored.getSettings()).toMatchObject({

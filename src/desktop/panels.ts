@@ -161,23 +161,19 @@ export function createDesktopPanels(
         }
       | undefined;
     let suppressContextMenu = false;
-    const cellAt = (event: PointerEvent): { col: number; row: number } => {
+    const cellAt = (event: MouseEvent): { col: number; row: number } => {
       const rect = surface.canvas.getBoundingClientRect();
       const width = rect.width || surface.canvas.width || 1;
       const height = rect.height || surface.canvas.height || 1;
+      const clientX = Number.isFinite(event.clientX) ? event.clientX : rect.left + width / 2;
+      const clientY = Number.isFinite(event.clientY) ? event.clientY : rect.top + height / 2;
       const col = Math.max(
         0,
-        Math.min(
-          surface.cols - 1,
-          Math.floor(((event.clientX - rect.left) / width) * surface.cols),
-        ),
+        Math.min(surface.cols - 1, Math.floor(((clientX - rect.left) / width) * surface.cols)),
       );
       const row = Math.max(
         0,
-        Math.min(
-          surface.rows - 1,
-          Math.floor(((event.clientY - rect.top) / height) * surface.rows),
-        ),
+        Math.min(surface.rows - 1, Math.floor(((clientY - rect.top) / height) * surface.rows)),
       );
       return { col, row };
     };
@@ -248,6 +244,15 @@ export function createDesktopPanels(
     surface.canvas.addEventListener('pointercancel', release);
     surface.canvas.addEventListener('lostpointercapture', onLostCapture);
     surface.canvas.addEventListener('contextmenu', onContextMenu);
+    const onWheel = (event: WheelEvent): void => {
+      const unit = event.deltaMode === 0 ? LINE_HEIGHT : event.deltaMode === 2 ? surface.rows : 1;
+      const magnitude = Math.abs(event.deltaY / unit);
+      const lines = Math.sign(event.deltaY) * Math.max(1, Math.round(magnitude));
+      if (lines === 0 || !surface.scroll?.(lines, cellAt(event))) return;
+      onSelect(surface.pane.id);
+      event.preventDefault();
+    };
+    surface.canvas.addEventListener('wheel', onWheel, { passive: false });
     const cleanupMouse = (): void => {
       release();
       suppressContextMenu = false;
@@ -257,6 +262,7 @@ export function createDesktopPanels(
       surface.canvas.removeEventListener('pointercancel', release);
       surface.canvas.removeEventListener('lostpointercapture', onLostCapture);
       surface.canvas.removeEventListener('contextmenu', onContextMenu);
+      surface.canvas.removeEventListener('wheel', onWheel);
     };
     const cancelMouse = (): void => release();
     const unsubscribe = surface.subscribe(() => {

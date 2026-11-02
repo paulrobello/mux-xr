@@ -43,6 +43,7 @@ export interface UICallbacks {
   onRefresh?(): void;
   onKeyboardBackgroundChange?(enabled: boolean): void;
   onResizeGrid?(paneId: string, cols: number, rows: number): boolean;
+  onTerminalCurvature?(paneId: string, degrees: number): void;
   onReloadApp?(): void;
   onArrange?(pattern: PanelArrangement): void;
   onMoveLayout?(direction: number): void;
@@ -79,6 +80,7 @@ export interface WorkspaceUI {
   closeInput(): void;
   setGazeInputEnabled(enabled: boolean): void;
   setTerminalGrid(paneId: string, cols: number, rows: number, canResize: boolean): void;
+  setTerminalCurvature(paneId: string, degrees: number): void;
   setPaneStatus?(paneId: string, status: TerminalStatus): void;
   setTerminalColorMode(mode: TerminalColorMode, persist?: boolean): void;
   setKeyboardBackgroundEnabled(enabled: boolean, persist?: boolean): void;
@@ -86,6 +88,7 @@ export interface WorkspaceUI {
   setUpdateAvailable(available: boolean): void;
   setArrangement(pattern: PanelArrangement, persist?: boolean): void;
   setTerminalFiltering(filtering: TerminalFiltering, persist?: boolean): void;
+  setFilteringCapabilities(maxAnisotropy: number): void;
 }
 
 export interface CommandStore {
@@ -255,6 +258,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   let commands: QuickCommand[] = [];
   let commandScope = 'global';
   const terminalGrid = new Map<string, { cols: number; rows: number; canResize: boolean }>();
+  const terminalCurvature = new Map<string, number>();
   const pendingGrid = new Map<string, { cols: number; rows: number }>();
   let inputMode: 'commands' | 'keyboard' = 'commands';
   const modifierState = createModifierState();
@@ -333,6 +337,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   root.querySelector('[data-gaze]')?.parentElement?.remove();
   let arrangementSelect: HTMLSelectElement | null = null;
   let arrangementApply: HTMLButtonElement | null = null;
+  let filteringMaxAnisotropy = 16;
   const updateArrangementAvailability = (): void => {
     if (arrangementApply) arrangementApply.disabled = attachedPaneIds.length === 0;
   };
@@ -359,7 +364,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     );
     const filteringControls = document.createElement('div');
     filteringControls.innerHTML =
-      '<label>Terminal filtering<select data-filter-mode aria-label="Terminal filtering"><option value="nearest">Nearest pixels</option><option value="linear">Linear (sharp)</option><option value="mipmap-nearest">Mipmap bilinear</option><option value="mipmap-linear">Mipmap trilinear (smooth)</option></select></label><label>Anisotropy (mipmap modes)<select data-filter-anisotropy aria-label="Terminal anisotropy"><option value="1">Off</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option><option value="16">16x</option></select></label><label class="check"><input type="checkbox" data-filter-gaze> Sharper gazed terminal <span>Use sharp linear sampling while looking at a terminal.</span></label>';
+      '<label>Terminal filtering<select data-filter-mode aria-label="Terminal filtering"><option value="nearest">Nearest pixels</option><option value="linear">Linear (sharp)</option><option value="mipmap-nearest">Mipmap bilinear</option><option value="mipmap-linear">Mipmap trilinear (smooth)</option></select></label><label data-filter-anisotropy-row>Anisotropy (mipmap modes)<select data-filter-anisotropy aria-label="Terminal anisotropy"><option value="1">Off</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option><option value="16">16x</option></select><span>Anisotropy matters for oblique minification. 8x and 16x may look the same front-facing.</span></label><label class="check"><input type="checkbox" data-filter-gaze> Sharper gazed terminal <span>Use sharp linear sampling while looking at a terminal.</span></label><label data-filter-distance-row>Gaze max distance<input data-filter-distance type="number" min="0.25" max="20" step="0.25" aria-label="Gaze maximum distance in meters"><span>Sharper gaze ignores mipmaps within this distance.</span></label>';
     settingsPanel.insertBefore(
       filteringControls,
       settingsPanel.querySelector('[data-action="passthrough"]'),
@@ -369,8 +374,29 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       '[data-filter-anisotropy]',
     );
     const filterGaze = filteringControls.querySelector<HTMLInputElement>('[data-filter-gaze]');
-    if (!filterMode || !filterAnisotropy || !filterGaze)
+    const filterDistance =
+      filteringControls.querySelector<HTMLInputElement>('[data-filter-distance]');
+    const filterAnisotropyRow = filteringControls.querySelector<HTMLElement>(
+      '[data-filter-anisotropy-row]',
+    );
+    const filterDistanceRow = filteringControls.querySelector<HTMLElement>(
+      '[data-filter-distance-row]',
+    );
+    if (
+      !filterMode ||
+      !filterAnisotropy ||
+      !filterGaze ||
+      !filterDistance ||
+      !filterAnisotropyRow ||
+      !filterDistanceRow
+    )
       throw new Error('Filtering controls missing');
+    const updateFilteringVisibility = (): void => {
+      const mipmapMode =
+        filterMode.value === 'mipmap-nearest' || filterMode.value === 'mipmap-linear';
+      filterAnisotropyRow.hidden = !mipmapMode;
+      filterDistanceRow.hidden = !mipmapMode || !filterGaze.checked;
+    };
     const changeFiltering = (): void => {
       settings = {
         ...settings,
@@ -378,20 +404,26 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
           mode: filterMode.value,
           anisotropy: Number(filterAnisotropy.value),
           gazeClarity: filterGaze.checked,
+          gazeMaxDistance: Number(filterDistance.value),
         }),
       };
+      filterDistance.value = String(settings.filtering.gazeMaxDistance);
+      updateFilteringVisibility();
       saveSettings();
     };
     filterMode.addEventListener('change', changeFiltering);
     filterAnisotropy.addEventListener('change', changeFiltering);
     filterGaze.addEventListener('change', changeFiltering);
+    filterDistance.addEventListener('change', changeFiltering);
     filterMode.value = settings.filtering.mode;
     filterAnisotropy.value = String(settings.filtering.anisotropy);
     filterGaze.checked = settings.filtering.gazeClarity;
+    filterDistance.value = String(settings.filtering.gazeMaxDistance);
+    updateFilteringVisibility();
     const grid = document.createElement('div');
     grid.dataset.gridControls = 'true';
     grid.innerHTML =
-      '<label>Selected terminal grid <span data-grid-caption>None selected</span></label><div class="grid-inputs"><label>Columns<input data-grid-cols type="number" min="2" max="300" step="1" aria-label="Terminal columns"></label><label>Rows<input data-grid-rows type="number" min="2" max="150" step="1" aria-label="Terminal rows"></label></div><button data-action="apply-grid" class="secondary">Apply grid</button><small data-grid-status>Resize changes the process display size and do not restart it.</small>';
+      '<label>Selected terminal grid <span data-grid-caption>None selected</span></label><div class="grid-inputs"><label>Columns<input data-grid-cols type="number" min="2" max="300" step="1" aria-label="Terminal columns"></label><label>Rows<input data-grid-rows type="number" min="2" max="150" step="1" aria-label="Terminal rows"></label></div><button data-action="apply-grid" class="secondary">Apply grid</button><small data-grid-status>Resize changes the process display size and do not restart it.</small><label>Terminal curvature <span data-terminal-curvature-value>0°</span><input data-terminal-curvature type="range" min="0" max="100" step="1" value="0" aria-label="Terminal curvature in degrees"></label>';
     settingsPanel.insertBefore(
       grid,
       settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
@@ -433,6 +465,18 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       saveSettings();
       callbacks.onArrange?.(pattern);
     });
+    root
+      .querySelector<HTMLInputElement>('[data-terminal-curvature]')
+      ?.addEventListener('input', (event) => {
+        if (!activePaneId) return;
+        const degrees = Math.max(
+          0,
+          Math.min(100, Number((event.target as HTMLInputElement).value)),
+        );
+        terminalCurvature.set(activePaneId, degrees);
+        qs<HTMLElement>('[data-terminal-curvature-value]').textContent = `${degrees}°`;
+        callbacks.onTerminalCurvature?.(activePaneId, degrees);
+      });
   }
   const editor = document.createElement('div');
   editor.className = 'command-editor';
@@ -455,6 +499,16 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     qs<HTMLElement>('[data-grid-caption]').textContent = 'No terminal selected';
     qs<HTMLElement>('[data-grid-status]').textContent =
       'Select an attached terminal to change its grid.';
+    qs<HTMLInputElement>('[data-terminal-curvature]').value = '0';
+    qs<HTMLElement>('[data-terminal-curvature-value]').textContent = '0°';
+    qs<HTMLInputElement>('[data-terminal-curvature]').disabled = true;
+  };
+  const updateCurvatureControls = (paneId: string | undefined): void => {
+    const input = qs<HTMLInputElement>('[data-terminal-curvature]');
+    const value = paneId ? (terminalCurvature.get(paneId) ?? 0) : 0;
+    input.value = String(value);
+    input.disabled = !paneId;
+    qs<HTMLElement>('[data-terminal-curvature-value]').textContent = `${value}°`;
   };
   clearModifiers();
   clearGridControls();
@@ -919,6 +973,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     setActivePane: (id) => {
       if (id) {
         selectPane(id, false);
+        updateCurvatureControls(id);
         const grid = terminalGrid.get(id);
         if (grid) {
           pendingGrid.delete(id);
@@ -989,6 +1044,11 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
           ? 'Resize changes the process display size and do not restart it.'
           : 'Resize unavailable while disconnected or read-only.';
     },
+    setTerminalCurvature(paneId, degrees) {
+      const value = Number.isFinite(degrees) ? Math.max(0, Math.min(100, degrees)) : 0;
+      terminalCurvature.set(paneId, value);
+      if (activePaneId === paneId) updateCurvatureControls(paneId);
+    },
     setTerminalColorMode(mode, persist = true) {
       settings = { ...settings, colorMode: mode };
       qs<HTMLSelectElement>('[data-color-mode]').value = mode;
@@ -1008,7 +1068,35 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         settings.filtering.anisotropy,
       );
       qs<HTMLInputElement>('[data-filter-gaze]').checked = settings.filtering.gazeClarity;
+      qs<HTMLInputElement>('[data-filter-distance]').value = String(
+        settings.filtering.gazeMaxDistance,
+      );
+      const mode = settings.filtering.mode;
+      const mipmapMode = mode === 'mipmap-nearest' || mode === 'mipmap-linear';
+      qs<HTMLElement>('[data-filter-anisotropy-row]').hidden = !mipmapMode;
+      qs<HTMLElement>('[data-filter-distance-row]').hidden =
+        !mipmapMode || !settings.filtering.gazeClarity;
       if (persist) saveSettings();
+    },
+    setFilteringCapabilities(maxAnisotropy) {
+      filteringMaxAnisotropy = Number.isFinite(maxAnisotropy)
+        ? Math.max(1, Math.min(16, maxAnisotropy))
+        : 16;
+      const select = qs<HTMLSelectElement>('[data-filter-anisotropy]');
+      for (const option of select.options)
+        option.hidden = Number(option.value) > filteringMaxAnisotropy;
+      if (Number(select.value) <= filteringMaxAnisotropy) return;
+      const available = [...select.options].reverse().find((option) => !option.hidden);
+      if (!available) return;
+      select.value = available.value;
+      settings = {
+        ...settings,
+        filtering: validateTerminalFiltering({
+          ...settings.filtering,
+          anisotropy: Number(available.value),
+        }),
+      };
+      saveSettings();
     },
     setArrangement(pattern, persist = true) {
       settings = { ...settings, arrangement: pattern };

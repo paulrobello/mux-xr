@@ -105,8 +105,8 @@ export function createInputMessage(data: string): ClientMessage {
 
 export function createMouseMessage(input: TerminalMouseInput): ClientMessage {
   const modifiers = input.modifiers ?? {};
-  // The mux core consumes xterm's button encoding. Motion is bit 5, while
-  // release is represented by the event type and keeps the button number.
+  // Raw SGR uses bit 5 for motion and bit 6 for wheels. Releases
+  // keep the button number and use the event type instead.
   const button = input.eventType === 'move' ? input.button | 32 : input.button;
   return create(ClientMessageSchema, {
     message: {

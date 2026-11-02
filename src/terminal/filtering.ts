@@ -4,12 +4,14 @@ export interface TerminalFiltering {
   mode: TerminalFilterMode;
   anisotropy: 1 | 2 | 4 | 8 | 16;
   gazeClarity: boolean;
+  gazeMaxDistance: number;
 }
 
 export const DEFAULT_TERMINAL_FILTERING: TerminalFiltering = {
   mode: 'mipmap-linear',
   anisotropy: 4,
   gazeClarity: true,
+  gazeMaxDistance: 3,
 };
 
 const ANISOTROPY_LEVELS = [1, 2, 4, 8, 16] as const;
@@ -21,6 +23,12 @@ function normalizeAnisotropy(value: unknown): TerminalFiltering['anisotropy'] {
   let selected: TerminalFiltering['anisotropy'] = 1;
   for (const level of ANISOTROPY_LEVELS) if (level <= clamped) selected = level;
   return selected;
+}
+
+function normalizeGazeMaxDistance(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value))
+    return DEFAULT_TERMINAL_FILTERING.gazeMaxDistance;
+  return Math.max(0.25, Math.min(20, value));
 }
 
 export function validateTerminalFiltering(value: unknown): TerminalFiltering {
@@ -42,5 +50,6 @@ export function validateTerminalFiltering(value: unknown): TerminalFiltering {
       typeof candidate.gazeClarity === 'boolean'
         ? candidate.gazeClarity
         : DEFAULT_TERMINAL_FILTERING.gazeClarity,
+    gazeMaxDistance: normalizeGazeMaxDistance(candidate.gazeMaxDistance),
   };
 }

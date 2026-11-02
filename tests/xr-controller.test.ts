@@ -203,6 +203,8 @@ describe('native XR controller event routing', () => {
   beforeEach(() => {
     fakeXR.presenting = true;
     localStorage.removeItem('mux-xr:ui-poses:v1');
+    localStorage.removeItem('mux-xr:widget-poses:v1');
+    localStorage.removeItem('mux-xr:terminal-warp:v1');
     fakeXR.controllers.forEach((controller) => {
       const object = controller as THREE.Group;
       object.position.set(0, 0, 0);
@@ -335,6 +337,75 @@ describe('native XR controller event routing', () => {
       new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.9 / 60),
     );
     expect(keyboard.quaternion.angleTo(expected)).toBeLessThan(1e-6);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('scrolls only the pointed pane while ungripped without changing selection', () => {
+    const { workspace, actions, container } = fixture();
+    actions.scrollTerminal = vi.fn(() => true);
+    workspace.selectTerminal('pane-a');
+    const screen = workspace.scene
+      .getObjectByName('terminal-panel-pane-b')
+      ?.getObjectByName('terminal-surface');
+    if (!screen) throw new Error('screen missing');
+    const pad = connectController(0, [0, 0, 0, 1]);
+    aimController(fakeXR.controllers[0] as THREE.Group, screen);
+    fakeXR.frame?.(0);
+    expect(actions.scrollTerminal).toHaveBeenCalledWith('pane-b', 3, expect.any(Object));
+    expect(workspace.state.selectedTerminalId).toBe('pane-a');
+    (pad.buttons[1] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(500);
+    expect(actions.scrollTerminal).toHaveBeenCalledTimes(1);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('persists clock presence and transforms and removes saved clocks on close', () => {
+    const first = fixture();
+    first.workspace.showInput('widgets');
+    hit(first.workspace, { inputAction: 'toggleWidget', widgetKind: 'digital-clock' });
+    const root = first.workspace.scene.children.find(
+      (o) => o.userData.widgetKind === 'digital-clock',
+    );
+    if (!root) throw new Error('clock missing');
+    hit(
+      first.workspace,
+      { inputAction: 'grabWidget', widgetKind: 'digital-clock' },
+      'squeezestart',
+    );
+    (fakeXR.controllers[0] as THREE.Group).position.x += 0.2;
+    fakeXR.frame?.(0);
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
+    const expected = root.position.clone();
+    first.workspace.dispose();
+    first.container.remove();
+    const second = fixture();
+    fakeXR.frame?.(16);
+    const restored = second.workspace.scene.children.find(
+      (o) => o.userData.widgetKind === 'digital-clock',
+    );
+    expect(restored?.position.distanceTo(expected)).toBeLessThan(1e-6);
+    hit(second.workspace, { inputAction: 'closeWidget', widgetKind: 'digital-clock' });
+    expect(JSON.parse(localStorage.getItem('mux-xr:widget-poses:v1') ?? '{}').poses).toEqual({});
+    second.workspace.dispose();
+    second.container.remove();
+  });
+
+  it('curves only the selected pane and persists curvature without resizing its grid', () => {
+    const { workspace, left, right, container } = fixture();
+    workspace.setTerminalCurvature('pane-b', 60);
+    const screen = workspace.scene
+      .getObjectByName('terminal-panel-pane-b')
+      ?.getObjectByName('terminal-surface') as THREE.Mesh;
+    expect(screen.geometry.boundingSphere?.radius).toBeGreaterThan(0);
+    expect(workspace.getTerminalCurvature('pane-b')).toBe(60);
+    expect(workspace.getTerminalCurvature('pane-a')).toBe(0);
+    expect(left.resizeGrid).not.toHaveBeenCalled();
+    expect(right.resizeGrid).not.toHaveBeenCalled();
+    workspace.setNotice('Example message');
+    hit(workspace, { inputAction: 'dismissNotice' });
+    expect(workspace.state.notice).toBeNull();
     workspace.dispose();
     container.remove();
   });
@@ -863,7 +934,7 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('scales distant tooltips while keeping their angular size bounded', () => {
+  it('anchors tooltip pose and size until the next hover while avoiding control bounds', () => {
     const { workspace, container } = fixture();
     workspace.showInput('keyboard');
     const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls') as THREE.Group;
@@ -874,11 +945,16 @@ describe('native XR controller event routing', () => {
     fakeXR.frame?.(800);
     const tip = workspace.scene.getObjectByName('xr-hover-help') as THREE.Mesh;
     const nearScale = tip.scale.x;
+    const tipPosition = tip.position.clone();
+    const tipQuaternion = tip.quaternion.clone();
+    workspace.camera.rotation.y += 0.3;
     keyboard.position.z -= 2;
     aimController(controller, key);
     fakeXR.frame?.(1600);
     expect(tip.visible).toBe(true);
-    expect(tip.scale.x).toBeGreaterThan(nearScale);
+    expect(tip.scale.x).toBe(nearScale);
+    expect(tip.position.distanceTo(tipPosition)).toBeLessThan(1e-6);
+    expect(tip.quaternion.angleTo(tipQuaternion)).toBeLessThan(1e-6);
     expect(tip.scale.x).toBeLessThanOrEqual(6);
     workspace.dispose();
     container.remove();
@@ -1766,7 +1842,7 @@ describe('native XR controller event routing', () => {
     const axis = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion);
     const position = keyboard.position.clone();
     fakeXR.frame?.(0);
-    const expected = new THREE.Quaternion().setFromAxisAngle(axis, -0.9 / 60).multiply(before);
+    const expected = new THREE.Quaternion().setFromAxisAngle(axis, 0.9 / 60).multiply(before);
     expect(keyboard.quaternion.angleTo(expected)).toBeLessThan(0.000001);
     expect(keyboard.position.distanceTo(position)).toBeLessThan(0.000001);
     expect(actions.sendKey).not.toHaveBeenCalled();

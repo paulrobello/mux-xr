@@ -14,21 +14,35 @@ describe('terminal filtering validation', () => {
       mode: 'nearest',
       anisotropy: 1,
       gazeClarity: false,
+      gazeMaxDistance: 3,
     });
     expect(validateTerminalFiltering({ mode: 'mipmap-nearest', anisotropy: 6 })).toEqual({
       mode: 'mipmap-nearest',
       anisotropy: 4,
       gazeClarity: true,
+      gazeMaxDistance: 3,
     });
     expect(validateTerminalFiltering({ mode: 'mipmap-linear', anisotropy: 99 })).toEqual({
       mode: 'mipmap-linear',
       anisotropy: 16,
       gazeClarity: true,
+      gazeMaxDistance: 3,
     });
   });
 
   it('rejects unknown mode and malformed fields independently', () => {
     expect(validateTerminalFiltering({ mode: 'bogus', anisotropy: '4', gazeClarity: 1 })).toEqual(
+      DEFAULT_TERMINAL_FILTERING,
+    );
+    expect(validateTerminalFiltering({ gazeMaxDistance: 0 })).toEqual({
+      ...DEFAULT_TERMINAL_FILTERING,
+      gazeMaxDistance: 0.25,
+    });
+    expect(validateTerminalFiltering({ gazeMaxDistance: 99 })).toEqual({
+      ...DEFAULT_TERMINAL_FILTERING,
+      gazeMaxDistance: 20,
+    });
+    expect(validateTerminalFiltering({ gazeMaxDistance: 'near' })).toEqual(
       DEFAULT_TERMINAL_FILTERING,
     );
   });

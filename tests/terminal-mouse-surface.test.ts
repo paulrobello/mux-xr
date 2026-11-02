@@ -1,13 +1,15 @@
-import { create, toBinary } from '@bufbuild/protobuf';
+import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneDescriptor } from '../src/contracts';
 import {
+  ClientMessageSchema,
   ConnectedSchema,
   ModeChangedSchema,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
 
 const modes = { mouseTrackingMode: 'none' as 'none' | 'drag' | 'any' | 'vt200' | 'x10' };
+const scrollCalls: number[] = [];
 const nullCell = {
   getWidth: () => 1,
   getChars: () => '',
@@ -44,6 +46,9 @@ vi.mock('@xterm/xterm', () => ({
     }
     focus(): void {}
     blur(): void {}
+    scrollLines(lines: number): void {
+      scrollCalls.push(lines);
+    }
     dispose(): void {}
   },
 }));
@@ -127,6 +132,7 @@ function namedMode(mode: string, enabled: boolean): ArrayBuffer {
 
 beforeEach(() => {
   MockSocket.instances.length = 0;
+  scrollCalls.length = 0;
   modes.mouseTrackingMode = 'none';
   (globalThis as Record<string, unknown>).WebSocket = MockSocket;
   (globalThis as Record<string, unknown>).document = {
@@ -150,6 +156,52 @@ beforeEach(() => {
 });
 
 describe('terminal surface mouse gating', () => {
+  it('sends bounded raw SGR wheel codes with clamped cells and no text or resize', async () => {
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane);
+    surface.connect();
+    const socket = MockSocket.instances[0];
+    socket.open();
+    socket.message(connected());
+    socket.message(modeChanged(true));
+    const before = socket.sent.length;
+    expect(surface.scroll?.(-2, { col: 99, row: -2 })).toBe(true);
+    expect(surface.scroll?.(100)).toBe(true);
+    const messages = socket.sent
+      .slice(before)
+      .map((raw) => fromBinary(ClientMessageSchema, new Uint8Array(raw).subarray(1)).message);
+    expect(messages).toHaveLength(34);
+    expect(
+      messages.every((message) => message.case === 'mouse' && message.value.eventType === 'scroll'),
+    ).toBe(true);
+    expect(
+      messages
+        .slice(0, 2)
+        .every(
+          (message) =>
+            message.case === 'mouse' &&
+            message.value.button === 64 &&
+            message.value.col === 3 &&
+            message.value.row === 0,
+        ),
+    ).toBe(true);
+    expect(
+      messages.slice(2).every((message) => message.case === 'mouse' && message.value.button === 65),
+    ).toBe(true);
+    surface.dispose();
+  });
+
+  it('scrolls the local xterm viewport when mouse tracking is off', async () => {
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane);
+    expect(surface.scroll?.(3, { col: 99, row: -2 })).toBe(true);
+    expect(scrollCalls).toEqual([3]);
+    expect(surface.scroll?.(0)).toBe(false);
+    surface.disconnect();
+    surface.dispose();
+    expect(surface.scroll?.(1)).toBe(false);
+  });
+
   it('gates by handshake, mode, bounds, pause, and dispose', async () => {
     const { createTerminalSurface } = await import('../src/terminal/surface');
     const surface = createTerminalSurface('http://127.0.0.1:9', pane);

@@ -38,6 +38,7 @@ function surface(): TerminalSurface {
     disconnect: vi.fn(),
     sendText: () => true,
     sendKey: () => true,
+    scroll: vi.fn(() => true),
     paste: () => true,
     focus: () => undefined,
     resizeGrid: () => true,
@@ -60,6 +61,27 @@ function canvasFor(host: HTMLElement): HTMLCanvasElement {
 }
 
 describe('desktop terminal mouse adapter', () => {
+  it('maps wheel units to terminal lines and prevents the browser scroll when handled', () => {
+    const host = document.createElement('div');
+    const desktop = createDesktopPanels(host, () => undefined);
+    const terminal = surface();
+    desktop.add(terminal);
+    const canvas = canvasFor(host);
+    const event = new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 42,
+      deltaMode: 0,
+      clientX: 150,
+      clientY: 100,
+    });
+    Object.defineProperties(event, { clientX: { value: 150 }, clientY: { value: 100 } });
+    canvas.dispatchEvent(event);
+    expect(vi.mocked(terminal.scroll)).toHaveBeenCalledWith(2, { col: 1, row: 1 });
+    expect(event.defaultPrevented).toBe(true);
+    desktop.dispose();
+  });
+
   it('maps CSS coordinates, captures the source pane, and releases after drag', () => {
     const host = document.createElement('div');
     const selected: string[] = [];

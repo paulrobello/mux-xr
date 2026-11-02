@@ -38,6 +38,7 @@ const SERVER_MOUSE_MODES: Record<string, TerminalMouseTrackingMode> = {
   mouse_button_event: 'drag',
   mouse_any_event: 'any',
 };
+const MAX_SCROLL_WHEEL_EVENTS = 32;
 
 export function validGrid(cols: number, rows: number): boolean {
   return (
@@ -372,7 +373,9 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       }
     };
   };
+  const streamIdentity = new URL(paneWebSocketURL(endpoint, pane.id));
   const surface: TerminalSurface = {
+    serverId: `${streamIdentity.origin}${streamIdentity.pathname}`,
     canvas,
     pane,
     get revision() {
@@ -451,8 +454,37 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       const mode = surface.mouseTracking;
       if (mode === 'none') return false;
       if (input.eventType === 'move' && mode !== 'drag' && mode !== 'any') return false;
-      if (input.eventType !== 'move' && mode === 'x10' && input.eventType !== 'press') return false;
+      if (
+        input.eventType !== 'move' &&
+        input.eventType !== 'scroll' &&
+        mode === 'x10' &&
+        input.eventType !== 'press'
+      )
+        return false;
       return send(createMouseMessage(input));
+    },
+    scroll: (lines, cell = { col: Math.floor(cols / 2), row: Math.floor(rows / 2) }): boolean => {
+      if (!Number.isFinite(lines) || lines === 0 || disposed) return false;
+      const wholeLines = Math.trunc(lines);
+      if (wholeLines === 0) return false;
+      const col = Math.max(0, Math.min(cols - 1, Math.trunc(cell.col)));
+      const row = Math.max(0, Math.min(rows - 1, Math.trunc(cell.row)));
+      const mode = surface.mouseTracking;
+      const remote = mode !== 'none' && ready && !readonly && socket?.readyState === WebSocket.OPEN;
+      if (remote) {
+        const button = wholeLines < 0 ? 64 : 65;
+        const count = Math.min(Math.abs(wholeLines), MAX_SCROLL_WHEEL_EVENTS);
+        let handled = true;
+        for (let index = 0; index < count; index += 1) {
+          handled =
+            (surface.sendMouse?.({ col, row, button, eventType: 'scroll' }) ?? false) && handled;
+        }
+        return handled;
+      }
+      terminal.scrollLines(wholeLines);
+      painter.invalidate();
+      paint();
+      return true;
     },
     paste: (text) => send(createPasteMessage(text)),
     focus: (focused) => {

@@ -31,8 +31,8 @@ export interface KeyModifiers {
   shift?: boolean;
 }
 
-export type TerminalMouseButton = 0 | 1 | 2;
-export type TerminalMouseEventType = 'press' | 'release' | 'move';
+export type TerminalMouseButton = 0 | 1 | 2 | 64 | 65;
+export type TerminalMouseEventType = 'press' | 'release' | 'move' | 'scroll';
 export type TerminalMouseTrackingMode = 'none' | 'x10' | 'vt200' | 'drag' | 'any';
 
 export interface TerminalMouseInput {
@@ -44,6 +44,7 @@ export interface TerminalMouseInput {
 }
 
 export interface TerminalSurface {
+  readonly serverId?: string;
   readonly canvas: HTMLCanvasElement;
   readonly pane: PaneDescriptor;
   readonly revision: number;
@@ -61,6 +62,7 @@ export interface TerminalSurface {
   sendText(text: string): boolean;
   sendKey(key: string, modifiers?: KeyModifiers): boolean;
   sendMouse?(input: TerminalMouseInput): boolean;
+  scroll?(lines: number, cell?: { col: number; row: number }): boolean;
   readonly mouseTracking?: TerminalMouseTrackingMode;
   paste(text: string): boolean;
   focus(focused: boolean): void;
@@ -93,6 +95,7 @@ export interface WorkspaceActions {
   sendText(text: string): void;
   sendKey(key: string, modifiers?: KeyModifiers): void;
   sendMouse?(paneId: string, input: TerminalMouseInput): boolean;
+  scrollTerminal?(paneId: string, lines: number, cell?: { col: number; row: number }): boolean;
   runCommand(command: QuickCommand, paneId: string): void;
   openKeyboard(): void;
   openCommands(): void;

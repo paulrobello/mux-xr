@@ -19,6 +19,7 @@ const paneSizes = [
   [64, 42],
 ] as const;
 const manualScales = [1, 1.25, 0.3, 1.1, 0.8, 1.4] as const;
+const curvatures = [0, 30, 45, 60, 75, 90] as const;
 const panes: PaneDescriptor[] = Array.from({ length: paneSizes.length }, (_, index) => ({
   id: `fixture-pane-${index + 1}`,
   workspaceId: index < 3 ? 'fixture-alpha' : 'fixture-beta',
@@ -60,6 +61,7 @@ surfaces.forEach((surface, index) => {
   const panel = scene.scene.getObjectByName(`terminal-panel-${surface.pane.id}`);
   if (!panel) throw new Error(`fixture panel is missing: ${surface.pane.id}`);
   panel.scale.setScalar(manualScales[index]);
+  scene.setTerminalCurvature(surface.pane.id, curvatures[index]);
 });
 scene.selectTerminal(panes[0].id);
 const originalCameraPosition = scene.camera.position.clone();
@@ -67,24 +69,58 @@ const originalCameraQuaternion = scene.camera.quaternion.clone();
 
 const finite = (values: readonly number[]): boolean => values.every(Number.isFinite);
 type ProjectedPoint = { x: number; y: number };
+const convexHull = (points: ProjectedPoint[]): ProjectedPoint[] => {
+  const sorted = [...points].sort((a, b) => a.x - b.x || a.y - b.y);
+  const cross = (a: ProjectedPoint, b: ProjectedPoint, c: ProjectedPoint): number =>
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const lower: ProjectedPoint[] = [];
+  for (const point of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], point) <= 0)
+      lower.pop();
+    lower.push(point);
+  }
+  const upper: ProjectedPoint[] = [];
+  for (const point of [...sorted].reverse()) {
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], point) <= 0)
+      upper.pop();
+    upper.push(point);
+  }
+  return lower.slice(0, -1).concat(upper.slice(0, -1));
+};
 const projectedEnvelope = (root: THREE.Group): ProjectedPoint[] => {
-  const bounds = measurePanelBounds(root);
-  const center = bounds.center.clone().applyMatrix4(root.matrixWorld);
-  const right = new THREE.Vector3(1, 0, 0).transformDirection(root.matrixWorld);
-  const up = new THREE.Vector3(0, 1, 0).transformDirection(root.matrixWorld);
-  const halfWidth = bounds.size.width / 2;
-  const halfHeight = bounds.size.height / 2;
-  const corners = [
-    center.clone().addScaledVector(right, -halfWidth).addScaledVector(up, -halfHeight),
-    center.clone().addScaledVector(right, halfWidth).addScaledVector(up, -halfHeight),
-    center.clone().addScaledVector(right, halfWidth).addScaledVector(up, halfHeight),
-    center.clone().addScaledVector(right, -halfWidth).addScaledVector(up, halfHeight),
-  ];
-  return corners.map((corner) => {
-    const cameraPoint = corner.applyMatrix4(scene.camera.matrixWorldInverse);
+  const worldPoints: THREE.Vector3[] = [];
+  root.traverse((object) => {
+    if (
+      !(object instanceof THREE.Mesh) ||
+      object.parent?.userData.labelTextObject === object ||
+      /label|glyph|text/i.test(object.name)
+    )
+      return;
+    const position = object.geometry.getAttribute('position');
+    if (!position) return;
+    object.updateWorldMatrix(true, false);
+    for (let index = 0; index < position.count; index += 1)
+      worldPoints.push(
+        new THREE.Vector3().fromBufferAttribute(position, index).applyMatrix4(object.matrixWorld),
+      );
+  });
+  if (worldPoints.length < 3) {
+    const bounds = new THREE.Box3().setFromObject(root);
+    worldPoints.push(
+      ...[
+        new THREE.Vector3(bounds.min.x, bounds.min.y, bounds.min.z),
+        new THREE.Vector3(bounds.max.x, bounds.min.y, bounds.min.z),
+        new THREE.Vector3(bounds.max.x, bounds.max.y, bounds.max.z),
+        new THREE.Vector3(bounds.min.x, bounds.max.y, bounds.max.z),
+      ],
+    );
+  }
+  const projected = worldPoints.map((point) => {
+    const cameraPoint = point.applyMatrix4(scene.camera.matrixWorldInverse);
     if (cameraPoint.z >= 0) throw new Error('arrangement panel envelope is behind the viewer');
     return { x: cameraPoint.x / -cameraPoint.z, y: cameraPoint.y / -cameraPoint.z };
   });
+  return convexHull(projected);
 };
 const projectedPolygonsOverlap = (first: ProjectedPoint[], second: ProjectedPoint[]): boolean => {
   const polygons = [first, second];
@@ -151,6 +187,7 @@ const snapshot = (): Record<string, unknown> => ({
       quaternion: object?.quaternion.toArray() ?? [],
       scale: object?.scale.x ?? Number.NaN,
       grid: `${surface.cols}x${surface.rows}`,
+      curvature: scene.getTerminalCurvature(surface.pane.id),
     };
   }),
   resizeCalls,
@@ -230,6 +267,7 @@ const run = async (): Promise<void> => {
       quaternion: number[];
       scale: number;
       grid: string;
+      curvature: number;
     }>;
     if (after.arrangement !== pattern)
       throw new Error(`native arrangement did not apply ${pattern}`);
@@ -242,6 +280,8 @@ const run = async (): Promise<void> => {
       throw new Error(`native arrangement changed panel IDs for ${pattern}`);
     if (panels.some((panel, index) => panel.scale !== beforePanels[index]?.scale))
       throw new Error(`native arrangement changed panel scale for ${pattern}`);
+    if (panels.some((panel, index) => panel.curvature !== curvatures[index]))
+      throw new Error(`native arrangement changed terminal curvature for ${pattern}`);
     if (
       panels.some(
         (panel, index) => panel.grid !== (before.panels as Array<{ grid: string }>)[index]?.grid,
@@ -308,6 +348,7 @@ const run = async (): Promise<void> => {
     paneIds: panes.map((pane) => pane.id),
     paneSizes,
     manualScales,
+    curvatures,
     selectedId: scene.state.selectedTerminalId,
     results,
     resizeCalls,

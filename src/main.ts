@@ -18,6 +18,7 @@ import { createUpdateChecker, type UpdateChecker } from './update-check';
 import { shouldAutoReload } from './update-policy';
 import { initialPaneSelection } from './workspace/initial';
 import { createWorkspaceScene, type WorkspaceScene } from './xr';
+import { createXREntryController, type XrEntryController } from './xr/entry';
 
 const app = document.querySelector<HTMLElement>('#app');
 if (!app) throw new Error('Application mount is missing');
@@ -43,21 +44,14 @@ let updateChecker: UpdateChecker | undefined;
 let reloading = false;
 let updateAvailable = false;
 let enteringXR = false;
+let xrEntry: XrEntryController;
 
 function maybeReloadUpdate(): void {
   if (shouldAutoReload(updateAvailable, scene.state.xrMode, enteringXR)) void reloadApp();
 }
 
 async function enterXR(mode: 'vr' | 'ar'): Promise<void> {
-  enteringXR = true;
-  try {
-    await scene.enterXR(mode);
-  } catch (error) {
-    notice(error instanceof Error ? error.message : 'Could not enter XR.');
-  } finally {
-    enteringXR = false;
-    maybeReloadUpdate();
-  }
+  await xrEntry.start(mode).catch(() => undefined);
 }
 
 async function reloadApp(): Promise<void> {
@@ -281,6 +275,7 @@ const actions: WorkspaceActions = {
   },
   runCommand,
   sendMouse,
+  scrollTerminal: (id, lines, cell) => surfaces.get(id)?.scroll?.(lines, cell) ?? false,
   openCommands: () => {
     syncCommands();
     ui.openInput('commands');
@@ -315,6 +310,7 @@ ui = mountWorkspaceUI(app, {
     void enterXR('ar');
   },
   onSettingsChange: applySettings,
+  onTerminalCurvature: (id, degrees) => scene.setTerminalCurvature(id, degrees),
   onResetLayout: () => scene.resetLayout(),
   onArrange: (pattern) => {
     desktop.showPreview();
@@ -331,6 +327,23 @@ ui = mountWorkspaceUI(app, {
   onDemo: startDemo,
 });
 scene = createWorkspaceScene(ui.sceneHost, actions);
+xrEntry = createXREntryController({
+  enter: async (mode) => {
+    enteringXR = true;
+    try {
+      await scene.enterXR(mode);
+      scene.setNotice(null);
+    } finally {
+      enteringXR = false;
+      maybeReloadUpdate();
+    }
+  },
+  isActive: () => scene.state.xrMode !== 'desktop',
+  onError: (error) => notice(error instanceof Error ? error.message : 'Could not enter XR.'),
+  xr: navigator.xr,
+  eventTarget: window,
+  userActivation: () => navigator.userActivation?.isActive ?? false,
+});
 desktop = createDesktopPanels(ui.sceneHost, selectPane, {
   onClose: closePane,
   onToggleConnection: togglePaneConnection,
@@ -344,6 +357,8 @@ const stopPresentation = scene.subscribe((state) => {
     ui.setKeyboardBackgroundEnabled(state.keyboardBackgroundEnabled, false);
     ui.setTerminalColorMode(state.terminalColorMode, false);
     ui.setTerminalFiltering(state.filtering, true);
+    ui.setFilteringCapabilities(Number(scene.scene.userData.maxAnisotropy ?? 1));
+    for (const id of surfaces.keys()) ui.setTerminalCurvature(id, scene.getTerminalCurvature(id));
     if (state.arrangement && state.arrangement !== ui.getSettings().arrangement)
       ui.setArrangement(state.arrangement);
   }
@@ -360,6 +375,7 @@ void loadObservatory(scene, environmentAbort.signal)
     console.warn('Observatory unavailable; using the lightweight background.', error);
   });
 if (scene.state.rendererError) notice(scene.state.rendererError);
+void xrEntry.enableAutoStart().catch(() => undefined);
 
 const params = new URLSearchParams(location.search);
 if (params.get('demo') === '1') startDemo();
@@ -369,6 +385,7 @@ else if (ui.getSettings().endpoint.trim()) void connect(ui.getSettings().endpoin
 window.addEventListener(
   'pagehide',
   () => {
+    xrEntry.dispose();
     updateChecker?.dispose();
     environmentAbort.abort();
     detachAll();
