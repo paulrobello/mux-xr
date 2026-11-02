@@ -120,12 +120,18 @@ async function panelMetrics(page: Page, id: string) {
     const screen = root?.getObjectByName('terminal-surface') as
       | import('three').Mesh<import('three').PlaneGeometry, import('three').MeshBasicMaterial>
       | undefined;
-    const canvas = screen?.material.map?.image as HTMLCanvasElement | undefined;
-    const ctx = canvas?.getContext('2d');
-    if (!root || !screen || !canvas || !ctx) throw new Error('Missing live panel pixels');
+    const image = screen?.material.map?.image as
+      | HTMLCanvasElement
+      | { data: Uint8Array; width: number; height: number }
+      | undefined;
+    const pixels =
+      image &&
+      ('data' in image
+        ? image.data
+        : image.getContext('2d')?.getImageData(0, 0, image.width, image.height).data);
+    if (!root || !screen || !pixels) throw new Error('Missing live panel pixels');
     let hash = 2166136261;
-    for (const value of ctx.getImageData(0, 0, canvas.width, canvas.height).data)
-      hash = Math.imul(hash ^ value, 16777619) >>> 0;
+    for (const value of pixels) hash = Math.imul(hash ^ value, 16777619) >>> 0;
     return {
       hash,
       width: screen.geometry.parameters.width,
@@ -313,10 +319,16 @@ async function main(): Promise<void> {
           const screen = panel?.getObjectByName('terminal-surface') as
             | import('three').Mesh<import('three').PlaneGeometry, import('three').MeshBasicMaterial>
             | undefined;
-          const canvas = screen?.material.map?.image as HTMLCanvasElement | undefined;
-          const ctx = canvas?.getContext('2d');
-          if (!canvas || !ctx) throw new Error('Terminal canvas was not available');
-          const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          const image = screen?.material.map?.image as
+            | HTMLCanvasElement
+            | { data: Uint8Array; width: number; height: number }
+            | undefined;
+          const pixels =
+            image &&
+            ('data' in image
+              ? image.data
+              : image.getContext('2d')?.getImageData(0, 0, image.width, image.height).data);
+          if (!pixels) throw new Error('Terminal pixels were not available');
           let hash = 2166136261;
           for (const value of pixels) hash = Math.imul(hash ^ value, 16777619) >>> 0;
           return hash;

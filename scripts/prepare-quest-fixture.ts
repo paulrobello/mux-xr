@@ -42,6 +42,7 @@ export class WebGLRenderer extends OriginalRenderer {
   constructor(parameters) {
     super(parameters);
     const renderer = this;
+    window.__questRenderer = renderer;
     const originalXR = renderer.xr;
     const originalRender = renderer.render.bind(renderer);
     const originalSetSize = renderer.setSize.bind(renderer);
@@ -58,7 +59,7 @@ export class WebGLRenderer extends OriginalRenderer {
     renderer.setAnimationLoop = (callback) => {
       if (animationFrame) cancelAnimationFrame(animationFrame);
       if (!callback) return;
-      const tick = (time) => { callback(time); animationFrame = requestAnimationFrame(tick); };
+      const tick = (time) => { const start = performance.now(); callback(time); window.__questAfterFrame?.(time, performance.now() - start); animationFrame = requestAnimationFrame(tick); };
       animationFrame = requestAnimationFrame(tick);
     };
     renderer.setSize = (width, height, updateStyle) => { headCamera.aspect = width / Math.max(1, height); headCamera.updateProjectionMatrix(); return originalSetSize(width, height, updateStyle); };

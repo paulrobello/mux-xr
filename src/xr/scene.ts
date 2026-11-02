@@ -21,6 +21,7 @@ import {
 } from './command-editor';
 import { createFrameCounter } from './fps';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
+import { createTerminalTexture, type TerminalTexture } from './terminal-texture';
 
 type InputMode = 'commands' | 'keyboard' | 'panes' | 'terminal' | 'arrange' | 'command-editor';
 
@@ -184,7 +185,8 @@ interface TerminalPanel {
   surface: TerminalSurface;
   root: THREE.Group;
   screen: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
-  texture: THREE.CanvasTexture;
+  texture: THREE.Texture;
+  textureSource: TerminalTexture;
   frame: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>;
   selection: THREE.Mesh<THREE.ShapeGeometry, THREE.MeshBasicMaterial>;
   unsubscribe: () => void;
@@ -218,15 +220,6 @@ function disposeObject(object: THREE.Object3D): void {
       (material as unknown as Record<string, THREE.Texture | undefined>)[key]?.dispose();
     material.dispose();
   }
-}
-
-function createCanvasTexture(surface: TerminalSurface): THREE.CanvasTexture {
-  const texture = new THREE.CanvasTexture(surface.canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.generateMipmaps = false;
-  return texture;
 }
 
 function createLabelButton(
@@ -1835,7 +1828,8 @@ export function createWorkspaceScene(
     root.userData.scaleLimits = [0.6, 1.8];
     root.position.copy(defaultPosition);
     root.rotation.y = index % 2 === 0 ? 0.06 : -0.06;
-    const texture = createCanvasTexture(surface);
+    const textureSource = createTerminalTexture(surface, renderer ?? undefined);
+    const texture = textureSource.texture;
     const screen = new THREE.Mesh(
       new THREE.PlaneGeometry(PANEL_WIDTH, PANEL_HEIGHT),
       new THREE.MeshBasicMaterial({ map: texture }),
@@ -1900,6 +1894,7 @@ export function createWorkspaceScene(
       root,
       screen,
       texture,
+      textureSource,
       frame,
       selection,
       unsubscribe: () => undefined,
@@ -1919,7 +1914,11 @@ export function createWorkspaceScene(
       syncPanelGrid(panel);
       if (surface.revision !== panel.revision) {
         panel.revision = surface.revision;
-        texture.needsUpdate = true;
+        textureSource.update();
+        if (panel.texture !== textureSource.texture) {
+          panel.texture = textureSource.texture;
+          screen.material.map = panel.texture;
+        }
       }
       const status = String(surface.status);
       const statusChanged = status !== panel.status;
@@ -1961,8 +1960,9 @@ export function createWorkspaceScene(
     if (!panel) return;
     panel.unsubscribe();
     scene.remove(panel.root);
+    panel.textureSource.dispose();
+    panel.screen.material.map = null;
     disposeObject(panel.root);
-    panel.texture.dispose();
     panels.delete(id);
     if (inputRoot && inputMode === 'arrange') refreshInputRoot('arrange');
     dragStates.forEach((drag, controller) => {

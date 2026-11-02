@@ -6,7 +6,7 @@ import type {
   TerminalStatus,
   TerminalSurface,
 } from '../contracts';
-import { terminalColor } from './colors';
+import { createTerminalPainter } from './painter';
 import {
   createFocusMessage,
   createInputMessage,
@@ -20,10 +20,6 @@ import {
 type SocketLike = WebSocket;
 const INITIAL_RETRY_MS = 500;
 const MAX_RETRY_MS = 5000;
-const CELL_WIDTH = 11;
-const LINE_HEIGHT = 21;
-const CANVAS_BACKGROUND = '#05070b';
-const MONOCHROME_BACKGROUND = '#070707';
 export const MIN_GRID_COLS = 2;
 export const MAX_GRID_COLS = 300;
 export const MIN_GRID_ROWS = 2;
@@ -130,96 +126,13 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   const notify = (): void => {
     for (const listener of listeners) listener();
   };
+  const painter = createTerminalPainter(canvas, terminal);
   const paint = (emit = true): void => {
-    if (emit) revision += 1;
-    const logicalWidth = cols * CELL_WIDTH;
-    const logicalHeight = rows * LINE_HEIGHT;
-    const density = Math.min(typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1, 2);
-    const width = Math.max(1, Math.round(logicalWidth * density));
-    const height = Math.max(1, Math.round(logicalHeight * density));
-    if (canvas.width !== width) canvas.width = width;
-    if (canvas.height !== height) canvas.height = height;
-    const styleWidth = `${logicalWidth}px`;
-    const styleHeight = `${logicalHeight}px`;
-    if (canvas.style.width !== styleWidth) canvas.style.width = styleWidth;
-    if (canvas.style.height !== styleHeight) canvas.style.height = styleHeight;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const canvasBackground = colorMode === 'monochrome' ? MONOCHROME_BACKGROUND : CANVAS_BACKGROUND;
-    ctx.setTransform(density, 0, 0, density, 0, 0);
-    ctx.fillStyle = canvasBackground;
-    ctx.fillRect(0, 0, logicalWidth, logicalHeight);
-    ctx.font = '18px monospace';
-    ctx.textBaseline = 'top';
-    const buffer = terminal.buffer.active;
-    const base = buffer.viewportY;
-    const reusableCell = buffer.getNullCell();
-    for (let row = 0; row < rows; row += 1) {
-      const line = buffer.getLine(base + row);
-      if (!line) continue;
-      for (let col = 0; col < cols; col += 1) {
-        const cell = line.getCell(col, reusableCell);
-        if (!cell || cell.getWidth() === 0) continue;
-        const inverse = Boolean(cell.isInverse());
-        const fg = terminalColor(
-          colorMode,
-          cell.isFgRGB(),
-          cell.isFgPalette(),
-          cell.getFgColor(),
-          '#d8e1ef',
-          Boolean(cell.isBold()),
-          false,
-        );
-        const bg = terminalColor(
-          colorMode,
-          cell.isBgRGB(),
-          cell.isBgPalette(),
-          cell.getBgColor(),
-          canvasBackground,
-          false,
-          true,
-        );
-        const foreground = inverse ? bg : fg;
-        const background = inverse ? fg : bg;
-        if (background !== canvasBackground) {
-          ctx.fillStyle = background;
-          ctx.fillRect(
-            col * CELL_WIDTH,
-            row * LINE_HEIGHT,
-            Math.max(1, cell.getWidth()) * CELL_WIDTH,
-            LINE_HEIGHT,
-          );
-        }
-        const text = cell.getChars();
-        if (text) {
-          ctx.fillStyle = foreground;
-          ctx.font = `${cell.isBold() ? 'bold ' : ''}${cell.isItalic() ? 'italic ' : ''}18px monospace`;
-          ctx.fillText(text, col * CELL_WIDTH, row * LINE_HEIGHT);
-          if (cell.isUnderline()) {
-            ctx.fillRect(
-              col * CELL_WIDTH,
-              (row + 1) * LINE_HEIGHT - 2,
-              Math.max(1, cell.getWidth()) * CELL_WIDTH,
-              1,
-            );
-          }
-        }
-      }
+    if (!painter.paint(cols, rows, colorMode)) return;
+    if (emit) {
+      revision += 1;
+      notify();
     }
-    const cursor =
-      terminal.buffer.active.baseY +
-      terminal.buffer.active.cursorY -
-      terminal.buffer.active.viewportY;
-    if (cursor >= 0 && cursor < rows) {
-      ctx.strokeStyle = '#ffffff';
-      ctx.strokeRect(
-        terminal.buffer.active.cursorX * CELL_WIDTH,
-        cursor * LINE_HEIGHT,
-        CELL_WIDTH,
-        LINE_HEIGHT,
-      );
-    }
-    if (emit) notify();
   };
   const cancelPaint = (): void => {
     if (paintFrame === null) return;
@@ -394,6 +307,9 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     pane,
     get revision() {
       return revision;
+    },
+    get dirtyRows() {
+      return painter.dirtyRows;
     },
     get cols() {
       return cols;

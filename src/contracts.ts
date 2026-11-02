@@ -34,6 +34,7 @@ export interface TerminalSurface {
   readonly canvas: HTMLCanvasElement;
   readonly pane: PaneDescriptor;
   readonly revision: number;
+  readonly dirtyRows?: Uint8Array;
   readonly cols: number;
   readonly rows: number;
   readonly status: TerminalStatus;

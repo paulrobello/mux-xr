@@ -12,6 +12,22 @@ const fakeResets: number[] = [];
 const fakeCells: unknown[] = [];
 const paintStyles: string[] = [];
 const paintTextStyles: string[] = [];
+function basicFakeCell(chars: string): Record<string, unknown> {
+  return {
+    getWidth: () => 1,
+    getChars: () => chars,
+    isInverse: () => 0,
+    isFgRGB: () => false,
+    isFgPalette: () => false,
+    getFgColor: () => 0,
+    isBgRGB: () => false,
+    isBgPalette: () => false,
+    getBgColor: () => 0,
+    isBold: () => 0,
+    isItalic: () => 0,
+    isUnderline: () => 0,
+  };
+}
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     public buffer = {
@@ -240,6 +256,7 @@ describe('terminal surface lifecycle', () => {
     );
     vi.runAllTimers();
     const revision = surface.revision;
+    fakeCells.push(basicFakeCell('a'));
     ws.message(
       frame(
         create(ServerMessageSchema, {
@@ -250,6 +267,7 @@ describe('terminal surface lifecycle', () => {
         }),
       ),
     );
+    fakeCells[0] = basicFakeCell('b');
     ws.message(
       frame(
         create(ServerMessageSchema, {
@@ -282,6 +300,7 @@ describe('terminal surface lifecycle', () => {
         }),
       ),
     );
+    fakeCells.push(basicFakeCell('flush'));
     const revision = surface.revision;
     surface.flush?.();
     expect(surface.revision).toBe(revision + 1);

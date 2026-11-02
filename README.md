@@ -111,4 +111,8 @@ The identifier covers the bundled application and public assets, so a font or en
 
 Automated typing, grid, command and reconnect checks must target an isolated private daemon and streamer. Never point the private-test flag at the real/default mux daemon. Live delivery verification is limited to static frontend files and normal application startup.
 
+Terminal updates compare visible cells and repaint only changed rows, including the old and new cursor rows. XR copies those row strips into a persistent GPU texture at the same pixel density. Unchanged output does not redraw text or upload a texture. Text size, color modes and grid dimensions stay independent of this optimization.
+
+`MUX_XR_PRIVATE_TEST=1 MUX_XR_BASE_URL=http://127.0.0.1:4241 bun run scripts/terminal-texture-check.ts` checks actual WebGL pixels against the canvas reference using an isolated Vite server. It loads a blank fixture, verifies partial updates, orientation, resizing and UV transforms, and does not connect to a mux daemon.
+
 `MUX_XR_BASE_URL=http://127.0.0.1:4241 MUX_XR_PRIVATE_TEST=1 bun run scripts/stream-lifecycle-check.ts` exercises four streams with every WebSocket intercepted. It covers a 3 MiB seed, manual disconnect, rejected input, reconnect without replay, close and reopen. Use an isolated static preview. `MUX_XR_SKIP_LIFECYCLE=1` measures a fixed four-pane, 149×54 workload with 6,400 packets. `MUX_XR_BASELINE=1` runs the same diagnostic against an older build. Timings describe desktop canvas cost and frame pacing, not Quest capacity or a headset FPS gate.
