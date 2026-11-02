@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
+import { DEFAULT_TERMINAL_FILTERING } from '../src/terminal/filtering';
 import { createTerminalTexture } from '../src/xr/terminal-texture';
 
 function fixture(
@@ -69,6 +70,29 @@ describe('terminal texture', () => {
     expect(owned.texture.magFilter).toBe(THREE.LinearFilter);
     expect(owned.texture.generateMipmaps).toBe(true);
     expect(owned.texture.anisotropy).toBe(4);
+    owned.dispose();
+  });
+
+  it('switches explicit sampler modes and skips repeated identical policy', () => {
+    const f = fixture();
+    const owned = createTerminalTexture(f, {
+      copyTextureToTexture: vi.fn(),
+      capabilities: { getMaxAnisotropy: () => 8 },
+    });
+    const texture = owned.texture;
+    const version = texture.version;
+    owned.setFiltering({ ...DEFAULT_TERMINAL_FILTERING, mode: 'nearest', anisotropy: 16 });
+    expect(texture.minFilter).toBe(THREE.NearestFilter);
+    expect(texture.magFilter).toBe(THREE.NearestFilter);
+    expect(texture.anisotropy).toBe(8);
+    owned.setFiltering({ ...DEFAULT_TERMINAL_FILTERING, mode: 'mipmap-nearest' });
+    expect(texture.minFilter).toBe(THREE.LinearMipmapNearestFilter);
+    owned.setFiltering({ ...DEFAULT_TERMINAL_FILTERING, mode: 'mipmap-linear' });
+    expect(texture.minFilter).toBe(THREE.LinearMipmapLinearFilter);
+    const appliedVersion = texture.version;
+    owned.setFiltering({ ...DEFAULT_TERMINAL_FILTERING, mode: 'mipmap-linear' });
+    expect(texture.version).toBeGreaterThan(version);
+    expect(texture.version).toBe(appliedVersion);
     owned.dispose();
   });
 

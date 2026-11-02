@@ -63,7 +63,7 @@ Mouse clicks in 3D preview and controller triggers in VR use the same actions, w
 | `A−` / `A+` | Zoom terminal text out or in locally. |
 | Esc, Tab, arrows, Enter | Send that terminal key to the pane containing the strip. |
 | Ctrl / Alt | Arm a modifier for the next strip key. |
-| Commands / Keyboard / Panes | Open saved commands, terminal input or hierarchy navigation. |
+| Commands / Widgets / Panes | Open saved commands, 3D clocks or hierarchy navigation from the XR HUD. Right-controller A toggles Keyboard. |
 | Background selector | Choose Black, Gradient or Observatory from one compact menu. |
 | Exit | Return to flat terminals in the browser, or end the immersive session in VR. |
 
@@ -87,7 +87,7 @@ The desktop and XR keyboards use the same familiar key positions, with Enter at 
 
 In **Arrange** or browser Workspace settings, use **Closer** and **Farther** to move all terminal panels together. Panel size, rotation, text zoom and terminal grids stay unchanged. Closer stops before the nearest panel enters the viewing space.
 
-The observatory planet rotates slowly about its own center. A subtle shooting star occasionally crosses the exterior. Motion pauses outside the Observatory and in passthrough, with no sound. Terminal textures use trilinear mipmaps and bounded anisotropic filtering to reduce distant motion shimmer while keeping full raster fidelity for the head-gazed pane. Physical headset shimmer perception remains a recheck.
+The observatory planet rotates slowly about its own center. A subtle shooting star occasionally crosses the exterior. Motion pauses outside the Observatory and in passthrough, with no sound. Terminal filtering is saved in Workspace Settings and native Terminal settings → Filtering. Choose Nearest, Linear, Mipmap crisp or Mipmap smooth, plus anisotropy Off/2×/4×/8×/16× (capped by the GPU). Mipmap smooth with 4× anisotropy is the base default. Sharper gaze is on by default: the head-gazed pane uses full raster quality and base-level linear sampling to favor clarity without reuploading textures, independently of Gaze input. Turn it off to keep the selected base filter on every pane. Physical headset clarity remains an owner recheck.
 
 ## Terminal mouse input
 
@@ -107,11 +107,18 @@ Presets apply to currently attached terminals around your current position and h
 
 Arrangement spacing measures each window's current grid geometry, title and controls, plus its manual physical scale. Layouts center those complete bounds and increase distance when viewer-facing windows would visually overlap. Physical scale, text zoom, input target and remote grids are preserved. Controller rays extend to reach arranged windows beyond the default ray length. Creating a new terminal through the viewer requires the pending opt-in core API, tracked by [the upstream card](https://board.example.test/board?card=01a1991e1e20727d8ff8a32afc0b212f). Existing default-workspace panes can already be attached.
 
+The native HUD replaces its Keyboard button with **Widgets**. A still toggles the keyboard. Widgets adds a local-time digital or analog 3D clock. Grip either clock to move, rotate, push/pull or scale it like other UI. Its × closes only that clock. Grip stick left/right now uses the reversed yaw and laser-axis roll directions.
+
+Keyboard and main-panel position, rotation and scale save on final grip release and XR exit. The next XR session restores them relative to the new headset position and heading. Both-stick recovery clears those saved poses while retaining commands and other preferences. Clock positions are currently session-local.
+
+Arrangements keep the full terminal bounds above the Observatory deck or passthrough floor. Black and Gradient keep unrestricted vertical layouts. Stars use varied-size circular soft sprites in one draw call, with no flashing or audio.
+
 ## Verification
 
 - `make checkall`: format/lint, TypeScript, unit tests and production build.
 - `make checkall-ci`: fast gate plus asset-chain validation, secret scan and dependency audit.
 - `MUX_XR_BASE_URL=https://localhost:4240 make production-label-check`: verify actual UI glyph pixels in a built app served with the streamer CSP. A Vite development server is not sufficient.
+- `MUX_XR_PRIVATE_TEST=1 MUX_XR_BASE_URL=http://127.0.0.1:4241 MUX_XR_TEST_ROOT=/path/to/private/dist make widgets-clarity-check`: native widget, filter and pose checks using a private built fixture.
 - `make e2e`: local native-GPU browser tests with explicitly synthetic protocol fixtures.
 - `make real-app-check`: actual built app against a private compatible core pair, requiring `MUX_XR_PRIVATE_TEST=1` and `MUX_XR_BASE_URL`. It issues two harmless marker commands, so use isolated test panes.
 - `MUX_XR_BASE_URL=http://127.0.0.1:4241 bun run scripts/xr-visual-check.ts`: native GPU rendering of the spatial keyboard using an explicit test XR camera/controller. This requires a Vite development server and does not replace headset testing.

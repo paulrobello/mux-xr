@@ -19,6 +19,9 @@ type CheckResult = {
   nearDirectMeanAbsDelta: number;
   dirtyUploadMeanAbsDelta: number;
   glErrors: number[];
+  filterModes: Array<{ mode: string; minFilter: number; anisotropy: number }>;
+  gazeLinearMeanAbsDelta: number;
+  sharpVsSmoothMeanAbsDelta: number;
 };
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -48,6 +51,10 @@ try {
     const threeModulePath = '/@id/three';
     const terminalTextureModule = '/src/xr/terminal-texture.ts';
     const THREE: typeof import('three') = await import(threeModulePath);
+    const terminalMaterialModule = '/src/xr/terminal-material.ts';
+    const { createTerminalMaterial, setTerminalMaterialFiltering } = (await import(
+      terminalMaterialModule
+    )) as typeof import('../src/xr/terminal-material');
     const { createTerminalTexture } = (await import(
       terminalTextureModule
     )) as typeof import('../src/xr/terminal-texture');
@@ -91,7 +98,7 @@ try {
     dirtyRows.fill(1);
     const owned = createTerminalTexture({ canvas: source, dirtyRows }, renderer);
     const geometry = new THREE.PlaneGeometry(2, 2);
-    const material = new THREE.MeshBasicMaterial();
+    const material = createTerminalMaterial(owned.texture);
     const plane = new THREE.Mesh(geometry, material);
     plane.rotation.set(0.22, -0.58, 0);
     const scene = new THREE.Scene();
@@ -156,6 +163,46 @@ try {
       frame(owned.texture, 0.006, 2.62),
       frame(fresh.texture, 0.006, 2.62),
     );
+    const smooth = frame(owned.texture, 0.006, 2.62);
+    const filterModes = [];
+    const expectedFilters = [
+      THREE.NearestFilter,
+      THREE.LinearFilter,
+      THREE.LinearMipmapNearestFilter,
+      THREE.LinearMipmapLinearFilter,
+    ];
+    for (const [index, mode] of (
+      ['nearest', 'linear', 'mipmap-nearest', 'mipmap-linear'] as const
+    ).entries()) {
+      owned.setFiltering({ mode, anisotropy: 16, gazeClarity: true });
+      frame(owned.texture, 0.006, 2.62);
+      if (owned.texture.minFilter !== expectedFilters[index])
+        throw new Error(`Wrong sampler: ${mode}`);
+      filterModes.push({
+        mode,
+        minFilter: owned.texture.minFilter,
+        anisotropy: owned.texture.anisotropy,
+      });
+    }
+    owned.setFiltering({ mode: 'mipmap-linear', anisotropy: 4, gazeClarity: true });
+    const gazeVersion = owned.texture.version;
+    setTerminalMaterialFiltering(
+      material,
+      { mode: 'mipmap-linear', anisotropy: 4, gazeClarity: true },
+      true,
+    );
+    if (owned.texture.version !== gazeVersion) throw new Error('Gaze caused a texture reupload');
+    const gazePixels = frame(owned.texture, 0.006, 2.62);
+    const freshLinear = createTerminalTexture({ canvas: source, dirtyRows }, renderer);
+    freshLinear.setFiltering({ mode: 'linear', anisotropy: 4, gazeClarity: false });
+    setTerminalMaterialFiltering(
+      material,
+      { mode: 'linear', anisotropy: 4, gazeClarity: false },
+      false,
+    );
+    const gazeLinearMeanAbsDelta = delta(gazePixels, frame(freshLinear.texture, 0.006, 2.62));
+    const sharpVsSmoothMeanAbsDelta = delta(gazePixels, smooth);
+    freshLinear.dispose();
     target.dispose();
     geometry.dispose();
     material.dispose();
@@ -172,6 +219,9 @@ try {
       nearDirectMeanAbsDelta,
       dirtyUploadMeanAbsDelta,
       glErrors,
+      filterModes,
+      gazeLinearMeanAbsDelta,
+      sharpVsSmoothMeanAbsDelta,
     };
   });
   assert(result.glErrors.length === 0, `WebGL errors: ${result.glErrors.join(', ')}`);
@@ -186,6 +236,14 @@ try {
   assert(
     result.filteredTemporalDelta < result.baselineTemporalDelta,
     `Filtered shimmer did not improve: ${JSON.stringify(result)}`,
+  );
+  assert(
+    result.gazeLinearMeanAbsDelta <= 0.1,
+    `Gaze policy differs from linear: ${JSON.stringify(result)}`,
+  );
+  assert(
+    result.sharpVsSmoothMeanAbsDelta > 0.1,
+    'Sharp and smooth filters did not change actual pixels',
   );
   console.log(JSON.stringify(result));
 } finally {

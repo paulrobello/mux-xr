@@ -321,14 +321,24 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
       page.evaluate(() =>
         (window as unknown as { __muxXR: { getControlHints(): Hint[] } }).__muxXR.getControlHints(),
       );
-    const keyboardHud = (await currentHints()).find(
-      (hint) => hint.inputAction === 'openInput' && hint.label === 'Keyboard',
+    assert(
+      !(await currentHints()).some(
+        (hint) => hint.inputAction === 'openInput' && hint.label === 'Keyboard',
+      ),
+      'Keyboard remains on the native HUD',
     );
-    assert(keyboardHud, 'Keyboard HUD target missing');
-    await page.mouse.click(keyboardHud.clientX, keyboardHud.clientY);
+    await page.locator('[data-action="widgets"]').click();
+    assert(
+      (await currentHints()).filter((hint) => hint.inputAction === 'toggleWidget').length === 2,
+      'Desktop Widgets did not open native clock choices',
+    );
+    const closeWidgets = (await currentHints()).find((hint) => hint.inputAction === 'close');
+    assert(closeWidgets, 'Widgets close target missing');
+    await page.mouse.click(closeWidgets.clientX, closeWidgets.clientY);
+    await page.locator('[data-action="keyboard"]').click();
     assert(
       await page.locator('[data-keyboard]').isVisible(),
-      'HUD did not open the compact keyboard',
+      'Browser shortcut did not open the compact keyboard',
     );
     assert(
       !(await currentHints()).some((hint) => hint.inputAction === 'key'),

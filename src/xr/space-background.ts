@@ -12,6 +12,7 @@ const METEOR_MIN_DELAY = 35;
 const METEOR_MAX_DELAY = 70;
 const METEOR_MIN_LIFETIME = 0.5;
 const METEOR_MAX_LIFETIME = 1.2;
+const STAR_SPRITE_SIZE = 64;
 
 function seededRandom(seed: number): () => number {
   let state = seed >>> 0;
@@ -21,10 +22,35 @@ function seededRandom(seed: number): () => number {
   };
 }
 
+function createStarSpriteTexture(): THREE.DataTexture {
+  const data = new Uint8Array(STAR_SPRITE_SIZE * STAR_SPRITE_SIZE * 4);
+  const center = (STAR_SPRITE_SIZE - 1) / 2;
+  const radius = STAR_SPRITE_SIZE / 2;
+  for (let y = 0; y < STAR_SPRITE_SIZE; y += 1) {
+    for (let x = 0; x < STAR_SPRITE_SIZE; x += 1) {
+      const distance = Math.hypot(x - center, y - center) / radius;
+      const core = Math.max(0, 1 - distance * distance);
+      const alpha = distance >= 0.94 ? 0 : Math.min(1, core ** 1.35 * 1.08);
+      const offset = (y * STAR_SPRITE_SIZE + x) * 4;
+      data[offset] = 255;
+      data[offset + 1] = 255;
+      data[offset + 2] = 255;
+      data[offset + 3] = Math.round(alpha * 255);
+    }
+  }
+  const texture = new THREE.DataTexture(data, STAR_SPRITE_SIZE, STAR_SPRITE_SIZE, THREE.RGBAFormat);
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function createStarfield(): THREE.Points {
   const random = seededRandom(0x4f425356);
   const positions = new Float32Array(STAR_COUNT * 3);
   const colors = new Float32Array(STAR_COUNT * 3);
+  const scales = new Float32Array(STAR_COUNT);
   for (let index = 0; index < STAR_COUNT; index += 1) {
     const cluster = index % 7 === 0;
     const z = cluster ? random() * 0.55 - 0.275 : random() * 2 - 1;
@@ -40,18 +66,34 @@ function createStarfield(): THREE.Points {
     colors[offset] = brightness * (warm ? 1 : 0.72);
     colors[offset + 1] = brightness * (warm ? 0.78 : 0.9);
     colors[offset + 2] = brightness * (warm ? 0.58 : 1);
+    scales[index] = cluster ? 1.05 + random() * 0.45 : 0.62 + random() * 0.62;
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geometry.setAttribute('starScale', new THREE.BufferAttribute(scales, 1));
+  const sprite = createStarSpriteTexture();
   const material = new THREE.PointsMaterial({
-    size: 0.34,
+    map: sprite,
+    size: 0.42,
     sizeAttenuation: true,
     vertexColors: true,
     transparent: true,
     opacity: 0.86,
+    alphaTest: 0.02,
     depthWrite: false,
   });
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace(
+      'uniform float size;',
+      'uniform float size;\nattribute float starScale;',
+    );
+    shader.vertexShader = shader.vertexShader.replace(
+      'gl_PointSize = size;',
+      'gl_PointSize = size * starScale;',
+    );
+  };
+  material.customProgramCacheKey = () => 'observatory-soft-starfield-v1';
   const stars = new THREE.Points(geometry, material);
   stars.name = 'observatory-exterior-stars';
   stars.renderOrder = -900;

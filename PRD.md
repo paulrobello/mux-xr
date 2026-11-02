@@ -6,7 +6,7 @@
 | Repo | /Users/localuser/Repos/mux-xr |
 | Owner | Paul Robello |
 | Status | Owner confirmed XR entry; revised controller/input build ready for headset recheck |
-| Date | October 31, 2026, Etc/GMT+8 |
+| Date | November 2, 2026, Etc/GMT+8 |
 
 ## Overview
 
@@ -19,7 +19,7 @@ A LAN-only Quest 3 workspace for monitoring par-mux terminals and issuing occasi
 - Explicit command target, global/workspace quick commands, terminal key strip and virtual keyboard. Terminal grid resize is explicit and selected-pane scoped, with browser/native settings, Apply-only sends, server-echo dimensions and bounded columns/rows.
 - Passthrough and VR with black, gradient and one polished silent sci-fi observatory.
 - Active-pane-only highlighting and a default-off head-gaze toggle for dwell-based keyboard targeting.
-- Headset-local settings. Measure higher panel capacity using real workload shapes.
+- Headset-local settings, keyboard/HUD poses and sizes, selectable texture filtering with independent gaze clarity, and 3D local-time clock widgets. Measure higher panel capacity using real workload shapes.
 - Detect new frontend builds with a bounded same-origin manifest poll and a user-controlled Reload action in browser/XR. Reload automatically on the non-XR main page; keep Reload explicit during immersion and end XR before navigation.
 
 ## Non-Goals
@@ -49,7 +49,7 @@ Right-controller B toggles temporary Focus mode for the aimed terminal, falling 
 
 Distance-based rendering LOD is independent of gaze keyboard targeting. The head-gazed pane always remains full fidelity. Medium/far panes reduce raster density and refresh cadence, hidden panes retain live parser state without painting, and desktop returns to full resolution. This never changes PTY grids, input selection or spatial UI text quality. Higher physical Quest capacity remains measured owner acceptance, not inferred from desktop pane counts.
 
-The shared desktop/XR keyboard uses conventional key grouping. Modifier taps remain one-shot, while a roughly 550 ms hold locks Shift/Ctrl/Alt until a later tap. Locked state is visible and resets on input-target/context changes. Right-controller A toggles the keyboard, preserving its pose and safe target ownership. B retains Focus mode. Closer/Farther translate the complete terminal layout horizontally toward or away from the viewer while preserving scales, rotations and remote grids, with a near-distance bound. Observatory motion is limited to slow own-center planet rotation and occasional reused meteor geometry. Terminal filtering adds mipmapped minification and bounded anisotropy, with separate software motion evidence and physical Quest acceptance.
+The shared desktop/XR keyboard uses conventional key grouping. Modifier taps remain one-shot, while a roughly 550 ms hold locks Shift/Ctrl/Alt until a later tap. Locked state is visible and resets on input-target/context changes. Right-controller A toggles the keyboard, preserving its pose and safe target ownership. B retains Focus mode. Closer/Farther translate the complete terminal layout horizontally toward or away from the viewer while preserving scales, rotations and remote grids, with a near-distance bound. Observatory motion is limited to slow own-center planet rotation and occasional reused meteor geometry. Terminal filtering offers nearest, linear, nearest-mip and trilinear choices with bounded Off/2×/4×/8×/16× anisotropy. Sharper gaze defaults on and uses full raster quality plus shader-selected base-level sampling on the head-gazed pane without texture uploads, independently of keyboard targeting. Observatory and passthrough arrangements respect the full window bounds above their floors, while Black and Gradient stay unrestricted. The native HUD replaces Keyboard with Widgets. A remains the keyboard shortcut. Digital and analog 3D local-time clocks use universal manipulation and separate close controls. Keyboard and HUD poses save locally on final grip release and XR exit, restore relative to the next headset heading, and clear through both-stick recovery. Grip-only yaw and grip-trigger roll use the owner-requested reversed horizontal direction. Physical Quest readability and comfort remain owner acceptance.
 
 ### Upstream Dependencies
 

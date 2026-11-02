@@ -19,6 +19,12 @@ import {
   keyboardKeys,
   type SemanticKey,
 } from '../keyboard';
+import {
+  DEFAULT_TERMINAL_FILTERING,
+  type TerminalFiltering,
+  type TerminalFilterMode,
+  validateTerminalFiltering,
+} from '../terminal/filtering';
 import { terminalKeyLabel } from '../terminal/protocol';
 import { calculateArrangement } from './arrangements';
 import {
@@ -27,14 +33,26 @@ import {
   createCommandDraft,
   editCommandDraft,
 } from './command-editor';
+import { keepLayoutAboveFloor, workspaceFloorY } from './floor-layout';
 import { createFrameCounter } from './fps';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
 import { terminalQualityAtDistance } from './terminal-lod';
+import { createTerminalMaterial, setTerminalMaterialFiltering } from './terminal-material';
 import { createTerminalTexture, type TerminalTexture } from './terminal-texture';
+import { applyUIPose, captureUIPose, createUIPoseStore, type UIPoseName } from './ui-poses';
+import { type ClockWidget, createClockWidget, type WidgetKind } from './widgets';
 
-type InputMode = 'commands' | 'keyboard' | 'panes' | 'terminal' | 'arrange' | 'command-editor';
+type InputMode =
+  | 'commands'
+  | 'keyboard'
+  | 'panes'
+  | 'terminal'
+  | 'arrange'
+  | 'command-editor'
+  | 'widgets'
+  | 'filtering';
 
 export interface PanelTransform {
   position: THREE.Vector3;
@@ -53,6 +71,8 @@ export interface WorkspaceSceneState {
   background: BackgroundMode;
   gazeInputEnabled: boolean;
   terminalColorMode: TerminalColorMode;
+  filtering: TerminalFiltering;
+  widgets: WidgetKind[];
   keyboardBackgroundEnabled: boolean;
   fps: number | null;
   xrMode: 'desktop' | 'vr' | 'ar';
@@ -78,6 +98,7 @@ export interface WorkspaceScene {
   setBackground(mode: BackgroundMode): void;
   setGazeInputEnabled(enabled: boolean): void;
   setTerminalColorMode(mode: TerminalColorMode): void;
+  setTerminalFiltering(filtering: TerminalFiltering): void;
   setKeyboardBackgroundEnabled(enabled: boolean): void;
   setAvailablePanes(panes: PaneDescriptor[]): void;
   setQuickCommands(commands: QuickCommand[]): void;
@@ -225,6 +246,9 @@ interface TerminalPanel {
   renderQuality: TerminalRenderQuality;
   pendingQuality: TerminalRenderQuality | null;
   qualitySince: number;
+  filterVersion: number;
+  filterGaze: boolean;
+  filterGazeAt: number;
 }
 
 function disposeObject(object: THREE.Object3D): void {
@@ -457,6 +481,11 @@ export function createWorkspaceScene(
   scene.add(ambient, key);
   const observatory = createObservatory(scene);
   const panels = new Map<string, TerminalPanel>();
+  const widgets = new Map<WidgetKind, ClockWidget>();
+  const poseStore = createUIPoseStore();
+  let poseRestorePending = false;
+  let keyboardPoseRestored = true;
+  let filterVersion = 0;
   const paneFocus = createPaneFocus();
   const listeners = new Set<(state: Readonly<WorkspaceSceneState>) => void>();
   const mutableState: WorkspaceSceneState = {
@@ -464,6 +493,8 @@ export function createWorkspaceScene(
     background: 'observatory',
     gazeInputEnabled: false,
     terminalColorMode: 'comfort',
+    filtering: { ...DEFAULT_TERMINAL_FILTERING },
+    widgets: [],
     keyboardBackgroundEnabled: true,
     fps: null,
     xrMode: 'desktop',
@@ -645,7 +676,9 @@ export function createWorkspaceScene(
     const labels = { ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift' };
     const active = modifierState.active;
     const locked = modifierState.locked;
-    const roots: THREE.Object3D[] = [...panels.values()].map((panel) => panel.root);
+    const roots: THREE.Object3D[] = [...panels.values()]
+      .map((panel) => panel.root)
+      .concat([...widgets.values()].map((widget) => widget.root));
     if (inputRoot) roots.push(inputRoot);
     for (const root of roots)
       root.traverse((object) => {
@@ -923,6 +956,19 @@ export function createWorkspaceScene(
         : THREE.MathUtils.clamp((time - previousRenderTime) / 1000, 0, 0.05);
     previousRenderTime = time;
     paneFocus.update(deltaSeconds);
+    if (poseRestorePending && renderer?.xr.isPresenting) {
+      const saved = poseStore.read('hud');
+      if (saved && hudRoot)
+        applyUIPose(
+          hudRoot,
+          renderer.xr.getCamera(),
+          saved,
+          hudRoot.userData.scaleLimits as [number, number],
+        );
+      poseRestorePending = false;
+    }
+    const nowMs = Date.now();
+    for (const widget of widgets.values()) widget.update(nowMs);
     (scene.userData.updateEnvironment as ((delta: number) => void) | undefined)?.(deltaSeconds);
     if (gripActive()) modifierPresses.clear();
     for (const press of modifierPresses.values()) {
@@ -1038,13 +1084,13 @@ export function createWorkspaceScene(
         const vertical = -applyDeadzone(y) * deltaSeconds;
         if (gamepad.buttons[0]?.pressed) {
           drag.relativeRotation.premultiply(
-            new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, -1), horizontal),
+            new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, -1), -horizontal),
           );
           drag.localOffset.z = THREE.MathUtils.clamp(drag.localOffset.z - vertical * 0.8, -6, -0.3);
         } else {
           drag.relativeRotation
             .multiply(
-              new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -horizontal),
+              new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), horizontal),
             )
             .multiply(
               new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -vertical * 0.9),
@@ -1074,6 +1120,14 @@ export function createWorkspaceScene(
       }
       mutableState.renderGazeTerminalId = renderGazeId;
       for (const panel of panels.values()) {
+        if (panel.id === renderGazeId) panel.filterGazeAt = time;
+        const filterGaze =
+          panel.id === renderGazeId || (panel.filterGaze && time - panel.filterGazeAt < 250);
+        if (filterGaze !== panel.filterGaze || panel.filterVersion !== filterVersion) {
+          setTerminalMaterialFiltering(panel.screen.material, mutableState.filtering, filterGaze);
+          panel.filterGaze = filterGaze;
+          panel.filterVersion = filterVersion;
+        }
         let quality: TerminalRenderQuality = 'full';
         if (renderer?.xr.isPresenting) {
           if (!panel.root.visible || panel.root.userData.focusHidden) quality = 'hidden';
@@ -1107,6 +1161,8 @@ export function createWorkspaceScene(
         panel.renderQuality = 'full';
         panel.pendingQuality = null;
         panel.surface.setRenderQuality?.('full');
+        panel.filterGaze = false;
+        setTerminalMaterialFiltering(panel.screen.material, mutableState.filtering, false);
       }
     }
     lodWasPresenting = Boolean(renderer?.xr.isPresenting);
@@ -1119,7 +1175,10 @@ export function createWorkspaceScene(
       raycaster.set(origin, direction);
       const hit = raycaster
         .intersectObjects(
-          [...panels.values()].map((panel) => panel.root).concat(inputRoot ? [inputRoot] : []),
+          [...panels.values()]
+            .map((panel) => panel.root)
+            .concat(inputRoot ? [inputRoot] : [])
+            .concat([...widgets.values()].map((widget) => widget.root)),
           true,
         )
         .find((entry) => isControlVisible(entry.object))?.object;
@@ -1229,6 +1288,61 @@ export function createWorkspaceScene(
     for (const panel of panels.values())
       panel.selection.visible = panel.id === mutableState.selectedTerminalId;
   };
+  const saveUIPose = (name: UIPoseName, object: THREE.Object3D): void => {
+    if (!renderer || (!renderer.xr.isPresenting && !activeSession)) return;
+    const saved = poseStore.save(name, captureUIPose(object, renderer.xr.getCamera()));
+    if (!saved && mutableState.notice !== 'UI position could not be saved on this device') {
+      mutableState.notice = 'UI position could not be saved on this device';
+      notify();
+    }
+  };
+  const placeWidget = (widget: ClockWidget): void => {
+    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    view.updateWorldMatrix(true, false);
+    const eye = view.getWorldPosition(new THREE.Vector3());
+    const forward = view.getWorldDirection(new THREE.Vector3());
+    forward.y = 0;
+    forward.normalize();
+    const rotation = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0),
+      Math.atan2(-forward.x, -forward.z),
+    );
+    const x = widget.root.userData.widgetKind === 'digital-clock' ? -0.45 : 0.45;
+    widget.root.position.copy(new THREE.Vector3(x, 0.3, -1.25).applyQuaternion(rotation).add(eye));
+    widget.root.quaternion.copy(rotation);
+    widget.root.scale.setScalar(1);
+  };
+  const removeWidget = (kind: WidgetKind): void => {
+    const widget = widgets.get(kind);
+    if (!widget) return;
+    for (const [controller, drag] of dragStates)
+      if (drag.object === widget.root) releaseGrab(controller);
+    for (const [controller, object] of hoveredByController)
+      if (widget.root.getObjectById(object.id)) hoveredByController.delete(controller);
+    showHover(null);
+    widget.root.removeFromParent();
+    widget.dispose();
+    widgets.delete(kind);
+    mutableState.widgets = [...widgets.keys()];
+    if (!disposed && inputRoot && inputMode === 'widgets') refreshInputRoot('widgets');
+    notify();
+  };
+  const toggleWidget = (kind: WidgetKind): void => {
+    if (widgets.has(kind)) {
+      removeWidget(kind);
+      return;
+    }
+    const widget = createClockWidget(kind);
+    widget.root.traverse((object) => {
+      if (!object.userData.inputAction) object.userData.inputAction = 'grabWidget';
+    });
+    widgets.set(kind, widget);
+    scene.add(widget.root);
+    placeWidget(widget);
+    mutableState.widgets = [...widgets.keys()];
+    hideInput();
+    notify();
+  };
   const clearInputRoot = (): void => {
     if (!inputRoot) return;
     for (const [controller, drag] of [...dragStates])
@@ -1289,6 +1403,17 @@ export function createWorkspaceScene(
       inputRoot.quaternion.copy(inputTransform.quaternion);
       inputRoot.scale.setScalar(inputTransform.scale);
     } else resetInputPose();
+    if (!keyboardPoseRestored && (mode === 'keyboard' || mode === 'command-editor')) {
+      const saved = poseStore.read('keyboard');
+      if (saved && !previousRoot)
+        applyUIPose(
+          inputRoot,
+          renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera,
+          saved,
+          inputRoot.userData.scaleLimits as [number, number],
+        );
+      keyboardPoseRestored = true;
+    }
     for (const controller of grabbedControllers) {
       captureGrab(controller, inputRoot);
     }
@@ -1335,9 +1460,13 @@ export function createWorkspaceScene(
     const title = createLabelButton(
       mode === 'command-editor'
         ? commandEditorMessage || 'New quick command'
-        : mode === 'arrange'
-          ? 'Arrange terminals'
-          : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? 'Keyboard' : mode === 'terminal' ? 'Terminal settings' : `Panes · ${hierarchyLevel}`} · ${targetTitle}`,
+        : mode === 'widgets'
+          ? 'Widgets'
+          : mode === 'filtering'
+            ? 'Terminal filtering'
+            : mode === 'arrange'
+              ? 'Arrange terminals'
+              : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? 'Keyboard' : mode === 'terminal' ? 'Terminal settings' : `Panes · ${hierarchyLevel}`} · ${targetTitle}`,
       0.9,
       0.12,
       { inputAction: 'grabInput' },
@@ -1594,6 +1723,58 @@ export function createWorkspaceScene(
       );
       modeStatus.position.y = -0.455;
       inputRoot.add(modeStatus);
+      const filteringButton = createLabelButton('Filtering', 0.65, 0.09, {
+        inputAction: 'openInput',
+        mode: 'filtering',
+      });
+      filteringButton.position.set(0.65, 0.55, 0);
+      inputRoot.add(filteringButton);
+    } else if (mode === 'widgets') {
+      for (const [index, kind] of (['digital-clock', 'analog-clock'] as const).entries()) {
+        const name = kind === 'digital-clock' ? 'Digital clock' : 'Analog clock';
+        const button = createLabelButton(
+          (widgets.has(kind) ? 'Hide ' : 'Add ') + name,
+          1.25,
+          0.14,
+          { inputAction: 'toggleWidget', widgetKind: kind },
+        );
+        button.position.set(0, 0.25 - index * 0.22, 0);
+        inputRoot.add(button);
+      }
+    } else if (mode === 'filtering') {
+      const modes: Array<[string, TerminalFilterMode]> = [
+        ['Nearest', 'nearest'],
+        ['Linear sharp', 'linear'],
+        ['Mipmap bilinear', 'mipmap-nearest'],
+        ['Mipmap smooth', 'mipmap-linear'],
+      ];
+      modes.forEach(([label, filterMode], index) => {
+        const button = createLabelButton(label, 0.74, 0.12, {
+          inputAction: 'filterMode',
+          filterMode,
+        });
+        button.position.set(index % 2 ? 0.4 : -0.4, 0.3 - Math.floor(index / 2) * 0.16, 0);
+        setModifierVisual(button, mutableState.filtering.mode === filterMode);
+        inputRoot?.add(button);
+      });
+      ([1, 2, 4, 8, 16] as const).forEach((anisotropy, index) => {
+        const button = createLabelButton(anisotropy === 1 ? 'Off' : `${anisotropy}x`, 0.26, 0.1, {
+          inputAction: 'filterAnisotropy',
+          anisotropy,
+        });
+        button.position.set((index - 2) * 0.3, -0.1, 0);
+        setModifierVisual(button, mutableState.filtering.anisotropy === anisotropy);
+        inputRoot?.add(button);
+      });
+      const gaze = createLabelButton(
+        `Sharper gaze: ${mutableState.filtering.gazeClarity ? 'on' : 'off'}`,
+        1.2,
+        0.1,
+        { inputAction: 'filterGaze' },
+      );
+      gaze.position.y = -0.28;
+      setModifierVisual(gaze, mutableState.filtering.gazeClarity);
+      inputRoot.add(gaze);
     } else {
       const unit = 0.13;
       for (const key of keyboardKeys) {
@@ -1661,7 +1842,7 @@ export function createWorkspaceScene(
     hudRoot.scale.setScalar(0.62);
     const controls: Array<[string, Record<string, unknown>]> = [
       ['Commands', { inputAction: 'openInput', mode: 'commands' }],
-      ['Keyboard', { inputAction: 'openInput', mode: 'keyboard' }],
+      ['Widgets', { inputAction: 'openInput', mode: 'widgets' }],
       ['Panes', { inputAction: 'openInput', mode: 'panes' }],
       ['Terminal', { inputAction: 'openInput', mode: 'terminal' }],
       ['Arrange', { inputAction: 'openInput', mode: 'arrange' }],
@@ -1887,6 +2068,29 @@ export function createWorkspaceScene(
       setBackground(hit.userData.background as BackgroundMode);
       return true;
     }
+    if (action === 'toggleWidget') {
+      toggleWidget(hit.userData.widgetKind as WidgetKind);
+      return true;
+    }
+    if (action === 'closeWidget') {
+      const kind = [...widgets.entries()].find(
+        ([, widget]) => widget.root.userData.widgetId === hit.userData.widgetId,
+      )?.[0];
+      if (kind) removeWidget(kind);
+      return true;
+    }
+    if (action === 'grabWidget') return true;
+    if (action === 'filterMode' || action === 'filterAnisotropy' || action === 'filterGaze') {
+      setTerminalFiltering({
+        ...mutableState.filtering,
+        ...(action === 'filterMode' ? { mode: hit.userData.filterMode as TerminalFilterMode } : {}),
+        ...(action === 'filterAnisotropy'
+          ? { anisotropy: Number(hit.userData.anisotropy) as TerminalFiltering['anisotropy'] }
+          : {}),
+        ...(action === 'filterGaze' ? { gazeClarity: !mutableState.filtering.gazeClarity } : {}),
+      });
+      return true;
+    }
     if (action === 'layoutDepth') {
       moveLayoutDepth(Number(hit.userData.direction));
       return true;
@@ -2042,7 +2246,11 @@ export function createWorkspaceScene(
           (Math.hypot(panel.width, panel.height) / 2 + 1) * panel.root.scale.x,
       );
     }
-    for (const root of [inputRoot, hudRoot]) {
+    for (const root of [
+      inputRoot,
+      hudRoot,
+      ...[...widgets.values()].map((widget) => widget.root),
+    ]) {
       if (!root) continue;
       root.getWorldPosition(reachPosition);
       reach = Math.max(reach, raycaster.ray.origin.distanceTo(reachPosition) + 3 * root.scale.x);
@@ -2053,6 +2261,7 @@ export function createWorkspaceScene(
       .map((panel) => panel.root);
     if (inputRoot) targets.push(inputRoot);
     if (hudRoot) targets.push(hudRoot);
+    for (const widget of widgets.values()) targets.push(widget.root);
     const hits = raycaster.intersectObjects(targets, true);
     const intersection = hits.find((entry) => isControlVisible(entry.object));
     const hit = intersection?.object;
@@ -2170,7 +2379,12 @@ export function createWorkspaceScene(
           object = inputRoot;
         else if (hudRoot && target.object && hudRoot.getObjectById(target.object.id))
           object = hudRoot;
-        else if (target.terminalId && target.object) {
+        else if (target.object?.userData.widgetId) {
+          object =
+            [...widgets.values()].find(
+              (widget) => widget.root.userData.widgetId === target.object?.userData.widgetId,
+            )?.root ?? null;
+        } else if (target.terminalId && target.object) {
           const panel = panels.get(target.terminalId);
           if (panel?.root.getObjectById(target.object.id)) object = panel.root;
         }
@@ -2191,8 +2405,17 @@ export function createWorkspaceScene(
         }
       };
       const onSqueezeEnd = (): void => {
+        const object = dragStates.get(root)?.object;
         heldControllers.delete(root);
         releaseGrab(root);
+        if (object && ![...dragStates.values()].some((drag) => drag.object === object)) {
+          if (object === hudRoot) saveUIPose('hud', object);
+          else if (
+            object === inputRoot &&
+            (inputMode === 'keyboard' || inputMode === 'command-editor')
+          )
+            saveUIPose('keyboard', object);
+        }
       };
       const onConnected = (event: Event): void => {
         disconnectedControllers.delete(root);
@@ -2295,10 +2518,11 @@ export function createWorkspaceScene(
     root.position.copy(defaultPosition);
     root.rotation.y = index % 2 === 0 ? 0.06 : -0.06;
     const textureSource = createTerminalTexture(surface, renderer ?? undefined);
+    textureSource.setFiltering(mutableState.filtering);
     const texture = textureSource.texture;
     const screen = new THREE.Mesh(
       new THREE.PlaneGeometry(PANEL_WIDTH, PANEL_HEIGHT),
-      new THREE.MeshBasicMaterial({ map: texture }),
+      createTerminalMaterial(texture),
     );
     screen.name = 'terminal-surface';
     screen.userData.helpText = getControlHelp({ terminalTitle: true });
@@ -2377,6 +2601,9 @@ export function createWorkspaceScene(
       renderQuality: 'full',
       pendingQuality: null,
       qualitySince: 0,
+      filterVersion,
+      filterGaze: false,
+      filterGazeAt: 0,
     };
     syncPanelGrid(panel);
     panel.unsubscribe = surface.subscribe(() => {
@@ -2477,6 +2704,19 @@ export function createWorkspaceScene(
     for (const panel of panels.values())
       panel.surface.focus(panel.id === mutableState.focusedTerminalId);
     setSelectedVisual();
+    notify();
+  };
+  const setTerminalFiltering = (filtering: TerminalFiltering): void => {
+    const next = validateTerminalFiltering(filtering);
+    if (JSON.stringify(next) === JSON.stringify(mutableState.filtering)) return;
+    mutableState.filtering = next;
+    filterVersion += 1;
+    for (const panel of panels.values()) {
+      panel.textureSource.setFiltering(next);
+      setTerminalMaterialFiltering(panel.screen.material, next, panel.filterGaze);
+      panel.filterVersion = filterVersion;
+    }
+    if (inputRoot && inputMode === 'filtering') refreshInputRoot('filtering');
     notify();
   };
   const setBackground = (mode: BackgroundMode): void => {
@@ -2582,7 +2822,9 @@ export function createWorkspaceScene(
       !renderer?.xr.isPresenting &&
       mode !== 'panes' &&
       mode !== 'terminal' &&
-      mode !== 'arrange'
+      mode !== 'arrange' &&
+      mode !== 'widgets' &&
+      mode !== 'filtering'
     ) {
       hideInput();
       if (mode === 'commands') actions.openCommands();
@@ -2622,6 +2864,8 @@ export function createWorkspaceScene(
     syncModifierVisuals();
   };
   const hideInput = (): void => {
+    if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
+      saveUIPose('keyboard', inputRoot);
     if (inputRoot)
       inputTransform = {
         position: inputRoot.position.clone(),
@@ -2652,6 +2896,8 @@ export function createWorkspaceScene(
         : { optionalFeatures: ['local-floor'] },
     );
     activeSession = session;
+    poseRestorePending = true;
+    keyboardPoseRestored = false;
     keyboardResume = null;
     hideInput();
     inputTransform = null;
@@ -2674,6 +2920,9 @@ export function createWorkspaceScene(
     }
     notify();
     session.addEventListener('end', () => {
+      if (hudRoot) saveUIPose('hud', hudRoot);
+      if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
+        saveUIPose('keyboard', inputRoot);
       keyboardResume = null;
       endFocusMode(true);
       releaseAllMouse();
@@ -2700,6 +2949,8 @@ export function createWorkspaceScene(
         panel.renderQuality = 'full';
         panel.pendingQuality = null;
         panel.surface.setRenderQuality?.('full');
+        panel.filterGaze = false;
+        setTerminalMaterialFiltering(panel.screen.material, mutableState.filtering, false);
       }
       if (hudRoot) {
         hudRoot.position.set(0, 0.78, -1.35);
@@ -2791,6 +3042,11 @@ export function createWorkspaceScene(
       panel.root.position.copy(poses[index].position).sub(offset).applyQuaternion(yaw).add(eye);
       panel.root.quaternion.copy(yaw).multiply(poses[index].quaternion);
     });
+    keepLayoutAboveFloor(
+      ordered.map((panel) => panel.root),
+      workspaceFloorY(mutableState.background, mutableState.xrMode),
+      eye,
+    );
     for (const [controller, drag] of dragStates)
       if (ordered.some((panel) => panel.root === drag.object)) captureGrab(controller, drag.object);
     for (const [object, pair] of pairGrabs)
@@ -2845,6 +3101,8 @@ export function createWorkspaceScene(
     notify();
   };
   const resetLayout = (): void => {
+    poseStore.clear();
+    keyboardPoseRestored = true;
     endFocusMode(true);
     mutableState.arrangement = null;
     for (const panel of panels.values()) {
@@ -2878,6 +3136,13 @@ export function createWorkspaceScene(
       }
     }
     resetInputPose();
+    for (const widget of widgets.values()) placeWidget(widget);
+    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    keepLayoutAboveFloor(
+      [...panels.values()].map((panel) => panel.root),
+      workspaceFloorY(mutableState.background, mutableState.xrMode),
+      view.getWorldPosition(new THREE.Vector3()),
+    );
     if (inputRoot && inputMode === 'arrange') refreshInputRoot('arrange');
     notify();
   };
@@ -2895,7 +3160,9 @@ export function createWorkspaceScene(
     scene.updateMatrixWorld(true);
     camera.updateMatrixWorld(true);
     const result: ReturnType<WorkspaceScene['getControlHints']> = [];
-    const roots: THREE.Object3D[] = [...panels.values()].map((panel) => panel.root);
+    const roots: THREE.Object3D[] = [...panels.values()]
+      .map((panel) => panel.root)
+      .concat([...widgets.values()].map((widget) => widget.root));
     if (inputRoot) roots.push(inputRoot);
     if (hudRoot) roots.push(hudRoot);
     for (const root of roots)
@@ -2930,6 +3197,7 @@ export function createWorkspaceScene(
     canvas.removeEventListener('lostpointercapture', onPointerUp);
     renderer?.setAnimationLoop(null);
     for (const id of [...panels.keys()]) removeTerminal(id);
+    for (const kind of [...widgets.keys()]) removeWidget(kind);
     for (const {
       root,
       onSelect,
@@ -2991,6 +3259,7 @@ export function createWorkspaceScene(
     setBackground,
     setGazeInputEnabled,
     setTerminalColorMode,
+    setTerminalFiltering,
     setKeyboardBackgroundEnabled,
     setAvailablePanes,
     setQuickCommands,

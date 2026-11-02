@@ -1,4 +1,9 @@
 import * as THREE from 'three';
+import {
+  DEFAULT_TERMINAL_FILTERING,
+  type TerminalFiltering,
+  validateTerminalFiltering,
+} from '../terminal/filtering';
 
 export interface TerminalTextureSurface {
   readonly canvas: HTMLCanvasElement;
@@ -8,6 +13,7 @@ export interface TerminalTextureSurface {
 
 export interface TerminalTexture {
   readonly texture: THREE.Texture;
+  setFiltering(settings: TerminalFiltering): void;
   update(): void;
   dispose(): void;
 }
@@ -17,17 +23,50 @@ export interface TerminalTextureRenderer {
   capabilities?: Pick<THREE.WebGLRenderer['capabilities'], 'getMaxAnisotropy'>;
 }
 
-const TERMINAL_MAX_ANISOTROPY = 4;
-
-function configureTexture(texture: THREE.Texture, renderer?: TerminalTextureRenderer): void {
+function configureTexture(
+  texture: THREE.Texture,
+  settings: TerminalFiltering,
+  renderer?: TerminalTextureRenderer,
+): void {
+  const effective = resolveTextureFiltering(settings, renderer);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.generateMipmaps = true;
+  texture.minFilter = effective.minFilter;
+  texture.magFilter = effective.magFilter;
+  texture.generateMipmaps = effective.generateMipmaps;
+  texture.anisotropy = effective.anisotropy;
+}
+
+interface EffectiveTextureFiltering {
+  minFilter: THREE.MinificationTextureFilter;
+  magFilter: THREE.MagnificationTextureFilter;
+  generateMipmaps: boolean;
+  anisotropy: number;
+}
+
+function resolveTextureFiltering(
+  settings: TerminalFiltering,
+  renderer?: TerminalTextureRenderer,
+): EffectiveTextureFiltering {
+  const filtering = validateTerminalFiltering(settings);
+  const nearest = filtering.mode === 'nearest';
+  const mipmapMode = filtering.mode === 'mipmap-nearest' || filtering.mode === 'mipmap-linear';
+  const minFilter =
+    filtering.mode === 'nearest'
+      ? THREE.NearestFilter
+      : filtering.mode === 'linear'
+        ? THREE.LinearFilter
+        : filtering.mode === 'mipmap-nearest'
+          ? THREE.LinearMipmapNearestFilter
+          : THREE.LinearMipmapLinearFilter;
   const maxAnisotropy = renderer?.capabilities?.getMaxAnisotropy?.();
-  texture.anisotropy = Number.isFinite(maxAnisotropy)
-    ? Math.max(1, Math.min(TERMINAL_MAX_ANISOTROPY, maxAnisotropy as number))
-    : 1;
+  return {
+    minFilter,
+    magFilter: nearest ? THREE.NearestFilter : THREE.LinearFilter,
+    generateMipmaps: mipmapMode,
+    anisotropy: Number.isFinite(maxAnisotropy)
+      ? Math.max(1, Math.min(filtering.anisotropy, maxAnisotropy as number))
+      : 1,
+  };
 }
 
 function copyTextureSettings(from: THREE.Texture, to: THREE.Texture): void {
@@ -86,7 +125,9 @@ export function createTerminalTexture(
   } else {
     texture = new THREE.CanvasTexture(surface.canvas);
   }
-  configureTexture(texture, renderer);
+  let currentFiltering = validateTerminalFiltering(DEFAULT_TERMINAL_FILTERING);
+  let effectiveFiltering = resolveTextureFiltering(currentFiltering, renderer);
+  configureTexture(texture, currentFiltering, renderer);
   texture.needsUpdate = true;
 
   let disposed = false;
@@ -141,6 +182,21 @@ export function createTerminalTexture(
   return {
     get texture(): THREE.Texture {
       return texture;
+    },
+    setFiltering(settings: TerminalFiltering): void {
+      const nextFiltering = validateTerminalFiltering(settings);
+      const nextEffectiveFiltering = resolveTextureFiltering(nextFiltering, renderer);
+      if (
+        nextEffectiveFiltering.minFilter === effectiveFiltering.minFilter &&
+        nextEffectiveFiltering.magFilter === effectiveFiltering.magFilter &&
+        nextEffectiveFiltering.generateMipmaps === effectiveFiltering.generateMipmaps &&
+        nextEffectiveFiltering.anisotropy === effectiveFiltering.anisotropy
+      )
+        return;
+      currentFiltering = nextFiltering;
+      effectiveFiltering = nextEffectiveFiltering;
+      configureTexture(texture, currentFiltering, renderer);
+      texture.needsUpdate = true;
     },
     update(): void {
       if (disposed) return;

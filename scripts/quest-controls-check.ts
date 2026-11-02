@@ -267,7 +267,8 @@ async function main(): Promise<void> {
         ),
       ]);
     });
-    await clickControl(page, 'openInput', { mode: 'keyboard' });
+    await clickControl(page, 'openInput', { mode: 'widgets' });
+    await clickControl(page, 'mode', { mode: 'keyboard' });
     for (const paneId of paneIds) {
       const beforePixels = await panelMetrics(page, paneId);
       await page.evaluate(

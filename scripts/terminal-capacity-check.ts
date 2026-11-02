@@ -23,6 +23,7 @@ const PRIVATE_TEST = process.env.MUX_XR_PRIVATE_TEST === '1';
 const BASELINE = process.env.MUX_XR_BASELINE === '1' || process.argv.includes('--baseline');
 const COUNTS = (process.env.MUX_XR_COUNTS ?? '6,12,18').split(',').map(Number);
 const BACKGROUND = process.env.MUX_XR_BACKGROUND ?? 'black';
+const GAZE_SWEEP = process.env.MUX_XR_GAZE_SWEEP === '1';
 const PANE_IDS = Array.from({ length: 18 }, (_, index) => `%${index + 1}`);
 const COLS = 149;
 const ROWS = 54;
@@ -451,8 +452,28 @@ async function measure(
       state.sendTimes.push(Date.now());
     }, 100);
   });
-  await page.waitForTimeout(8_000);
-  timers.forEach(clearInterval);
+  try {
+    if (GAZE_SWEEP) {
+      for (let step = 0; step < 16; step += 1) {
+        await page.evaluate(
+          (id) => {
+            const w = window as unknown as FixtureWindow;
+            const screen = w.__questScene
+              .getObjectByName(`terminal-panel-${id}`)
+              ?.getObjectByName('terminal-surface');
+            if (!screen) throw new Error(`Missing gaze-sweep screen: ${id}`);
+            w.__questCamera.lookAt(screen.getWorldPosition(new w.__questThree.Vector3()));
+            w.__questCamera.updateMatrixWorld(true);
+          },
+          PANE_IDS[step % count],
+        );
+        await page.waitForTimeout(500);
+      }
+    } else await page.waitForTimeout(8_000);
+  } finally {
+    timers.forEach(clearInterval);
+  }
+
   const after = loadavg();
   const metrics = await page.evaluate(() => {
     const w = window as unknown as {
@@ -645,7 +666,11 @@ async function main(): Promise<void> {
       counts: COUNTS,
       viewport: { width: 1440, height: 1000, deviceScaleFactor: 2 },
       grid: { cols: COLS, rows: ROWS },
-      workload: { panes: 'one line at 10Hz plus appended log line at 1Hz', durationMs: 8_000 },
+      workload: {
+        panes: 'one line at 10Hz plus appended log line at 1Hz',
+        durationMs: 8_000,
+        gazeSweep: GAZE_SWEEP,
+      },
       results,
     };
     const path = join(evidence, `terminal-capacity-${BASELINE ? 'baseline' : 'candidate'}.json`);

@@ -206,3 +206,9 @@ Version availability uses a compact inline browser notice and a small action att
 ### Spatial arrangements
 
 The native Arrange surface uses four labeled choices in the existing grabbable panel style. Browser settings use a compact select and explicit Apply action that opens the 3D preview. Row, Grid, Arc and Sphere affect attached terminal roots only. Sphere occupies the forward hemisphere, with panels facing the viewer. Presets preserve physical scale and intentional input targeting. Subsequent manual placement remains under the user's control.
+
+### Widgets, placement and filtering
+
+The HUD uses Widgets in the former Keyboard slot. Clocks have dark physical bodies, crisp digital text or raised analog hands, a compact close action and the same grip gestures as other surfaces. Save keyboard/HUD transforms relative to the headset heading across sessions. Keep arranged terminal bounds above the Observatory or passthrough floor without constraining Black/Gradient layouts.
+
+Expose four terminal sampling choices and bounded anisotropy in browser/native settings, with visible current values. Sharper head-gaze rendering is independent of input gaze and selection. Use stable soft circular stars with varied size and restrained color, retaining one draw call.

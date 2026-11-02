@@ -19,6 +19,18 @@ export function getKeyHelp(key: string): string | undefined {
 export function getControlHelp(data: Record<string, unknown>): string | undefined {
   if (typeof data.key === 'string') return getKeyHelp(data.key);
   switch (data.inputAction) {
+    case 'toggleWidget':
+      return 'Show or hide this movable clock';
+    case 'closeWidget':
+      return 'Close this clock widget';
+    case 'grabWidget':
+      return undefined;
+    case 'filterMode':
+      return 'Choose terminal sampling; sharper modes may shimmer';
+    case 'filterAnisotropy':
+      return 'Choose anisotropy for mipmap modes';
+    case 'filterGaze':
+      return 'Use sharper sampling for the looked-at terminal';
     case 'newCommand':
       return 'Create a saved quick command';
     case 'commandField':
@@ -67,9 +79,13 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
           ? 'Browse workspaces, sessions, windows and panes'
           : data.mode === 'terminal'
             ? 'Open terminal grid and color settings'
-            : data.mode === 'arrange'
-              ? 'Arrange attached terminals in a spatial pattern'
-              : 'Open saved quick commands';
+            : data.mode === 'widgets'
+              ? 'Open movable digital and analog clocks'
+              : data.mode === 'filtering'
+                ? 'Choose filtering and viewed-terminal clarity'
+                : data.mode === 'arrange'
+                  ? 'Arrange attached terminals in a spatial pattern'
+                  : 'Open saved quick commands';
     case 'exit':
       return 'Exit immersive mode or the 3D preview';
     case 'close':

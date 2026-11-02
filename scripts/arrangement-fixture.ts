@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { PaneDescriptor, PanelArrangement, TerminalSurface } from '../src/contracts';
 import { createDemoSurface } from '../src/demo';
 import { createWorkspaceScene } from '../src/xr';
+import { workspaceFloorY } from '../src/xr/floor-layout';
 import { waitForLabelSync } from '../src/xr/labels';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
 
@@ -117,12 +118,27 @@ const assertPanelEnvelopesDoNotOverlap = (pattern: PanelArrangement): void => {
     return root;
   });
   const projected = roots.map(projectedEnvelope);
+  for (const root of roots) {
+    const center = new THREE.Box3().setFromObject(root).getCenter(new THREE.Vector3());
+    const towardEye = scene.camera.getWorldPosition(new THREE.Vector3()).sub(center).normalize();
+    const panelFront = new THREE.Vector3(0, 0, 1).transformDirection(root.matrixWorld);
+    if (panelFront.dot(towardEye) < 0.95)
+      throw new Error(`panel is not viewer-facing after ${pattern}: ${root.name}`);
+  }
   for (let first = 0; first < roots.length; first += 1) {
     for (let second = first + 1; second < roots.length; second += 1) {
       if (projectedPolygonsOverlap(projected[first], projected[second]))
         throw new Error(`actual panel envelopes overlap after ${pattern}: ${first}/${second}`);
     }
   }
+};
+const actualWorldBounds = (): THREE.Box3 => {
+  const bounds = new THREE.Box3().makeEmpty();
+  for (const surface of surfaces) {
+    const root = scene.scene.getObjectByName(`terminal-panel-${surface.pane.id}`);
+    if (root) bounds.union(new THREE.Box3().setFromObject(root));
+  }
+  return bounds;
 };
 const snapshot = (): Record<string, unknown> => ({
   arrangement: scene.state.arrangement,
@@ -233,6 +249,35 @@ const run = async (): Promise<void> => {
     )
       throw new Error(`native arrangement changed terminal grid for ${pattern}`);
     assertPanelEnvelopesDoNotOverlap(pattern);
+    const observatoryFloorY = workspaceFloorY('observatory', scene.state.xrMode);
+    const observatoryBounds = actualWorldBounds();
+    if (observatoryFloorY === null || observatoryBounds.min.y < observatoryFloorY + 0.06 - 1e-5)
+      throw new Error(`observatory floor clearance failed after ${pattern}`);
+    const floorChecks: Record<string, unknown>[] = [
+      {
+        background: 'observatory',
+        floorY: observatoryFloorY,
+        worldBoundsMinY: observatoryBounds.min.y,
+        floorClearance: observatoryBounds.min.y - observatoryFloorY,
+      },
+    ];
+    for (const background of ['black', 'gradient'] as const) {
+      scene.setBackground(background);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      scene.showInput('arrange');
+      await settleLabels();
+      if (!clickHint(pattern))
+        throw new Error(`native arrange control not visible for ${background}/${pattern}`);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      scene.hideInput();
+      assertPanelEnvelopesDoNotOverlap(pattern);
+      const floorY = workspaceFloorY(background, scene.state.xrMode);
+      const worldBounds = actualWorldBounds();
+      if (floorY !== null) throw new Error(`unexpected floor for ${background}`);
+      floorChecks.push({ background, floorY, worldBoundsMinY: worldBounds.min.y });
+    }
+    scene.setBackground('observatory');
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     scene.showInput('terminal');
     await settleLabels();
     if (scene.state.inputTargetId !== panes[0].id)
@@ -253,6 +298,7 @@ const run = async (): Promise<void> => {
       after,
       hintLabels,
       envelopesChecked: true,
+      floorChecks,
       inputTargetAndGridChecked: true,
     });
   }

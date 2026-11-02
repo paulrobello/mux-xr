@@ -202,12 +202,141 @@ function pressFocusButton(gamepad: Gamepad, time: number): void {
 describe('native XR controller event routing', () => {
   beforeEach(() => {
     fakeXR.presenting = true;
+    localStorage.removeItem('mux-xr:ui-poses:v1');
     fakeXR.controllers.forEach((controller) => {
       const object = controller as THREE.Group;
       object.position.set(0, 0, 0);
       object.visible = true;
       object.rotation.set(0, 0, 0);
     });
+  });
+
+  it('replaces the HUD keyboard shortcut with Widgets and closes clocks without typing', () => {
+    const { workspace, actions, container } = fixture();
+    const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+    const modes = hud?.children.map((object) => object.userData.mode);
+    expect(modes).toContain('widgets');
+    expect(modes).not.toContain('keyboard');
+    hit(workspace, { inputAction: 'openInput', mode: 'widgets' });
+    hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'digital-clock' });
+    expect(workspace.state.widgets).toEqual(['digital-clock']);
+    const root = objectWithData(workspace, {
+      widgetKind: 'digital-clock',
+      inputAction: 'grabWidget',
+    });
+    hit(workspace, { inputAction: 'grabWidget', widgetKind: 'digital-clock' }, 'squeezestart');
+    const initial = root.getWorldPosition(new THREE.Vector3());
+    (fakeXR.controllers[0] as THREE.Group).position.x += 0.2;
+    fakeXR.frame?.(16);
+    expect(root.getWorldPosition(new THREE.Vector3()).distanceTo(initial)).toBeGreaterThan(0.1);
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
+    hit(workspace, { inputAction: 'closeWidget', widgetKind: 'digital-clock' });
+    expect(workspace.state.widgets).toEqual([]);
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    expect(actions.sendText).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('pair-scales a clock, recovers it and disposes it without terminal traffic', () => {
+    const { workspace, actions, left, container } = fixture();
+    workspace.showInput('widgets');
+    hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'analog-clock' });
+    const face = objectWithData(workspace, {
+      widgetKind: 'analog-clock',
+      inputAction: 'grabWidget',
+    });
+    const close = objectWithData(workspace, {
+      widgetKind: 'analog-clock',
+      inputAction: 'closeWidget',
+    });
+    let root = face;
+    while (root.parent && !root.userData.scaleLimits) root = root.parent;
+    connectController(0);
+    connectController(1);
+    aimController(fakeXR.controllers[0] as THREE.Group, face);
+    aimController(fakeXR.controllers[1] as THREE.Group, close);
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezestart' } as never);
+    (fakeXR.controllers[1] as THREE.Group).dispatchEvent({ type: 'squeezestart' } as never);
+    const scale = root.scale.x;
+    (fakeXR.controllers[0] as THREE.Group).position.x -= 0.1;
+    (fakeXR.controllers[1] as THREE.Group).position.x += 0.1;
+    fakeXR.frame?.(16);
+    expect(root.scale.x).toBeGreaterThan(scale);
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
+    (fakeXR.controllers[1] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
+    workspace.resetLayout();
+    expect(root.scale.x).toBe(1);
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    expect(left.resizeGrid).not.toHaveBeenCalled();
+    workspace.dispose();
+    expect(root.children).toHaveLength(0);
+    container.remove();
+  });
+
+  it('saves final UI grip poses and saves again when XR ends after presentation stops', async () => {
+    const listeners: Array<() => void> = [];
+    const session = {
+      addEventListener: (_type: string, listener: () => void) => listeners.push(listener),
+      end: async () => {
+        fakeXR.presenting = false;
+        listeners.forEach((listener) => {
+          listener();
+        });
+      },
+    };
+    vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+    const { workspace, container } = fixture();
+    await workspace.enterXR('vr');
+    fakeXR.frame?.(0);
+    workspace.showInput('keyboard');
+    hit(workspace, { inputAction: 'key', key: 'a' }, 'squeezestart');
+    (fakeXR.controllers[0] as THREE.Group).position.x += 0.2;
+    fakeXR.frame?.(16);
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
+    const saved = JSON.parse(localStorage.getItem('mux-xr:ui-poses:v1') ?? '{}');
+    expect(saved.poses.keyboard.position).toHaveLength(3);
+    const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+    if (!hud) throw new Error('HUD missing');
+    hud.position.x = 0.37;
+    hud.scale.setScalar(0.7);
+    hit(workspace, { inputAction: 'exit' });
+    await Promise.resolve();
+    const ended = JSON.parse(localStorage.getItem('mux-xr:ui-poses:v1') ?? '{}');
+    expect(ended.poses.hud.scale).toBeCloseTo(0.7);
+    expect(ended.poses.keyboard).toBeDefined();
+    workspace.dispose();
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it('opens native Widgets and Filtering in desktop preview without a keyboard drawer', () => {
+    const { workspace, actions, container } = fixture();
+    fakeXR.presenting = false;
+    workspace.showInput('widgets');
+    expect(workspace.scene.getObjectByName('xr-widgets-controls')).toBeDefined();
+    workspace.showInput('filtering');
+    expect(workspace.scene.getObjectByName('xr-filtering-controls')).toBeDefined();
+    expect(actions.openKeyboard).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('reverses normal-grip yaw while retaining local pitch behavior', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    connectController(0, [0, 0, 1, 0]);
+    hit(workspace, { inputAction: 'key', key: 'a' }, 'squeezestart');
+    const before = keyboard.quaternion.clone();
+    fakeXR.frame?.(0);
+    const expected = before.multiply(
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.9 / 60),
+    );
+    expect(keyboard.quaternion.angleTo(expected)).toBeLessThan(1e-6);
+    workspace.dispose();
+    container.remove();
   });
 
   it('routes stream controls separately from closing the terminal view', () => {
@@ -1023,7 +1152,7 @@ describe('native XR controller event routing', () => {
   it('retargets keyboard input on explicit selection and never activates a key with grip', () => {
     const { workspace, actions, container } = fixture();
     workspace.selectTerminal('pane-a');
-    hit(workspace, { inputAction: 'openInput', mode: 'keyboard' });
+    workspace.showInput('keyboard');
     workspace.selectTerminal('pane-b');
     vi.mocked(actions.sendKey).mockClear();
     hit(workspace, { inputAction: 'key', key: 'a' }, 'squeezestart');
@@ -1062,7 +1191,7 @@ describe('native XR controller event routing', () => {
   it('updates native key captions for Shift and restores them after input', () => {
     const { workspace, actions, container } = fixture();
     workspace.selectTerminal('pane-a');
-    hit(workspace, { inputAction: 'openInput', mode: 'keyboard' });
+    workspace.showInput('keyboard');
     const label = (key: string): string | undefined => {
       let found: string | undefined;
       workspace.scene.traverse((object) => {
@@ -1474,7 +1603,7 @@ describe('native XR controller event routing', () => {
       'xr-workspace-hud',
       undefined,
       { inputAction: 'openInput', mode: 'commands' },
-      { inputAction: 'openInput', mode: 'keyboard' },
+      { inputAction: 'openInput', mode: 'widgets' },
     ],
   ])(
     'pair-grips the %s root without activating controls or resizing PTY',
@@ -1637,7 +1766,7 @@ describe('native XR controller event routing', () => {
     const axis = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion);
     const position = keyboard.position.clone();
     fakeXR.frame?.(0);
-    const expected = new THREE.Quaternion().setFromAxisAngle(axis, 0.9 / 60).multiply(before);
+    const expected = new THREE.Quaternion().setFromAxisAngle(axis, -0.9 / 60).multiply(before);
     expect(keyboard.quaternion.angleTo(expected)).toBeLessThan(0.000001);
     expect(keyboard.position.distanceTo(position)).toBeLessThan(0.000001);
     expect(actions.sendKey).not.toHaveBeenCalled();

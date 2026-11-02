@@ -194,6 +194,7 @@ function applySettings(settings: WorkspaceSettings): void {
     scene.setTerminalColorMode(settings.colorMode);
     scene.setKeyboardBackgroundEnabled(settings.keyboardBackground);
     scene.setGazeInputEnabled(settings.gazeInput);
+    scene.setTerminalFiltering(settings.filtering);
     scene.setBackground(settings.background);
     for (const surface of surfaces.values()) surface.setColorMode(settings.colorMode);
   } finally {
@@ -319,6 +320,10 @@ ui = mountWorkspaceUI(app, {
     desktop.showPreview();
     scene.arrangeTerminals(pattern);
   },
+  onWidgets: () => {
+    desktop.showPreview();
+    scene.showInput('widgets');
+  },
   onMoveLayout: (direction) => {
     desktop.showPreview();
     scene.moveLayoutDepth(direction);
@@ -338,6 +343,7 @@ const stopPresentation = scene.subscribe((state) => {
     ui.setGazeInputEnabled(state.gazeInputEnabled);
     ui.setKeyboardBackgroundEnabled(state.keyboardBackgroundEnabled, false);
     ui.setTerminalColorMode(state.terminalColorMode, false);
+    ui.setTerminalFiltering(state.filtering, true);
     if (state.arrangement && state.arrangement !== ui.getSettings().arrangement)
       ui.setArrangement(state.arrangement);
   }

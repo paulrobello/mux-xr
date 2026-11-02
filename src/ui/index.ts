@@ -10,6 +10,11 @@ import type {
 } from '../contracts';
 import { getKeyHelp } from '../control-help';
 import { createModifierState, keyboardDimensions, keyboardKeys } from '../keyboard';
+import {
+  DEFAULT_TERMINAL_FILTERING,
+  type TerminalFiltering,
+  validateTerminalFiltering,
+} from '../terminal/filtering';
 import { terminalKeyLabel } from '../terminal/protocol';
 
 export type { SemanticKey } from '../keyboard';
@@ -41,6 +46,7 @@ export interface UICallbacks {
   onReloadApp?(): void;
   onArrange?(pattern: PanelArrangement): void;
   onMoveLayout?(direction: number): void;
+  onWidgets?(): void;
 }
 
 export interface WorkspaceSettings {
@@ -51,6 +57,7 @@ export interface WorkspaceSettings {
   colorMode: TerminalColorMode;
   keyboardBackground: boolean;
   arrangement: PanelArrangement;
+  filtering: TerminalFiltering;
 }
 
 export interface WorkspaceUI {
@@ -78,6 +85,7 @@ export interface WorkspaceUI {
   getCommandsForPane(paneId: string): QuickCommand[];
   setUpdateAvailable(available: boolean): void;
   setArrangement(pattern: PanelArrangement, persist?: boolean): void;
+  setTerminalFiltering(filtering: TerminalFiltering, persist?: boolean): void;
 }
 
 export interface CommandStore {
@@ -95,6 +103,7 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   colorMode: 'comfort',
   keyboardBackground: true,
   arrangement: 'arc',
+  filtering: { ...DEFAULT_TERMINAL_FILTERING },
 };
 
 export function workspaceScope(endpoint: string, workspaceId: string): string {
@@ -132,6 +141,7 @@ export function validateSettings(value: unknown): WorkspaceSettings {
         ? candidate.colorMode
         : 'comfort',
     keyboardBackground: candidate.keyboardBackground !== false,
+    filtering: validateTerminalFiltering(candidate.filtering),
     arrangement:
       candidate.arrangement === 'row' ||
       candidate.arrangement === 'grid' ||
@@ -312,6 +322,13 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       '<span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button>';
     root.querySelector('.stage-head')?.after(updateNotice);
   }
+  const widgetsButton = document.createElement('button');
+  widgetsButton.className = 'secondary';
+  widgetsButton.dataset.action = 'widgets';
+  widgetsButton.textContent = 'Widgets';
+  widgetsButton.title = 'Open movable clock widgets';
+  widgetsButton.addEventListener('click', () => callbacks.onWidgets?.());
+  root.querySelector('.stage-tools')?.append(widgetsButton);
   const settingsPanel = root.querySelector<HTMLElement>('[data-settings]');
   root.querySelector('[data-gaze]')?.parentElement?.remove();
   let arrangementSelect: HTMLSelectElement | null = null;
@@ -340,6 +357,37 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       keyboardBackground,
       settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
     );
+    const filteringControls = document.createElement('div');
+    filteringControls.innerHTML =
+      '<label>Terminal filtering<select data-filter-mode aria-label="Terminal filtering"><option value="nearest">Nearest pixels</option><option value="linear">Linear (sharp)</option><option value="mipmap-nearest">Mipmap bilinear</option><option value="mipmap-linear">Mipmap trilinear (smooth)</option></select></label><label>Anisotropy (mipmap modes)<select data-filter-anisotropy aria-label="Terminal anisotropy"><option value="1">Off</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option><option value="16">16x</option></select></label><label class="check"><input type="checkbox" data-filter-gaze> Sharper gazed terminal <span>Use sharp linear sampling while looking at a terminal.</span></label>';
+    settingsPanel.insertBefore(
+      filteringControls,
+      settingsPanel.querySelector('[data-action="passthrough"]'),
+    );
+    const filterMode = filteringControls.querySelector<HTMLSelectElement>('[data-filter-mode]');
+    const filterAnisotropy = filteringControls.querySelector<HTMLSelectElement>(
+      '[data-filter-anisotropy]',
+    );
+    const filterGaze = filteringControls.querySelector<HTMLInputElement>('[data-filter-gaze]');
+    if (!filterMode || !filterAnisotropy || !filterGaze)
+      throw new Error('Filtering controls missing');
+    const changeFiltering = (): void => {
+      settings = {
+        ...settings,
+        filtering: validateTerminalFiltering({
+          mode: filterMode.value,
+          anisotropy: Number(filterAnisotropy.value),
+          gazeClarity: filterGaze.checked,
+        }),
+      };
+      saveSettings();
+    };
+    filterMode.addEventListener('change', changeFiltering);
+    filterAnisotropy.addEventListener('change', changeFiltering);
+    filterGaze.addEventListener('change', changeFiltering);
+    filterMode.value = settings.filtering.mode;
+    filterAnisotropy.value = String(settings.filtering.anisotropy);
+    filterGaze.checked = settings.filtering.gazeClarity;
     const grid = document.createElement('div');
     grid.dataset.gridControls = 'true';
     grid.innerHTML =
@@ -949,6 +997,17 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     setKeyboardBackgroundEnabled(enabled, persist = true) {
       settings = { ...settings, keyboardBackground: enabled };
       qs<HTMLInputElement>('[data-keyboard-background]').checked = enabled;
+      if (persist) saveSettings();
+    },
+    setTerminalFiltering(filtering, persist = false) {
+      const next = validateTerminalFiltering(filtering);
+      if (JSON.stringify(settings.filtering) === JSON.stringify(next)) return;
+      settings = { ...settings, filtering: next };
+      qs<HTMLSelectElement>('[data-filter-mode]').value = settings.filtering.mode;
+      qs<HTMLSelectElement>('[data-filter-anisotropy]').value = String(
+        settings.filtering.anisotropy,
+      );
+      qs<HTMLInputElement>('[data-filter-gaze]').checked = settings.filtering.gazeClarity;
       if (persist) saveSettings();
     },
     setArrangement(pattern, persist = true) {

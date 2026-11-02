@@ -168,6 +168,114 @@ describe('mux XR local UI state', () => {
     localStorage.clear();
   });
 
+  it('exposes all terminal filtering controls, persists them, and restores their live state', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const changes: string[] = [];
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onSettingsChange: (settings) => changes.push(JSON.stringify(settings.filtering)),
+    });
+    expect(ui.getSettings().filtering).toEqual({
+      mode: 'mipmap-linear',
+      anisotropy: 4,
+      gazeClarity: true,
+    });
+    const mode = query<HTMLSelectElement>(root, '[data-filter-mode]');
+    const anisotropy = query<HTMLSelectElement>(root, '[data-filter-anisotropy]');
+    const gaze = query<HTMLInputElement>(root, '[data-filter-gaze]');
+    expect([...mode.options].map((option) => option.value)).toEqual([
+      'nearest',
+      'linear',
+      'mipmap-nearest',
+      'mipmap-linear',
+    ]);
+    for (const value of ['nearest', 'linear', 'mipmap-nearest', 'mipmap-linear']) {
+      mode.value = value;
+      mode.dispatchEvent(new Event('change'));
+      expect(ui.getSettings().filtering.mode).toBe(value);
+    }
+    for (const value of ['1', '2', '4', '8', '16']) {
+      anisotropy.value = value;
+      anisotropy.dispatchEvent(new Event('change'));
+      expect(ui.getSettings().filtering.anisotropy).toBe(Number(value));
+    }
+    gaze.checked = false;
+    gaze.dispatchEvent(new Event('change'));
+    expect(ui.getSettings().filtering.gazeClarity).toBe(false);
+    ui.destroy();
+    const restored = mountWorkspaceUI(root, { onConnect: () => undefined });
+    expect(query<HTMLSelectElement>(root, '[data-filter-mode]').value).toBe('mipmap-linear');
+    expect(query<HTMLSelectElement>(root, '[data-filter-anisotropy]').value).toBe('16');
+    expect(query<HTMLInputElement>(root, '[data-filter-gaze]').checked).toBe(false);
+    expect(restored.getSettings().filtering).toEqual({
+      mode: 'mipmap-linear',
+      anisotropy: 16,
+      gazeClarity: false,
+    });
+    expect(changes.length).toBe(10);
+    restored.destroy();
+    localStorage.clear();
+  });
+
+  it('defaults missing or invalid persisted filtering without disturbing other settings', () => {
+    localStorage.setItem(
+      'mux-xr:settings:v1',
+      JSON.stringify({
+        version: 1,
+        endpoint: 'WSS://example.test',
+        background: 'black',
+        gazeInput: true,
+        colorMode: 'original',
+        keyboardBackground: false,
+        arrangement: 'grid',
+      }),
+    );
+    expect(
+      validateSettings(JSON.parse(localStorage.getItem('mux-xr:settings:v1') ?? '{}')).filtering,
+    ).toEqual({
+      mode: 'mipmap-linear',
+      anisotropy: 4,
+      gazeClarity: true,
+    });
+    const root = document.createElement('div');
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    expect(ui.getSettings().endpoint).toBe('WSS://example.test');
+    ui.destroy();
+    localStorage.setItem(
+      'mux-xr:settings:v1',
+      JSON.stringify({
+        version: 1,
+        endpoint: 'WSS://example.test',
+        background: 'black',
+        filtering: { mode: 'invalid', anisotropy: 999, gazeClarity: 'yes' },
+      }),
+    );
+    const restored = mountWorkspaceUI(root, { onConnect: () => undefined });
+    expect(restored.getSettings().filtering).toEqual({
+      mode: 'mipmap-linear',
+      anisotropy: 16,
+      gazeClarity: true,
+    });
+    expect(restored.getSettings().background).toBe('black');
+    restored.destroy();
+    localStorage.clear();
+  });
+
+  it('routes the Widgets control to onWidgets independently of desktop keyboard input', () => {
+    const root = document.createElement('div');
+    const onWidgets = vi.fn();
+    const onSendKey = vi.fn();
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined, onWidgets, onSendKey });
+    query<HTMLButtonElement>(root, '[data-action="widgets"]').click();
+    expect(onWidgets).toHaveBeenCalledOnce();
+    expect(onSendKey).not.toHaveBeenCalled();
+    query<HTMLButtonElement>(root, '[data-action="keyboard"]').click();
+    expect(onWidgets).toHaveBeenCalledOnce();
+    expect(onSendKey).not.toHaveBeenCalled();
+    ui.destroy();
+  });
+
   it('returns command persistence status and writes workspace scope independently of visible scope', () => {
     localStorage.clear();
     const root = document.createElement('div');
