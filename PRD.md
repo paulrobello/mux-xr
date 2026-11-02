@@ -45,6 +45,8 @@ Grip-only thumbstick X yaws an XR root and Y pitches it, with no Y translation. 
 
 Spatial arrangement presets are available for currently attached terminals through browser settings and the native Arrange menu: Row, Grid, Arc and Sphere. Sphere uses a front hemisphere with level, inward-facing panels. Explicit application uses the current viewer position and yaw, preserves physical sizes/text zoom/input focus/PTY grids, rebases held panels, and leaves later manual changes intact. The chosen pattern is a saved local preference. Adding another pane does not automatically rearrange existing panels. Named pose libraries and animated restore remain separate roadmap work.
 
+Right-controller B toggles temporary Focus mode for the aimed terminal, falling back to the active pane. The pane moves to a size-fitted position centered on the current view and remains world-stable. Other terminals fade out and reject ray/gaze input while the keyboard and HUD remain available. Exiting restores the pane's exact original transform and fades other terminals in. Grip suppresses B activation. Arrangement/recenter actions and XR exit restore visibility without changing terminal grids or processes.
+
 ### Upstream Dependencies
 
 - [Full hierarchy/layout streaming](https://board.example.test/board?card=01a19579caef72cb9ccc955871ab48c7): implemented in core `95dbb69f` and published in 0.76.0; metadata-only selector is `/ws?metadata=1`. Required for production hierarchy navigation. Integrate that supported contract rather than a second mux-control bridge.

@@ -73,6 +73,8 @@ Terminal grid size is changed only from the selected pane in browser Workspace S
 
 Terminal windows can shrink to 0.3×, half the previous 0.6× minimum. The upper limit stays 1.8×. The HUD and input surfaces use matching background select menus with evenly spaced options and a shared saved value.
 
+In XR, press **B on the right controller** while pointing at a terminal to enter Focus mode. With no terminal under the ray, it uses the active pane. The pane moves in front of your current view at a distance fitted to its size, while the other terminals fade out. Its placement stays fixed as your head moves, and the keyboard and HUD remain available. Press B again to restore its exact original position, rotation and scale and fade the other terminals back in. B is ignored while either grip is held. Selecting a different pane, applying an arrangement, recentering or leaving XR safely ends Focus mode. This never resizes the terminal grid or stops its process.
+
 ## Terminal mouse input
 
 For TUIs that enable mouse tracking, point at the terminal and press the controller trigger for a left click. Hold the trigger and move the ray to drag, then release it. Movement is sent only over the captured pane, and the release stays with that pane. Grip suppresses mouse input and safely ends an existing drag before window manipulation. Desktop terminal canvases also support pointer click/drag. Mouse coordinates follow the remote grid, physical transforms and local text zoom. Disabled tracking, read-only and disconnected streams reject mouse input.

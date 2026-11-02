@@ -176,16 +176,27 @@ function aimControllerAtScreen(
   controller.quaternion.copy(orientation);
 }
 
-function connectController(index: number, axes = [0, 0, 0, 0]): Gamepad {
+function connectController(
+  index: number,
+  axes = [0, 0, 0, 0],
+  handedness: 'left' | 'right' | 'none' = 'right',
+): Gamepad {
   const gamepad = {
     axes,
-    buttons: [{ pressed: false }, { pressed: false }, { pressed: false }, { pressed: false }],
+    buttons: Array.from({ length: 6 }, () => ({ pressed: false })),
   } as unknown as Gamepad;
   (fakeXR.controllers[index] as THREE.Group).dispatchEvent({
     type: 'connected',
-    data: { gamepad },
+    data: { gamepad, handedness },
   } as never);
   return gamepad;
+}
+
+function pressFocusButton(gamepad: Gamepad, time: number): void {
+  (gamepad.buttons[5] as { pressed: boolean }).pressed = true;
+  fakeXR.frame?.(time);
+  (gamepad.buttons[5] as { pressed: boolean }).pressed = false;
+  fakeXR.frame?.(time + 16);
 }
 
 describe('native XR controller event routing', () => {
@@ -1738,5 +1749,156 @@ describe('native XR controller event routing', () => {
     expect(keyboard.position.distanceTo(released)).toBeLessThan(0.000001);
     workspace.dispose();
     container.remove();
+  });
+
+  it('assigns focus mode to the right-handed controller regardless of connection slot', () => {
+    const { workspace, container } = fixture();
+    const right = connectController(1, [0, 0, 0, 0], 'right');
+    connectController(0, [0, 0, 0, 0], 'left');
+    const screen = workspace.scene
+      .getObjectByName('terminal-panel-pane-b')
+      ?.getObjectByName('terminal-surface');
+    if (!screen) throw new Error('Pane B screen missing');
+    aimControllerAtScreen(fakeXR.controllers[1] as THREE.Group, screen, new THREE.Vector3());
+    pressFocusButton(right, 100);
+    expect(workspace.state.focusModeTerminalId).toBe('pane-b');
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('uses a B-button edge, ignores grip-suppressed presses, and exits without an aim hit', () => {
+    const { workspace, container } = fixture();
+    const gamepad = connectController(0);
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    const screen = workspace.scene.getObjectByName('terminal-surface');
+    if (!screen) throw new Error('Terminal screen missing');
+    aimControllerAtScreen(controller, screen, new THREE.Vector3());
+    (gamepad.buttons[1] as { pressed: boolean }).pressed = true;
+    (gamepad.buttons[5] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(100);
+    expect(workspace.state.focusModeTerminalId).toBeNull();
+    (gamepad.buttons[1] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(116);
+    expect(workspace.state.focusModeTerminalId).toBeNull();
+    (gamepad.buttons[5] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(132);
+    (gamepad.buttons[5] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(148);
+    expect(workspace.state.focusModeTerminalId).toBe('pane-a');
+    fakeXR.frame?.(164);
+    expect(workspace.state.focusModeTerminalId).toBe('pane-a');
+    controller.position.set(100, 100, 100);
+    (gamepad.buttons[5] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(180);
+    (gamepad.buttons[5] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(196);
+    expect(workspace.state.focusModeTerminalId).toBeNull();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('preserves keyboard targeting while hiding other roots from input and gaze', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    expect(keyboard).toBeDefined();
+    const gamepad = connectController(0);
+    workspace.toggleFocusMode('pane-a');
+    expect(workspace.state.focusModeTerminalId).toBe('pane-a');
+    expect(workspace.state.inputTargetId).toBe('pane-a');
+    expect(keyboard?.visible).toBe(true);
+    const hiddenRoot = workspace.scene.getObjectByName('terminal-panel-pane-b');
+    expect(hiddenRoot?.userData.focusHidden).toBe(true);
+    for (let frame = 0; frame < 20; frame += 1) fakeXR.frame?.(frame * 20);
+    expect(hiddenRoot?.visible).toBe(false);
+    workspace.toggleFocusMode();
+    expect(workspace.state.focusModeTerminalId).toBeNull();
+    expect(hiddenRoot?.visible).toBe(true);
+    for (let frame = 20; frame < 40; frame += 1) fakeXR.frame?.(frame * 20);
+    expect(hiddenRoot?.userData.focusHidden).toBeFalsy();
+    expect(gamepad.buttons[5]?.pressed).toBe(false);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('places focus relative to the viewer once without changing scale or remote grids', () => {
+    const { workspace, actions, container } = fixture();
+    workspace.camera.position.set(3, 1.8, 2);
+    workspace.camera.rotation.set(-0.25, Math.PI / 3, 0, 'YXZ');
+    const root = workspace.scene.getObjectByName('terminal-panel-pane-b');
+    if (!root) throw new Error('Pane B root missing');
+    root.scale.setScalar(0.6);
+    const original = root.position.clone();
+    workspace.toggleFocusMode('pane-b');
+    for (let frame = 0; frame < 20; frame += 1) fakeXR.frame?.(frame * 20);
+    const focused = root.position.clone();
+    expect(focused.distanceTo(original)).toBeGreaterThan(1);
+    expect(root.scale.x).toBe(0.6);
+    expect(
+      root
+        .getWorldDirection(new THREE.Vector3())
+        .dot(workspace.camera.getWorldDirection(new THREE.Vector3()).negate()),
+    ).toBeCloseTo(1);
+    const local = focused
+      .clone()
+      .sub(workspace.camera.position)
+      .applyQuaternion(workspace.camera.quaternion.clone().invert());
+    expect(Math.abs(local.x)).toBeLessThan(0.1);
+    expect(Math.abs(local.y)).toBeLessThan(0.1);
+    expect(local.z).toBeLessThan(-0.75);
+    workspace.camera.position.x += 2;
+    workspace.camera.rotation.y += 0.5;
+    fakeXR.frame?.(1000);
+    expect(root.position).toEqual(focused);
+    expect(actions.resizeGrid).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('restores the exact pane transform after focus manipulation and target removal', () => {
+    const { workspace, container } = fixture();
+    const root = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    if (!root) throw new Error('Pane A root missing');
+    const position = root.position.clone();
+    const quaternion = root.quaternion.clone();
+    const scale = root.scale.clone();
+    workspace.toggleFocusMode('pane-a');
+    root.position.x += 0.4;
+    root.quaternion.multiply(
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.3),
+    );
+    root.scale.multiplyScalar(1.3);
+    workspace.toggleFocusMode();
+    expect(root.position.distanceTo(position)).toBeLessThan(1e-6);
+    expect(root.quaternion.angleTo(quaternion)).toBeLessThan(1e-6);
+    expect(root.scale.distanceTo(scale)).toBeLessThan(1e-6);
+    workspace.toggleFocusMode('pane-a');
+    workspace.removeTerminal('pane-a');
+    expect(workspace.state.focusModeTerminalId).toBeNull();
+    expect(workspace.scene.getObjectByName('terminal-panel-pane-b')?.visible).toBe(true);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('recovers all roots when XR presentation ends', async () => {
+    const endListeners: Array<() => void> = [];
+    const session = {
+      addEventListener: (_type: string, listener: () => void) => endListeners.push(listener),
+      end: vi.fn(async () => {
+        endListeners.forEach((listener) => {
+          listener();
+        });
+      }),
+    };
+    vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+    const { workspace, container } = fixture();
+    await workspace.enterXR('vr');
+    workspace.toggleFocusMode('pane-a');
+    await workspace.exitXR();
+    expect(workspace.state.focusModeTerminalId).toBeNull();
+    expect(workspace.scene.getObjectByName('terminal-panel-pane-b')?.visible).toBe(true);
+    workspace.dispose();
+    container.remove();
+    vi.unstubAllGlobals();
   });
 });

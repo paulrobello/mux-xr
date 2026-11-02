@@ -22,6 +22,7 @@ import {
 } from './command-editor';
 import { createFrameCounter } from './fps';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
+import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
 import { createTerminalTexture, type TerminalTexture } from './terminal-texture';
 
@@ -48,6 +49,7 @@ export interface WorkspaceSceneState {
   fps: number | null;
   xrMode: 'desktop' | 'vr' | 'ar';
   focusedTerminalId: string | null;
+  focusModeTerminalId: string | null;
   rendererError: string | null;
   inputTargetId: string | null;
   inputTargetTitle: string | null;
@@ -78,6 +80,7 @@ export interface WorkspaceScene {
   setNotice(message: string | null): void;
   resetLayout(): void;
   arrangeTerminals(pattern: PanelArrangement): void;
+  toggleFocusMode(id?: string): void;
   scaleSelectedPanel(direction: number): void;
   getControlHints(): Array<{
     label: string;
@@ -373,7 +376,7 @@ function createKeyStrip(): THREE.Group {
 
 function isControlVisible(object: THREE.Object3D): boolean {
   for (let current: THREE.Object3D | null = object; current; current = current.parent)
-    if (!current.visible) return false;
+    if (!current.visible || current.userData.focusHidden) return false;
   return true;
 }
 
@@ -435,6 +438,7 @@ export function createWorkspaceScene(
   scene.add(ambient, key);
   const observatory = createObservatory(scene);
   const panels = new Map<string, TerminalPanel>();
+  const paneFocus = createPaneFocus();
   const listeners = new Set<(state: Readonly<WorkspaceSceneState>) => void>();
   const mutableState: WorkspaceSceneState = {
     selectedTerminalId: null,
@@ -445,6 +449,7 @@ export function createWorkspaceScene(
     fps: null,
     xrMode: 'desktop',
     focusedTerminalId: null,
+    focusModeTerminalId: null,
     rendererError,
     inputTargetId: null,
     inputTargetTitle: null,
@@ -540,6 +545,8 @@ export function createWorkspaceScene(
   };
   const availablePanes: PaneDescriptor[] = [];
   const controllerGamepads = new Map<THREE.Group, Gamepad>();
+  const controllerHandedness = new Map<THREE.Group, string>();
+  const focusButtonDown = new Set<THREE.Group>();
   const disconnectedControllers = new Set<THREE.Group>();
   const heldControllers = new Set<THREE.Group>();
   const mouseCaptures = new Map<
@@ -816,6 +823,7 @@ export function createWorkspaceScene(
         ? 1 / 60
         : THREE.MathUtils.clamp((time - previousRenderTime) / 1000, 0, 0.05);
     previousRenderTime = time;
+    paneFocus.update(deltaSeconds);
     const fps = frameCounter.sample(time);
     if (fps !== null) {
       mutableState.fps = fps;
@@ -833,6 +841,25 @@ export function createWorkspaceScene(
         );
     }
     if (renderer?.xr.isPresenting) {
+      for (const controller of controllerRoots) {
+        if (controllerHandedness.get(controller) !== 'right') continue;
+        const pressed = Boolean(controllerGamepads.get(controller)?.buttons[5]?.pressed);
+        const wasPressed = focusButtonDown.has(controller);
+        if (pressed) focusButtonDown.add(controller);
+        else focusButtonDown.delete(controller);
+        if (
+          pressed &&
+          !wasPressed &&
+          controller.visible &&
+          !disconnectedControllers.has(controller) &&
+          !gripActive()
+        ) {
+          const target = targetFromController(controller);
+          toggleFocusMode(
+            target?.terminalId && panels.has(target.terminalId) ? target.terminalId : undefined,
+          );
+        }
+      }
       const bothSticks =
         heldControllers.size === 0 &&
         controllerRoots.length === 2 &&
@@ -1950,6 +1977,7 @@ export function createWorkspaceScene(
           if (panel?.root.getObjectById(target.object.id)) object = panel.root;
         }
         if (!object) return;
+        paneFocus.cancelMotion(object);
         if (object.userData.terminalId) selectTerminal(object.userData.terminalId as string);
         const other = [...dragStates.entries()].find(
           ([controller, drag]) => controller !== root && drag.object === object,
@@ -1971,7 +1999,11 @@ export function createWorkspaceScene(
       const onConnected = (event: Event): void => {
         disconnectedControllers.delete(root);
         rayLine.visible = true;
-        const gamepad = (event as Event & { data?: { gamepad?: Gamepad } }).data?.gamepad;
+        const data = (event as Event & { data?: { gamepad?: Gamepad; handedness?: string } }).data;
+        const gamepad = data?.gamepad;
+        controllerHandedness.set(root, data?.handedness ?? 'none');
+        if (gamepad?.buttons[5]?.pressed) focusButtonDown.add(root);
+        else focusButtonDown.delete(root);
         if (gamepad) controllerGamepads.set(root, gamepad);
       };
       const onDisconnected = (): void => {
@@ -1981,6 +2013,8 @@ export function createWorkspaceScene(
         rayLine.visible = false;
         contact.visible = false;
         controllerGamepads.delete(root);
+        controllerHandedness.delete(root);
+        focusButtonDown.delete(root);
         releaseGrab(root);
         recenterSince = null;
         const previous = hoveredByController.get(root);
@@ -2182,12 +2216,15 @@ export function createWorkspaceScene(
       mutableState.focusedTerminalId = panel.id;
     }
     setSelectedVisual();
+    paneFocus.add(root);
     if (inputRoot && inputMode === 'arrange') refreshInputRoot('arrange');
     notify();
   };
   const removeTerminal = (id: string): void => {
     const panel = panels.get(id);
     if (!panel) return;
+    paneFocus.remove(panel.root);
+    mutableState.focusModeTerminalId = paneFocus.activeId;
     for (const [source, capture] of mouseCaptures) if (capture.id === id) releaseMouse(source);
     panel.unsubscribe();
     scene.remove(panel.root);
@@ -2212,6 +2249,7 @@ export function createWorkspaceScene(
   };
   const selectTerminal = (id: string | null): void => {
     const nextId = id && panels.has(id) ? id : null;
+    if (paneFocus.activeId && nextId !== paneFocus.activeId) endFocusMode(true);
     if (nextId === mutableState.selectedTerminalId && mutableState.focusedTerminalId === nextId)
       return;
     if (!gazeRetargeting) gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
@@ -2402,6 +2440,7 @@ export function createWorkspaceScene(
     }
     notify();
     session.addEventListener('end', () => {
+      endFocusMode(true);
       releaseAllMouse();
       activeSession = null;
       hideInput();
@@ -2412,6 +2451,8 @@ export function createWorkspaceScene(
       recenterLatched = false;
       heldControllers.clear();
       controllerGamepads.clear();
+      controllerHandedness.clear();
+      focusButtonDown.clear();
       previousRenderTime = null;
       hoveredByController.clear();
       showHover(null);
@@ -2433,8 +2474,58 @@ export function createWorkspaceScene(
   const exitXR = async (): Promise<void> => {
     if (activeSession) await activeSession.end();
   };
+  const endFocusMode = (immediate = false): void => {
+    paneFocus.exit(immediate);
+    mutableState.focusModeTerminalId = null;
+  };
+  const toggleFocusMode = (id?: string): void => {
+    if (gripActive()) return;
+    releaseAllMouse();
+    closeBackgroundMenus();
+    showHover(null);
+    gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
+    if (paneFocus.activeId) {
+      endFocusMode();
+      notify();
+      return;
+    }
+    const panel = panels.get(id ?? mutableState.selectedTerminalId ?? '');
+    if (!panel) return;
+    selectTerminal(panel.id);
+    const bounds = measurePanelBounds(panel.root);
+    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    view.updateWorldMatrix(true, false);
+    const eye = view.getWorldPosition(new THREE.Vector3());
+    const forward = view.getWorldDirection(new THREE.Vector3());
+    const rotation = new THREE.Quaternion().setFromRotationMatrix(
+      new THREE.Matrix4().lookAt(eye, eye.clone().add(forward), new THREE.Vector3(0, 1, 0)),
+    );
+    const distance = Math.max(
+      0.8,
+      bounds.size.width / (2 * Math.tan(THREE.MathUtils.degToRad(25))),
+      bounds.size.height / (2 * Math.tan(THREE.MathUtils.degToRad(18))),
+    );
+    const position = new THREE.Vector3(0, 0, -distance)
+      .applyQuaternion(rotation)
+      .add(eye)
+      .sub(bounds.center.clone().multiply(panel.root.scale).applyQuaternion(rotation));
+    if (panel.root.parent) {
+      panel.root.parent.worldToLocal(position);
+      rotation.premultiply(panel.root.parent.getWorldQuaternion(new THREE.Quaternion()).invert());
+    }
+    paneFocus.enter(
+      panel.id,
+      panel.root,
+      [...panels.values()].map((value) => value.root),
+      position,
+      rotation,
+    );
+    mutableState.focusModeTerminalId = panel.id;
+    notify();
+  };
   const arrangeTerminals = (pattern: PanelArrangement): void => {
     if (!panels.size) return;
+    endFocusMode(true);
     const ordered = [...panels.values()];
     const bounds = ordered.map(({ root }) => measurePanelBounds(root));
     const poses = calculateArrangement(
@@ -2467,6 +2558,7 @@ export function createWorkspaceScene(
     notify();
   };
   const resetLayout = (): void => {
+    endFocusMode(true);
     mutableState.arrangement = null;
     for (const panel of panels.values()) {
       panel.root.position.copy(panel.defaultPosition);
@@ -2540,6 +2632,7 @@ export function createWorkspaceScene(
   const dispose = (): void => {
     if (disposed) return;
     disposed = true;
+    paneFocus.dispose();
     window.cancelAnimationFrame(frameHandle);
     window.removeEventListener('resize', resize);
     canvas.removeEventListener('pointerdown', onPointerDown);
@@ -2573,6 +2666,8 @@ export function createWorkspaceScene(
     controllerListeners.length = 0;
     controllerRoots.length = 0;
     controllerGamepads.clear();
+    controllerHandedness.clear();
+    focusButtonDown.clear();
     disconnectedControllers.clear();
     heldControllers.clear();
     clearInputRoot();
@@ -2617,6 +2712,7 @@ export function createWorkspaceScene(
     setUpdateAvailable,
     setNotice,
     arrangeTerminals,
+    toggleFocusMode,
     resetLayout,
     scaleSelectedPanel,
     getControlHints,
