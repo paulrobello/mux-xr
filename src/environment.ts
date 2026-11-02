@@ -91,6 +91,7 @@ export async function loadObservatory(
   let root: THREE.Object3D | null = null;
   let disposed = false;
   const ownedTextures = new Set<THREE.Texture>();
+  let planetPivot: THREE.Group | null = null;
   let unsubscribe = (): void => undefined;
   const sync = (): void => {
     const visible = workspace.state.background === 'observatory' && workspace.state.xrMode !== 'ar';
@@ -102,6 +103,8 @@ export async function loadObservatory(
     if (disposed) return;
     disposed = true;
     unsubscribe();
+    if (workspace.scene.userData.updateEnvironment === updateEnvironment)
+      delete workspace.scene.userData.updateEnvironment;
     signal?.removeEventListener('abort', dispose);
     if (root) {
       workspace.scene.remove(root);
@@ -112,11 +115,19 @@ export async function loadObservatory(
     for (const texture of ownedTextures) texture.dispose();
     background.dispose();
   };
+  const updateEnvironment = (deltaSeconds: number): void => {
+    if (disposed) return;
+    background.update(deltaSeconds);
+    if (planetPivot && background.root.visible && Number.isFinite(deltaSeconds)) {
+      planetPivot.rotation.y += Math.max(0, Math.min(deltaSeconds, 0.25)) * 0.008;
+    }
+  };
   if (signal?.aborted) {
     dispose();
     return dispose;
   }
   unsubscribe = workspace.subscribe(sync);
+  workspace.scene.userData.updateEnvironment = updateEnvironment;
   signal?.addEventListener('abort', dispose, { once: true });
   sync();
   try {
@@ -129,6 +140,8 @@ export async function loadObservatory(
     root.name = 'authored-observatory';
     quietObservatoryPlanet(root);
     workspace.scene.add(root);
+    const planet = findPlanetMesh(root);
+    if (planet && !planetPivot) planetPivot = createPlanetPivot(planet);
     sync();
     const authoredRoot = root;
     try {
@@ -155,4 +168,35 @@ export async function loadObservatory(
   }
   sync();
   return dispose;
+}
+
+function findPlanetMesh(root: THREE.Object3D): THREE.Mesh | undefined {
+  const named = root.getObjectByName('planet_mesh');
+  if (named instanceof THREE.Mesh) return named;
+  let found: THREE.Mesh | undefined;
+  root.traverse((child) => {
+    if (found || !(child instanceof THREE.Mesh)) return;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    if (materials.some((material) => material.name === 'observatory_planet_low')) found = child;
+  });
+  return found;
+}
+
+function createPlanetPivot(planet: THREE.Mesh): THREE.Group {
+  const parent = planet.parent;
+  const pivot = new THREE.Group();
+  pivot.name = 'observatory-planet-rotation-pivot';
+  planet.updateWorldMatrix(true, false);
+  planet.geometry.computeBoundingSphere();
+  const center = planet.geometry.boundingSphere?.center.clone() ?? new THREE.Vector3();
+  const worldCenter = planet.localToWorld(center);
+  if (parent) {
+    parent.updateWorldMatrix(true, false);
+    parent.worldToLocal(worldCenter);
+    parent.add(pivot);
+    pivot.position.copy(worldCenter);
+    pivot.updateWorldMatrix(true, false);
+    pivot.attach(planet);
+  }
+  return pivot;
 }

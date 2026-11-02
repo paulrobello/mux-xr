@@ -23,6 +23,56 @@ const query = <T extends Element>(root: ParentNode, selector: string): T => {
 };
 
 describe('mux XR local UI state', () => {
+  it('keeps locked Shift active until tapped and resets one-shot labels', () => {
+    vi.useFakeTimers();
+    const root = document.createElement('div');
+    const sent: Array<{ key: string; shift?: boolean }> = [];
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onSendKey: (_pane, key, modifiers) => sent.push({ key, shift: modifiers?.shift }),
+    });
+    const makePane = (id: string) => ({
+      id,
+      workspaceId: 'w',
+      workspaceName: 'W',
+      sessionId: 's',
+      sessionName: 'S',
+      windowId: 'win',
+      windowName: 'Win',
+      title: id,
+    });
+    ui.update({ panes: [makePane('pane-a'), makePane('pane-b')] });
+    ui.setActivePane('pane-a');
+    ui.openInput('keyboard');
+    const shift = root.querySelector<HTMLButtonElement>('[data-key="Shift"]');
+    const letter = root.querySelector<HTMLButtonElement>('[data-key="a"]');
+    if (!shift || !letter) throw new Error('keyboard controls missing');
+    shift.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    vi.advanceTimersByTime(550);
+    shift.dispatchEvent(new Event('pointerup', { bubbles: true }));
+    shift.click();
+    expect(shift.classList.contains('locked')).toBe(true);
+    letter.click();
+    letter.click();
+    expect(sent).toEqual([
+      { key: 'a', shift: true },
+      { key: 'a', shift: true },
+    ]);
+    expect(letter.textContent).toBe('A');
+    shift.click();
+    expect(shift.classList.contains('locked')).toBe(false);
+    expect(letter.textContent).toBe('a');
+    shift.click();
+    letter.click();
+    expect(letter.textContent).toBe('a');
+    shift.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    ui.setActivePane('pane-b');
+    vi.advanceTimersByTime(600);
+    expect(shift.classList.contains('locked')).toBe(false);
+    ui.destroy();
+    vi.useRealTimers();
+  });
+
   it('shows the update notice only when available and reloads on explicit click', () => {
     const root = document.createElement('div');
     const onReloadApp = vi.fn();

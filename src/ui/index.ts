@@ -9,7 +9,16 @@ import type {
   WorkspaceSnapshot,
 } from '../contracts';
 import { getKeyHelp } from '../control-help';
+import { createModifierState, keyboardDimensions, keyboardKeys } from '../keyboard';
 import { terminalKeyLabel } from '../terminal/protocol';
+
+export type { SemanticKey } from '../keyboard';
+export {
+  createModifierState,
+  keyboardDimensions,
+  keyboardKeys,
+  semanticKeyboardLayout,
+} from '../keyboard';
 
 export interface UICallbacks {
   onConnect(endpoint: string): void;
@@ -31,6 +40,7 @@ export interface UICallbacks {
   onResizeGrid?(paneId: string, cols: number, rows: number): boolean;
   onReloadApp?(): void;
   onArrange?(pattern: PanelArrangement): void;
+  onMoveLayout?(direction: number): void;
 }
 
 export interface WorkspaceSettings {
@@ -211,46 +221,6 @@ function icon(name: 'close' | 'link' | 'xr' | 'send' | 'plus' | 'settings'): str
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name]}</svg>`;
 }
 
-export interface SemanticKey {
-  readonly label: string;
-  readonly key: string;
-  readonly modifier?: 'ctrl' | 'alt' | 'shift';
-}
-const KEY_LAYOUT: readonly (readonly SemanticKey[])[] = [
-  [
-    { label: 'Esc', key: 'Escape' },
-    { label: 'Tab', key: 'Tab' },
-    { label: 'Ctrl', key: 'Control', modifier: 'ctrl' },
-    { label: 'Alt', key: 'Alt', modifier: 'alt' },
-    { label: 'Shift', key: 'Shift', modifier: 'shift' },
-  ],
-  [
-    { label: '↑', key: 'ArrowUp' },
-    { label: '←', key: 'ArrowLeft' },
-    { label: '↓', key: 'ArrowDown' },
-    { label: '→', key: 'ArrowRight' },
-    { label: 'Enter', key: 'Enter' },
-  ],
-  ['`', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Backspace'].map((key) => ({
-    label: key === 'Backspace' ? '⌫' : key,
-    key,
-  })),
-  ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '[', ']'].map((key) => ({
-    label: key,
-    key: key.toLowerCase(),
-  })),
-  ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';', "'", '\\'].map((key) => ({
-    label: key,
-    key: key.toLowerCase(),
-  })),
-  ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/'].map((key) => ({
-    label: key,
-    key: key.toLowerCase(),
-  })),
-  [{ label: 'Space', key: ' ' }],
-];
-export const semanticKeyboardLayout = KEY_LAYOUT;
-
 function connectionActionLabel(status: TerminalStatus | undefined): string {
   return status === undefined || status === 'connected' || status === 'connecting'
     ? 'Disconnect'
@@ -277,25 +247,58 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   const terminalGrid = new Map<string, { cols: number; rows: number; canResize: boolean }>();
   const pendingGrid = new Map<string, { cols: number; rows: number }>();
   let inputMode: 'commands' | 'keyboard' = 'commands';
-  const heldModifiers: KeyModifiers = {};
+  const modifierState = createModifierState();
+  const holdTimers = new Map<HTMLButtonElement, number>();
   const keyboardLabel = (key: string, shift = false): string => {
     if (key.length === 1 && key !== ' ') return terminalKeyLabel(key, shift);
-    return KEY_LAYOUT.flat().find((entry) => entry.key === key)?.label ?? key;
+    return keyboardKeys.find((entry) => entry.key === key)?.label ?? key;
   };
   const keyboardTitle = (key: string): string => getKeyHelp(key) ?? '';
-  const clearModifiers = (): void => {
-    delete heldModifiers.ctrl;
-    delete heldModifiers.alt;
-    delete heldModifiers.shift;
+  const syncModifierVisuals = (): void => {
     for (const key of root.querySelectorAll<HTMLButtonElement>('.key')) {
-      key.classList.remove('active');
-      if (!key.dataset.modifier) key.textContent = keyboardLabel(key.dataset.key ?? '');
+      const modifier = key.dataset.modifier as 'ctrl' | 'alt' | 'shift' | undefined;
+      if (modifier) {
+        const active = Boolean(modifierState.active[modifier]);
+        const locked = Boolean(modifierState.locked[modifier]);
+        key.classList.toggle('active', active);
+        key.classList.toggle('locked', locked);
+        key.setAttribute('aria-pressed', String(active));
+        key.title = locked
+          ? `${key.textContent ?? modifier} locked (click to unlock)`
+          : keyboardTitle(key.dataset.key ?? '');
+      } else {
+        key.textContent = keyboardLabel(key.dataset.key ?? '', Boolean(modifierState.active.shift));
+      }
     }
+  };
+  const clearModifiers = (): void => {
+    for (const timer of holdTimers.values()) window.clearTimeout(timer);
+    holdTimers.clear();
+    modifierState.clear();
+    for (const key of root.querySelectorAll<HTMLButtonElement>('.key'))
+      delete key.dataset.longPressed;
+    syncModifierVisuals();
   };
   let capturedTarget: string | undefined;
   const root = document.createElement('section');
   root.className = 'mux-ui';
-  root.innerHTML = `<style>${CSS}</style><header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. No process control.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="update-notice" data-update-notice hidden role="status"><span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${KEY_LAYOUT.map((row) => `<div class="key-row">${row.map((key) => `<button class="key" data-key="${escapeHtml(key.key)}" data-modifier="${key.modifier ?? ''}" aria-label="${escapeHtml(key.key === 'Backspace' ? 'Backspace' : key.label)}" title="${escapeHtml(keyboardTitle(key.key))}">${escapeHtml(key.label)}</button>`).join('')}</div>`).join('')}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Highlight the pane at the center of your view.</span></label><label class="check" title="Use head direction to choose the keyboard target after a short dwell. Looking at the keyboard keeps the last pane target."><input type="checkbox" data-gaze-input> Gaze keyboard input <span>In XR, looking at a pane briefly makes it the keyboard target. Off keeps manual selection.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
+  const keyboardMarkup = keyboardKeys
+    .map(
+      (entry) =>
+        `<button class="key" data-key="${escapeHtml(entry.key)}" data-modifier="${entry.modifier ?? ''}" style="--key-x:${entry.x};--key-y:${entry.y};--key-width:${entry.width};--key-height:${entry.height}" aria-pressed="false" aria-label="${escapeHtml(entry.key === 'Backspace' ? 'Backspace' : entry.label)}" title="${escapeHtml(keyboardTitle(entry.key))}">${escapeHtml(entry.label)}</button>`,
+    )
+    .join('');
+  root.innerHTML = `<style>${CSS}</style><header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. No process control.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="update-notice" data-update-notice hidden role="status"><span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${keyboardMarkup}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Highlight the pane at the center of your view.</span></label><label class="check" title="Use head direction to choose the keyboard target after a short dwell. Looking at a pane keeps the last pane target."><input type="checkbox" data-gaze-input> Gaze keyboard input <span>In XR, looking at a pane briefly makes it the keyboard target. Off keeps manual selection.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
+  const keyboardElement = root.querySelector<HTMLElement>('[data-keyboard]');
+  if (keyboardElement) {
+    keyboardElement.style.setProperty('--keyboard-width', String(keyboardDimensions.width));
+    keyboardElement.style.setProperty('--keyboard-height', String(keyboardDimensions.height));
+    root
+      .querySelector('style')
+      ?.append(
+        '.keyboard{position:relative;display:block;width:min(100%,calc(var(--keyboard-width)*1em));aspect-ratio:var(--keyboard-width)/var(--keyboard-height);min-height:170px}.key{position:absolute;left:calc(var(--key-x)/var(--keyboard-width)*100%);top:calc(var(--key-y)/var(--keyboard-height)*100%);width:calc(var(--key-width)/var(--keyboard-width)*100%);height:calc(var(--key-height)/var(--keyboard-height)*100%);min-height:0}',
+      );
+  }
   container.replaceChildren(root);
   const updateNotice =
     root.querySelector<HTMLElement>('[data-update-notice]') ?? document.createElement('div');
@@ -349,6 +352,24 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     arrangement.dataset.arrangementControls = 'true';
     arrangement.innerHTML =
       '<label for="arrangement-pattern">3D arrangement</label><select id="arrangement-pattern" data-arrangement aria-label="3D terminal arrangement"><option value="row">Row</option><option value="grid">Grid</option><option value="arc">Arc</option><option value="sphere">Sphere</option></select><small>Applies to attached terminals in 3D. Sphere uses a front hemisphere. Terminals remain individually adjustable.</small><button data-action="apply-arrangement" class="secondary" title="Apply this 3D arrangement to attached terminals">Apply arrangement</button>';
+    const distanceRow = document.createElement('div');
+    distanceRow.className = 'grid-inputs';
+    for (const [label, direction] of [
+      ['Closer', -1],
+      ['Farther', 1],
+    ] as const) {
+      const button = document.createElement('button');
+      button.className = 'secondary';
+      button.textContent = label;
+      button.dataset.action = direction < 0 ? 'layout-closer' : 'layout-farther';
+      button.title =
+        direction < 0
+          ? 'Move all terminals closer without resizing them'
+          : 'Move all terminals farther without resizing them';
+      button.addEventListener('click', () => callbacks.onMoveLayout?.(direction));
+      distanceRow.append(button);
+    }
+    arrangement.append(distanceRow);
     settingsPanel.insertBefore(
       arrangement,
       settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
@@ -541,6 +562,38 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     updateTargetCaption();
     if (notify) callbacks.onSelectPane?.(pane);
   };
+  const cancelModifierHold = (button: HTMLButtonElement): void => {
+    const timer = holdTimers.get(button);
+    if (timer !== undefined) window.clearTimeout(timer);
+    holdTimers.delete(button);
+  };
+  root.addEventListener('pointerdown', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-modifier]');
+    if (!button) return;
+    const modifier = button.dataset.modifier as 'ctrl' | 'alt' | 'shift' | undefined;
+    if (!modifier) return;
+    delete button.dataset.longPressed;
+    cancelModifierHold(button);
+    button.setPointerCapture?.(event.pointerId);
+    holdTimers.set(
+      button,
+      window.setTimeout(() => {
+        modifierState.lock(modifier);
+        button.dataset.longPressed = 'true';
+        syncModifierVisuals();
+        holdTimers.delete(button);
+      }, 550),
+    );
+  });
+  for (const eventName of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) {
+    root.addEventListener(eventName, (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-modifier]');
+      if (button) {
+        cancelModifierHold(button);
+        if (eventName === 'pointercancel') delete button.dataset.longPressed;
+      }
+    });
+  }
   root.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
     const button = target.closest<HTMLElement>('button');
@@ -564,17 +617,17 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       const key = button.dataset.key;
       const modifier = button.dataset.modifier as 'ctrl' | 'alt' | 'shift' | '';
       if (modifier) {
-        heldModifiers[modifier] = !heldModifiers[modifier];
-        button.classList.toggle('active');
-        root.querySelectorAll<HTMLButtonElement>('[data-key]').forEach((keyButton) => {
-          const raw = keyButton.dataset.key ?? '';
-          if (!keyButton.dataset.modifier)
-            keyButton.textContent = keyboardLabel(raw, Boolean(heldModifiers.shift));
-        });
+        if (button.dataset.longPressed) {
+          delete button.dataset.longPressed;
+          return;
+        }
+        modifierState.tap(modifier);
+        syncModifierVisuals();
         return;
       }
-      if (capturedTarget) callbacks.onSendKey?.(capturedTarget, key, { ...heldModifiers });
-      clearModifiers();
+      if (capturedTarget) callbacks.onSendKey?.(capturedTarget, key, { ...modifierState.active });
+      modifierState.consume();
+      syncModifierVisuals();
       return;
     }
     switch (button.dataset.action) {
@@ -926,6 +979,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     },
     captureCommandTarget: () => capturedTarget,
     destroy() {
+      clearModifiers();
       root.remove();
     },
   };

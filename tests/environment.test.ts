@@ -127,6 +127,47 @@ describe('authored observatory display treatment', () => {
     textureLoad.mockRestore();
   });
 
+  it('rotates the authored planet around its geometry center through the scene callback', async () => {
+    const scene = new THREE.Scene();
+    const state = { background: 'observatory' as BackgroundMode, xrMode: 'desktop' as const };
+    const workspace = {
+      scene,
+      state,
+      subscribe: () => () => undefined,
+    } as unknown as WorkspaceScene;
+    const geometry = new THREE.SphereGeometry(1);
+    geometry.translate(10, 0, 0);
+    const planet = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({ name: 'observatory_planet_low' }),
+    );
+    planet.name = 'planet_mesh';
+    const authoredRoot = new THREE.Group();
+    authoredRoot.add(planet);
+    const gltfLoad = vi
+      .spyOn(GLTFLoader.prototype, 'loadAsync')
+      .mockResolvedValue({ scene: authoredRoot } as never);
+    const textureLoad = vi
+      .spyOn(THREE.TextureLoader.prototype, 'loadAsync')
+      .mockRejectedValue(new Error('not needed'));
+    const dispose = await loadObservatory(workspace);
+    geometry.computeBoundingSphere();
+    const sphere = geometry.boundingSphere;
+    if (!sphere) throw new Error('Planet bounds missing');
+    const centerBefore = planet.localToWorld(sphere.center.clone());
+    const update = scene.userData.updateEnvironment as (deltaSeconds: number) => void;
+    const pivot = scene.getObjectByName('observatory-planet-rotation-pivot');
+    if (!pivot) throw new Error('Planet pivot missing');
+    const rotationBefore = pivot.rotation.y;
+    update(1);
+    const centerAfter = planet.localToWorld(sphere.center.clone());
+    expect(centerAfter.distanceTo(centerBefore)).toBeLessThan(1e-6);
+    expect(pivot.rotation.y).not.toBe(rotationBefore);
+    dispose();
+    gltfLoad.mockRestore();
+    textureLoad.mockRestore();
+  });
+
   it('disposes a late planet texture after abort', async () => {
     const scene = new THREE.Scene();
     const state = { background: 'observatory' as BackgroundMode, xrMode: 'desktop' as const };

@@ -1751,6 +1751,193 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('locks a held modifier across keys and releases it on a later tap', () => {
+    const { workspace, actions, container } = fixture();
+    workspace.showInput('keyboard');
+    hit(workspace, { inputAction: 'key', key: 'Shift' });
+    fakeXR.frame?.(0);
+    fakeXR.frame?.(600);
+    const locked = objectWithData(workspace, { inputAction: 'key', key: 'Shift' });
+    expect(locked.userData.locked).toBe(true);
+    hit(workspace, { inputAction: 'key', key: 'a' });
+    hit(workspace, { inputAction: 'key', key: 'b' });
+    expect(actions.sendKey).toHaveBeenNthCalledWith(1, 'a', { shift: true });
+    expect(actions.sendKey).toHaveBeenNthCalledWith(2, 'b', { shift: true });
+    hit(workspace, { inputAction: 'key', key: 'Shift' });
+    hit(workspace, { inputAction: 'key', key: 'c' });
+    expect(actions.sendKey).toHaveBeenLastCalledWith('c', undefined);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('cancels modifier holds on release and clears locks on target change', () => {
+    const { workspace, actions, container } = fixture();
+    workspace.showInput('keyboard');
+    hit(workspace, { inputAction: 'key', key: 'Control' });
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'selectend' } as never);
+    fakeXR.frame?.(0);
+    fakeXR.frame?.(700);
+    hit(workspace, { inputAction: 'key', key: 'a' });
+    hit(workspace, { inputAction: 'key', key: 'b' });
+    expect(actions.sendKey).toHaveBeenLastCalledWith('b', undefined);
+    hit(workspace, { inputAction: 'key', key: 'Shift' });
+    fakeXR.frame?.(800);
+    fakeXR.frame?.(1400);
+    workspace.selectTerminal('pane-b');
+    hit(workspace, { inputAction: 'key', key: 'c' });
+    expect(actions.sendKey).toHaveBeenLastCalledWith('c', undefined);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('toggles keyboard with right A once per press and preserves its pose and target', () => {
+    const { workspace, container } = fixture();
+    const gamepad = connectController(1, [0, 0, 0, 0], 'right');
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(0);
+    let keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('A did not open keyboard');
+    keyboard.position.x += 0.3;
+    const position = keyboard.position.clone();
+    fakeXR.frame?.(100);
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBe(keyboard);
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(120);
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(140);
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(160);
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(180);
+    keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    expect(keyboard?.position).toEqual(position);
+    expect(workspace.state.inputTargetId).toBe('pane-a');
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('consumes A pressed during grip until a new physical press', () => {
+    const { workspace, container } = fixture();
+    const gamepad = connectController(0);
+    (gamepad.buttons[1] as { pressed: boolean }).pressed = true;
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(0);
+    (gamepad.buttons[1] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(100);
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(120);
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(140);
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeDefined();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('moves an entire layout without changing its geometry, input or grids', () => {
+    const { workspace, actions, container } = fixture();
+    workspace.arrangeTerminals('sphere');
+    const a = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    const b = workspace.scene.getObjectByName('terminal-panel-pane-b');
+    if (!a || !b) throw new Error('Missing terminals');
+    const before = [a, b].map((root) => ({
+      position: root.position.clone(),
+      quaternion: root.quaternion.clone(),
+      scale: root.scale.clone(),
+    }));
+    const selected = workspace.state.selectedTerminalId;
+    workspace.moveLayoutDepth(-1);
+    const da = a.position.clone().sub(before[0].position);
+    const db = b.position.clone().sub(before[1].position);
+    expect(da.length()).toBeCloseTo(0.4);
+    expect(da.distanceTo(db)).toBeLessThan(1e-6);
+    for (const [index, root] of [a, b].entries()) {
+      expect(root.quaternion.angleTo(before[index].quaternion)).toBeLessThan(1e-6);
+      expect(root.scale).toEqual(before[index].scale);
+    }
+    expect(workspace.state.selectedTerminalId).toBe(selected);
+    expect(actions.resizeGrid).not.toHaveBeenCalled();
+    workspace.moveLayoutDepth(1);
+    expect(a.position.distanceTo(before[0].position)).toBeLessThan(1e-6);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('bounds whole-layout movement before panels reach the viewer', () => {
+    const { workspace, container } = fixture();
+    workspace.arrangeTerminals('sphere');
+    for (let step = 0; step < 30; step += 1) workspace.moveLayoutDepth(-1);
+    workspace.scene.updateMatrixWorld(true);
+    for (const root of workspace.scene.children.filter((object) =>
+      object.name.startsWith('terminal-panel-'),
+    )) {
+      const bounds = new THREE.Box3().setFromObject(root);
+      expect(bounds.max.z).toBeLessThanOrEqual(workspace.camera.position.z - 0.8 + 1e-6);
+    }
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('restores modifier state when a desktop pointer press is canceled', () => {
+    fakeXR.presenting = false;
+    const { workspace, actions, container } = fixture();
+    vi.spyOn(workspace.canvas, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 1024,
+      height: 768,
+      right: 1024,
+      bottom: 768,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    workspace.canvas.setPointerCapture = vi.fn();
+    const control = workspace
+      .getControlHints()
+      .find((hint) => hint.key === 'Control' && hint.terminalId === 'pane-a');
+    const tab = workspace
+      .getControlHints()
+      .find((hint) => hint.key === 'Tab' && hint.terminalId === 'pane-a');
+    if (!control || !tab) throw new Error('Key strip hints missing');
+    workspace.canvas.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        pointerId: 3,
+        clientX: control.clientX,
+        clientY: control.clientY,
+      }),
+    );
+    workspace.canvas.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 3 }));
+    workspace.canvas.dispatchEvent(
+      new PointerEvent('pointerdown', { pointerId: 3, clientX: tab.clientX, clientY: tab.clientY }),
+    );
+    expect(actions.sendKey).toHaveBeenLastCalledWith('Tab', undefined);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('does not resurrect keyboard locks after changing panes while the keyboard is hidden', () => {
+    const { workspace, actions, container } = fixture();
+    const gamepad = connectController(1, [0, 0, 0, 0], 'right');
+    workspace.showInput('keyboard');
+    hit(workspace, { inputAction: 'key', key: 'Shift' });
+    fakeXR.frame?.(0);
+    fakeXR.frame?.(600);
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(620);
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(640);
+    workspace.selectTerminal('pane-b');
+    workspace.selectTerminal('pane-a');
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(660);
+    hit(workspace, { inputAction: 'key', key: 'c' });
+    expect(actions.sendKey).toHaveBeenLastCalledWith('c', undefined);
+    workspace.dispose();
+    container.remove();
+  });
+
   it('assigns focus mode to the right-handed controller regardless of connection slot', () => {
     const { workspace, container } = fixture();
     const right = connectController(1, [0, 0, 0, 0], 'right');

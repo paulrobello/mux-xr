@@ -39,7 +39,10 @@ describe('terminal texture', () => {
   it('copies a changed strip in one GPU operation when the renderer supports regions', () => {
     const f = fixture(2, 4);
     const copyTextureToTexture = vi.fn();
-    const owned = createTerminalTexture(f, { copyTextureToTexture });
+    const owned = createTerminalTexture(f, {
+      copyTextureToTexture,
+      capabilities: { getMaxAnisotropy: () => 16 },
+    });
     const version = owned.texture.version;
     f.dirtyRows[1] = 1;
     owned.update();
@@ -53,6 +56,26 @@ describe('terminal texture', () => {
     expect(position.toArray()).toEqual([0, 2]);
     expect(owned.texture.version).toBe(version);
     expect(owned.texture.updateRanges).toEqual([]);
+    owned.dispose();
+  });
+
+  it('uses trilinear mipmaps and caps anisotropy for minification', () => {
+    const f = fixture();
+    const owned = createTerminalTexture(f, {
+      copyTextureToTexture: vi.fn(),
+      capabilities: { getMaxAnisotropy: () => 16 },
+    });
+    expect(owned.texture.minFilter).toBe(THREE.LinearMipmapLinearFilter);
+    expect(owned.texture.magFilter).toBe(THREE.LinearFilter);
+    expect(owned.texture.generateMipmaps).toBe(true);
+    expect(owned.texture.anisotropy).toBe(4);
+    owned.dispose();
+  });
+
+  it('falls back to one anisotropy sample when renderer capabilities are unavailable', () => {
+    const f = fixture();
+    const owned = createTerminalTexture(f, { copyTextureToTexture: vi.fn() });
+    expect(owned.texture.anisotropy).toBe(1);
     owned.dispose();
   });
 
@@ -161,6 +184,9 @@ describe('terminal texture', () => {
     expect(owned.texture.offset.x).toBe(0.1);
     expect(owned.texture.offset.y).toBe(0.2);
     expect(owned.texture.wrapS).toBe(THREE.RepeatWrapping);
+    expect(owned.texture.minFilter).toBe(THREE.LinearMipmapLinearFilter);
+    expect(owned.texture.generateMipmaps).toBe(true);
+    expect(owned.texture.anisotropy).toBe(1);
   });
 
   it('falls back to CanvasTexture when a context cannot read pixels', () => {

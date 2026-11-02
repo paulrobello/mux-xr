@@ -40,10 +40,30 @@ describe('observatory exterior space', () => {
     expect(first.root.name).toBe('observatory-exterior-space');
     expect(positions(first.root)).toEqual(positions(second.root));
     expect(positions(first.root).every(Number.isFinite)).toBe(true);
-    expect(first.root.children).toHaveLength(3);
+    expect(first.root.children).toHaveLength(4);
     expect(maxDistance(first.root)).toBeLessThan(80);
     first.dispose();
     second.dispose();
+  });
+
+  it('updates a bounded reusable shooting star only while visible', () => {
+    const background = createSpaceBackground();
+    const meteor = background.root.getObjectByName('observatory-exterior-shooting-star') as
+      | THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>
+      | undefined;
+    expect(meteor).toBeDefined();
+    background.root.visible = true;
+    for (let index = 0; index < 210; index += 1) background.update(0.25);
+    expect(meteor?.visible).toBe(true);
+    const geometry = meteor?.geometry;
+    const position = meteor?.position.clone();
+    background.update(0.05);
+    expect(position && meteor && meteor.position.distanceTo(position)).toBeGreaterThan(0);
+    background.root.visible = false;
+    background.update(60);
+    expect(meteor?.visible).toBe(true);
+    expect(meteor?.geometry).toBe(geometry);
+    background.dispose();
   });
 
   it('disposes owned resources idempotently and detaches the root', () => {

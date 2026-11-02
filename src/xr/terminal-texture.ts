@@ -12,11 +12,22 @@ export interface TerminalTexture {
   dispose(): void;
 }
 
-function configureTexture(texture: THREE.Texture): void {
+export interface TerminalTextureRenderer {
+  copyTextureToTexture: THREE.WebGLRenderer['copyTextureToTexture'];
+  capabilities?: Pick<THREE.WebGLRenderer['capabilities'], 'getMaxAnisotropy'>;
+}
+
+const TERMINAL_MAX_ANISOTROPY = 4;
+
+function configureTexture(texture: THREE.Texture, renderer?: TerminalTextureRenderer): void {
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.minFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
-  texture.generateMipmaps = false;
+  texture.generateMipmaps = true;
+  const maxAnisotropy = renderer?.capabilities?.getMaxAnisotropy?.();
+  texture.anisotropy = Number.isFinite(maxAnisotropy)
+    ? Math.max(1, Math.min(TERMINAL_MAX_ANISOTROPY, maxAnisotropy as number))
+    : 1;
 }
 
 function copyTextureSettings(from: THREE.Texture, to: THREE.Texture): void {
@@ -53,7 +64,7 @@ function copyFlipped(
 
 export function createTerminalTexture(
   surface: TerminalTextureSurface,
-  renderer?: Pick<THREE.WebGLRenderer, 'copyTextureToTexture'>,
+  renderer?: TerminalTextureRenderer,
 ): TerminalTexture {
   let canvasWidth = surface.canvas.width;
   let canvasHeight = surface.canvas.height;
@@ -75,7 +86,7 @@ export function createTerminalTexture(
   } else {
     texture = new THREE.CanvasTexture(surface.canvas);
   }
-  configureTexture(texture);
+  configureTexture(texture, renderer);
   texture.needsUpdate = true;
 
   let disposed = false;

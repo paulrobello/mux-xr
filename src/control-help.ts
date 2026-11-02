@@ -2,9 +2,9 @@ export function getKeyHelp(key: string): string | undefined {
   const hints: Record<string, string> = {
     Escape: 'Send Escape to this terminal',
     Tab: 'Send Tab for completion or indentation',
-    Control: 'Toggle Ctrl for the next terminal key',
-    Alt: 'Toggle Alt for the next terminal key',
-    Shift: 'Use uppercase or symbols for the next key',
+    Control: 'Ctrl: tap once, hold to lock',
+    Alt: 'Alt: tap once, hold to lock',
+    Shift: 'Shift: tap once, hold to lock',
     ArrowUp: 'Send Up: previous command or move up',
     ArrowDown: 'Send Down: next command or move down',
     ArrowLeft: 'Send Left: move the cursor left',
@@ -33,6 +33,10 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
       return 'Clear the current draft field';
     case 'commandCancel':
       return 'Discard this command draft';
+    case 'layoutDepth':
+      return Number(data.direction) < 0
+        ? 'Move all terminals closer; keep sizes'
+        : 'Move all terminals farther; keep sizes';
     case 'arrange':
       return data.pattern === 'sphere'
         ? 'Arrange terminals on a sphere in front of you'

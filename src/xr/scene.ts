@@ -12,8 +12,14 @@ import type {
   WorkspaceActions,
 } from '../contracts';
 import { getControlHelp } from '../control-help';
+import {
+  createModifierState,
+  type KeyboardModifier,
+  keyboardDimensions,
+  keyboardKeys,
+  type SemanticKey,
+} from '../keyboard';
 import { terminalKeyLabel } from '../terminal/protocol';
-import { type SemanticKey, semanticKeyboardLayout } from '../ui';
 import { calculateArrangement } from './arrangements';
 import {
   type CommandDraft,
@@ -85,6 +91,7 @@ export interface WorkspaceScene {
   arrangeTerminals(pattern: PanelArrangement): void;
   toggleFocusMode(id?: string): void;
   scaleSelectedPanel(direction: number): void;
+  moveLayoutDepth(direction: number): void;
   getControlHints(): Array<{
     label: string;
     help: string;
@@ -605,7 +612,22 @@ export function createWorkspaceScene(
   let activeSession: XrSessionLike | null = null;
   let inputMode: InputMode = 'commands';
   let panePage = 0;
-  let armedModifiers: KeyModifiers = {};
+  const modifierState = createModifierState();
+  const modifierPresses = new Map<
+    THREE.Group | number,
+    {
+      modifier: KeyboardModifier;
+      since: number | null;
+      locked: boolean;
+      before?: { active: boolean; locked: boolean };
+    }
+  >();
+  const keyboardButtonDown = new Set<THREE.Group>();
+  let keyboardResume: {
+    mode: 'keyboard' | 'command-editor';
+    target: string | null;
+    locked: Readonly<KeyModifiers>;
+  } | null = null;
   let hierarchyLevel: 'workspace' | 'session' | 'window' | 'pane' = 'workspace';
   let hierarchyWorkspaceId: string | null = null;
   let hierarchySessionId: string | null = null;
@@ -619,11 +641,53 @@ export function createWorkspaceScene(
     scale: number;
   } | null = null;
   const pointer = new THREE.Vector2();
+  const syncModifierVisuals = (): void => {
+    const labels = { ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift' };
+    const active = modifierState.active;
+    const locked = modifierState.locked;
+    const roots: THREE.Object3D[] = [...panels.values()].map((panel) => panel.root);
+    if (inputRoot) roots.push(inputRoot);
+    for (const root of roots)
+      root.traverse((object) => {
+        const modifier = object.userData.modifier as KeyboardModifier | undefined;
+        if (!modifier) return;
+        setModifierVisual(object, Boolean(active[modifier]));
+        object.userData.locked = Boolean(locked[modifier]);
+        updateLabel(
+          object as THREE.Mesh,
+          locked[modifier] ? `${labels[modifier]} lock` : labels[modifier],
+        );
+        object.userData.helpText = locked[modifier]
+          ? `${labels[modifier]} locked; tap to release`
+          : `${labels[modifier]}: tap once, hold to lock`;
+      });
+  };
   const clearArmedModifiers = (): void => {
-    inputRoot?.traverse((object) => {
-      if (object.userData.modifier) setModifierVisual(object, false);
-    });
-    armedModifiers = {};
+    modifierPresses.clear();
+    modifierState.clear();
+    syncModifierVisuals();
+  };
+  const consumeArmedModifiers = (): void => {
+    modifierState.consume();
+    syncModifierVisuals();
+  };
+  const beginModifierPress = (
+    source: THREE.Group | number,
+    target: InputTarget | null,
+    before?: { active: boolean; locked: boolean },
+  ): void => {
+    modifierPresses.delete(source);
+    const modifier = target?.object?.userData.modifier as KeyboardModifier | undefined;
+    if (modifier) modifierPresses.set(source, { modifier, since: null, locked: false, before });
+  };
+  const cancelModifierPress = (source: number): void => {
+    const press = modifierPresses.get(source);
+    modifierPresses.delete(source);
+    if (!press?.before) return;
+    modifierState.restore(press.modifier, press.before.active, press.before.locked);
+    syncModifierVisuals();
+    if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
+      refreshInputRoot(inputMode);
   };
   const releaseMouse = (source: THREE.Group | number): void => {
     const capture = mouseCaptures.get(source);
@@ -639,7 +703,7 @@ export function createWorkspaceScene(
       });
     if (typeof source === 'number' && canvas.hasPointerCapture?.(source))
       canvas.releasePointerCapture(source);
-    clearArmedModifiers();
+    consumeArmedModifiers();
     if (capture.modifiers?.shift && inputRoot && inputMode === 'keyboard')
       refreshInputRoot(inputMode);
   };
@@ -784,7 +848,16 @@ export function createWorkspaceScene(
     if (renderer?.xr.isPresenting) return;
     if (!setPointerRay(event)) return;
     const target = targetFromRay();
+    const modifier = target?.object?.userData.modifier as KeyboardModifier | undefined;
+    const before = modifier
+      ? {
+          active: Boolean(modifierState.active[modifier]),
+          locked: Boolean(modifierState.locked[modifier]),
+        }
+      : undefined;
     activateTarget(target);
+    beginModifierPress(event.pointerId, target, before);
+    if (modifierPresses.has(event.pointerId)) canvas.setPointerCapture?.(event.pointerId);
     if (
       startMouse(event.pointerId, target, event.button, {
         shift: event.shiftKey,
@@ -800,6 +873,9 @@ export function createWorkspaceScene(
   const onPointerMove = (event: PointerEvent): void => {
     if (renderer?.xr.isPresenting) return;
     if (!setPointerRay(event)) return;
+    const modifierPress = modifierPresses.get(event.pointerId);
+    if (modifierPress && targetFromRay()?.object?.userData.modifier !== modifierPress.modifier)
+      cancelModifierPress(event.pointerId);
     if (mouseCaptures.has(event.pointerId)) {
       moveMouse(event.pointerId, targetFromRay());
       return;
@@ -811,6 +887,8 @@ export function createWorkspaceScene(
     if (!renderer?.xr.isPresenting) showHover(null);
   };
   const onPointerUp = (event: PointerEvent): void => {
+    if (event.type === 'pointerup') modifierPresses.delete(event.pointerId);
+    else cancelModifierPress(event.pointerId);
     if (
       event.type === 'pointerup' &&
       !renderer?.xr.isPresenting &&
@@ -845,6 +923,18 @@ export function createWorkspaceScene(
         : THREE.MathUtils.clamp((time - previousRenderTime) / 1000, 0, 0.05);
     previousRenderTime = time;
     paneFocus.update(deltaSeconds);
+    (scene.userData.updateEnvironment as ((delta: number) => void) | undefined)?.(deltaSeconds);
+    if (gripActive()) modifierPresses.clear();
+    for (const press of modifierPresses.values()) {
+      if (press.since === null) press.since = time;
+      if (!press.locked && time - press.since >= 550) {
+        press.locked = true;
+        modifierState.lock(press.modifier);
+        if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
+          refreshInputRoot(inputMode);
+        syncModifierVisuals();
+      }
+    }
     const fps = frameCounter.sample(time);
     if (fps !== null) {
       mutableState.fps = fps;
@@ -864,6 +954,18 @@ export function createWorkspaceScene(
     if (renderer?.xr.isPresenting) {
       for (const controller of controllerRoots) {
         if (controllerHandedness.get(controller) !== 'right') continue;
+        const keyboardPressed = Boolean(controllerGamepads.get(controller)?.buttons[4]?.pressed);
+        const keyboardWasPressed = keyboardButtonDown.has(controller);
+        if (keyboardPressed) keyboardButtonDown.add(controller);
+        else keyboardButtonDown.delete(controller);
+        if (
+          keyboardPressed &&
+          !keyboardWasPressed &&
+          controller.visible &&
+          !disconnectedControllers.has(controller) &&
+          !gripActive()
+        )
+          toggleKeyboard();
         const pressed = Boolean(controllerGamepads.get(controller)?.buttons[5]?.pressed);
         const wasPressed = focusButtonDown.has(controller);
         if (pressed) focusButtonDown.add(controller);
@@ -1068,6 +1170,9 @@ export function createWorkspaceScene(
           contact.visible = Boolean(target?.object);
         }
         const object = target?.object;
+        const modifierPress = modifierPresses.get(controller);
+        if (modifierPress && object?.userData.modifier !== modifierPress.modifier)
+          modifierPresses.delete(controller);
         if (object?.userData.labelText !== undefined) {
           controlTargeted = true;
           if (object.userData.helpText) hover ??= object;
@@ -1087,7 +1192,7 @@ export function createWorkspaceScene(
         const modifier = previous.userData.modifier as keyof KeyModifiers | undefined;
         if (material?.color)
           material.color.setHex(
-            (modifier && armedModifiers[modifier]) || previous.userData.activeState
+            (modifier && modifierState.active[modifier]) || previous.userData.activeState
               ? ACCENT
               : 0xffffff,
           );
@@ -1308,6 +1413,17 @@ export function createWorkspaceScene(
           setModifierVisual(button, mutableState.arrangement === pattern);
           inputRoot?.add(button);
         });
+        for (const [label, direction] of [
+          ['Closer', -1],
+          ['Farther', 1],
+        ] as const) {
+          const button = createLabelButton(label, 0.65, 0.11, {
+            inputAction: 'layoutDepth',
+            direction,
+          });
+          button.position.set(direction < 0 ? -0.38 : 0.38, -0.28, 0);
+          inputRoot.add(button);
+        }
       }
     } else if (mode === 'panes') {
       const visible = availablePanes.filter(
@@ -1479,33 +1595,23 @@ export function createWorkspaceScene(
       modeStatus.position.y = -0.455;
       inputRoot.add(modeStatus);
     } else {
-      semanticKeyboardLayout.forEach((row, rowIndex) => {
-        const widths = row.map((key) =>
-          key.key === ' ' ? 0.9 : key.label.length > 4 ? 0.27 : 0.17,
+      const unit = 0.13;
+      for (const key of keyboardKeys) {
+        const button = createLabelButton(
+          key.key.length === 1 && key.key !== ' '
+            ? terminalKeyLabel(key.key, Boolean(modifierState.active.shift))
+            : key.label,
+          key.width * unit - 0.014,
+          key.height * unit - 0.03,
+          { inputAction: 'key', key: key.key, modifier: key.modifier },
         );
-        let left =
-          -(widths.reduce((total, width) => total + width, 0) + (row.length - 1) * 0.025) / 2;
-        row.forEach((key, columnIndex) => {
-          const width = widths[columnIndex];
-          const x = left + width / 2;
-          left += width + 0.025;
-          const button = createLabelButton(
-            key.key.length === 1 && key.key !== ' '
-              ? terminalKeyLabel(key.key, Boolean(armedModifiers.shift))
-              : key.label,
-            width,
-            0.1,
-            {
-              inputAction: 'key',
-              key: key.key,
-              modifier: key.modifier,
-            },
-          );
-          if (key.modifier) setModifierVisual(button, Boolean(armedModifiers[key.modifier]));
-          button.position.set(x, 0.4 - rowIndex * 0.13, 0);
-          inputRoot?.add(button);
-        });
-      });
+        button.position.set(
+          (key.x + key.width / 2 - keyboardDimensions.width / 2) * unit,
+          0.48 - (key.y + key.height / 2) * unit,
+          0,
+        );
+        inputRoot.add(button);
+      }
     }
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
     close.position.set(0, -0.66, 0);
@@ -1545,6 +1651,7 @@ export function createWorkspaceScene(
     backing.userData.helpText = getControlHelp({ inputAction: 'grabInput' });
     inputRoot.add(backing);
     scene.add(inputRoot);
+    syncModifierVisuals();
   };
   const createHud = (): void => {
     hudRoot = new THREE.Group();
@@ -1780,6 +1887,10 @@ export function createWorkspaceScene(
       setBackground(hit.userData.background as BackgroundMode);
       return true;
     }
+    if (action === 'layoutDepth') {
+      moveLayoutDepth(Number(hit.userData.direction));
+      return true;
+    }
     if (action === 'arrange') {
       arrangeTerminals(hit.userData.pattern as PanelArrangement);
       return true;
@@ -1884,10 +1995,14 @@ export function createWorkspaceScene(
     }
     if (action === 'key' && inputMode === 'command-editor' && commandDraft) {
       const modifier = hit.userData.modifier as keyof KeyModifiers | undefined;
-      if (modifier) armedModifiers[modifier] = !armedModifiers[modifier];
+      if (modifier) modifierState.tap(modifier);
       else {
-        commandDraft = editCommandDraft(commandDraft, hit.userData.key as string, armedModifiers);
-        clearArmedModifiers();
+        commandDraft = editCommandDraft(
+          commandDraft,
+          hit.userData.key as string,
+          modifierState.active,
+        );
+        consumeArmedModifiers();
       }
       commandEditorMessage = '';
       refreshInputRoot('command-editor');
@@ -1899,14 +2014,17 @@ export function createWorkspaceScene(
       actions.selectPane(paneId);
       const modifier = hit.userData.modifier as keyof KeyModifiers | undefined;
       if (modifier) {
-        armedModifiers[modifier] = !armedModifiers[modifier];
-        setModifierVisual(hit, Boolean(armedModifiers[modifier]));
+        modifierState.tap(modifier);
+        syncModifierVisuals();
+        setModifierVisual(hit, Boolean(modifierState.active[modifier]));
         if (modifier === 'shift') refreshInputRoot(inputMode);
         return true;
       }
-      const modifiers = Object.keys(armedModifiers).length ? { ...armedModifiers } : undefined;
+      const modifiers = Object.keys(modifierState.active).length
+        ? { ...modifierState.active }
+        : undefined;
       actions.sendKey(hit.userData.key as string, modifiers);
-      clearArmedModifiers();
+      consumeArmedModifiers();
       if (inputMode === 'keyboard') refreshInputRoot(inputMode);
     } else if (action === 'command') {
       const command = menuCommands.find((item) => item.id === hit.userData.commandId);
@@ -1977,22 +2095,26 @@ export function createWorkspaceScene(
       if (keyName) {
         const modifier = hit?.userData.modifier as keyof KeyModifiers | undefined;
         if (modifier) {
-          armedModifiers[modifier] = !armedModifiers[modifier];
-          if (hit) setModifierVisual(hit, Boolean(armedModifiers[modifier]));
+          modifierState.tap(modifier);
+          syncModifierVisuals();
+          if (hit) setModifierVisual(hit, Boolean(modifierState.active[modifier]));
         } else {
           actions.sendKey(
             keyName,
-            Object.keys(armedModifiers).length ? { ...armedModifiers } : undefined,
+            Object.keys(modifierState.active).length ? { ...modifierState.active } : undefined,
           );
-          clearArmedModifiers();
+          consumeArmedModifiers();
         }
       }
     }
   };
   const onControllerSelect = (controller: THREE.Group): void => {
     const target = targetFromController(controller);
-    const modifiers = Object.keys(armedModifiers).length ? { ...armedModifiers } : undefined;
+    const modifiers = Object.keys(modifierState.active).length
+      ? { ...modifierState.active }
+      : undefined;
     activateTarget(target);
+    beginModifierPress(controller, target);
     startMouse(controller, target, 0, modifiers);
     showHover(null);
   };
@@ -2025,6 +2147,7 @@ export function createWorkspaceScene(
         onControllerSelect(root);
       };
       const onSelectEnd = (): void => {
+        modifierPresses.delete(root);
         if (mouseCaptures.has(root) && !gripActive()) {
           moveMouse(root, targetFromController(root));
         }
@@ -2033,6 +2156,7 @@ export function createWorkspaceScene(
       const onSqueeze = (event: Event): void => {
         if (heldControllers.has(root) || disconnectedControllers.has(root)) return;
         releaseAllMouse();
+        modifierPresses.clear();
         heldControllers.add(root);
         const target = targetFromController(root);
         if (!target) return;
@@ -2076,12 +2200,16 @@ export function createWorkspaceScene(
         const data = (event as Event & { data?: { gamepad?: Gamepad; handedness?: string } }).data;
         const gamepad = data?.gamepad;
         controllerHandedness.set(root, data?.handedness ?? 'none');
+        if (gamepad?.buttons[4]?.pressed) keyboardButtonDown.add(root);
+        else keyboardButtonDown.delete(root);
         if (gamepad?.buttons[5]?.pressed) focusButtonDown.add(root);
         else focusButtonDown.delete(root);
         if (gamepad) controllerGamepads.set(root, gamepad);
       };
       const onDisconnected = (): void => {
         releaseMouse(root);
+        modifierPresses.delete(root);
+        keyboardButtonDown.delete(root);
         disconnectedControllers.add(root);
         heldControllers.delete(root);
         rayLine.visible = false;
@@ -2098,7 +2226,7 @@ export function createWorkspaceScene(
           const modifier = previous.userData.modifier as keyof KeyModifiers | undefined;
           if (material?.color)
             material.color.setHex(
-              (modifier && armedModifiers[modifier]) || previous.userData.activeState
+              (modifier && modifierState.active[modifier]) || previous.userData.activeState
                 ? ACCENT
                 : 0xffffff,
             );
@@ -2332,6 +2460,8 @@ export function createWorkspaceScene(
     if (nextId === mutableState.selectedTerminalId && mutableState.focusedTerminalId === nextId)
       return;
     if (!gazeRetargeting) gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
+    keyboardResume = null;
+    clearArmedModifiers();
     mutableState.selectedTerminalId = nextId;
     mutableState.focusedTerminalId = mutableState.selectedTerminalId;
     if (mutableState.selectedTerminalId) actions.selectPane(mutableState.selectedTerminalId);
@@ -2447,6 +2577,7 @@ export function createWorkspaceScene(
     quickCommands = commands.map((command) => ({ ...command }));
   };
   const showInput = (mode: InputMode): void => {
+    keyboardResume = null;
     if (
       !renderer?.xr.isPresenting &&
       mode !== 'panes' &&
@@ -2466,6 +2597,29 @@ export function createWorkspaceScene(
     commandPage = 0;
     clearArmedModifiers();
     refreshInputRoot(mode);
+  };
+  const toggleKeyboard = (): void => {
+    modifierPresses.clear();
+    if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor')) {
+      keyboardResume = {
+        mode: inputMode,
+        target: mutableState.selectedTerminalId,
+        locked: modifierState.locked,
+      };
+      hideInput();
+      return;
+    }
+    const resume =
+      !inputRoot && keyboardResume?.target === mutableState.selectedTerminalId
+        ? keyboardResume
+        : null;
+    showInput(resume?.mode === 'command-editor' && commandDraft ? 'command-editor' : 'keyboard');
+    if (resume)
+      for (const name of ['ctrl', 'alt', 'shift'] as const)
+        if (resume.locked[name]) modifierState.lock(name);
+    if (resume && inputRoot) refreshInputRoot(inputMode);
+    keyboardResume = null;
+    syncModifierVisuals();
   };
   const hideInput = (): void => {
     if (inputRoot)
@@ -2498,6 +2652,7 @@ export function createWorkspaceScene(
         : { optionalFeatures: ['local-floor'] },
     );
     activeSession = session;
+    keyboardResume = null;
     hideInput();
     inputTransform = null;
     previousRenderTime = null;
@@ -2519,6 +2674,7 @@ export function createWorkspaceScene(
     }
     notify();
     session.addEventListener('end', () => {
+      keyboardResume = null;
       endFocusMode(true);
       releaseAllMouse();
       activeSession = null;
@@ -2532,6 +2688,8 @@ export function createWorkspaceScene(
       controllerGamepads.clear();
       controllerHandedness.clear();
       focusButtonDown.clear();
+      keyboardButtonDown.clear();
+      modifierPresses.clear();
       previousRenderTime = null;
       hoveredByController.clear();
       showHover(null);
@@ -2640,6 +2798,50 @@ export function createWorkspaceScene(
         beginPairGrab(object, ...pair.controllers);
     mutableState.arrangement = pattern;
     if (inputRoot && inputMode === 'arrange') refreshInputRoot('arrange');
+    notify();
+  };
+  const moveLayoutDepth = (direction: number): void => {
+    if (!panels.size || !Number.isFinite(direction) || direction === 0) return;
+    endFocusMode(true);
+    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    scene.updateMatrixWorld(true);
+    view.updateWorldMatrix(true, false);
+    const eye = view.getWorldPosition(new THREE.Vector3());
+    const center = new THREE.Vector3();
+    for (const panel of panels.values())
+      center.add(panel.root.getWorldPosition(new THREE.Vector3()));
+    center.divideScalar(panels.size).sub(eye);
+    center.y = 0;
+    if (center.lengthSq() < 0.0001) {
+      view.getWorldDirection(center);
+      center.y = 0;
+    }
+    if (center.lengthSq() < 0.0001) center.set(0, 0, -1);
+    center.normalize();
+    let distance = Math.sign(direction) * 0.4;
+    if (distance < 0) {
+      let nearest = Infinity;
+      for (const panel of panels.values()) {
+        const box = new THREE.Box3().setFromObject(panel.root);
+        for (const x of [box.min.x, box.max.x])
+          for (const y of [box.min.y, box.max.y])
+            for (const z of [box.min.z, box.max.z]) {
+              nearest = Math.min(nearest, new THREE.Vector3(x, y, z).sub(eye).dot(center));
+            }
+      }
+      distance = -Math.min(-distance, Math.max(0, nearest - 0.8));
+    }
+    const delta = center.multiplyScalar(distance);
+    for (const panel of panels.values()) {
+      const position = panel.root.getWorldPosition(new THREE.Vector3()).add(delta);
+      panel.root.position.copy(
+        panel.root.parent ? panel.root.parent.worldToLocal(position) : position,
+      );
+    }
+    for (const [controller, drag] of dragStates)
+      if (drag.object.userData.terminalId) captureGrab(controller, drag.object);
+    for (const [object, pair] of pairGrabs)
+      if (object.userData.terminalId) beginPairGrab(object, ...pair.controllers);
     notify();
   };
   const resetLayout = (): void => {
@@ -2753,6 +2955,8 @@ export function createWorkspaceScene(
     controllerGamepads.clear();
     controllerHandedness.clear();
     focusButtonDown.clear();
+    keyboardButtonDown.clear();
+    modifierPresses.clear();
     disconnectedControllers.clear();
     heldControllers.clear();
     clearInputRoot();
@@ -2800,6 +3004,7 @@ export function createWorkspaceScene(
     toggleFocusMode,
     resetLayout,
     scaleSelectedPanel,
+    moveLayoutDepth,
     getControlHints,
     dispose,
     subscribe(listener) {

@@ -49,6 +49,8 @@ Right-controller B toggles temporary Focus mode for the aimed terminal, falling 
 
 Distance-based rendering LOD is independent of gaze keyboard targeting. The head-gazed pane always remains full fidelity. Medium/far panes reduce raster density and refresh cadence, hidden panes retain live parser state without painting, and desktop returns to full resolution. This never changes PTY grids, input selection or spatial UI text quality. Higher physical Quest capacity remains measured owner acceptance, not inferred from desktop pane counts.
 
+The shared desktop/XR keyboard uses conventional key grouping. Modifier taps remain one-shot, while a roughly 550 ms hold locks Shift/Ctrl/Alt until a later tap. Locked state is visible and resets on input-target/context changes. Right-controller A toggles the keyboard, preserving its pose and safe target ownership. B retains Focus mode. Closer/Farther translate the complete terminal layout horizontally toward or away from the viewer while preserving scales, rotations and remote grids, with a near-distance bound. Observatory motion is limited to slow own-center planet rotation and occasional reused meteor geometry. Terminal filtering adds mipmapped minification and bounded anisotropy, with separate software motion evidence and physical Quest acceptance.
+
 ### Upstream Dependencies
 
 - [Full hierarchy/layout streaming](https://board.example.test/board?card=01a19579caef72cb9ccc955871ab48c7): implemented in core `95dbb69f` and published in 0.76.0; metadata-only selector is `/ws?metadata=1`. Required for production hierarchy navigation. Integrate that supported contract rather than a second mux-control bridge.

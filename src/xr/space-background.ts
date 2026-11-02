@@ -2,11 +2,16 @@ import * as THREE from 'three';
 
 export interface SpaceBackground {
   root: THREE.Group;
+  update: (deltaSeconds: number) => void;
   dispose: () => void;
 }
 
 const STAR_COUNT = 640;
 const SKY_RADIUS = 78;
+const METEOR_MIN_DELAY = 35;
+const METEOR_MAX_DELAY = 70;
+const METEOR_MIN_LIFETIME = 0.5;
+const METEOR_MAX_LIFETIME = 1.2;
 
 function seededRandom(seed: number): () => number {
   let state = seed >>> 0;
@@ -128,11 +133,77 @@ function createOrbitalTrail(): THREE.LineLoop {
   return trail;
 }
 
+function createMeteor(): THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial> {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+  const material = new THREE.LineBasicMaterial({
+    color: 0xb8e6ee,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  });
+  const meteor = new THREE.Line(geometry, material);
+  meteor.name = 'observatory-exterior-shooting-star';
+  meteor.renderOrder = -898;
+  meteor.visible = false;
+  return meteor;
+}
+
 export function createSpaceBackground(): SpaceBackground {
   const root = new THREE.Group();
   root.name = 'observatory-exterior-space';
   root.visible = false;
-  root.add(createSkyShell(), createStarfield(), createOrbitalTrail());
+  const meteor = createMeteor();
+  root.add(createSkyShell(), createStarfield(), createOrbitalTrail(), meteor);
+  const meteorPosition = meteor.geometry.getAttribute('position') as THREE.BufferAttribute;
+  const meteorStart = new THREE.Vector3();
+  const meteorEnd = new THREE.Vector3();
+  const meteorDirection = new THREE.Vector3();
+  let elapsed = 0;
+  let meteorDelay = METEOR_MIN_DELAY + 35 * 0.5;
+  let meteorAge = 0;
+  let meteorLifetime = METEOR_MIN_LIFETIME;
+  let meteorActive = false;
+  const spawnMeteor = (): void => {
+    const angle = elapsed * 0.73;
+    const y = 21 + Math.sin(elapsed * 0.31) * 3;
+    const x = Math.sin(angle) * 30;
+    const z = -58 - Math.cos(angle) * 6;
+    meteorStart.set(x, y, z);
+    meteorDirection.set(-0.62, -0.08, 0.34).normalize();
+    meteorEnd.copy(meteorStart).addScaledVector(meteorDirection, -5.5);
+    meteorPosition.setXYZ(0, 0, 0, 0);
+    meteorEnd.copy(meteorDirection).multiplyScalar(-5.5);
+    meteorPosition.setXYZ(1, meteorEnd.x, meteorEnd.y, meteorEnd.z);
+    meteor.position.copy(meteorStart);
+    meteor.geometry.boundingSphere = null;
+    meteorPosition.needsUpdate = true;
+    meteorLifetime =
+      METEOR_MIN_LIFETIME + (elapsed % 1) * (METEOR_MAX_LIFETIME - METEOR_MIN_LIFETIME);
+    meteorAge = 0;
+    meteorActive = true;
+    meteor.visible = true;
+  };
+  const update = (deltaSeconds: number): void => {
+    if (disposed || !root.visible || !Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return;
+    const delta = Math.min(deltaSeconds, 0.25);
+    elapsed += delta;
+    if (!meteorActive) {
+      meteorDelay -= delta;
+      if (meteorDelay <= 0) spawnMeteor();
+      return;
+    }
+    meteorAge += delta;
+    meteor.position.copy(meteorStart).addScaledVector(meteorDirection, meteorAge * 24);
+    const progress = Math.min(1, meteorAge / meteorLifetime);
+    meteor.material.opacity = Math.sin(progress * Math.PI) * 0.48;
+    if (progress >= 1) {
+      meteorActive = false;
+      meteor.visible = false;
+      meteor.material.opacity = 0;
+      meteorDelay = METEOR_MIN_DELAY + (elapsed % 1) * (METEOR_MAX_DELAY - METEOR_MIN_DELAY);
+    }
+  };
   let disposed = false;
   const dispose = (): void => {
     if (disposed) return;
@@ -140,6 +211,7 @@ export function createSpaceBackground(): SpaceBackground {
     root.traverse((object) => {
       if (
         object instanceof THREE.Mesh ||
+        object instanceof THREE.Line ||
         object instanceof THREE.LineLoop ||
         object instanceof THREE.Points
       ) {
@@ -155,5 +227,5 @@ export function createSpaceBackground(): SpaceBackground {
     });
     root.removeFromParent();
   };
-  return { root, dispose };
+  return { root, update, dispose };
 }

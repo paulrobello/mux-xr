@@ -531,7 +531,7 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
       'base keycap was not lowercase',
     );
     await page.locator('[data-key="a"]').click();
-    await page.locator('[data-modifier="shift"]').click();
+    await page.locator('[data-modifier="shift"]').first().click();
     assert(
       (await page.locator('[data-key="4"]').textContent()) === '$',
       'Shift keycap did not expose dollar',
@@ -541,9 +541,9 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
       (await page.locator('[data-key="4"]').textContent()) === '4',
       'one-shot Shift did not restore keycap',
     );
-    await page.locator('[data-modifier="shift"]').click();
+    await page.locator('[data-modifier="shift"]').first().click();
     await page.locator('[data-key="c"]').click();
-    await page.locator('[data-modifier="ctrl"]').click();
+    await page.locator('[data-modifier="ctrl"]').first().click();
     await page.locator('[data-key="c"]').click();
     const keyboardBytes = (await observedInputFrames(page, state, '%1', keyboardStart, '\x03'))
       .filter((frame) => frame.paneId === '%1' && frame.case === 'input')

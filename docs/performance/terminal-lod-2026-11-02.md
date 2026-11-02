@@ -1,6 +1,6 @@
 # Terminal LOD capacity comparison — 2026-11-02
 
-Baseline source: `0e84ad3`. Candidate: the runtime changes accompanying this report. Apple M4 Mac mini, native Chromium headless/ANGLE Metal, 1440×1000 viewport, device scale 2. These are desktop diagnostics using the actual app callbacks, terminal parser/painter, XR render/controller branch and a narrow XR session shim. They do not establish a Quest maximum or sustained thermal behavior.
+Baseline source: `0e84ad3`. Candidate source: `e918a42`, before the later keyboard and filtering batch. The source hashes below bind that historical comparison. Apple M4 Mac mini, native Chromium headless/ANGLE Metal, 1440×1000 viewport, device scale 2. These are desktop diagnostics using the actual app callbacks, terminal parser/painter, XR render/controller branch and a narrow XR session shim. They do not establish a Quest maximum or sustained thermal behavior.
 
 All WebSockets were intercepted. Each case used real logical 149×54 grids, dense colored initial content, one-row agent spinners at approximately 10 Hz per pane and one appended log line per second in pane 1. Two seconds of warmup preceded eight seconds of measurement. The same packet counts and byte counts were delivered to both variants. Keyboard was closed, background Black, gaze keyboard input off, selected pane %1. The center pane remained full quality and a far-pane head turn promoted that pane to full without changing selection.
 

@@ -319,6 +319,10 @@ ui = mountWorkspaceUI(app, {
     desktop.showPreview();
     scene.arrangeTerminals(pattern);
   },
+  onMoveLayout: (direction) => {
+    desktop.showPreview();
+    scene.moveLayoutDepth(direction);
+  },
   onDemo: startDemo,
 });
 scene = createWorkspaceScene(ui.sceneHost, actions);
