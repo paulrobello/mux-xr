@@ -95,7 +95,7 @@ async function target(
     { action, extra },
   );
 }
-async function pressA(page: Page): Promise<void> {
+async function toggleKeyboardFromMenu(page: Page): Promise<void> {
   await page.evaluate(async () => {
     const w = window as unknown as FixtureWindow;
     w.__widgetsPad.buttons[4].pressed = true;
@@ -107,6 +107,19 @@ async function pressA(page: Page): Promise<void> {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
     );
   });
+  await waitFor(
+    page,
+    async () =>
+      page.evaluate(() =>
+        Boolean(
+          (window as unknown as FixtureWindow).__questScene.getObjectByName('radial-menu')?.userData
+            .interactive,
+        ),
+      ),
+    'A menu did not settle',
+  );
+  await target(page, 'radialAction', { radialAction: 'keyboard' });
+  await page.waitForTimeout(180);
 }
 async function widgetPixels(page: Page, name: string): Promise<{ visible: number; delta: number }> {
   return page.evaluate((name) => {
@@ -323,7 +336,7 @@ try {
       data: { gamepad: pad, handedness: 'right' },
     } as never);
   });
-  await pressA(page);
+  await toggleKeyboardFromMenu(page);
   const keyboardPose = await page.evaluate((): Pose => {
     const w = window as unknown as FixtureWindow;
     const keyboard = w.__questScene.getObjectByName('xr-keyboard-controls');
@@ -366,7 +379,7 @@ try {
       data: { gamepad: pad, handedness: 'right' },
     } as never);
   });
-  await pressA(page);
+  await toggleKeyboardFromMenu(page);
   const keyboardRestored = await page.evaluate((): Pose | undefined => {
     const object = (window as unknown as FixtureWindow).__questScene.getObjectByName(
       'xr-keyboard-controls',

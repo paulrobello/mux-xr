@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 /** The largest supported horizontal terminal bend. */
 export const MAX_TERMINAL_CURVATURE_RADIANS = (100 * Math.PI) / 180;
@@ -223,4 +224,26 @@ export function getConservativeTerminalArrangementSize(span: TerminalWarpSpan): 
   depth: number;
 } {
   return { width: span.width, depth: getTerminalWarpBounds(span).depth };
+}
+
+export function createTerminalFrameGeometry(span: TerminalWarpSpan): THREE.BufferGeometry {
+  const segments = span.radians > 0 ? 32 : 1;
+  const pieces = [
+    new THREE.BoxGeometry(span.width + 0.035, 0.03, 0.035, segments).translate(
+      0,
+      span.height / 2 + 0.015,
+      0,
+    ),
+    new THREE.BoxGeometry(span.width + 0.035, 0.03, 0.035, segments).translate(
+      0,
+      -span.height / 2 - 0.015,
+      0,
+    ),
+    new THREE.BoxGeometry(0.0175, span.height, 0.035).translate(-span.width / 2 - 0.00875, 0, 0),
+    new THREE.BoxGeometry(0.0175, span.height, 0.035).translate(span.width / 2 + 0.00875, 0, 0),
+  ];
+  const merged = mergeGeometries(pieces, false);
+  for (const piece of pieces) piece.dispose();
+  if (!merged) throw new Error('Terminal frame geometries are incompatible');
+  return warpGeometryPositions(merged, span);
 }

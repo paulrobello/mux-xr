@@ -83,7 +83,7 @@ The observatory exterior adds stable star clusters and diffuse cloud bands. The 
 
 ## Keyboard and workspace shortcuts
 
-The desktop and XR keyboards use the same familiar key positions, with Enter at the right of the home row, wide Shift/Backspace/Space keys, and a separate inverted-T arrow cluster. Right-controller **A** toggles the keyboard. It preserves the keyboard pose and active target, and ignores presses made during a grip. **B** continues to toggle terminal Focus mode. A temporarily hidden keyboard retains its locks for the same target, while pane/context changes and XR exit clear them.
+The desktop and XR keyboards use the same familiar key positions, with Enter at the right of the home row, wide Shift/Backspace/Space keys, and a separate inverted-T arrow cluster. Right-controller **A** opens or closes the tinted radial action menu. Choose Keyboard to toggle the keyboard. It preserves the keyboard pose and active target, and ignores presses made during a grip. **B** continues to toggle terminal Focus mode. A temporarily hidden keyboard retains its locks for the same target, while pane/context changes and XR exit clear them.
 
 In **Arrange** or browser Workspace settings, use **Closer** and **Farther** to move all terminal panels together. Panel size, rotation, text zoom and terminal grids stay unchanged. Closer stops before the nearest panel enters the viewing space.
 
@@ -107,7 +107,7 @@ Presets apply to currently attached terminals around your current position and h
 
 Arrangement spacing measures each window's current grid geometry, title and controls, plus its manual physical scale. Layouts center those complete bounds and increase distance when viewer-facing windows would visually overlap. Physical scale, text zoom, input target and remote grids are preserved. Controller rays extend to reach arranged windows beyond the default ray length. Creating a new terminal through the viewer requires the pending opt-in core API, tracked by [the upstream card](https://board.example.test/board?card=01a1991e1e20727d8ff8a32afc0b212f). Existing default-workspace panes can already be attached.
 
-The native HUD replaces its Keyboard button with **Widgets**. A still toggles the keyboard. Widgets adds a local-time digital or analog 3D clock. Grip either clock to move, rotate, push/pull or scale it like other UI. Its × closes only that clock. Grip stick left/right now uses the reversed yaw and laser-axis roll directions.
+The native HUD replaces its Keyboard button with **Widgets**. A opens the radial menu. Widgets adds a local-time digital or analog 3D clock. Grip either clock to move, rotate, push/pull or scale it like other UI. Its × closes only that clock. Grip stick left/right now uses the reversed yaw and laser-axis roll directions.
 
 Keyboard and main-panel position, rotation and scale save on final grip release and XR exit. The next XR session restores them relative to the new headset position and heading. Both-stick recovery clears those saved poses while retaining commands and other preferences. Clock presence, position, rotation and scale now persist locally, including desktop preview and XR reload. Closing a clock removes its saved entry.
 
@@ -154,4 +154,12 @@ Filtering shows anisotropy only for mipmap modes and hides values beyond the dev
 
 Terminal settings → Warp adjusts the selected pane from flat to 100° curvature. Browser Workspace Settings has the same selected-pane slider. Curvature is saved per server/pane, preserves the remote grid and mouse UV mapping, and is included in layout spacing/floor checks. Point at a terminal and use either controller's stick up/down to scroll. Grip suppresses scrolling. Ordinary shells use local scrollback. Mouse-aware TUIs receive raw SGR wheel reports. Browser wheel scrolling works in both flat terminals and the 3D preview.
 
-The [radial design notes](design/radial-menus.md) and [rendered comparison](https://artifacts.example.test/a/01a19e0a856b745388c896d401016f04) compare five-action menus and glass treatment using the actual scene. Production A remains Keyboard until a radial direction is selected. The [core 0.77 review](docs/core-0.77-review.md) records relevant release additions and opt-in boundaries.
+The [radial design notes](design/radial-menus.md) and [rendered comparison](https://artifacts.example.test/a/01a19e0a856b745388c896d401016f04) compare five-action menus and glass treatment using the actual scene. The tinted ring is now the live A-button menu. The [core 0.77 review](docs/core-0.77-review.md) records relevant release additions and opt-in boundaries.
+
+## Animated menu, glass and restart restore
+
+Press A to open the selected tinted ring. Its center expands first, five options emerge as a stack, then move around the circle into their final positions. The programmed opening is 800 ms. Moving targets cannot be activated or grabbed. Point and trigger to choose Keyboard, Commands, Layout, Warp or Widgets. Center Cancel or A closes it. B remains Focus. Scrolling and underlying terminal activation are blocked while the menu is visible.
+
+Warp includes saved per-pane glass opacity controls from 10–100%. Browser Workspace Settings has the same slider. The dark backing becomes translucent while normal bright text stays opaque. The frame is a separate hollow bezel, so adjusting opacity does not abruptly remove the border or require repeated texture uploads.
+
+Open terminal views, the selected pane and 3D positions/rotations/scales are saved per streamer. Reload resolves them against the current hierarchy and shows a dismissible toast for unavailable panes. Explicitly closing every view saves an empty workspace. Focus-mode placement is temporary and is excluded from the saved layout. Restoration sends no commands, resize or pane-create request. After installing this update, open the panes you want once; subsequent restarts restore the saved set.

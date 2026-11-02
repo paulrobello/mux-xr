@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_TERMINAL_FILTERING } from '../src/terminal/filtering';
-import { createTerminalMaterial, setTerminalMaterialFiltering } from '../src/xr/terminal-material';
+import {
+  createTerminalMaterial,
+  setTerminalBackgroundOpacity,
+  setTerminalMaterialFiltering,
+} from '../src/xr/terminal-material';
 
 describe('terminal material filtering', () => {
   it('toggles base-level sampling only for gaze clarity on mipmap modes', () => {
@@ -58,6 +62,64 @@ describe('terminal material filtering', () => {
     expect(shader.fragmentShader).toContain('textureLod( map, vMapUv, 0.0 )');
     expect(shader.fragmentShader).toContain('sRGBTransferEOTF');
     expect(shader.fragmentShader).toContain('#include <colorspace_fragment>');
+    material.dispose();
+  });
+
+  it('applies opacity only to dark sampled background pixels', () => {
+    const material = createTerminalMaterial(new THREE.DataTexture());
+    const shader = {
+      uniforms: {} as Record<string, unknown>,
+      fragmentShader: '#include <map_fragment>\n#include <colorspace_fragment>',
+      vertexShader: '',
+    };
+    material.onBeforeCompile(
+      shader as unknown as Parameters<typeof material.onBeforeCompile>[0],
+      {} as THREE.WebGLRenderer,
+    );
+    expect(shader.uniforms.terminalBackgroundOpacity).toBe(
+      material.userData.terminalBackgroundOpacity,
+    );
+    expect(shader.fragmentShader).toContain(
+      'max( max( sampledDiffuseColor.r, sampledDiffuseColor.g ), sampledDiffuseColor.b )',
+    );
+    expect(shader.fragmentShader).toContain(
+      'smoothstep( 0.005, 0.025, terminalDarkBackgroundValue )',
+    );
+    expect(shader.fragmentShader).toContain('#ifdef USE_MAP');
+    expect(shader.fragmentShader).toContain(
+      'diffuseColor.a *= mix( 1.0, terminalBackgroundOpacity',
+    );
+    expect(shader.fragmentShader).toContain('#include <colorspace_fragment>');
+    material.dispose();
+  });
+
+  it('uses peak RGB so saturated glyph colors stay opaque', () => {
+    const darkBackgroundMask = (red: number, green: number, blue: number): number => {
+      const peak = Math.max(red, green, blue);
+      const t = Math.max(0, Math.min(1, (peak - 0.005) / 0.02));
+      return 1 - t * t * (3 - 2 * t);
+    };
+    expect(darkBackgroundMask(0, 0, 0)).toBe(1);
+    expect(darkBackgroundMask(0, 0, 0.01)).toBeCloseTo(0.84375);
+    expect(darkBackgroundMask(0, 0, 0.4)).toBe(0);
+    expect(darkBackgroundMask(0.2, 0.2, 0.2)).toBe(0);
+    expect(darkBackgroundMask(0.1, 0.8, 0.1)).toBe(0);
+    expect(darkBackgroundMask(0, 0, 0.002)).toBeCloseTo(1);
+  });
+
+  it('changes transparency state only when crossing opaque mode', () => {
+    const material = createTerminalMaterial(new THREE.DataTexture());
+    setTerminalBackgroundOpacity(material, 0.5);
+    expect(material.transparent).toBe(true);
+    expect(material.depthWrite).toBe(false);
+    expect((material.userData.terminalBackgroundOpacity as { value: number }).value).toBe(0.5);
+    const nonOpaqueMaterialVersion = material.version;
+    setTerminalBackgroundOpacity(material, 0.4);
+    expect(material.version).toBe(nonOpaqueMaterialVersion);
+    setTerminalBackgroundOpacity(material, 1);
+    expect(material.transparent).toBe(false);
+    expect(material.depthWrite).toBe(true);
+    expect(material.version).toBeGreaterThan(nonOpaqueMaterialVersion);
     material.dispose();
   });
 });

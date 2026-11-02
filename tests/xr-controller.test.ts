@@ -199,6 +199,33 @@ function pressFocusButton(gamepad: Gamepad, time: number): void {
   fakeXR.frame?.(time + 16);
 }
 
+function openRadialMenu(gamepad: Gamepad, time: number): void {
+  (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
+  fakeXR.frame?.(time);
+  (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
+  fakeXR.frame?.(time + 16);
+  fakeXR.frame?.(time + 900);
+}
+
+function selectRadialAction(
+  workspace: ReturnType<typeof createWorkspaceScene>,
+  gamepad: Gamepad,
+  action: 'keyboard' | 'commands' | 'layout' | 'warp' | 'widgets' | 'cancel',
+  time: number,
+): void {
+  openRadialMenu(gamepad, time);
+  hit(workspace, { inputAction: 'radialAction', radialAction: action });
+  fakeXR.frame?.(time + 1100);
+}
+
+function selectKeyboardViaRadial(
+  workspace: ReturnType<typeof createWorkspaceScene>,
+  gamepad: Gamepad,
+  time: number,
+): void {
+  selectRadialAction(workspace, gamepad, 'keyboard', time);
+}
+
 describe('native XR controller event routing', () => {
   beforeEach(() => {
     fakeXR.presenting = true;
@@ -1995,26 +2022,32 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('toggles keyboard with right A once per press and preserves its pose and target', () => {
+  it('opens radial with right A and preserves keyboard pose and target through selection', () => {
     const { workspace, container } = fixture();
     const gamepad = connectController(1, [0, 0, 0, 0], 'right');
     (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
     fakeXR.frame?.(0);
-    let keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
-    if (!keyboard) throw new Error('A did not open keyboard');
-    keyboard.position.x += 0.3;
-    const position = keyboard.position.clone();
+    const radial = workspace.scene.getObjectByName('radial-menu');
+    expect(radial?.visible).toBe(true);
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
     fakeXR.frame?.(100);
-    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBe(keyboard);
+    expect(radial?.visible).toBe(true);
     (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
     fakeXR.frame?.(120);
     (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
     fakeXR.frame?.(140);
-    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+    expect(workspace.state.radialOpen).toBe(false);
     (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
-    fakeXR.frame?.(160);
-    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
-    fakeXR.frame?.(180);
+    fakeXR.frame?.(360);
+    expect(radial?.visible).toBe(false);
+    selectKeyboardViaRadial(workspace, gamepad, 400);
+    let keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Radial keyboard action did not open keyboard');
+    keyboard.position.x += 0.3;
+    const position = keyboard.position.clone();
+    selectKeyboardViaRadial(workspace, gamepad, 1600);
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+    selectKeyboardViaRadial(workspace, gamepad, 2800);
     keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
     expect(keyboard?.position).toEqual(position);
     expect(workspace.state.inputTargetId).toBe('pane-a');
@@ -2035,9 +2068,97 @@ describe('native XR controller event routing', () => {
     fakeXR.frame?.(120);
     (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
     fakeXR.frame?.(140);
+    expect(workspace.scene.getObjectByName('radial-menu')?.visible).toBe(true);
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(1040);
+    hit(workspace, { inputAction: 'radialAction', radialAction: 'keyboard' });
+    fakeXR.frame?.(1240);
     expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeDefined();
     workspace.dispose();
     container.remove();
+  });
+
+  it('treats radial as a modal A menu and routes each action to its panel', () => {
+    const { workspace, actions, container } = fixture();
+    const gamepad = connectController(1, [0, 0, 0, 0], 'right');
+    openRadialMenu(gamepad, 0);
+    const radial = workspace.scene.getObjectByName('radial-menu');
+    expect(radial?.visible).toBe(true);
+    expect(radial?.userData.inputAction).toBe('grabRadial');
+    const sendsBeforeEarlySelection = (actions.sendKey as ReturnType<typeof vi.fn>).mock.calls
+      .length;
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+    expect((gamepad.buttons[4] as { pressed: boolean }).pressed).toBe(false);
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(1000);
+    expect(workspace.state.radialOpen).toBe(false);
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(1200);
+    expect(radial?.visible).toBe(false);
+    expect((actions.sendKey as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      sendsBeforeEarlySelection,
+    );
+
+    selectRadialAction(workspace, gamepad, 'commands', 1400);
+    expect(workspace.scene.getObjectByName('xr-commands-controls')).toBeDefined();
+    selectRadialAction(workspace, gamepad, 'layout', 2600);
+    expect(workspace.scene.getObjectByName('xr-arrange-controls')).toBeDefined();
+    selectRadialAction(workspace, gamepad, 'warp', 3800);
+    expect(workspace.scene.getObjectByName('xr-warp-controls')).toBeDefined();
+    selectRadialAction(workspace, gamepad, 'widgets', 5000);
+    expect(workspace.scene.getObjectByName('xr-widgets-controls')).toBeDefined();
+    selectRadialAction(workspace, gamepad, 'cancel', 6200);
+    expect(radial?.visible).toBe(false);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('remembers terminal scale and captures original placement during transient focus', () => {
+    const { workspace, container } = fixture();
+    workspace.selectTerminal('pane-a');
+    const pose = {
+      position: [0.4, -0.1, -1.5] as [number, number, number],
+      quaternion: [0, 0, 0, 1] as [number, number, number, number],
+      scale: 0.8,
+    };
+    workspace.restoreTerminalPose('pane-a', pose);
+    workspace.scaleSelectedPanel(-1);
+    expect(workspace.captureTerminalPose('pane-a')?.scale).toBeCloseTo(0.7);
+    const saved = workspace.captureTerminalPose('pane-a');
+    workspace.toggleFocusMode('pane-a');
+    fakeXR.frame?.(0);
+    fakeXR.frame?.(300);
+    const title = objectWithData(workspace, { terminalTitle: true, terminalId: 'pane-a' });
+    aimController(fakeXR.controllers[0] as THREE.Group, title);
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezestart' } as never);
+    (fakeXR.controllers[0] as THREE.Group).position.x += 0.1;
+    fakeXR.frame?.(400);
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
+    expect(workspace.captureTerminalPose('pane-a')?.position).toEqual(saved?.position);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('restores glass opacity without resizing or rebuilding for every slider value', () => {
+    const { workspace, left, container } = fixture();
+    workspace.setTerminalOpacity('pane-a', 0.4);
+    const screen = workspace.scene
+      .getObjectByName('terminal-panel-pane-a')
+      ?.getObjectByName('terminal-surface') as THREE.Mesh<
+      THREE.BufferGeometry,
+      THREE.MeshBasicMaterial
+    >;
+    const version = screen.material.version;
+    workspace.setTerminalOpacity('pane-a', 0.5);
+    expect(screen.material.version).toBe(version);
+    expect(screen.material.userData.terminalBackgroundOpacity.value).toBe(0.5);
+    expect(left.resizeGrid).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+    const second = fixture();
+    expect(second.workspace.getTerminalOpacity('pane-a')).toBe(0.5);
+    second.workspace.dispose();
+    second.container.remove();
   });
 
   it('moves an entire layout without changing its geometry, input or grids', () => {
@@ -2125,18 +2246,26 @@ describe('native XR controller event routing', () => {
   it('does not resurrect keyboard locks after changing panes while the keyboard is hidden', () => {
     const { workspace, actions, container } = fixture();
     const gamepad = connectController(1, [0, 0, 0, 0], 'right');
-    workspace.showInput('keyboard');
+    selectKeyboardViaRadial(workspace, gamepad, 0);
     hit(workspace, { inputAction: 'key', key: 'Shift' });
-    fakeXR.frame?.(0);
-    fakeXR.frame?.(600);
+    fakeXR.frame?.(1200);
+    fakeXR.frame?.(1800);
     (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
-    fakeXR.frame?.(620);
+    fakeXR.frame?.(1820);
     (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
-    fakeXR.frame?.(640);
+    fakeXR.frame?.(1836);
+    fakeXR.frame?.(2720);
+    hit(workspace, { inputAction: 'radialAction', radialAction: 'keyboard' });
+    fakeXR.frame?.(2920);
     workspace.selectTerminal('pane-b');
     workspace.selectTerminal('pane-a');
     (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
-    fakeXR.frame?.(660);
+    fakeXR.frame?.(3000);
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(3016);
+    fakeXR.frame?.(3900);
+    hit(workspace, { inputAction: 'radialAction', radialAction: 'keyboard' });
+    fakeXR.frame?.(4100);
     hit(workspace, { inputAction: 'key', key: 'c' });
     expect(actions.sendKey).toHaveBeenLastCalledWith('c', undefined);
     workspace.dispose();

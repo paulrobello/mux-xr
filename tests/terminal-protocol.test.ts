@@ -36,7 +36,9 @@ describe('terminal protocol framing', () => {
     const message = decodeServerMessage(screenFrame(screen, compressed));
     expect(message.message.case).toBe('connected');
     if (message.message.case !== 'connected') throw new Error('expected connected');
-    expect(message.message.value.initialScreen).toEqual(screen);
+    const actual = message.message.value.initialScreen;
+    if (!actual) throw new Error('missing initial screen');
+    expect(Buffer.from(actual).equals(Buffer.from(screen))).toBe(true);
   });
 
   it('accepts a compressed seed above the former 256 KiB wire limit', () => {
@@ -52,7 +54,9 @@ describe('terminal protocol framing', () => {
     expect(frame.byteLength).toBeGreaterThan(256 * 1024);
     const message = decodeServerMessage(frame);
     if (message.message.case !== 'connected') throw new Error('expected connected');
-    expect(message.message.value.initialScreen).toEqual(screen);
+    const actual = message.message.value.initialScreen;
+    if (!actual) throw new Error('missing initial screen');
+    expect(Buffer.from(actual).equals(Buffer.from(screen))).toBe(true);
   });
 
   it.each([false, true])('retains the hard 9 MiB bound with compression=%s', (compressed) => {

@@ -19,6 +19,14 @@ export function getKeyHelp(key: string): string | undefined {
 export function getControlHelp(data: Record<string, unknown>): string | undefined {
   if (typeof data.key === 'string') return getKeyHelp(data.key);
   switch (data.inputAction) {
+    case 'glassOpacity':
+      return 'Adjust the dark terminal background opacity';
+    case 'radialAction':
+      return data.radialAction === 'cancel'
+        ? 'Close the action menu'
+        : `Open ${String(data.radialAction)}`;
+    case 'grabRadial':
+      return undefined;
     case 'dismissNotice':
       return 'Clear this message';
     case 'filterDistance':

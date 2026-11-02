@@ -4,11 +4,17 @@ const VERSION = 1;
 interface WarpDocument {
   version: 1;
   values: Record<string, number>;
+  opacity?: Record<string, number>;
 }
 
 function clampDegrees(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, value));
+}
+
+function clampOpacity(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 1;
+  return Math.max(0.1, Math.min(1, value));
 }
 
 function readDocument(storage: Storage): WarpDocument {
@@ -25,7 +31,12 @@ function readDocument(storage: Storage): WarpDocument {
     }
     const values: Record<string, number> = {};
     for (const [key, value] of Object.entries(candidate.values)) values[key] = clampDegrees(value);
-    return { version: VERSION, values };
+    const opacity: Record<string, number> = {};
+    if (typeof candidate.opacity === 'object' && candidate.opacity !== null) {
+      for (const [key, value] of Object.entries(candidate.opacity))
+        opacity[key] = clampOpacity(value);
+    }
+    return { version: VERSION, values, opacity };
   } catch {
     return { version: VERSION, values: {} };
   }
@@ -42,6 +53,8 @@ function defaultStorage(): Storage | null {
 export function createTerminalWarpStore(storage: Storage | null = defaultStorage()): {
   get(key: string): number;
   set(key: string, degrees: number): boolean;
+  getOpacity(key: string): number;
+  setOpacity(key: string, value: number): boolean;
 } {
   return {
     get(key): number {
@@ -52,6 +65,22 @@ export function createTerminalWarpStore(storage: Storage | null = defaultStorage
       if (!storage) return false;
       const document = readDocument(storage);
       document.values[key] = clampDegrees(degrees);
+      try {
+        storage.setItem(STORAGE_KEY, JSON.stringify(document));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    getOpacity(key): number {
+      if (!storage) return 1;
+      return readDocument(storage).opacity?.[key] ?? 1;
+    },
+    setOpacity(key, value): boolean {
+      if (!storage) return false;
+      const document = readDocument(storage);
+      document.opacity ??= {};
+      document.opacity[key] = clampOpacity(value);
       try {
         storage.setItem(STORAGE_KEY, JSON.stringify(document));
         return true;

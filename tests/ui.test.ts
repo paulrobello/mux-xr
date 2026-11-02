@@ -89,6 +89,27 @@ describe('mux XR local UI state', () => {
     ui.destroy();
   });
 
+  it('shows and dismisses workspace notices safely', () => {
+    const root = document.createElement('div');
+    const onDismissNotice = vi.fn();
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined, onDismissNotice });
+    const notice = query<HTMLElement>(root, '[data-notice]');
+    expect(notice.hidden).toBe(true);
+    ui.setNotice('Terminal view is no longer available.');
+    expect(notice.hidden).toBe(false);
+    expect(query<HTMLElement>(notice, '[data-notice-text]').textContent).toBe(
+      'Terminal view is no longer available.',
+    );
+    query<HTMLButtonElement>(notice, '[data-action="dismiss-notice"]').click();
+    expect(notice.hidden).toBe(true);
+    expect(onDismissNotice).toHaveBeenCalledOnce();
+    ui.setNotice('<unsafe>');
+    expect(query<HTMLElement>(notice, '[data-notice-text]').innerHTML).toBe('&lt;unsafe&gt;');
+    ui.setNotice(null);
+    expect(notice.hidden).toBe(true);
+    ui.destroy();
+  });
+
   it('falls back safely for malformed or outdated settings', () => {
     expect(validateSettings(null)).toMatchObject({
       version: 1,
@@ -437,6 +458,51 @@ describe('mux XR local UI state', () => {
     expect(query<HTMLInputElement>(root, '[data-grid-rows]').value).toBe('36');
     ui.setTerminalGrid('pane-a', 120, 36, true);
     expect(query<HTMLElement>(root, '[data-grid-status]').textContent).toContain('Resize changes');
+    ui.destroy();
+  });
+
+  it('controls terminal glass opacity per pane without resizing', () => {
+    const root = document.createElement('div');
+    const opacityChanges: Array<[string, number]> = [];
+    const resized: Array<[string, number, number]> = [];
+    const pane = (id: string) => ({
+      id,
+      workspaceId: 'w',
+      workspaceName: 'W',
+      sessionId: 's',
+      sessionName: 'S',
+      windowId: 'win',
+      windowName: 'Win',
+      title: id,
+    });
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onResizeGrid: (id, cols, rows) => {
+        resized.push([id, cols, rows]);
+        return true;
+      },
+      onTerminalOpacity: (id, value) => opacityChanges.push([id, value]),
+    });
+    ui.update({ panes: [pane('pane-a'), pane('pane-b')] });
+    const opacity = query<HTMLInputElement>(root, '[data-terminal-opacity]');
+    expect(opacity.disabled).toBe(true);
+    ui.setActivePane('pane-a');
+    expect(opacity.value).toBe('100');
+    ui.setTerminalOpacity('pane-a', 5);
+    expect(opacity.value).toBe('10');
+    ui.setTerminalOpacity('pane-a', 105);
+    expect(opacity.value).toBe('100');
+    opacity.value = '55';
+    opacity.dispatchEvent(new Event('input'));
+    expect(opacityChanges).toEqual([['pane-a', 55]]);
+    ui.setActivePane('pane-b');
+    expect(opacity.value).toBe('100');
+    ui.setTerminalOpacity('pane-b', 40);
+    ui.setActivePane('pane-a');
+    expect(opacity.value).toBe('55');
+    ui.setAttachedPaneIds([]);
+    expect(opacity.disabled).toBe(true);
+    expect(resized).toEqual([]);
     ui.destroy();
   });
 

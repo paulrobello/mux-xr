@@ -92,3 +92,9 @@ Persist clock presence and yaw-relative transforms with the keyboard/HUD. Restor
 Sharper gaze applies only within a configurable saved maximum physical distance. Filtering controls expose applicable anisotropy levels up to the actual device cap. Per-server/pane curvature is adjustable 0–100° without PTY resize, with valid UV picking and depth-aware arrangement spacing. Controller stick and browser wheel scroll local history or a mouse-aware TUI, with grip suppression.
 
 Radial menus and glass remain a rendered design review. Proposed A toggles Keyboard/Commands/Layout/Warp/Widgets, with trigger selection, center Cancel and B focus preserved. Native prototypes use current geometry, fonts, colors and background. Glass chrome is feasible with conservative alpha; refractive glass and whole-terminal transparency need physical readability and performance acceptance.
+
+## Selected radial and last-workspace restore
+
+The accepted tinted ring is live on A. Opening uses center expansion (0–160ms), stacked emergence (160–320ms) and polar fan-out (320–800ms), with trigger/grip gating until settled. All five actions route to existing surfaces. Modal ownership suppresses input and scrolling behind the menu, with B Focus retained outside it.
+
+Dark terminal backing opacity is configurable 10–100% per server/pane in browser and XR. Foreground colors remain crisp and the hollow frame stays present. Saved open views include selection and yaw-relative 3D transforms. Resolve saved identities against live hierarchy, restore partial sets safely, toast missing panes, preserve explicit empty sets and exclude transient Focus placement.

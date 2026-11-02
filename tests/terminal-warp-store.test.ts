@@ -40,6 +40,25 @@ describe('terminal warp store', () => {
     expect(createTerminalWarpStore(storage).get('pane')).toBe(0);
   });
 
+  it('persists opacity beside legacy curvature values and clamps it', () => {
+    const storage = memoryStorage();
+    const store = createTerminalWarpStore(storage);
+    expect(store.getOpacity('pane')).toBe(1);
+    expect(store.set('pane', 42)).toBe(true);
+    expect(store.setOpacity('pane', 0.35)).toBe(true);
+    expect(store.get('pane')).toBe(42);
+    expect(store.getOpacity('pane')).toBe(0.35);
+    expect(store.setOpacity('low', -1)).toBe(true);
+    expect(store.setOpacity('high', 2)).toBe(true);
+    expect(store.setOpacity('nan', Number.NaN)).toBe(true);
+    expect(store.getOpacity('low')).toBe(0.1);
+    expect(store.getOpacity('high')).toBe(1);
+    expect(store.getOpacity('nan')).toBe(1);
+    const document = JSON.parse(storage.getItem('mux-xr:terminal-warp:v1') ?? '{}');
+    expect(document.values.pane).toBe(42);
+    expect(document.opacity.pane).toBe(0.35);
+  });
+
   it('returns false when storage is unavailable or blocked', () => {
     expect(createTerminalWarpStore(null).set('pane', 20)).toBe(false);
     const storage = memoryStorage();

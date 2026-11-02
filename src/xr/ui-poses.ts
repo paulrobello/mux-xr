@@ -16,13 +16,13 @@ interface PoseDocument {
   poses: Partial<Record<UIPoseName, SavedUIPose>>;
 }
 
-function validPose(value: unknown): value is SavedUIPose {
+function validPose(value: unknown, maxDistance = 20): value is SavedUIPose {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Partial<SavedUIPose>;
   if (!Array.isArray(candidate.position) || candidate.position.length !== 3) return false;
   if (!candidate.position.every((part) => typeof part === 'number' && Number.isFinite(part)))
     return false;
-  if (Math.hypot(...candidate.position) > 20) return false;
+  if (Math.hypot(...candidate.position) > maxDistance) return false;
   if (!Array.isArray(candidate.quaternion) || candidate.quaternion.length !== 4) return false;
   if (!candidate.quaternion.every((part) => typeof part === 'number' && Number.isFinite(part)))
     return false;
@@ -142,8 +142,9 @@ export function applyUIPose(
   viewer: THREE.Object3D,
   pose: SavedUIPose,
   limits: [number, number],
+  maxDistance = 20,
 ): void {
-  if (!validPose(pose)) return;
+  if (!validPose(pose, maxDistance)) return;
   const yaw = viewerYaw(viewer);
   const viewerPosition = viewer.getWorldPosition(new THREE.Vector3());
   const worldPosition = new THREE.Vector3(...pose.position)

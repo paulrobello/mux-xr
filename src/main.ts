@@ -17,6 +17,12 @@ import { mountWorkspaceUI, type WorkspaceSettings, type WorkspaceUI } from './ui
 import { createUpdateChecker, type UpdateChecker } from './update-check';
 import { shouldAutoReload } from './update-policy';
 import { initialPaneSelection } from './workspace/initial';
+import {
+  createOpenViewsStore,
+  normalizeOpenViewsServer,
+  type OpenViewsProfile,
+  resolveOpenViews,
+} from './workspace/open-views';
 import { createWorkspaceScene, type WorkspaceScene } from './xr';
 import { createXREntryController, type XrEntryController } from './xr/entry';
 
@@ -34,6 +40,11 @@ let generation = 0;
 let stopMetadata: (() => void) | undefined;
 let refreshMetadata: (() => void) | undefined;
 let autoAttachPending = true;
+const openViewsStore = createOpenViewsStore();
+let pendingOpenViews: OpenViewsProfile | null = null;
+let pauseViewPersistence = 0;
+let lastLayoutRevision = 0;
+let pendingRestoreNotice: string | null = null;
 let ui: WorkspaceUI;
 let scene: WorkspaceScene;
 let desktop: DesktopPanels;
@@ -86,6 +97,35 @@ function syncCommands(): void {
   scene.setQuickCommands(selectedId ? ui.getCommandsForPane(selectedId) : []);
 }
 
+function persistOpenViews(): void {
+  if (demo || !endpoint || autoAttachPending || pauseViewPersistence) return;
+  let server: string;
+  try {
+    server = normalizeOpenViewsServer(endpoint);
+  } catch {
+    return;
+  }
+  const views = [...surfaces.values()].map((surface) => ({
+    paneId: surface.pane.id,
+    workspaceId: surface.pane.workspaceId,
+    sessionId: surface.pane.sessionId,
+    windowId: surface.pane.windowId,
+    title: surface.pane.title,
+    ...(scene.captureTerminalPose(surface.pane.id)
+      ? { pose: scene.captureTerminalPose(surface.pane.id) ?? undefined }
+      : {}),
+  }));
+  if (!openViewsStore.save(server, { views, selectedId }))
+    scene.setNotice('Open terminal views could not be saved on this device.');
+}
+function withoutViewPersistence(action: () => void): void {
+  pauseViewPersistence++;
+  try {
+    action();
+  } finally {
+    pauseViewPersistence--;
+  }
+}
 function selectPane(id: string): void {
   const pane = snapshot.panes.find((item) => item.id === id);
   if (!pane) return;
@@ -115,6 +155,7 @@ function selectPane(id: string): void {
   const surface = surfaces.get(id);
   if (surface)
     ui.setConnection(surface.status, `${pane.title} · ${surface.error ?? surface.status}`);
+  persistOpenViews();
 }
 
 function closePane(id: string): void {
@@ -133,6 +174,7 @@ function closePane(id: string): void {
     syncCommands();
     ui.setConnection('idle', 'Choose a pane to open a terminal view.');
   }
+  persistOpenViews();
 }
 
 function togglePaneConnection(id: string): void {
@@ -204,23 +246,48 @@ function detachAll(): void {
   selectedId = null;
 }
 
-function applySnapshot(next: WorkspaceSnapshot): void {
-  snapshot = next;
-  ui.update(next);
-  scene.setAvailablePanes(next.panes);
-  const valid = new Set(next.panes.map((pane) => pane.id));
-  for (const id of [...surfaces.keys()]) if (!valid.has(id)) closePane(id);
-  if (autoAttachPending && next.panes.length) {
-    autoAttachPending = false;
-    const initial = initialPaneSelection(next.panes);
-    for (const pane of initial.panes) selectPane(pane.id);
-    if (initial.activeId) selectPane(initial.activeId);
-  }
+function applySnapshot(next: WorkspaceSnapshot, authoritative = true): void {
+  withoutViewPersistence(() => {
+    snapshot = next;
+    ui.update(next);
+    scene.setAvailablePanes(next.panes);
+    const valid = new Set(next.panes.map((pane) => pane.id));
+    for (const id of [...surfaces.keys()]) if (!valid.has(id)) closePane(id);
+    if (autoAttachPending && authoritative && (next.panes.length || pendingOpenViews !== null)) {
+      autoAttachPending = false;
+      if (!demo && pendingOpenViews !== null) {
+        const resolved = resolveOpenViews(pendingOpenViews, next.panes);
+        for (const view of resolved.views) {
+          selectPane(view.paneId);
+          if (view.pose) scene.restoreTerminalPose(view.paneId, view.pose);
+        }
+        if (resolved.selectedId) selectPane(resolved.selectedId);
+        else if (resolved.views.length) selectPane(resolved.views[0].paneId);
+        if (resolved.missing.length) {
+          const ids = resolved.missing.map((view) => view.paneId).join(', ');
+          const message = `${resolved.missing.length} saved terminal${resolved.missing.length === 1 ? ' is' : 's are'} no longer in mux: ${ids.slice(0, 100)}.`;
+          pendingRestoreNotice = scene.state.xrMode === 'desktop' ? message : null;
+          scene.setNotice(message);
+        }
+        if (!resolved.views.length)
+          ui.setConnection('idle', 'No terminal views open. Choose a pane.');
+        pendingOpenViews = null;
+      } else {
+        const initial = initialPaneSelection(next.panes);
+        for (const pane of initial.panes) selectPane(pane.id);
+        if (initial.activeId) selectPane(initial.activeId);
+      }
+    }
+  });
+  persistOpenViews();
 }
 
 function startDemo(): void {
+  persistOpenViews();
   generation += 1;
-  detachAll();
+  withoutViewPersistence(detachAll);
+  pendingOpenViews = null;
+  pendingRestoreNotice = null;
   demo = true;
   autoAttachPending = true;
   ui.setDemoMode(true);
@@ -229,13 +296,20 @@ function startDemo(): void {
 }
 
 async function connect(nextEndpoint: string): Promise<void> {
+  persistOpenViews();
   const current = ++generation;
-  detachAll();
+  withoutViewPersistence(detachAll);
   demo = false;
   autoAttachPending = true;
-  applySnapshot({ panes: [] });
-  ui.setDemoMode(false);
+  pendingRestoreNotice = null;
   endpoint = nextEndpoint;
+  try {
+    pendingOpenViews = openViewsStore.read(normalizeOpenViewsServer(endpoint));
+  } catch {
+    pendingOpenViews = null;
+  }
+  applySnapshot({ panes: [] }, false);
+  ui.setDemoMode(false);
   ui.setConnection('connecting', 'Connecting to your streamer…');
   try {
     const { connectHierarchy } = await import('./workspace/hierarchy');
@@ -311,6 +385,11 @@ ui = mountWorkspaceUI(app, {
   },
   onSettingsChange: applySettings,
   onTerminalCurvature: (id, degrees) => scene.setTerminalCurvature(id, degrees),
+  onTerminalOpacity: (id, opacity) => scene.setTerminalOpacity(id, opacity / 100),
+  onDismissNotice: () => {
+    pendingRestoreNotice = null;
+    scene.setNotice(null);
+  },
   onResetLayout: () => scene.resetLayout(),
   onArrange: (pattern) => {
     desktop.showPreview();
@@ -332,7 +411,8 @@ xrEntry = createXREntryController({
     enteringXR = true;
     try {
       await scene.enterXR(mode);
-      scene.setNotice(null);
+      scene.setNotice(pendingRestoreNotice);
+      pendingRestoreNotice = null;
     } finally {
       enteringXR = false;
       maybeReloadUpdate();
@@ -358,9 +438,17 @@ const stopPresentation = scene.subscribe((state) => {
     ui.setTerminalColorMode(state.terminalColorMode, false);
     ui.setTerminalFiltering(state.filtering, true);
     ui.setFilteringCapabilities(Number(scene.scene.userData.maxAnisotropy ?? 1));
-    for (const id of surfaces.keys()) ui.setTerminalCurvature(id, scene.getTerminalCurvature(id));
+    for (const id of surfaces.keys()) {
+      ui.setTerminalCurvature(id, scene.getTerminalCurvature(id));
+      ui.setTerminalOpacity(id, scene.getTerminalOpacity(id) * 100);
+    }
     if (state.arrangement && state.arrangement !== ui.getSettings().arrangement)
       ui.setArrangement(state.arrangement);
+  }
+  ui.setNotice(state.notice);
+  if (state.layoutRevision !== lastLayoutRevision) {
+    lastLayoutRevision = state.layoutRevision;
+    persistOpenViews();
   }
   desktop.setImmersive(state.xrMode !== 'desktop');
   if (state.xrMode !== 'desktop') ui.closeInput();
@@ -385,10 +473,12 @@ else if (ui.getSettings().endpoint.trim()) void connect(ui.getSettings().endpoin
 window.addEventListener(
   'pagehide',
   () => {
+    if (scene.state.xrMode !== 'desktop') scene.captureWorkspaceState();
+    persistOpenViews();
     xrEntry.dispose();
     updateChecker?.dispose();
     environmentAbort.abort();
-    detachAll();
+    withoutViewPersistence(detachAll);
     stopPresentation();
     desktop.dispose();
     disposeEnvironment?.();
