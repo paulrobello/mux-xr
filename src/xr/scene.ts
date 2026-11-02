@@ -190,8 +190,14 @@ interface TerminalPanel {
   unsubscribe: () => void;
   defaultPosition: THREE.Vector3;
   titleLabel: THREE.Mesh;
+  connectionButton: THREE.Mesh;
+  closeButton: THREE.Mesh;
   width: number;
   height: number;
+  revision: number;
+  status: string;
+  title: string;
+  error: string | null;
 }
 
 function disposeObject(object: THREE.Object3D): void {
@@ -818,6 +824,7 @@ export function createWorkspaceScene(
       updateNotice.visible = mutableState.updateAvailable && Boolean(renderer?.xr.isPresenting);
     updateHoverPosition();
     observatory.rotation.y = time * 0.00001;
+    for (const panel of panels.values()) panel.surface.flush?.();
     renderer?.render(scene, camera);
     if (!renderer && typeof window.requestAnimationFrame === 'function')
       frameHandle = window.requestAnimationFrame(render);
@@ -1375,6 +1382,16 @@ export function createWorkspaceScene(
       hideInput();
       return true;
     }
+    if (action === 'closePane') {
+      const paneId = hit.userData.terminalId as string | undefined;
+      if (paneId) actions.closePane(paneId);
+      return true;
+    }
+    if (action === 'toggleConnection') {
+      const paneId = hit.userData.terminalId as string | undefined;
+      if (paneId) actions.togglePaneConnection?.(paneId);
+      return true;
+    }
     if (action === 'grabInput') return true;
     if (action === 'newCommand') {
       commandDraft = createCommandDraft(crypto.randomUUID());
@@ -1798,10 +1815,14 @@ export function createWorkspaceScene(
       child.position.x = Number(child.userData.direction) * (width / 2 + 0.08);
       child.position.y = height / 2 - 0.18;
     }
+    panel.connectionButton.position.set(0.24, -(height / 2 + 0.24), 0.02);
+    panel.closeButton.position.set(-0.24, -(height / 2 + 0.24), 0.02);
   };
   const addTerminal = (surface: TerminalSurface): void => {
     if (panels.has(surface.pane.id)) return;
-    const index = panels.size;
+    const occupied = new Set([...panels.values()].map((panel) => panel.root.userData.initialSlot));
+    let index = 0;
+    while (occupied.has(index)) index += 1;
     const defaultPosition = new THREE.Vector3(
       index % 2 === 0 ? -0.87 : 0.87,
       1.5 - Math.floor(index / 2) * 0.95,
@@ -1810,6 +1831,7 @@ export function createWorkspaceScene(
     const root = new THREE.Group();
     root.name = `terminal-panel-${surface.pane.id}`;
     root.userData.terminalId = surface.pane.id;
+    root.userData.initialSlot = index;
     root.userData.scaleLimits = [0.6, 1.8];
     root.position.copy(defaultPosition);
     root.rotation.y = index % 2 === 0 ? 0.06 : -0.06;
@@ -1845,12 +1867,33 @@ export function createWorkspaceScene(
     fontDown.position.set(-0.79, 0.22, 0.02);
     fontUp.position.set(0.79, 0.22, 0.02);
     root.userData.fontZoom = 1;
-    const titleLabel = createLabelButton(`${surface.pane.title} · ${surface.status}`, 0.92, 0.08, {
-      terminalId: surface.pane.id,
-      terminalTitle: true,
-    });
+    const shortError = surface.error ? ` · ${surface.error.slice(0, 28)}` : '';
+    const titleLabel = createLabelButton(
+      `${surface.pane.title} · ${surface.status}${shortError}`,
+      0.92,
+      0.08,
+      {
+        terminalId: surface.pane.id,
+        terminalTitle: true,
+      },
+    );
+    titleLabel.userData.helpText = surface.error ?? titleLabel.userData.helpText;
     titleLabel.position.set(0, 0.47, 0.02);
-    root.add(selection, keyStrip, fontDown, fontUp, titleLabel);
+    const connectionButton = createLabelButton(
+      ['connected', 'connecting'].includes(String(surface.status)) ? 'Disconnect' : 'Reconnect',
+      0.46,
+      0.08,
+      {
+        inputAction: 'toggleConnection',
+        terminalId: surface.pane.id,
+        status: surface.status,
+      },
+    );
+    const closeButton = createLabelButton('Close view', 0.38, 0.08, {
+      inputAction: 'closePane',
+      terminalId: surface.pane.id,
+    });
+    root.add(selection, keyStrip, fontDown, fontUp, titleLabel, connectionButton, closeButton);
     const panel: TerminalPanel = {
       id: surface.pane.id,
       surface,
@@ -1862,14 +1905,46 @@ export function createWorkspaceScene(
       unsubscribe: () => undefined,
       defaultPosition,
       titleLabel,
+      connectionButton,
+      closeButton,
       width: PANEL_WIDTH,
-      height: PANEL_HEIGHT,
+      height: 0,
+      revision: surface.revision,
+      status: String(surface.status),
+      title: surface.pane.title,
+      error: surface.error,
     };
     syncPanelGrid(panel);
     panel.unsubscribe = surface.subscribe(() => {
       syncPanelGrid(panel);
-      texture.needsUpdate = true;
-      updateLabel(panel.titleLabel, `${surface.pane.title} · ${surface.status}`);
+      if (surface.revision !== panel.revision) {
+        panel.revision = surface.revision;
+        texture.needsUpdate = true;
+      }
+      const status = String(surface.status);
+      const statusChanged = status !== panel.status;
+      const errorChanged = surface.error !== panel.error;
+      if (statusChanged) {
+        panel.status = status;
+        panel.connectionButton.userData.status = status;
+        panel.connectionButton.userData.helpText = getControlHelp(panel.connectionButton.userData);
+        updateLabel(
+          panel.connectionButton,
+          ['connected', 'connecting'].includes(status) ? 'Disconnect' : 'Reconnect',
+        );
+      }
+      if (surface.pane.title !== panel.title || statusChanged || errorChanged) {
+        panel.title = surface.pane.title;
+        updateLabel(
+          panel.titleLabel,
+          `${surface.pane.title} · ${surface.status}${surface.error ? ` · ${surface.error.slice(0, 28)}` : ''}`,
+        );
+      }
+      if (errorChanged) {
+        panel.error = surface.error;
+        panel.titleLabel.userData.helpText =
+          surface.error ?? getControlHelp({ terminalTitle: true });
+      }
     });
     panels.set(panel.id, panel);
     scene.add(root);

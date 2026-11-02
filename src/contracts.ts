@@ -13,7 +13,14 @@ export interface PaneDescriptor {
   windowActive?: boolean;
 }
 
-export type TerminalStatus = 'connecting' | 'connected' | 'disconnected' | 'exited' | 'closed';
+export type TerminalStatus =
+  | 'connecting'
+  | 'connected'
+  | 'disconnected'
+  | 'paused'
+  | 'error'
+  | 'exited'
+  | 'closed';
 
 export type TerminalColorMode = 'comfort' | 'original' | 'monochrome';
 
@@ -30,8 +37,11 @@ export interface TerminalSurface {
   readonly cols: number;
   readonly rows: number;
   readonly status: TerminalStatus;
+  readonly error: string | null;
   readonly canResizeGrid: boolean;
   connect(): void;
+  disconnect(): void;
+  flush?(): void;
   sendText(text: string): boolean;
   sendKey(key: string, modifiers?: KeyModifiers): boolean;
   paste(text: string): boolean;
@@ -73,4 +83,5 @@ export interface WorkspaceActions {
   setKeyboardBackground?(enabled: boolean): void;
   reloadApp?(): void;
   saveCommand?(command: QuickCommand): boolean;
+  togglePaneConnection?(id: string): void;
 }

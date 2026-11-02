@@ -20,6 +20,7 @@ vi.mock('@xterm/xterm', () => ({
         baseY: 0,
         cursorY: 0,
         cursorX: 0,
+        getNullCell: () => ({}),
         getLine: () =>
           fakeCells.length ? { getCell: (index: number) => fakeCells[index] } : undefined,
       },
@@ -197,6 +198,116 @@ describe('terminal surface lifecycle', () => {
     expect(surface.status).toBe('connected');
     first.closeSilently();
     expect(surface.status).toBe('connected');
+    vi.useRealTimers();
+  });
+
+  it('pauses retries without clearing the rendered view and reconnects explicitly', async () => {
+    vi.useFakeTimers();
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    const originalWidth = surface.canvas.width;
+    surface.connect();
+    const first = MockSocket.instances[0];
+    first.closeSilently();
+    surface.disconnect();
+    expect(surface.status).toBe('paused');
+    first.open();
+    expect(surface.status).toBe('paused');
+    expect(surface.canvas.width).toBe(originalWidth);
+    expect(surface.sendText('paused')).toBe(false);
+    vi.advanceTimersByTime(10_000);
+    expect(MockSocket.instances).toHaveLength(1);
+    surface.connect();
+    expect(MockSocket.instances).toHaveLength(2);
+    expect(surface.status).toBe('connecting');
+    surface.dispose();
+    vi.useRealTimers();
+  });
+
+  it('coalesces output paints while preserving every terminal write', async () => {
+    vi.useFakeTimers();
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    surface.connect();
+    const ws = MockSocket.instances[0];
+    ws.open();
+    ws.message(
+      frame(
+        create(ServerMessageSchema, {
+          message: { case: 'connected', value: create(ConnectedSchema, { cols: 80, rows: 24 }) },
+        }),
+      ),
+    );
+    vi.runAllTimers();
+    const revision = surface.revision;
+    ws.message(
+      frame(
+        create(ServerMessageSchema, {
+          message: {
+            case: 'output',
+            value: create(OutputSchema, { data: new TextEncoder().encode('a') }),
+          },
+        }),
+      ),
+    );
+    ws.message(
+      frame(
+        create(ServerMessageSchema, {
+          message: {
+            case: 'output',
+            value: create(OutputSchema, { data: new TextEncoder().encode('b') }),
+          },
+        }),
+      ),
+    );
+    expect(surface.revision).toBe(revision);
+    expect(fakeWrites).toHaveLength(2);
+    vi.runAllTimers();
+    expect(surface.revision).toBe(revision + 1);
+    surface.dispose();
+    vi.useRealTimers();
+  });
+
+  it('flushes queued output from the XR frame without waiting for a browser frame', async () => {
+    vi.useFakeTimers();
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    surface.connect();
+    const ws = MockSocket.instances[0];
+    ws.open();
+    ws.message(
+      frame(
+        create(ServerMessageSchema, {
+          message: { case: 'connected', value: create(ConnectedSchema, { cols: 80, rows: 24 }) },
+        }),
+      ),
+    );
+    const revision = surface.revision;
+    surface.flush?.();
+    expect(surface.revision).toBe(revision + 1);
+    vi.advanceTimersByTime(16);
+    expect(surface.revision).toBe(revision + 1);
+    surface.dispose();
+    vi.useRealTimers();
+  });
+
+  it('stops retrying after a malformed frame and clears the bounded error on retry', async () => {
+    vi.useFakeTimers();
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    surface.connect();
+    const first = MockSocket.instances[0];
+    first.open();
+    first.message(new ArrayBuffer(1));
+    expect(surface.status).toBe('error');
+    expect(surface.error).toContain('decode failed');
+    expect(surface.error?.length).toBeLessThanOrEqual(256);
+    vi.advanceTimersByTime(10_000);
+    expect(MockSocket.instances).toHaveLength(1);
+    surface.connect();
+    expect(surface.error).toBeNull();
+    expect(surface.status).toBe('connecting');
+    surface.dispose();
     vi.useRealTimers();
   });
 

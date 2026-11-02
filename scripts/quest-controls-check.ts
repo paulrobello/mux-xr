@@ -41,6 +41,7 @@ async function waitFor<T>(
 }
 
 type ControlExpectation = {
+  terminalId?: string;
   mode?: string;
   field?: string;
   key?: string;
@@ -68,6 +69,8 @@ async function clickControl(
       let target: import('three').Object3D | undefined;
       root.traverse((object) => {
         if (target || object.userData.inputAction !== action) return;
+        if (expected.terminalId !== undefined && object.userData.terminalId !== expected.terminalId)
+          return;
         if (expected.mode !== undefined && object.userData.mode !== expected.mode) return;
         if (expected.field !== undefined && object.userData.field !== expected.field) return;
         if (expected.key !== undefined && object.userData.key !== expected.key) return;
@@ -384,6 +387,39 @@ async function main(): Promise<void> {
       (text) => text.includes('nativecommand'),
       'saved native command did not execute',
     );
+    await clickControl(page, 'close');
+    await clickControl(page, 'toggleConnection', { terminalId: paneIds[0] });
+    await waitFor(
+      () => state(page),
+      (value) =>
+        value.streams.some((stream) => stream.id === paneIds[0] && stream.status === 'paused'),
+      'Native Disconnect did not pause the stream',
+    );
+    await clickControl(page, 'toggleConnection', { terminalId: paneIds[0] });
+    await waitFor(
+      () => state(page),
+      (value) => value.streams.every((stream) => stream.status === 'connected'),
+      'Native Reconnect did not resume the stream',
+    );
+    await clickControl(page, 'closePane', { terminalId: paneIds[0] });
+    await waitFor(
+      () => state(page),
+      (value) =>
+        !value.attached.includes(paneIds[0]) && value.panes.some((pane) => pane.id === paneIds[0]),
+      'Native Close view did not preserve the pane in the hierarchy',
+    );
+    await page.evaluate(
+      (id) =>
+        (window as unknown as { __muxXR: { selectPane(id: string): void } }).__muxXR.selectPane(id),
+      paneIds[0],
+    );
+    await waitFor(
+      () => state(page),
+      (value) =>
+        value.streams.length === 2 &&
+        value.streams.every((stream) => stream.status === 'connected'),
+      'Native-closed pane did not reopen',
+    );
     const connectionsBeforeReconnect = viewerConnections;
     const inputsBeforeReconnect = frames.length;
     await page.evaluate((ids) => {
@@ -430,6 +466,7 @@ async function main(): Promise<void> {
           initialPanel,
           resizedPanel,
           viewerConnections,
+          nativeLifecycleControls: true,
           errors,
           output: Object.fromEntries(output),
         },

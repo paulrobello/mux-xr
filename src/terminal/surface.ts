@@ -118,24 +118,31 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   let ready = false;
   let retries = 0;
   let retry: ReturnType<typeof setTimeout> | null = null;
+  let paintFrame: number | ReturnType<typeof setTimeout> | null = null;
+  let pendingPaintGuard: (() => boolean) | null = null;
   let appCursor = false;
   let readonly = false;
   let colorMode: TerminalColorMode = 'comfort';
   let generation = 0;
+  let paused = false;
+  let error: string | null = null;
   const listeners = new Set<() => void>();
   const notify = (): void => {
-    revision += 1;
-    paint();
     for (const listener of listeners) listener();
   };
-  const paint = (): void => {
+  const paint = (emit = true): void => {
+    if (emit) revision += 1;
     const logicalWidth = cols * CELL_WIDTH;
     const logicalHeight = rows * LINE_HEIGHT;
     const density = Math.min(typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1, 2);
-    canvas.width = Math.max(1, Math.round(logicalWidth * density));
-    canvas.height = Math.max(1, Math.round(logicalHeight * density));
-    canvas.style.width = `${logicalWidth}px`;
-    canvas.style.height = `${logicalHeight}px`;
+    const width = Math.max(1, Math.round(logicalWidth * density));
+    const height = Math.max(1, Math.round(logicalHeight * density));
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    const styleWidth = `${logicalWidth}px`;
+    const styleHeight = `${logicalHeight}px`;
+    if (canvas.style.width !== styleWidth) canvas.style.width = styleWidth;
+    if (canvas.style.height !== styleHeight) canvas.style.height = styleHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const canvasBackground = colorMode === 'monochrome' ? MONOCHROME_BACKGROUND : CANVAS_BACKGROUND;
@@ -146,11 +153,12 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     ctx.textBaseline = 'top';
     const buffer = terminal.buffer.active;
     const base = buffer.viewportY;
+    const reusableCell = buffer.getNullCell();
     for (let row = 0; row < rows; row += 1) {
       const line = buffer.getLine(base + row);
       if (!line) continue;
       for (let col = 0; col < cols; col += 1) {
-        const cell = line.getCell(col);
+        const cell = line.getCell(col, reusableCell);
         if (!cell || cell.getWidth() === 0) continue;
         const inverse = Boolean(cell.isInverse());
         const fg = terminalColor(
@@ -211,6 +219,38 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
         LINE_HEIGHT,
       );
     }
+    if (emit) notify();
+  };
+  const cancelPaint = (): void => {
+    if (paintFrame === null) return;
+    if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function')
+      window.cancelAnimationFrame(paintFrame as number);
+    else clearTimeout(paintFrame as ReturnType<typeof setTimeout>);
+    paintFrame = null;
+    pendingPaintGuard = null;
+  };
+  const queuePaint = (isCurrent: () => boolean = () => true): void => {
+    if (disposed || paused || !isCurrent()) return;
+    pendingPaintGuard = isCurrent;
+    if (paintFrame !== null) return;
+    const frame = (): void => {
+      paintFrame = null;
+      const guard = pendingPaintGuard;
+      pendingPaintGuard = null;
+      if (disposed || paused || !guard?.()) return;
+      paint();
+    };
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      paintFrame = window.requestAnimationFrame(frame);
+    } else {
+      paintFrame = setTimeout(frame, 0);
+    }
+  };
+  const flush = (): void => {
+    if (paintFrame === null) return;
+    const guard = pendingPaintGuard;
+    cancelPaint();
+    if (!disposed && !paused && guard?.()) paint();
   };
   const setStatus = (next: TerminalStatus): void => {
     if (status !== next) {
@@ -218,13 +258,28 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       notify();
     }
   };
+  const failProtocol = (message: string): void => {
+    error = message.slice(0, 256);
+    ready = false;
+    paused = true;
+    generation += 1;
+    if (retry) {
+      clearTimeout(retry);
+      retry = null;
+    }
+    cancelPaint();
+    const current = socket;
+    socket = null;
+    current?.close();
+    setStatus('error');
+  };
   const send = (message: Parameters<typeof encodeClientMessage>[0]): boolean => {
     if (!ready || readonly || !socket || socket.readyState !== WebSocket.OPEN) return false;
     socket.send(encodeClientMessage(message));
     return true;
   };
   const scheduleRetry = (): void => {
-    if (disposed || retry) return;
+    if (disposed || paused || retry) return;
     const delay = Math.min(INITIAL_RETRY_MS * 2 ** retries, MAX_RETRY_MS);
     retries += 1;
     retry = setTimeout(connect, delay);
@@ -236,6 +291,8 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       socket?.readyState === WebSocket.CONNECTING
     )
       return;
+    paused = false;
+    error = null;
     if (retry) {
       clearTimeout(retry);
       retry = null;
@@ -254,6 +311,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     ws.binaryType = 'arraybuffer';
     socket = ws;
     ws.onopen = () => {
+      if (token !== generation || ws !== socket) return;
       setStatus('connecting');
     };
     ws.onmessage = (event) => {
@@ -272,20 +330,23 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             }
             terminal.resize(cols, rows);
             terminal.reset();
-            if (connected.initialScreen?.length) terminal.write(connected.initialScreen, notify);
-            else notify();
+            const current = (): boolean => token === generation;
+            if (connected.initialScreen?.length)
+              terminal.write(connected.initialScreen, () => queuePaint(current));
+            else queuePaint(current);
             setStatus('connected');
             break;
           }
           case 'output':
-            terminal.write(msg.message.value.data, notify);
+            terminal.write(msg.message.value.data, () => queuePaint(() => token === generation));
             break;
           case 'resize':
             if (!validGrid(msg.message.value.cols, msg.message.value.rows)) break;
             cols = msg.message.value.cols;
             rows = msg.message.value.rows;
             terminal.resize(cols, rows);
-            notify();
+            cancelPaint();
+            paint();
             break;
           case 'modeChanged':
             if (msg.message.value.mode === 'application_cursor')
@@ -296,12 +357,21 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             setStatus('exited');
             ws.close();
             break;
+          case 'error':
+            failProtocol(
+              msg.message.value.code
+                ? `${msg.message.value.code}: ${msg.message.value.message}`
+                : msg.message.value.message,
+            );
+            break;
           default:
-            notify();
+            break;
         }
-      } catch {
-        ready = false;
-        ws.close();
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        const data = event.data as ArrayBuffer | ArrayBufferView;
+        const byteLength = data instanceof ArrayBuffer ? data.byteLength : data.byteLength;
+        failProtocol(`decode failed for ${byteLength} bytes: ${message}`);
       }
     };
     ws.onerror = () => {
@@ -334,10 +404,29 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     get status() {
       return status;
     },
+    get error() {
+      return error;
+    },
     get canResizeGrid() {
       return ready && socket?.readyState === WebSocket.OPEN && !readonly && !disposed;
     },
     connect,
+    flush,
+    disconnect: () => {
+      if (disposed || paused) return;
+      paused = true;
+      ready = false;
+      generation += 1;
+      if (retry) {
+        clearTimeout(retry);
+        retry = null;
+      }
+      cancelPaint();
+      const current = socket;
+      socket = null;
+      current?.close();
+      setStatus('paused');
+    },
     sendText: (text) => send(createInputMessage(text)),
     sendKey: (key, modifiers) =>
       send(
@@ -358,7 +447,8 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     setColorMode: (mode) => {
       if (colorMode === mode) return;
       colorMode = mode;
-      notify();
+      cancelPaint();
+      paint();
     },
     subscribe: (listener) => {
       listeners.add(listener);
@@ -367,15 +457,19 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      paused = false;
       ready = false;
       generation += 1;
       if (retry) clearTimeout(retry);
-      socket?.close();
+      cancelPaint();
+      const current = socket;
+      socket = null;
+      current?.close();
       terminal.dispose();
       host.remove();
       setStatus('closed');
     },
   };
-  paint();
+  paint(false);
   return surface;
 }

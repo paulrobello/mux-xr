@@ -17,6 +17,8 @@ export interface DesktopPanels {
 export interface DesktopPanelCallbacks {
   onScale?(direction: number): void;
   onReset?(): void;
+  onClose?(id: string): void;
+  onToggleConnection?(id: string): void;
 }
 
 export function createDesktopPanels(
@@ -96,22 +98,56 @@ export function createDesktopPanels(
     panel.className = 'desktop-terminal-panel';
     const heading = document.createElement('button');
     heading.type = 'button';
-    heading.textContent = `${surface.pane.title} · ${surface.status}`;
-    heading.title = `Select terminal ${surface.pane.title} as the input target`;
+    const updateHeading = (): void => {
+      const error = surface.error ? ` · ${surface.error.slice(0, 48)}` : '';
+      heading.textContent = `${surface.pane.title} · ${surface.status}${error}`;
+      heading.title = surface.error
+        ? `${surface.error} Select terminal ${surface.pane.title} as the input target.`
+        : `Select terminal ${surface.pane.title} as the input target`;
+    };
+    updateHeading();
     heading.className = 'desktop-terminal-heading';
     heading.addEventListener('click', () => onSelect(surface.pane.id));
+    const controls = document.createElement('div');
+    controls.className = 'desktop-terminal-controls';
+    const connection = document.createElement('button');
+    connection.type = 'button';
+    connection.className = 'desktop-terminal-action';
+    connection.addEventListener('click', (event) => {
+      event.stopPropagation();
+      callbacks.onToggleConnection?.(surface.pane.id);
+    });
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'desktop-terminal-action';
+    close.textContent = 'Close view';
+    close.title = `Close ${surface.pane.title} view and keep the terminal running`;
+    close.addEventListener('click', (event) => {
+      event.stopPropagation();
+      callbacks.onClose?.(surface.pane.id);
+    });
+    const updateActions = (): void => {
+      const reconnect = !['connected', 'connecting'].includes(String(surface.status));
+      connection.textContent = reconnect ? 'Reconnect' : 'Disconnect';
+      connection.title = reconnect
+        ? `Reconnect ${surface.pane.title} view to the running terminal`
+        : `Disconnect ${surface.pane.title} view without stopping the terminal`;
+      connection.setAttribute('aria-label', connection.title);
+    };
+    updateActions();
+    controls.append(connection, close);
     const body = document.createElement('div');
     body.className = 'desktop-terminal-output';
     body.addEventListener('pointerdown', () => onSelect(surface.pane.id));
     surface.canvas.setAttribute('aria-label', `${surface.pane.title} terminal output`);
     updateSize(surface, surface.canvas);
     body.append(surface.canvas);
-    panel.append(heading, body);
+    panel.append(heading, controls, body);
     grid.append(panel);
     const unsubscribe = surface.subscribe(() => {
-      heading.textContent = `${surface.pane.title} · ${surface.status}`;
-      heading.title = `Select terminal ${surface.pane.title} as the input target`;
+      updateHeading();
       updateSize(surface, surface.canvas);
+      updateActions();
     });
     panels.set(surface.pane.id, { element: panel, unsubscribe });
   };

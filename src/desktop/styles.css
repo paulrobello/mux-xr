@@ -55,6 +55,29 @@
 .desktop-terminal-toolbar button:hover {
   background: #203c48;
 }
+.desktop-terminal-controls {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #293746;
+  background: #0b121a;
+}
+.desktop-terminal-action {
+  padding: 5px 9px;
+  border: 1px solid #304958;
+  border-radius: 4px;
+  background: transparent;
+  color: #9aabb6;
+  font:
+    11px ui-sans-serif,
+    system-ui,
+    sans-serif;
+}
+.desktop-terminal-action:hover {
+  border-color: #66d5e7;
+  color: #edf4f8;
+  background: #172934;
+}
 .desktop-terminal-output {
   overflow: auto;
   padding: 12px;

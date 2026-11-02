@@ -60,7 +60,9 @@ function surface(descriptor: PaneDescriptor): TerminalSurface {
     cols: 80,
     rows: 24,
     status: 'connected',
+    error: null,
     connect() {},
+    disconnect() {},
     sendText: () => true,
     sendKey: () => true,
     paste: () => true,
@@ -79,6 +81,7 @@ function fixture() {
   const actions: WorkspaceActions = {
     selectPane: vi.fn(),
     closePane: vi.fn(),
+    togglePaneConnection: vi.fn(),
     sendText: vi.fn(),
     sendKey: vi.fn(),
     runCommand: vi.fn(),
@@ -178,6 +181,28 @@ describe('native XR controller event routing', () => {
       object.visible = true;
       object.rotation.set(0, 0, 0);
     });
+  });
+
+  it('routes stream controls separately from closing the terminal view', () => {
+    const { workspace, actions } = fixture();
+    hit(workspace, { inputAction: 'toggleConnection', terminalId: 'pane-a' });
+    expect(actions.togglePaneConnection).toHaveBeenCalledWith('pane-a');
+    expect(actions.closePane).not.toHaveBeenCalled();
+    hit(workspace, { inputAction: 'closePane', terminalId: 'pane-a' });
+    expect(actions.closePane).toHaveBeenCalledWith('pane-a');
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    expect(actions.sendText).not.toHaveBeenCalled();
+    workspace.dispose();
+  });
+
+  it('reuses a vacant slot when reopening a view', () => {
+    const { workspace, left } = fixture();
+    workspace.removeTerminal(left.pane.id);
+    workspace.addTerminal(left);
+    const reopened = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    const other = workspace.scene.getObjectByName('terminal-panel-pane-b');
+    expect(reopened?.position.x).toBeLessThan(other?.position.x ?? -Infinity);
+    workspace.dispose();
   });
 
   it('uses one keyboard presentation for the current mode', () => {

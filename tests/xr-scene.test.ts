@@ -84,7 +84,9 @@ describe('XR scene interaction helpers', () => {
       get status() {
         return status;
       },
+      error: null,
       connect() {},
+      disconnect() {},
       sendText: () => true,
       sendKey: () => true,
       paste: () => true,

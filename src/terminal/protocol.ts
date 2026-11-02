@@ -15,8 +15,9 @@ import {
 
 export type { ClientMessage, ServerMessage } from './vendor/terminal_pb';
 
-const MAX_COMPRESSED_SIZE = 256 * 1024;
-const MAX_DECOMPRESSED_SIZE = 2 * 1024 * 1024;
+// Match the core streaming protocol's bounded 9 MiB payload contract.
+const MAX_DECOMPRESSED_SIZE = 9 * 1024 * 1024;
+const MAX_COMPRESSED_SIZE = MAX_DECOMPRESSED_SIZE;
 
 /** Returns the US-layout printable character represented by a key and Shift state. */
 export function terminalKeyLabel(key: string, shift = false): string {
@@ -65,7 +66,7 @@ export function encodeClientMessage(message: ClientMessage): ArrayBuffer {
 
 export function decodeServerMessage(data: ArrayBuffer): ServerMessage {
   const bytes = new Uint8Array(data);
-  if (!bytes.length) throw new Error('Empty message');
+  if (bytes.length < 2) throw new Error('Empty message');
   let payload = bytes.slice(1);
   if (bytes[0] !== 0 && bytes[0] !== 1) throw new Error('Unsupported compression flag');
   if (bytes[0] === 1) {

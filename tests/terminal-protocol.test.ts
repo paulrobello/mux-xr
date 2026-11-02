@@ -1,4 +1,5 @@
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
+import { deflate } from 'pako';
 import { describe, expect, it } from 'vitest';
 import {
   createInputMessage,
@@ -15,6 +16,57 @@ import {
 } from '../src/terminal/vendor/terminal_pb';
 
 describe('terminal protocol framing', () => {
+  function screenFrame(screen: Uint8Array, compressed: boolean): ArrayBuffer {
+    const message = create(ServerMessageSchema, {
+      message: {
+        case: 'connected',
+        value: create(ConnectedSchema, { cols: 149, rows: 54, initialScreen: screen }),
+      },
+    });
+    const payload = toBinary(ServerMessageSchema, message);
+    const bytes = compressed ? deflate(payload) : payload;
+    const frame = new Uint8Array(bytes.length + 1);
+    frame[0] = compressed ? 1 : 0;
+    frame.set(bytes, 1);
+    return frame.buffer;
+  }
+
+  it.each([false, true])('accepts a large scrollback seed with compression=%s', (compressed) => {
+    const screen = new TextEncoder().encode('monitor output\r\n'.repeat(180_000));
+    const message = decodeServerMessage(screenFrame(screen, compressed));
+    expect(message.message.case).toBe('connected');
+    if (message.message.case !== 'connected') throw new Error('expected connected');
+    expect(message.message.value.initialScreen).toEqual(screen);
+  });
+
+  it('accepts a compressed seed above the former 256 KiB wire limit', () => {
+    const screen = new Uint8Array(512 * 1024);
+    let state = 123456789;
+    for (let index = 0; index < screen.length; index += 1) {
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      screen[index] = state & 255;
+    }
+    const frame = screenFrame(screen, true);
+    expect(frame.byteLength).toBeGreaterThan(256 * 1024);
+    const message = decodeServerMessage(frame);
+    if (message.message.case !== 'connected') throw new Error('expected connected');
+    expect(message.message.value.initialScreen).toEqual(screen);
+  });
+
+  it.each([false, true])('retains the hard 9 MiB bound with compression=%s', (compressed) => {
+    const limit = 9 * 1024 * 1024;
+    const overhead = screenFrame(new Uint8Array(limit), false).byteLength - 1 - limit;
+    const accepted = screenFrame(new Uint8Array(limit - overhead), compressed);
+    const decoded = decodeServerMessage(accepted);
+    if (decoded.message.case !== 'connected') throw new Error('expected connected');
+    expect(decoded.message.value.initialScreen?.length).toBe(limit - overhead);
+    expect(() =>
+      decodeServerMessage(screenFrame(new Uint8Array(limit - overhead + 1), compressed)),
+    ).toThrow(/payload too large/i);
+  });
+
   it('round-trips an uncompressed client input through generated protobuf', () => {
     const frame = encodeClientMessage(createInputMessage('echo hi'));
     expect(new Uint8Array(frame)[0]).toBe(0);

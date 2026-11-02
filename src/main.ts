@@ -99,12 +99,15 @@ function selectPane(id: string): void {
     desktop.add(surface);
     scene.addTerminal(surface);
     surface.subscribe(() => {
-      if (selectedId === id) ui.setConnection(surface.status, `${pane.title} · ${surface.status}`);
+      if (selectedId === id)
+        ui.setConnection(surface.status, `${pane.title} · ${surface.error ?? surface.status}`);
+      ui.setPaneStatus?.(id, surface.status);
       ui.setTerminalGrid(id, surface.cols, surface.rows, surface.canResizeGrid);
     });
     surface.setColorMode(ui.getSettings().colorMode);
     ui.setTerminalGrid(id, surface.cols, surface.rows, surface.canResizeGrid);
     surface.connect();
+    ui.setPaneStatus?.(id, surface.status);
     ui.setAttachedPaneIds([...surfaces.keys()]);
   }
   if (selectedId === id) return;
@@ -114,7 +117,8 @@ function selectPane(id: string): void {
   syncCommands();
   scene.selectTerminal(id);
   const surface = surfaces.get(id);
-  if (surface) ui.setConnection(surface.status, `${pane.title} · ${surface.status}`);
+  if (surface)
+    ui.setConnection(surface.status, `${pane.title} · ${surface.error ?? surface.status}`);
 }
 
 function closePane(id: string): void {
@@ -126,6 +130,20 @@ function closePane(id: string): void {
   ui.setAttachedPaneIds([...surfaces.keys()]);
   const next = surfaces.keys().next().value;
   if (next && !selectedId) selectPane(next);
+  else if (!selectedId) {
+    ui.setActivePane(undefined);
+    desktop.select(null);
+    scene.selectTerminal(null);
+    syncCommands();
+    ui.setConnection('idle', 'Choose a pane to open a terminal view.');
+  }
+}
+
+function togglePaneConnection(id: string): void {
+  const surface = surfaces.get(id);
+  if (!surface) return;
+  if (surface.status === 'connected' || surface.status === 'connecting') surface.disconnect();
+  else surface.connect();
 }
 
 function sendKey(id: string, key: string, modifiers?: KeyModifiers): boolean {
@@ -246,6 +264,7 @@ const actions: WorkspaceActions = {
   },
   selectPane,
   closePane,
+  togglePaneConnection,
   sendText: (text) => {
     if (selectedId) sendText(selectedId, text);
   },
@@ -274,6 +293,7 @@ ui = mountWorkspaceUI(app, {
   onRefresh: () => refreshMetadata?.(),
   onSelectPane: (pane) => selectPane(pane.id),
   onClosePane: (pane) => closePane(pane.id),
+  onTogglePaneConnection: (pane) => togglePaneConnection(pane.id),
   onSendText: sendText,
   onSendKey: sendKey,
   onRunCommand: runCommand,
@@ -295,6 +315,8 @@ ui = mountWorkspaceUI(app, {
 });
 scene = createWorkspaceScene(ui.sceneHost, actions);
 desktop = createDesktopPanels(ui.sceneHost, selectPane, {
+  onClose: closePane,
+  onToggleConnection: togglePaneConnection,
   onScale: (direction) => scene.scaleSelectedPanel(direction),
   onReset: () => scene.resetLayout(),
 });
@@ -371,6 +393,7 @@ Object.assign(window, {
     connect,
     selectPane,
     closePane,
+    togglePaneConnection,
   },
 });
 

@@ -108,6 +108,9 @@ export function createDemoSurface(pane: PaneDescriptor): TerminalSurface {
     get status() {
       return status;
     },
+    get error() {
+      return null;
+    },
     get cols() {
       return cols;
     },
@@ -117,7 +120,16 @@ export function createDemoSurface(pane: PaneDescriptor): TerminalSurface {
     get canResizeGrid() {
       return status === 'connected';
     },
-    connect: () => undefined,
+    connect: () => {
+      if (status !== 'paused') return;
+      status = 'connected';
+      for (const listener of listeners) listener();
+    },
+    disconnect: () => {
+      if (status === 'closed' || status === 'paused') return;
+      status = 'paused';
+      for (const listener of listeners) listener();
+    },
     sendText: send,
     sendKey: send,
     paste: send,

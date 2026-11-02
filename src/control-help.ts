@@ -70,6 +70,12 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
       return 'Exit immersive mode or the 3D preview';
     case 'close':
       return 'Close terminal input controls';
+    case 'closePane':
+      return 'Close this terminal view; the shell keeps running';
+    case 'toggleConnection':
+      return ['connected', 'connecting'].includes(String(data.status))
+        ? 'Disconnect this terminal view without stopping the shell'
+        : 'Reconnect this terminal view to the running shell';
     case 'background':
       return `Use the ${String(data.background)} VR background`;
     case 'command':
