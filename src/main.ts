@@ -3,6 +3,7 @@ import type {
   KeyModifiers,
   QuickCommand,
   TerminalColorMode,
+  TerminalMouseInput,
   TerminalSurface,
   WorkspaceActions,
   WorkspaceSnapshot,
@@ -158,6 +159,11 @@ function sendText(id: string, text: string): void {
     notice('Terminal is disconnected. Reconnect before sending input.');
 }
 
+function sendMouse(id: string, input: TerminalMouseInput): boolean {
+  if (input.eventType === 'press') selectPane(id);
+  return surfaces.get(id)?.sendMouse?.(input) ?? false;
+}
+
 function runCommand(command: QuickCommand, paneId: string): void {
   const surface = surfaces.get(paneId);
   if (!surface?.sendText(command.text)) {
@@ -272,6 +278,7 @@ const actions: WorkspaceActions = {
     if (selectedId) sendKey(selectedId, key, modifiers);
   },
   runCommand,
+  sendMouse,
   openCommands: () => {
     syncCommands();
     ui.openInput('commands');
@@ -317,6 +324,7 @@ scene = createWorkspaceScene(ui.sceneHost, actions);
 desktop = createDesktopPanels(ui.sceneHost, selectPane, {
   onClose: closePane,
   onToggleConnection: togglePaneConnection,
+  onMouse: sendMouse,
   onScale: (direction) => scene.scaleSelectedPanel(direction),
   onReset: () => scene.resetLayout(),
 });
@@ -385,6 +393,7 @@ Object.assign(window, {
         cols: surface.cols,
         rows: surface.rows,
         writable: surface.canResizeGrid,
+        mouseTracking: surface.mouseTracking ?? 'none',
       })),
     }),
     getControlHints: () => scene.getControlHints(),

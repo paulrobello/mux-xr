@@ -205,10 +205,23 @@ async function main(): Promise<void> {
     await fixturePage.waitForFunction(
       () =>
         Boolean(
-          (window as unknown as { __arrangementFixtureReady?: boolean }).__arrangementFixtureReady,
+          (
+            window as unknown as {
+              __arrangementFixtureReady?: boolean;
+              __arrangementFixtureError?: string;
+            }
+          ).__arrangementFixtureReady ||
+            (window as unknown as { __arrangementFixtureError?: string }).__arrangementFixtureError,
         ),
       undefined,
       { timeout: 15_000 },
+    );
+    const fixtureFailure = await fixturePage.evaluate(
+      () => (window as unknown as { __arrangementFixtureError?: string }).__arrangementFixtureError,
+    );
+    assert(
+      !fixtureFailure,
+      `Arrangement fixture failed: ${fixtureFailure}; ${fixtureErrors.join('; ')}`,
     );
     const fixture = await fixturePage.evaluate(
       () => (window as unknown as { __arrangementFixture: unknown }).__arrangementFixture,
@@ -217,10 +230,38 @@ async function main(): Promise<void> {
       results?: unknown[];
       resizeCalls?: number;
       renderer?: string;
+      paneSizes?: number[][];
+      manualScales?: number[];
     };
     assert(
       fixtureRecord.results?.length === patterns.length,
       'fixture did not verify all four arrangements',
+    );
+    assert(
+      JSON.stringify(fixtureRecord.paneSizes) ===
+        JSON.stringify([
+          [80, 24],
+          [120, 36],
+          [160, 48],
+          [52, 30],
+          [100, 18],
+          [64, 42],
+        ]),
+      'fixture did not use the mixed terminal grids',
+    );
+    assert(
+      JSON.stringify(fixtureRecord.manualScales) === JSON.stringify([1, 1.25, 0.3, 1.1, 0.8, 1.4]),
+      'fixture did not use the manual panel scales',
+    );
+    assert(
+      fixtureRecord.results.every((result) => {
+        const record = result as {
+          envelopesChecked?: boolean;
+          inputTargetAndGridChecked?: boolean;
+        };
+        return record.envelopesChecked && record.inputTargetAndGridChecked;
+      }),
+      'fixture did not verify panel envelopes and input/grid retention for every arrangement',
     );
     assert(
       fixtureRecord.resizeCalls === 0,

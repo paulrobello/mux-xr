@@ -36,7 +36,7 @@ Each desktop and XR terminal has **Close view** and **Disconnect / Reconnect** c
 
 WebXR needs a secure context. Desktop localhost is suitable for development. Daily LAN access needs a certificate trusted by the headset and HTTPS/WSS endpoints. Vite can load existing certificate/key files via `MUX_XR_TLS_CERT` and `MUX_XR_TLS_KEY`; no credentials, certificates or trust stores are replaced automatically.
 
-The prepared preview serves the built app and WebSockets at **[https://192.0.2.10:4240](https://192.0.2.10:4240)**, also available at `https://localhost:4240`. The full app passed from test-mac over LAN HTTPS/WSS with two real shell panes and targeted command input. It uses a dedicated matching daemon and leaves shared par-mux and pardeck services unchanged. To view existing sessions, point a compatible streamer at their daemon socket.
+The prepared preview serves the built app and WebSockets at **[https://192.0.2.10:4240](https://192.0.2.10:4240)**, also available at `https://localhost:4240`. The full app passed from test-mac over LAN HTTPS/WSS with two private real shell panes and targeted command input. The current dedicated streamer mirrors the existing default par-mux daemon. Delivery preserves that daemon and pardeck services.
 
 The existing IWSDK development PEM was reused. It is self-signed and covers localhost rather than the LAN IP, so the Quest browser needs an explicit certificate exception. Paul approved the exact preview binary's incoming-connection rule, which was applied and verified. Existing certificates, trust stores and credentials were preserved. Paul confirmed Quest Browser access and immersive XR entry on November 1, 2026. The refined controls still require a headset recheck.
 
@@ -50,7 +50,7 @@ To serve an already running compatible daemon, run the streamer in a par-mux pan
   --allowed-origins https://localhost:4240
 ```
 
-Stop that streamer with Ctrl-C in its owning pane. The prepared preview's exact private socket and pane IDs are recorded in `.local/runtime.json`; its shell panes are ordinary live shells. Preserve existing authentication configuration and shared services. No published hosting or tunnels are required.
+Stop that streamer with Ctrl-C in its owning pane. The prepared preview's exact upstream socket and streamer pane IDs are recorded in `.local/runtime.json`. Preserve existing authentication configuration and shared services. No published hosting or tunnels are required.
 
 The endpoint is prefilled from the page origin, and a custom endpoint is remembered. The preview mirrors the existing par-mux daemon. Initial views prefer its default workspace/session, and existing panes keep their own programs and shell. On Quest, opening the preview automatically connects when the server field is populated. Choose two pane leaves, then Enter XR. Every XR UI surface (pane, keyboard, commands, hierarchy and workspace HUD) is a grabbable root. Grip one controller to move and rotate it: thumbstick X yaws and Y pitches, without Y translation. Grip plus trigger rolls around the controller laser axis with thumbstick X and pushes or pulls along it with thumbstick Y. Grip the same surface with both controllers to resize by spreading or bringing hands together, rotate by changing hand direction, and move it with the hand midpoint. Transforms persist while typing, retargeting and switching modes. The default keyboard remains small. Each terminal's A± controls zoom its text locally. Commands opens saved quick commands and their editor. Keyboard opens text entry and terminal keys. Both follow your pane selection, with optional Gaze input available in XR and browser settings. Shift shows uppercase letters and US-layout symbols, including `$`, then resets after a character. Settings offers passthrough and the three silent backgrounds.
 
@@ -64,12 +64,18 @@ Mouse clicks in 3D preview and controller triggers in VR use the same actions, w
 | Esc, Tab, arrows, Enter | Send that terminal key to the pane containing the strip. |
 | Ctrl / Alt | Arm a modifier for the next strip key. |
 | Commands / Keyboard / Panes | Open saved commands, terminal input or hierarchy navigation. |
-| Black / Gradient / Observatory | Change the VR background. |
+| Background selector | Choose Black, Gradient or Observatory from one compact menu. |
 | Exit | Return to flat terminals in the browser, or end the immersive session in VR. |
 
 The 3D preview toolbar always exposes **Smaller panel**, **Larger panel** and **Reset layout**, independently of pane geometry. Preview enlargement is bounded to keep the panel and attached controls inside the viewport. In VR, there are no dedicated physical resize or reset buttons. Hover help uses compact labels that scale with viewing distance after a 700 ms dwell, shows actions only and is hidden while gripping. If UI space is lost, release all grips and hold both thumbstick clicks for one second to recenter every pane, the HUD and input surfaces near the current headset position and reset physical scale. This recovery does not resize the PTY. Surface scale and text zoom leave terminal rows and columns unchanged.
 
 Terminal grid size is changed only from the selected pane in browser Workspace Settings with numeric columns/rows and Apply, or from the native HUD Terminal settings. Native presets are 80x24, 100x30, 120x36 and 160x48, with ±1 and ±10 draft controls plus Apply. Columns and rows are bounded to 2..300 and 2..150. The controls are disabled while disconnected, and only an explicit Apply sends a resize; actual dimensions come back from the server as read-only state. Terminal colors are a saved global preference with Comfortable (default), Original and Monochrome modes. The native keyboard uses self-hosted OFL Noto Sans and Symbols 2 through Troika SDF 0.52.5; unsupported visual glyphs render as `?` while retaining the original title. Keyboard Backing is a saved browser/native-header toggle: off leaves key buttons visible, while the logical grabbable plane remains and can occlude gaze so the input target is retained. The native FPS HUD is an actual frame counter updated about every 500 ms, not a capacity benchmark.
+
+Terminal windows can shrink to 0.3×, half the previous 0.6× minimum. The upper limit stays 1.8×. The HUD and input surfaces use matching background select menus with evenly spaced options and a shared saved value.
+
+## Terminal mouse input
+
+For TUIs that enable mouse tracking, point at the terminal and press the controller trigger for a left click. Hold the trigger and move the ray to drag, then release it. Movement is sent only over the captured pane, and the release stays with that pane. Grip suppresses mouse input and safely ends an existing drag before window manipulation. Desktop terminal canvases also support pointer click/drag. Mouse coordinates follow the remote grid, physical transforms and local text zoom. Disabled tracking, read-only and disconnected streams reject mouse input.
 
 ## Quick command setup
 
@@ -83,7 +89,7 @@ Use **Workspace settings → 3D arrangement → Apply arrangement** in the brows
 
 Presets apply to currently attached terminals around your current position and heading. They preserve each panel's physical size, text zoom, input target and remote grid. You can continue grabbing, rotating and scaling afterward. Opening another terminal does not reset existing panels. The last chosen preset is saved locally, but applying it remains explicit. Named saved layouts and animated restoration remain roadmap work.
 
-Arrangement spacing for newly grid-sized windows is queued for the next batch at the owner's request. Current presets retain their baseline spacing, so wide/tall panels may need manual adjustment. Creating a new terminal through the viewer requires the pending opt-in core API, tracked by [the upstream card](https://board.example.test/board?card=01a1991e1e20727d8ff8a32afc0b212f). Existing default-workspace panes can already be attached.
+Arrangement spacing measures each window's current grid geometry, title and controls, plus its manual physical scale. Layouts center those complete bounds and increase distance when viewer-facing windows would visually overlap. Physical scale, text zoom, input target and remote grids are preserved. Controller rays extend to reach arranged windows beyond the default ray length. Creating a new terminal through the viewer requires the pending opt-in core API, tracked by [the upstream card](https://board.example.test/board?card=01a1991e1e20727d8ff8a32afc0b212f). Existing default-workspace panes can already be attached.
 
 ## Verification
 

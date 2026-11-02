@@ -120,6 +120,9 @@ export function createDemoSurface(pane: PaneDescriptor): TerminalSurface {
     get canResizeGrid() {
       return status === 'connected';
     },
+    get mouseTracking() {
+      return 'none' as const;
+    },
     connect: () => {
       if (status !== 'paused') return;
       status = 'connected';
@@ -132,6 +135,7 @@ export function createDemoSurface(pane: PaneDescriptor): TerminalSurface {
     },
     sendText: send,
     sendKey: send,
+    sendMouse: () => false,
     paste: send,
     focus: () => undefined,
     resizeGrid: (nextCols, nextRows) => {

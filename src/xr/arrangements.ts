@@ -125,19 +125,109 @@ const sphereArrangement = (sizes: readonly ArrangementPanelSize[]): ArrangementP
   });
 };
 
+type ProjectedPoint = { x: number; y: number; z: number };
+type ProjectedQuad = ProjectedPoint[];
+
+const projectedQuad = (pose: ArrangementPose, size: ArrangementPanelSize): ProjectedQuad => {
+  const halfWidth = (size.width + PANEL_GAP) / 2;
+  const halfHeight = (size.height + PANEL_GAP) / 2;
+  return [
+    new THREE.Vector3(-halfWidth, -halfHeight, 0),
+    new THREE.Vector3(halfWidth, -halfHeight, 0),
+    new THREE.Vector3(halfWidth, halfHeight, 0),
+    new THREE.Vector3(-halfWidth, halfHeight, 0),
+  ].map((corner) => {
+    const point = corner.applyQuaternion(pose.quaternion).add(pose.position);
+    return { x: point.x / -point.z, y: point.y / -point.z, z: point.z };
+  });
+};
+
+const quadsOverlap = (first: ProjectedQuad, second: ProjectedQuad): boolean => {
+  const axes: ProjectedPoint[] = [];
+  for (const quad of [first, second]) {
+    for (let index = 0; index < quad.length; index += 1) {
+      const a = quad[index];
+      const b = quad[(index + 1) % quad.length];
+      axes.push({ x: -(b.y - a.y), y: b.x - a.x, z: 0 });
+    }
+  }
+  for (const axis of axes) {
+    const firstProjection = first.map((point) => point.x * axis.x + point.y * axis.y);
+    const secondProjection = second.map((point) => point.x * axis.x + point.y * axis.y);
+    const firstMin = Math.min(...firstProjection);
+    const firstMax = Math.max(...firstProjection);
+    const secondMin = Math.min(...secondProjection);
+    const secondMax = Math.max(...secondProjection);
+    if (firstMax <= secondMin || secondMax <= firstMin) return false;
+  }
+  return true;
+};
+
+const arrangementFits = (
+  poses: readonly ArrangementPose[],
+  sizes: readonly ArrangementPanelSize[],
+  scale: number,
+): boolean => {
+  const projected = poses.map((pose, index) => {
+    const scaled = { ...pose, position: pose.position.clone().multiplyScalar(scale) };
+    return projectedQuad(scaled, sizes[index]);
+  });
+  for (const quad of projected) {
+    if (
+      quad.some(
+        (point) =>
+          point.z >= -1e-6 ||
+          !Number.isFinite(point.x) ||
+          !Number.isFinite(point.y) ||
+          !Number.isFinite(point.z),
+      )
+    )
+      return false;
+  }
+  for (let first = 0; first < projected.length; first += 1) {
+    for (let second = first + 1; second < projected.length; second += 1)
+      if (quadsOverlap(projected[first], projected[second])) return false;
+  }
+  return true;
+};
+
+const separateOverlappingPanels = (
+  poses: ArrangementPose[],
+  sizes: readonly ArrangementPanelSize[],
+): ArrangementPose[] => {
+  if (arrangementFits(poses, sizes, 1)) return poses;
+  let high = 1;
+  for (let attempt = 0; attempt < 16 && !arrangementFits(poses, sizes, high); attempt += 1)
+    high *= 2;
+  if (!arrangementFits(poses, sizes, high)) return poses;
+  let low = 1;
+  for (let iteration = 0; iteration < 18; iteration += 1) {
+    const middle = (low + high) / 2;
+    if (arrangementFits(poses, sizes, middle)) high = middle;
+    else low = middle;
+  }
+  return poses.map((pose) => ({
+    position: pose.position.clone().multiplyScalar(high),
+    quaternion: pose.quaternion,
+  }));
+};
+
 export const calculateArrangement = (
   pattern: PanelArrangement,
   sizes: readonly ArrangementPanelSize[],
 ): ArrangementPose[] => {
   if (sizes.length === 0) return [];
-  switch (pattern) {
-    case 'row':
-      return rowArrangement(sizes);
-    case 'grid':
-      return gridArrangement(sizes);
-    case 'arc':
-      return arcArrangement(sizes);
-    case 'sphere':
-      return sphereArrangement(sizes);
-  }
+  const poses = (() => {
+    switch (pattern) {
+      case 'row':
+        return rowArrangement(sizes);
+      case 'grid':
+        return gridArrangement(sizes);
+      case 'arc':
+        return arcArrangement(sizes);
+      case 'sphere':
+        return sphereArrangement(sizes);
+    }
+  })();
+  return separateOverlappingPanels(poses, sizes);
 };

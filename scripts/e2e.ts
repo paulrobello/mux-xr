@@ -374,6 +374,11 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
     });
     await recovery.click();
     await page.locator('[data-action="desktop-reset-layout"]').click();
+    const backgroundSelect = (await currentHints()).find(
+      (hint) => hint.inputAction === 'backgroundSelect',
+    );
+    assert(backgroundSelect, 'background selector missing');
+    await page.mouse.click(backgroundSelect.clientX, backgroundSelect.clientY);
     const black = (await currentHints()).find(
       (hint) => hint.inputAction === 'background' && hint.label === 'Black',
     );

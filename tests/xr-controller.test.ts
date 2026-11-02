@@ -84,6 +84,7 @@ function fixture() {
     togglePaneConnection: vi.fn(),
     sendText: vi.fn(),
     sendKey: vi.fn(),
+    sendMouse: vi.fn(() => true),
     runCommand: vi.fn(),
     openKeyboard: vi.fn(),
     openCommands: vi.fn(),
@@ -160,6 +161,21 @@ function aimController(controller: THREE.Group, target: THREE.Object3D, distance
   controller.quaternion.copy(orientation);
 }
 
+function aimControllerAtScreen(
+  controller: THREE.Group,
+  screen: THREE.Object3D,
+  localPoint: THREE.Vector3,
+  distance = 0.3,
+): void {
+  const orientation = screen.getWorldQuaternion(new THREE.Quaternion());
+  controller.position.copy(
+    screen
+      .localToWorld(localPoint.clone())
+      .add(new THREE.Vector3(0, 0, distance).applyQuaternion(orientation)),
+  );
+  controller.quaternion.copy(orientation);
+}
+
 function connectController(index: number, axes = [0, 0, 0, 0]): Gamepad {
   const gamepad = {
     axes,
@@ -195,6 +211,255 @@ describe('native XR controller event routing', () => {
     workspace.dispose();
   });
 
+  it('routes controller screen hits to clamped terminal mouse cells and captures movement', () => {
+    const { workspace, actions, container } = fixture();
+    const screen = workspace.scene.getObjectByName('terminal-surface');
+    if (!screen) throw new Error('Terminal surface missing');
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    const geometry = (screen as THREE.Mesh).geometry as THREE.PlaneGeometry;
+    const width = geometry.parameters.width;
+    const height = geometry.parameters.height;
+    aimControllerAtScreen(controller, screen, new THREE.Vector3(width * 0.001, 0, 0));
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    expect(actions.sendMouse).toHaveBeenLastCalledWith(
+      'pane-a',
+      expect.objectContaining({ col: 40, row: 12, button: 0, eventType: 'press' }),
+    );
+
+    aimControllerAtScreen(controller, screen, new THREE.Vector3(width * 0.25, height * 0.25, 0));
+    fakeXR.frame?.(16);
+    expect(actions.sendMouse).toHaveBeenLastCalledWith(
+      'pane-a',
+      expect.objectContaining({ col: 60, row: 6, button: 0, eventType: 'move' }),
+    );
+
+    aimControllerAtScreen(
+      controller,
+      screen,
+      new THREE.Vector3(width * 0.4999, -height * 0.4999, 0),
+    );
+    fakeXR.frame?.(32);
+    expect(actions.sendMouse).toHaveBeenLastCalledWith(
+      'pane-a',
+      expect.objectContaining({ col: 79, row: 23, eventType: 'move' }),
+    );
+    controller.dispatchEvent({ type: 'selectend' } as never);
+    expect(actions.sendMouse).toHaveBeenLastCalledWith(
+      'pane-a',
+      expect.objectContaining({ col: 79, row: 23, eventType: 'release' }),
+    );
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('suppresses controller mouse input while a grip is held or its raw grip button is pressed', () => {
+    const { workspace, actions, container } = fixture();
+    const screen = workspace.scene.getObjectByName('terminal-surface');
+    if (!screen) throw new Error('Terminal surface missing');
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    const gamepad = connectController(0);
+    (gamepad.buttons[1] as { pressed: boolean }).pressed = true;
+    aimControllerAtScreen(controller, screen, new THREE.Vector3(0, 0, 0));
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    expect(actions.sendMouse).not.toHaveBeenCalled();
+    (gamepad.buttons[1] as { pressed: boolean }).pressed = false;
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    expect(actions.sendMouse).toHaveBeenCalledWith(
+      'pane-a',
+      expect.objectContaining({ eventType: 'press' }),
+    );
+    const callsBeforeGrip = (actions.sendMouse as ReturnType<typeof vi.fn>).mock.calls.length;
+    controller.dispatchEvent({ type: 'squeezestart' } as never);
+    expect(actions.sendMouse).toHaveBeenCalledWith(
+      'pane-a',
+      expect.objectContaining({ eventType: 'release' }),
+    );
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    expect((actions.sendMouse as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      callsBeforeGrip + 1,
+    );
+    controller.dispatchEvent({ type: 'squeezeend' } as never);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('keeps mouse capture on the original pane while the ray crosses another pane or empty space', () => {
+    const { workspace, actions, container } = fixture();
+    const screenA = workspace.scene
+      .getObjectByName('terminal-panel-pane-a')
+      ?.getObjectByName('terminal-surface');
+    const screenB = workspace.scene
+      .getObjectByName('terminal-panel-pane-b')
+      ?.getObjectByName('terminal-surface');
+    if (!screenA || !screenB) throw new Error('Terminal surfaces missing');
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    aimControllerAtScreen(controller, screenA, new THREE.Vector3(0.001, 0, 0));
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    expect(actions.sendMouse).toHaveBeenLastCalledWith(
+      'pane-a',
+      expect.objectContaining({ col: 40, row: 12, eventType: 'press' }),
+    );
+    const callsAfterPress = (actions.sendMouse as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    aimControllerAtScreen(controller, screenB, new THREE.Vector3(0.2, 0, 0));
+    fakeXR.frame?.(16);
+    expect((actions.sendMouse as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsAfterPress);
+
+    const orientation = screenA.getWorldQuaternion(new THREE.Quaternion());
+    controller.position.copy(screenA.localToWorld(new THREE.Vector3(0, 0, 0.3)));
+    controller.quaternion.copy(
+      new THREE.Quaternion()
+        .setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
+        .multiply(orientation),
+    );
+    fakeXR.frame?.(32);
+    expect((actions.sendMouse as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsAfterPress);
+
+    aimControllerAtScreen(controller, screenA, new THREE.Vector3(0.2, 0, 0));
+    fakeXR.frame?.(48);
+    expect(actions.sendMouse).toHaveBeenLastCalledWith(
+      'pane-a',
+      expect.objectContaining({ col: 51, row: 12, eventType: 'move' }),
+    );
+    controller.dispatchEvent({ type: 'selectend' } as never);
+    expect(actions.sendMouse).toHaveBeenLastCalledWith(
+      'pane-a',
+      expect.objectContaining({ col: 51, row: 12, eventType: 'release' }),
+    );
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('does not capture a controller mouse press when the backend rejects it', () => {
+    const { workspace, actions, container } = fixture();
+    const screen = workspace.scene.getObjectByName('terminal-surface');
+    if (!screen) throw new Error('Terminal surface missing');
+    (actions.sendMouse as ReturnType<typeof vi.fn>).mockReturnValueOnce(false);
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    aimControllerAtScreen(controller, screen, new THREE.Vector3(0, 0, 0));
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    controller.dispatchEvent({ type: 'selectend' } as never);
+    expect(actions.sendMouse).toHaveBeenCalledTimes(1);
+    expect(actions.sendMouse).toHaveBeenLastCalledWith(
+      'pane-a',
+      expect.objectContaining({ eventType: 'press' }),
+    );
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('releases captured controller mouse input when the terminal closes, disconnects, or XR ends', async () => {
+    const pressCenter = (workspace: ReturnType<typeof createWorkspaceScene>): void => {
+      const screen = workspace.scene.getObjectByName('terminal-surface');
+      if (!screen) throw new Error('Terminal surface missing');
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      aimControllerAtScreen(controller, screen, new THREE.Vector3(0.001, 0, 0));
+      controller.dispatchEvent({ type: 'selectstart' } as never);
+    };
+
+    {
+      const { workspace, actions, container } = fixture();
+      pressCenter(workspace);
+      workspace.removeTerminal('pane-a');
+      expect(actions.sendMouse).toHaveBeenLastCalledWith(
+        'pane-a',
+        expect.objectContaining({ eventType: 'release' }),
+      );
+      workspace.dispose();
+      container.remove();
+    }
+
+    {
+      const { workspace, actions, container } = fixture();
+      pressCenter(workspace);
+      (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'disconnected' } as never);
+      expect(actions.sendMouse).toHaveBeenLastCalledWith(
+        'pane-a',
+        expect.objectContaining({ eventType: 'release' }),
+      );
+      workspace.dispose();
+      container.remove();
+    }
+
+    const endListeners: Array<() => void> = [];
+    const session = {
+      addEventListener: (_type: string, listener: () => void) => endListeners.push(listener),
+      end: vi.fn(async () =>
+        endListeners.forEach((listener) => {
+          listener();
+        }),
+      ),
+    };
+    vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+    fakeXR.presenting = true;
+    const { workspace, actions, container } = fixture();
+    await workspace.enterXR('vr');
+    pressCenter(workspace);
+    await workspace.exitXR();
+    expect(actions.sendMouse).toHaveBeenLastCalledWith(
+      'pane-a',
+      expect.objectContaining({ eventType: 'release' }),
+    );
+    workspace.dispose();
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it('uses synchronized background selectors in the HUD and input root', () => {
+    const { workspace, container } = fixture();
+    const backgroundMenus = (): THREE.Object3D[] => {
+      const menus: THREE.Object3D[] = [];
+      workspace.scene.traverse((object) => {
+        if (object.name === 'background-options') menus.push(object);
+      });
+      return menus;
+    };
+    const trigger = (owner: 'hud' | 'input'): THREE.Object3D =>
+      objectWithData(workspace, { inputAction: 'backgroundSelect', backgroundSelectOwner: owner });
+    const label = (owner: 'hud' | 'input'): string => String(trigger(owner).userData.labelText);
+    const visibleMenu = (): THREE.Object3D | undefined =>
+      backgroundMenus().find((menu) => menu.visible);
+
+    expect(backgroundMenus()).toHaveLength(1);
+    expect(label('hud')).toBe('Observatory');
+    expect(trigger('hud').userData.helpText).toContain('background');
+    expect(visibleMenu()).toBeUndefined();
+
+    hit(workspace, { inputAction: 'backgroundSelect', backgroundSelectOwner: 'hud' });
+    expect(visibleMenu()).toBeDefined();
+    hit(workspace, { inputAction: 'background', background: 'gradient' });
+    expect(label('hud')).toBe('Gradient');
+    expect(visibleMenu()).toBeUndefined();
+
+    workspace.showInput('keyboard');
+    expect(backgroundMenus()).toHaveLength(2);
+    expect(label('input')).toBe('Gradient');
+    expect(label('hud')).toBe('Gradient');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    const inputOptions = keyboard.getObjectByName('background-options');
+    expect(inputOptions).toBeDefined();
+    const optionWidths = inputOptions?.children
+      .filter((child) => child.userData.inputAction === 'background')
+      .map((child) => Number(child.userData.labelWidth));
+    expect(optionWidths?.length).toBe(3);
+    expect(new Set(optionWidths).size).toBe(1);
+
+    hit(workspace, { inputAction: 'backgroundSelect', backgroundSelectOwner: 'input' });
+    expect(visibleMenu()).toBe(inputOptions);
+    hit(workspace, { inputAction: 'background', background: 'observatory' });
+    expect(label('input')).toBe('Observatory');
+    expect(label('hud')).toBe('Observatory');
+    expect(visibleMenu()).toBeUndefined();
+
+    hit(workspace, { inputAction: 'backgroundSelect', backgroundSelectOwner: 'input' });
+    expect(visibleMenu()).toBe(inputOptions);
+    hit(workspace, { inputAction: 'key', key: 'a' });
+    expect(visibleMenu()).toBeUndefined();
+    workspace.dispose();
+    container.remove();
+  });
+
   it('reuses a vacant slot when reopening a view', () => {
     const { workspace, left } = fixture();
     workspace.removeTerminal(left.pane.id);
@@ -202,6 +467,22 @@ describe('native XR controller event routing', () => {
     const reopened = workspace.scene.getObjectByName('terminal-panel-pane-a');
     const other = workspace.scene.getObjectByName('terminal-panel-pane-b');
     expect(reopened?.position.x).toBeLessThan(other?.position.x ?? -Infinity);
+    workspace.dispose();
+  });
+
+  it('reaches terminals placed beyond the default laser length', () => {
+    const { workspace } = fixture();
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    if (!panel) throw new Error('Terminal missing');
+    panel.position.set(0, 1.5, -12);
+    panel.quaternion.identity();
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    controller.position.set(0, 1.5, 0);
+    controller.quaternion.identity();
+    fakeXR.frame?.(16);
+    expect(controller.userData.rayDistance).toBeCloseTo(12);
+    const line = controller.children.find((child) => child instanceof THREE.Line);
+    expect(line?.scale.z).toBeCloseTo(12 / 8);
     workspace.dispose();
   });
 
@@ -276,7 +557,8 @@ describe('native XR controller event routing', () => {
       expect(panel.userData.fontZoom).toBe(1.25);
       for (const id of ['pane-a', 'pane-b']) {
         const root = workspace.scene.getObjectByName(`terminal-panel-${id}`) as THREE.Group;
-        const towardEye = workspace.camera.position.clone().sub(root.position).normalize();
+        const visualCenter = new THREE.Box3().setFromObject(root).getCenter(new THREE.Vector3());
+        const towardEye = workspace.camera.position.clone().sub(visualCenter).normalize();
         const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(root.quaternion);
         expect(normal.dot(towardEye)).toBeGreaterThan(0.999);
       }
@@ -561,6 +843,19 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('bounds desktop panel shrink at the physical minimum without resizing the PTY', () => {
+    fakeXR.presenting = false;
+    const { workspace, right, container } = fixture();
+    workspace.selectTerminal('pane-b');
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-b');
+    if (!panel) throw new Error('Pane B missing');
+    for (let step = 0; step < 30; step += 1) workspace.scaleSelectedPanel(-1);
+    expect(panel.scale.x).toBeCloseTo(0.3, 6);
+    expect(right.resizeGrid).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
   it('routes browser hover and clicks through the terminal control actions', () => {
     fakeXR.presenting = false;
     const { workspace, actions, container, right } = fixture();
@@ -836,7 +1131,10 @@ describe('native XR controller event routing', () => {
     const controls: THREE.Object3D[] = [];
     keyboard.updateMatrixWorld(true);
     keyboard.traverse((object) => {
-      if (object.userData.labelWidth) controls.push(object);
+      if (!object.userData.labelWidth) return;
+      for (let parent: THREE.Object3D | null = object; parent; parent = parent.parent)
+        if (!parent.visible) return;
+      controls.push(object);
     });
     for (let a = 0; a < controls.length; a += 1) {
       const first = controls[a];
@@ -1032,6 +1330,33 @@ describe('native XR controller event routing', () => {
     expect(keyboard.scale.x).toBeCloseTo(scaleWhilePairHeld, 6);
     expect(keyboard.position.x).toBeLessThan(initialPosition.x);
     expect(actions.sendKey).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('clamps two-controller terminal shrink at the physical minimum without input or PTY resize', () => {
+    const { workspace, actions, right, container } = fixture();
+    workspace.selectTerminal('pane-b');
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-b');
+    if (!panel) throw new Error('Pane B missing');
+    const title = objectWithData(workspace, { terminalTitle: true, terminalId: 'pane-b' });
+    const zoom = objectWithData(workspace, { inputAction: 'fontZoom', terminalId: 'pane-b' });
+    const left = fakeXR.controllers[0] as THREE.Group;
+    const rightController = fakeXR.controllers[1] as THREE.Group;
+    connectController(0);
+    connectController(1);
+    aimController(left, title);
+    aimController(rightController, zoom);
+    left.dispatchEvent({ type: 'squeezestart' } as never);
+    rightController.dispatchEvent({ type: 'squeezestart' } as never);
+    const midpoint = left.position.clone().add(rightController.position).multiplyScalar(0.5);
+    left.position.copy(midpoint).add(new THREE.Vector3(-0.05, 0, 0));
+    rightController.position.copy(midpoint).add(new THREE.Vector3(0.05, 0, 0));
+    fakeXR.frame?.(16);
+    expect(panel.scale.x).toBeCloseTo(0.3, 6);
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    expect(actions.sendText).not.toHaveBeenCalled();
+    expect(right.resizeGrid).not.toHaveBeenCalled();
     workspace.dispose();
     container.remove();
   });

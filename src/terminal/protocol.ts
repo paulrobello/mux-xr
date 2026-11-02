@@ -1,11 +1,13 @@
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import * as pako from 'pako';
+import type { TerminalMouseInput } from '../contracts';
 import {
   type ClientMessage,
   ClientMessageSchema,
   ClientResizeSchema,
   FocusChangeSchema,
   InputSchema,
+  MouseInputSchema,
   PasteInputSchema,
   PingSchema,
   RequestRefreshSchema,
@@ -97,6 +99,27 @@ export function createInputMessage(data: string): ClientMessage {
     message: {
       case: 'input',
       value: create(InputSchema, { data: new TextEncoder().encode(data) }),
+    },
+  });
+}
+
+export function createMouseMessage(input: TerminalMouseInput): ClientMessage {
+  const modifiers = input.modifiers ?? {};
+  // The mux core consumes xterm's button encoding. Motion is bit 5, while
+  // release is represented by the event type and keeps the button number.
+  const button = input.eventType === 'move' ? input.button | 32 : input.button;
+  return create(ClientMessageSchema, {
+    message: {
+      case: 'mouse',
+      value: create(MouseInputSchema, {
+        col: input.col,
+        row: input.row,
+        button,
+        shift: modifiers.shift ?? false,
+        ctrl: modifiers.ctrl ?? false,
+        alt: modifiers.alt ?? false,
+        eventType: input.eventType,
+      }),
     },
   });
 }

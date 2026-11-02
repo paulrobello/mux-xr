@@ -76,6 +76,8 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
       return ['connected', 'connecting'].includes(String(data.status))
         ? 'Disconnect this terminal view without stopping the shell'
         : 'Reconnect this terminal view to the running shell';
+    case 'backgroundSelect':
+      return 'Choose the VR background';
     case 'background':
       return `Use the ${String(data.background)} VR background`;
     case 'command':

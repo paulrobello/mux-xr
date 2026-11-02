@@ -3,6 +3,8 @@ import type {
   KeyModifiers,
   PaneDescriptor,
   TerminalColorMode,
+  TerminalMouseInput,
+  TerminalMouseTrackingMode,
   TerminalStatus,
   TerminalSurface,
 } from '../contracts';
@@ -10,6 +12,7 @@ import { createTerminalPainter } from './painter';
 import {
   createFocusMessage,
   createInputMessage,
+  createMouseMessage,
   createPasteMessage,
   createResizeMessage,
   decodeServerMessage,
@@ -24,6 +27,12 @@ export const MIN_GRID_COLS = 2;
 export const MAX_GRID_COLS = 300;
 export const MIN_GRID_ROWS = 2;
 export const MAX_GRID_ROWS = 150;
+const SERVER_MOUSE_MODES: Record<string, TerminalMouseTrackingMode> = {
+  mouse_x10: 'x10',
+  mouse_normal: 'vt200',
+  mouse_button_event: 'drag',
+  mouse_any_event: 'any',
+};
 
 export function validGrid(cols: number, rows: number): boolean {
   return (
@@ -121,6 +130,10 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   let colorMode: TerminalColorMode = 'comfort';
   let generation = 0;
   let paused = false;
+  let mouseTrackingFallback: TerminalMouseTrackingMode = 'none';
+  let mouseTrackingDisabled = false;
+  let serverMouseMode: TerminalMouseTrackingMode | null = null;
+  let serverMouseModeKnown = false;
   let error: string | null = null;
   const listeners = new Set<() => void>();
   const notify = (): void => {
@@ -236,6 +249,10 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             const connected = msg.message.value;
             ready = true;
             readonly = connected.readonly ?? false;
+            mouseTrackingFallback = 'none';
+            mouseTrackingDisabled = false;
+            serverMouseMode = null;
+            serverMouseModeKnown = false;
             retries = 0;
             if (validGrid(connected.cols, connected.rows)) {
               cols = connected.cols;
@@ -261,10 +278,25 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             cancelPaint();
             paint();
             break;
-          case 'modeChanged':
+          case 'modeChanged': {
             if (msg.message.value.mode === 'application_cursor')
               appCursor = msg.message.value.enabled;
+            const exactMouseMode = SERVER_MOUSE_MODES[msg.message.value.mode];
+            if (exactMouseMode) {
+              serverMouseModeKnown = true;
+              if (msg.message.value.enabled) {
+                serverMouseMode = exactMouseMode;
+                mouseTrackingDisabled = false;
+              } else if (serverMouseMode === exactMouseMode) {
+                serverMouseMode = null;
+              }
+            } else if (msg.message.value.mode === 'mouse_tracking' && !serverMouseModeKnown) {
+              // Compatibility with older servers that only exposed an aggregate flag.
+              mouseTrackingDisabled = !msg.message.value.enabled;
+              mouseTrackingFallback = msg.message.value.enabled ? 'vt200' : 'none';
+            }
             break;
+          }
           case 'shutdown':
             ready = false;
             setStatus('exited');
@@ -326,6 +358,12 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     get canResizeGrid() {
       return ready && socket?.readyState === WebSocket.OPEN && !readonly && !disposed;
     },
+    get mouseTracking() {
+      if (serverMouseModeKnown) return serverMouseMode ?? 'none';
+      if (mouseTrackingDisabled) return 'none';
+      const mode = terminal.modes?.mouseTrackingMode as TerminalMouseTrackingMode | undefined;
+      return mode && mode !== 'none' ? mode : mouseTrackingFallback;
+    },
     connect,
     flush,
     disconnect: () => {
@@ -350,6 +388,22 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
           terminalKeyBytes(key, modifiers, terminal.modes?.applicationCursorKeysMode ?? appCursor),
         ),
       ),
+    sendMouse: (input: TerminalMouseInput): boolean => {
+      if (
+        !Number.isInteger(input.col) ||
+        !Number.isInteger(input.row) ||
+        input.col < 0 ||
+        input.col >= cols ||
+        input.row < 0 ||
+        input.row >= rows
+      )
+        return false;
+      const mode = surface.mouseTracking;
+      if (mode === 'none') return false;
+      if (input.eventType === 'move' && mode !== 'drag' && mode !== 'any') return false;
+      if (input.eventType !== 'move' && mode === 'x10' && input.eventType !== 'press') return false;
+      return send(createMouseMessage(input));
+    },
     paste: (text) => send(createPasteMessage(text)),
     focus: (focused) => {
       if (focused) terminal.focus();

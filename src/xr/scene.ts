@@ -6,6 +6,7 @@ import type {
   PanelArrangement,
   QuickCommand,
   TerminalColorMode,
+  TerminalMouseInput,
   TerminalSurface,
   WorkspaceActions,
 } from '../contracts';
@@ -21,6 +22,7 @@ import {
 } from './command-editor';
 import { createFrameCounter } from './fps';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
+import { measurePanelBounds } from './panel-bounds';
 import { createTerminalTexture, type TerminalTexture } from './terminal-texture';
 
 type InputMode = 'commands' | 'keyboard' | 'panes' | 'terminal' | 'arrange' | 'command-editor';
@@ -94,6 +96,7 @@ export interface InputTarget {
   terminalId: string;
   kind: 'terminal' | 'key' | 'command' | 'keyboard';
   object?: THREE.Object3D;
+  uv?: THREE.Vector2;
 }
 
 export interface InputCapture {
@@ -244,6 +247,52 @@ function setModifierVisual(object: THREE.Object3D, armed: boolean): void {
 
 function updateLabel(object: THREE.Mesh, label: string): void {
   if (object.userData.labelText !== label) updateScalableLabel(object, label);
+}
+
+const BACKGROUND_LABELS: Record<BackgroundMode, string> = {
+  black: 'Black',
+  gradient: 'Gradient',
+  observatory: 'Observatory',
+};
+
+function createBackgroundSelect(mode: BackgroundMode, owner: 'hud' | 'input'): THREE.Group {
+  const root = new THREE.Group();
+  root.name = 'background-select';
+  const trigger = createLabelButton(BACKGROUND_LABELS[mode], 0.48, 0.09, {
+    inputAction: 'backgroundSelect',
+    backgroundSelectOwner: owner,
+  });
+  trigger.name = 'background-select-trigger';
+  const shape = new THREE.Shape().moveTo(-0.009, 0.006).lineTo(0.009, 0.006).lineTo(0, -0.006);
+  shape.closePath();
+  const arrow = new THREE.Mesh(
+    new THREE.ShapeGeometry(shape),
+    new THREE.MeshBasicMaterial({ color: 0xffffff }),
+  );
+  arrow.position.set(0.2, 0, 0.003);
+  arrow.raycast = () => undefined;
+  const options = new THREE.Group();
+  options.name = 'background-options';
+  options.visible = false;
+  options.position.z = 0.03;
+  const backing = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.5, 0.33),
+    new THREE.MeshBasicMaterial({ color: 0x0d1720 }),
+  );
+  backing.position.set(0, 0.22, -0.005);
+  backing.userData.inputAction = 'noop';
+  options.add(backing);
+  (Object.keys(BACKGROUND_LABELS) as BackgroundMode[]).forEach((background, index) => {
+    const option = createLabelButton(BACKGROUND_LABELS[background], 0.48, 0.09, {
+      inputAction: 'background',
+      background,
+    });
+    option.position.y = 0.33 - index * 0.11;
+    setModifierVisual(option, background === mode);
+    options.add(option);
+  });
+  root.add(trigger, arrow, options);
+  return root;
 }
 
 function createGradientTexture(): THREE.CanvasTexture {
@@ -410,12 +459,14 @@ export function createWorkspaceScene(
   const controllerListeners: Array<{
     root: THREE.Group;
     onSelect: (event: Event) => void;
+    onSelectEnd: (event: Event) => void;
     onSqueeze: (event: Event) => void;
     onSqueezeEnd: (event: Event) => void;
     onConnected: (event: Event) => void;
     onDisconnected: (event: Event) => void;
   }> = [];
   const tempMatrix = new THREE.Matrix4();
+  const reachPosition = new THREE.Vector3();
   const dragStates = new Map<
     THREE.Group,
     {
@@ -491,6 +542,16 @@ export function createWorkspaceScene(
   const controllerGamepads = new Map<THREE.Group, Gamepad>();
   const disconnectedControllers = new Set<THREE.Group>();
   const heldControllers = new Set<THREE.Group>();
+  const mouseCaptures = new Map<
+    THREE.Group | number,
+    {
+      id: string;
+      col: number;
+      row: number;
+      button: TerminalMouseInput['button'];
+      modifiers?: KeyModifiers;
+    }
+  >();
   let previousRenderTime: number | null = null;
   const frameCounter = createFrameCounter();
   let fpsLabel: THREE.Mesh | null = null;
@@ -505,6 +566,12 @@ export function createWorkspaceScene(
   let commandPage = 0;
   let inputRoot: THREE.Group | null = null;
   let hudRoot: THREE.Group | null = null;
+  const closeBackgroundMenus = (): void => {
+    for (const owner of [hudRoot, inputRoot]) {
+      const options = owner?.getObjectByName('background-options');
+      if (options) options.visible = false;
+    }
+  };
   let updateNotice: THREE.Mesh | null = null;
   let statusNotice: THREE.Mesh | null = null;
   let activeSession: XrSessionLike | null = null;
@@ -529,6 +596,100 @@ export function createWorkspaceScene(
       if (object.userData.modifier) setModifierVisual(object, false);
     });
     armedModifiers = {};
+  };
+  const releaseMouse = (source: THREE.Group | number): void => {
+    const capture = mouseCaptures.get(source);
+    if (!capture) return;
+    mouseCaptures.delete(source);
+    const panel = panels.get(capture.id);
+    if (panel)
+      actions.sendMouse?.(capture.id, {
+        ...capture,
+        col: Math.min(capture.col, panel.surface.cols - 1),
+        row: Math.min(capture.row, panel.surface.rows - 1),
+        eventType: 'release',
+      });
+    if (typeof source === 'number' && canvas.hasPointerCapture?.(source))
+      canvas.releasePointerCapture(source);
+    clearArmedModifiers();
+    if (capture.modifiers?.shift && inputRoot && inputMode === 'keyboard')
+      refreshInputRoot(inputMode);
+  };
+  const releaseAllMouse = (): void => {
+    for (const source of [...mouseCaptures.keys()]) releaseMouse(source);
+  };
+  const gripActive = (): boolean =>
+    heldControllers.size > 0 ||
+    [...controllerGamepads.values()].some((pad) => pad.buttons[1]?.pressed);
+  const cellAtUV = (panel: TerminalPanel, uv: THREE.Vector2): { col: number; row: number } => {
+    panel.texture.updateMatrix();
+    const sampled = uv.clone().applyMatrix3(panel.texture.matrix);
+    return {
+      col: THREE.MathUtils.clamp(
+        Math.floor(sampled.x * panel.surface.cols),
+        0,
+        panel.surface.cols - 1,
+      ),
+      row: THREE.MathUtils.clamp(
+        Math.floor((1 - sampled.y) * panel.surface.rows),
+        0,
+        panel.surface.rows - 1,
+      ),
+    };
+  };
+  const startMouse = (
+    source: THREE.Group | number,
+    target: InputTarget | null,
+    button: number,
+    modifiers?: KeyModifiers,
+  ): boolean => {
+    if (gripActive() || !target?.uv || button < 0 || button > 2) return false;
+    const panel = panels.get(target.terminalId);
+    if (
+      !panel ||
+      target.object !== panel.screen ||
+      [...mouseCaptures.values()].some((capture) => capture.id === panel.id)
+    )
+      return false;
+    const input: TerminalMouseInput = {
+      ...cellAtUV(panel, target.uv),
+      button: button as TerminalMouseInput['button'],
+      eventType: 'press',
+      modifiers,
+    };
+    if (!actions.sendMouse?.(panel.id, input)) return false;
+    mouseCaptures.set(source, { ...input, id: panel.id });
+    return true;
+  };
+  const moveMouse = (source: THREE.Group | number, target: InputTarget | null): void => {
+    const capture = mouseCaptures.get(source);
+    if (!capture) return;
+    const panel = panels.get(capture.id);
+    if (
+      gripActive() ||
+      !panel ||
+      panel.surface.status !== 'connected' ||
+      panel.surface.mouseTracking === 'none'
+    ) {
+      releaseMouse(source);
+      return;
+    }
+    if (target?.object !== panel.screen) return;
+    const localRay = raycaster.ray.clone().applyMatrix4(panel.screen.matrixWorld.clone().invert());
+    const point = localRay.intersectPlane(
+      new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
+      new THREE.Vector3(),
+    );
+    if (!point) return;
+    const geometry = panel.screen.geometry.parameters;
+    const cell = cellAtUV(
+      panel,
+      new THREE.Vector2(point.x / geometry.width + 0.5, point.y / geometry.height + 0.5),
+    );
+    if (cell.col === capture.col && cell.row === capture.row) return;
+    capture.col = cell.col;
+    capture.row = cell.row;
+    actions.sendMouse?.(capture.id, { ...capture, eventType: 'move' });
   };
 
   const notify = (): void => {
@@ -594,17 +755,42 @@ export function createWorkspaceScene(
   const onPointerDown = (event: PointerEvent): void => {
     if (renderer?.xr.isPresenting) return;
     if (!setPointerRay(event)) return;
-    activateTarget(targetFromRay());
+    const target = targetFromRay();
+    activateTarget(target);
+    if (
+      startMouse(event.pointerId, target, event.button, {
+        shift: event.shiftKey,
+        ctrl: event.ctrlKey,
+        alt: event.altKey,
+      })
+    ) {
+      canvas.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    }
     showHover(null);
   };
   const onPointerMove = (event: PointerEvent): void => {
     if (renderer?.xr.isPresenting) return;
     if (!setPointerRay(event)) return;
+    if (mouseCaptures.has(event.pointerId)) {
+      moveMouse(event.pointerId, targetFromRay());
+      return;
+    }
     showHover(targetFromRay()?.object ?? null);
     updateHoverPosition();
   };
   const onPointerLeave = (): void => {
     if (!renderer?.xr.isPresenting) showHover(null);
+  };
+  const onPointerUp = (event: PointerEvent): void => {
+    if (
+      event.type === 'pointerup' &&
+      !renderer?.xr.isPresenting &&
+      mouseCaptures.has(event.pointerId) &&
+      setPointerRay(event)
+    )
+      moveMouse(event.pointerId, targetFromRay());
+    releaseMouse(event.pointerId);
   };
   const resize = (): void => {
     const width = Math.max(1, container.clientWidth || window.innerWidth || 1);
@@ -725,7 +911,7 @@ export function createWorkspaceScene(
       const gazeCamera = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
       scene.updateMatrixWorld(true);
       gazeCamera.updateMatrixWorld(true);
-      raycaster.far = CONTROLLER_RAY_LENGTH;
+      raycaster.far = camera.far;
       const origin = new THREE.Vector3().setFromMatrixPosition(gazeCamera.matrixWorld);
       const direction = gazeCamera.getWorldDirection(new THREE.Vector3());
       raycaster.set(origin, direction);
@@ -741,7 +927,8 @@ export function createWorkspaceScene(
         mutableState.gazeInputEnabled &&
         mutableState.xrMode !== 'desktop' &&
         inputMode !== 'command-editor' &&
-        dragStates.size === 0
+        dragStates.size === 0 &&
+        mouseCaptures.size === 0
       ) {
         const nextGaze = updateGaze(
           gazeInputState,
@@ -766,6 +953,7 @@ export function createWorkspaceScene(
         if (!controller.visible || disconnectedControllers.has(controller)) continue;
         controller.updateMatrixWorld(true);
         const target = targetFromController(controller);
+        moveMouse(controller, target);
         const distance =
           (controller.userData.rayDistance as number | undefined) ?? CONTROLLER_RAY_LENGTH;
         const line = controller.children.find((child) => child instanceof THREE.Line) as
@@ -828,7 +1016,9 @@ export function createWorkspaceScene(
   canvas.addEventListener('pointerdown', onPointerDown);
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerleave', onPointerLeave);
-  canvas.addEventListener('pointercancel', onPointerLeave);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerUp);
+  canvas.addEventListener('lostpointercapture', onPointerUp);
 
   const setSelectedVisual = (): void => {
     for (const panel of panels.values())
@@ -1219,23 +1409,12 @@ export function createWorkspaceScene(
     }
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
     close.position.set(0, -0.66, 0);
-    const black = createLabelButton('Black', 0.22, 0.08, {
-      inputAction: 'background',
-      background: 'black',
-    });
-    const gradient = createLabelButton('Gradient', 0.25, 0.08, {
-      inputAction: 'background',
-      background: 'gradient',
-    });
-    const observatory = createLabelButton('Observatory', 0.3, 0.08, {
-      inputAction: 'background',
-      background: 'observatory',
-    });
-    black.position.set(-0.38, -0.53, 0);
-    gradient.position.set(-0.08, -0.53, 0);
-    observatory.position.set(0.3, -0.53, 0);
     inputRoot.add(close);
-    if (mode !== 'command-editor') inputRoot.add(black, gradient, observatory);
+    if (mode !== 'command-editor') {
+      const backgroundSelect = createBackgroundSelect(mutableState.background, 'input');
+      backgroundSelect.position.y = -0.53;
+      inputRoot.add(backgroundSelect);
+    }
     inputRoot.updateMatrixWorld(true);
     const bounds = new THREE.Box3();
     for (const child of inputRoot.children) {
@@ -1280,14 +1459,25 @@ export function createWorkspaceScene(
       ['Terminal', { inputAction: 'openInput', mode: 'terminal' }],
       ['Arrange', { inputAction: 'openInput', mode: 'arrange' }],
       ['Exit', { inputAction: 'exit' }],
-      ['Black', { inputAction: 'background', background: 'black' }],
-      ['Gradient', { inputAction: 'background', background: 'gradient' }],
-      ['Observatory', { inputAction: 'background', background: 'observatory' }],
+      [BACKGROUND_LABELS[mutableState.background], { inputAction: 'backgroundSelect' }],
       ['Gaze input: off', { inputAction: 'gazeInput', gazeInputEnabled: false }],
     ];
+    const widths = controls.map(([, data]) =>
+      data.inputAction === 'backgroundSelect'
+        ? 0.48
+        : data.inputAction === 'gazeInput'
+          ? 0.34
+          : 0.27,
+    );
+    const totalWidth = widths.reduce((sum, width) => sum + width, 0) + (controls.length - 1) * 0.04;
+    let left = -totalWidth / 2;
     controls.forEach(([label, data], index) => {
-      const button = createLabelButton(label, label === 'Observatory' ? 0.34 : 0.27, 0.09, data);
-      button.position.x = (index - (controls.length - 1) / 2) * 0.31;
+      const button =
+        data.inputAction === 'backgroundSelect'
+          ? createBackgroundSelect(mutableState.background, 'hud')
+          : createLabelButton(label, widths[index], 0.09, data);
+      button.position.x = left + widths[index] / 2;
+      left += widths[index] + 0.04;
       hudRoot?.add(button);
     });
     updateNotice = createLabelButton('Update: Reload', 0.42, 0.09, { inputAction: 'reloadUpdate' });
@@ -1302,7 +1492,7 @@ export function createWorkspaceScene(
     statusNotice.visible = Boolean(mutableState.notice);
     hudRoot.add(statusNotice);
     const backing = new THREE.Mesh(
-      new THREE.PlaneGeometry(controls.length * 0.31 + 0.08, 0.15),
+      new THREE.PlaneGeometry(totalWidth + 0.08, 0.15),
       new THREE.MeshBasicMaterial({ color: 0x0d1720 }),
     );
     backing.position.z = -0.015;
@@ -1347,7 +1537,7 @@ export function createWorkspaceScene(
   };
   const resizePanel = (panel: TerminalPanel, direction: number): void => {
     const current = panel.root.scale.x;
-    const next = Math.max(0.6, Math.min(1.8, current + direction * 0.1));
+    const next = Math.max(0.3, Math.min(1.8, current + direction * 0.1));
     panel.root.scale.setScalar(next);
     if (!renderer?.xr.isPresenting && next > current && !panelFitsPreview(panel)) {
       let low = current;
@@ -1369,6 +1559,13 @@ export function createWorkspaceScene(
   };
   const handleInputTarget = (hit: THREE.Object3D): boolean => {
     const action = hit.userData.inputAction as string | undefined;
+    if (action === 'backgroundSelect') {
+      const options = hit.parent?.getObjectByName('background-options');
+      const open = !options?.visible;
+      closeBackgroundMenus();
+      if (options) options.visible = open;
+      return true;
+    }
     if (!action || action === 'noop') return false;
     if (action === 'close') {
       commandDraft = null;
@@ -1618,7 +1815,21 @@ export function createWorkspaceScene(
     return true;
   };
   const targetFromRay = (): InputTarget | null => {
-    raycaster.far = CONTROLLER_RAY_LENGTH;
+    let reach = CONTROLLER_RAY_LENGTH;
+    for (const panel of panels.values()) {
+      panel.root.getWorldPosition(reachPosition);
+      reach = Math.max(
+        reach,
+        raycaster.ray.origin.distanceTo(reachPosition) +
+          (Math.hypot(panel.width, panel.height) / 2 + 1) * panel.root.scale.x,
+      );
+    }
+    for (const root of [inputRoot, hudRoot]) {
+      if (!root) continue;
+      root.getWorldPosition(reachPosition);
+      reach = Math.max(reach, raycaster.ray.origin.distanceTo(reachPosition) + 3 * root.scale.x);
+    }
+    raycaster.far = Math.min(camera.far, reach);
     const targets = [...panels.values()].map((panel) => panel.root);
     if (inputRoot) targets.push(inputRoot);
     if (hudRoot) targets.push(hudRoot);
@@ -1639,7 +1850,7 @@ export function createWorkspaceScene(
     const terminalId = current?.userData.terminalId as string | undefined;
     if (!terminalId) return null;
     const key = hit.userData.key as string | undefined;
-    return { terminalId, kind: key ? 'key' : 'terminal', object: hit };
+    return { terminalId, kind: key ? 'key' : 'terminal', object: hit, uv: intersection?.uv };
   };
   const targetFromController = (root: THREE.Group): InputTarget | null => {
     scene.updateMatrixWorld(true);
@@ -1648,10 +1859,11 @@ export function createWorkspaceScene(
     raycaster.ray.origin.setFromMatrixPosition(root.matrixWorld);
     raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix).normalize();
     const target = targetFromRay();
-    root.userData.rayDistance = Math.min(CONTROLLER_RAY_LENGTH, Math.max(0.02, lastRayDistance));
+    root.userData.rayDistance = Math.max(0.02, lastRayDistance);
     return target;
   };
   const activateTarget = (target: InputTarget | null): void => {
+    if (target?.object?.userData.inputAction !== 'backgroundSelect') closeBackgroundMenus();
     if (!target) return;
     if (target.kind === 'keyboard' && target.object) {
       handleInputTarget(target.object);
@@ -1677,7 +1889,10 @@ export function createWorkspaceScene(
     }
   };
   const onControllerSelect = (controller: THREE.Group): void => {
-    activateTarget(targetFromController(controller));
+    const target = targetFromController(controller);
+    const modifiers = Object.keys(armedModifiers).length ? { ...armedModifiers } : undefined;
+    activateTarget(target);
+    startMouse(controller, target, 0, modifiers);
     showHover(null);
   };
   const setupControllers = (): void => {
@@ -1700,11 +1915,23 @@ export function createWorkspaceScene(
       contact.visible = false;
       root.add(rayLine, contact);
       const onSelect = (): void => {
-        if (heldControllers.has(root) || disconnectedControllers.has(root)) return;
+        if (
+          heldControllers.has(root) ||
+          controllerGamepads.get(root)?.buttons[1]?.pressed ||
+          disconnectedControllers.has(root)
+        )
+          return;
         onControllerSelect(root);
+      };
+      const onSelectEnd = (): void => {
+        if (mouseCaptures.has(root) && !gripActive()) {
+          moveMouse(root, targetFromController(root));
+        }
+        releaseMouse(root);
       };
       const onSqueeze = (event: Event): void => {
         if (heldControllers.has(root) || disconnectedControllers.has(root)) return;
+        releaseAllMouse();
         heldControllers.add(root);
         const target = targetFromController(root);
         if (!target) return;
@@ -1748,6 +1975,7 @@ export function createWorkspaceScene(
         if (gamepad) controllerGamepads.set(root, gamepad);
       };
       const onDisconnected = (): void => {
+        releaseMouse(root);
         disconnectedControllers.add(root);
         heldControllers.delete(root);
         rayLine.visible = false;
@@ -1771,6 +1999,7 @@ export function createWorkspaceScene(
       };
       const eventRoot = root as unknown as EventRoot;
       eventRoot.addEventListener('selectstart', onSelect);
+      eventRoot.addEventListener('selectend', onSelectEnd);
       eventRoot.addEventListener('squeezestart', onSqueeze);
       eventRoot.addEventListener('squeezeend', onSqueezeEnd);
       eventRoot.addEventListener('connected', onConnected);
@@ -1779,6 +2008,7 @@ export function createWorkspaceScene(
       controllerListeners.push({
         root,
         onSelect,
+        onSelectEnd,
         onSqueeze,
         onSqueezeEnd,
         onConnected,
@@ -1825,7 +2055,7 @@ export function createWorkspaceScene(
     root.name = `terminal-panel-${surface.pane.id}`;
     root.userData.terminalId = surface.pane.id;
     root.userData.initialSlot = index;
-    root.userData.scaleLimits = [0.6, 1.8];
+    root.userData.scaleLimits = [0.3, 1.8];
     root.position.copy(defaultPosition);
     root.rotation.y = index % 2 === 0 ? 0.06 : -0.06;
     const textureSource = createTerminalTexture(surface, renderer ?? undefined);
@@ -1958,6 +2188,7 @@ export function createWorkspaceScene(
   const removeTerminal = (id: string): void => {
     const panel = panels.get(id);
     if (!panel) return;
+    for (const [source, capture] of mouseCaptures) if (capture.id === id) releaseMouse(source);
     panel.unsubscribe();
     scene.remove(panel.root);
     panel.textureSource.dispose();
@@ -2003,6 +2234,18 @@ export function createWorkspaceScene(
   };
   const setBackground = (mode: BackgroundMode): void => {
     mutableState.background = mode;
+    closeBackgroundMenus();
+    for (const owner of [hudRoot, inputRoot]) {
+      const select = owner?.getObjectByName('background-select');
+      const trigger = select?.getObjectByName('background-select-trigger') as
+        | THREE.Mesh
+        | undefined;
+      if (trigger) updateLabel(trigger, BACKGROUND_LABELS[mode]);
+      select?.traverse((child) => {
+        if (child.userData.inputAction === 'background')
+          setModifierVisual(child, child.userData.background === mode);
+      });
+    }
     if (mutableState.xrMode === 'ar') {
       observatory.visible = false;
       scene.background = null;
@@ -2130,6 +2373,7 @@ export function createWorkspaceScene(
     ).xr;
     if (!xr) throw new Error('WebXR is unavailable');
     const sessionMode = mode === 'ar' ? 'immersive-ar' : 'immersive-vr';
+    releaseAllMouse();
     const session = await xr.requestSession(
       sessionMode,
       mode === 'ar'
@@ -2158,6 +2402,7 @@ export function createWorkspaceScene(
     }
     notify();
     session.addEventListener('end', () => {
+      releaseAllMouse();
       activeSession = null;
       hideInput();
       inputTransform = null;
@@ -2191,12 +2436,10 @@ export function createWorkspaceScene(
   const arrangeTerminals = (pattern: PanelArrangement): void => {
     if (!panels.size) return;
     const ordered = [...panels.values()];
+    const bounds = ordered.map(({ root }) => measurePanelBounds(root));
     const poses = calculateArrangement(
       pattern,
-      ordered.map(({ root }) => ({
-        width: (PANEL_WIDTH + 0.3) * root.scale.x,
-        height: (PANEL_HEIGHT + 0.3) * root.scale.x,
-      })),
+      bounds.map((bound) => bound.size),
     );
     const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
     view.updateMatrixWorld(true);
@@ -2207,7 +2450,11 @@ export function createWorkspaceScene(
       Math.atan2(-forward.x, -forward.z),
     );
     ordered.forEach((panel, index) => {
-      panel.root.position.copy(poses[index].position).applyQuaternion(yaw).add(eye);
+      const offset = bounds[index].center
+        .clone()
+        .multiply(panel.root.scale)
+        .applyQuaternion(poses[index].quaternion);
+      panel.root.position.copy(poses[index].position).sub(offset).applyQuaternion(yaw).add(eye);
       panel.root.quaternion.copy(yaw).multiply(poses[index].quaternion);
     });
     for (const [controller, drag] of dragStates)
@@ -2298,12 +2545,15 @@ export function createWorkspaceScene(
     canvas.removeEventListener('pointerdown', onPointerDown);
     canvas.removeEventListener('pointermove', onPointerMove);
     canvas.removeEventListener('pointerleave', onPointerLeave);
-    canvas.removeEventListener('pointercancel', onPointerLeave);
+    canvas.removeEventListener('pointerup', onPointerUp);
+    canvas.removeEventListener('pointercancel', onPointerUp);
+    canvas.removeEventListener('lostpointercapture', onPointerUp);
     renderer?.setAnimationLoop(null);
     for (const id of [...panels.keys()]) removeTerminal(id);
     for (const {
       root,
       onSelect,
+      onSelectEnd,
       onSqueeze,
       onSqueezeEnd,
       onConnected,
@@ -2311,6 +2561,7 @@ export function createWorkspaceScene(
     } of controllerListeners) {
       const eventRoot = root as unknown as EventRoot;
       eventRoot.removeEventListener('selectstart', onSelect);
+      eventRoot.removeEventListener('selectend', onSelectEnd);
       eventRoot.removeEventListener('squeezestart', onSqueeze);
       eventRoot.removeEventListener('squeezeend', onSqueezeEnd);
       eventRoot.removeEventListener('connected', onConnected);

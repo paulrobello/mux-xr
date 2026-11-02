@@ -1,5 +1,5 @@
 import './styles.css';
-import type { TerminalSurface } from '../contracts';
+import type { TerminalMouseInput, TerminalSurface } from '../contracts';
 
 const CELL_WIDTH = 11;
 const LINE_HEIGHT = 21;
@@ -19,6 +19,7 @@ export interface DesktopPanelCallbacks {
   onReset?(): void;
   onClose?(id: string): void;
   onToggleConnection?(id: string): void;
+  onMouse?(id: string, input: TerminalMouseInput): boolean;
 }
 
 export function createDesktopPanels(
@@ -83,7 +84,15 @@ export function createDesktopPanels(
   scaleDown.addEventListener('click', () => callbacks.onScale?.(-1));
   scaleUp.addEventListener('click', () => callbacks.onScale?.(1));
   reset.addEventListener('click', () => callbacks.onReset?.());
-  const panels = new Map<string, { element: HTMLElement; unsubscribe: () => void }>();
+  const panels = new Map<
+    string,
+    {
+      element: HTMLElement;
+      unsubscribe: () => void;
+      cancelMouse: () => void;
+      cleanupMouse: () => void;
+    }
+  >();
 
   const updateSize = (surface: TerminalSurface, canvas: HTMLCanvasElement): void => {
     canvas.style.width = `${surface.cols * CELL_WIDTH}px`;
@@ -138,22 +147,129 @@ export function createDesktopPanels(
     controls.append(connection, close);
     const body = document.createElement('div');
     body.className = 'desktop-terminal-output';
-    body.addEventListener('pointerdown', () => onSelect(surface.pane.id));
     surface.canvas.setAttribute('aria-label', `${surface.pane.title} terminal output`);
     updateSize(surface, surface.canvas);
     body.append(surface.canvas);
     panel.append(heading, controls, body);
     grid.append(panel);
+    let drag:
+      | {
+          pointerId: number;
+          button: 0 | 1 | 2;
+          modifiers: { shift?: boolean; ctrl?: boolean; alt?: boolean };
+          cell: { col: number; row: number };
+        }
+      | undefined;
+    let suppressContextMenu = false;
+    const cellAt = (event: PointerEvent): { col: number; row: number } => {
+      const rect = surface.canvas.getBoundingClientRect();
+      const width = rect.width || surface.canvas.width || 1;
+      const height = rect.height || surface.canvas.height || 1;
+      const col = Math.max(
+        0,
+        Math.min(
+          surface.cols - 1,
+          Math.floor(((event.clientX - rect.left) / width) * surface.cols),
+        ),
+      );
+      const row = Math.max(
+        0,
+        Math.min(
+          surface.rows - 1,
+          Math.floor(((event.clientY - rect.top) / height) * surface.rows),
+        ),
+      );
+      return { col, row };
+    };
+    const modifiers = (
+      event: PointerEvent,
+    ): { shift?: boolean; ctrl?: boolean; alt?: boolean } => ({
+      shift: event.shiftKey || undefined,
+      ctrl: event.ctrlKey || undefined,
+      alt: event.altKey || undefined,
+    });
+    const release = (): void => {
+      if (!drag) return;
+      const active = drag;
+      drag = undefined;
+      surface.canvas.releasePointerCapture?.(active.pointerId);
+      callbacks.onMouse?.(surface.pane.id, {
+        ...active.cell,
+        button: active.button,
+        eventType: 'release',
+        modifiers: active.modifiers,
+      });
+    };
+    const onPointerDown = (event: PointerEvent): void => {
+      if (event.button < 0 || event.button > 2 || drag) return;
+      suppressContextMenu = false;
+      onSelect(surface.pane.id);
+      const cell = cellAt(event);
+      const button = event.button as 0 | 1 | 2;
+      const handled =
+        callbacks.onMouse?.(surface.pane.id, {
+          ...cell,
+          button,
+          eventType: 'press',
+          modifiers: modifiers(event),
+        }) ?? false;
+      if (!handled) return;
+      drag = { pointerId: event.pointerId, button, modifiers: modifiers(event), cell };
+      suppressContextMenu = button === 2;
+      surface.canvas.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    };
+    const onPointerMove = (event: PointerEvent): void => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      const cell = cellAt(event);
+      if (cell.col === drag.cell.col && cell.row === drag.cell.row) return;
+      drag.cell = cell;
+      const handled =
+        callbacks.onMouse?.(surface.pane.id, {
+          ...cell,
+          button: drag.button,
+          eventType: 'move',
+          modifiers: drag.modifiers,
+        }) ?? false;
+      if (handled) event.preventDefault();
+    };
+    const onPointerUp = (event: PointerEvent): void => {
+      if (drag && event.pointerId === drag.pointerId) release();
+    };
+    const onLostCapture = (): void => release();
+    const onContextMenu = (event: MouseEvent): void => {
+      if (!suppressContextMenu) return;
+      event.preventDefault();
+      suppressContextMenu = false;
+    };
+    surface.canvas.addEventListener('pointerdown', onPointerDown);
+    surface.canvas.addEventListener('pointermove', onPointerMove);
+    surface.canvas.addEventListener('pointerup', onPointerUp);
+    surface.canvas.addEventListener('pointercancel', release);
+    surface.canvas.addEventListener('lostpointercapture', onLostCapture);
+    surface.canvas.addEventListener('contextmenu', onContextMenu);
+    const cleanupMouse = (): void => {
+      release();
+      suppressContextMenu = false;
+      surface.canvas.removeEventListener('pointerdown', onPointerDown);
+      surface.canvas.removeEventListener('pointermove', onPointerMove);
+      surface.canvas.removeEventListener('pointerup', onPointerUp);
+      surface.canvas.removeEventListener('pointercancel', release);
+      surface.canvas.removeEventListener('lostpointercapture', onLostCapture);
+      surface.canvas.removeEventListener('contextmenu', onContextMenu);
+    };
+    const cancelMouse = (): void => release();
     const unsubscribe = surface.subscribe(() => {
       updateHeading();
       updateSize(surface, surface.canvas);
       updateActions();
     });
-    panels.set(surface.pane.id, { element: panel, unsubscribe });
+    panels.set(surface.pane.id, { element: panel, unsubscribe, cancelMouse, cleanupMouse });
   };
   const remove = (id: string): void => {
     const panel = panels.get(id);
     if (!panel) return;
+    panel.cleanupMouse();
     panel.unsubscribe();
     panel.element.remove();
     panels.delete(id);
@@ -168,6 +284,7 @@ export function createDesktopPanels(
   };
   const setImmersive = (enabled: boolean): void => {
     if (immersive === enabled) return;
+    if (enabled) for (const panel of panels.values()) panel.cancelMouse();
     immersive = enabled;
     updateMode();
   };

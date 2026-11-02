@@ -6,6 +6,42 @@ const size = (width = 1.42, height = 0.8): ArrangementPanelSize => ({ width, hei
 const normal = (pose: ReturnType<typeof calculateArrangement>[number]): THREE.Vector3 =>
   new THREE.Vector3(0, 0, 1).applyQuaternion(pose.quaternion);
 
+const projectedQuad = (
+  pose: ReturnType<typeof calculateArrangement>[number],
+  panel: ArrangementPanelSize,
+): Array<{ x: number; y: number }> => {
+  const halfWidth = (panel.width + 0.12) / 2;
+  const halfHeight = (panel.height + 0.12) / 2;
+  return [
+    [-halfWidth, -halfHeight],
+    [halfWidth, -halfHeight],
+    [halfWidth, halfHeight],
+    [-halfWidth, halfHeight],
+  ].map(([x, y]) => {
+    const point = new THREE.Vector3(x, y, 0).applyQuaternion(pose.quaternion).add(pose.position);
+    return { x: point.x / -point.z, y: point.y / -point.z };
+  });
+};
+
+const overlaps = (
+  first: Array<{ x: number; y: number }>,
+  second: Array<{ x: number; y: number }>,
+): boolean => {
+  const axes: Array<{ x: number; y: number }> = [];
+  for (const quad of [first, second]) {
+    for (let index = 0; index < quad.length; index += 1) {
+      const a = quad[index];
+      const b = quad[(index + 1) % quad.length];
+      axes.push({ x: -(b.y - a.y), y: b.x - a.x });
+    }
+  }
+  return axes.every((axis) => {
+    const a = first.map((point) => point.x * axis.x + point.y * axis.y);
+    const b = second.map((point) => point.x * axis.x + point.y * axis.y);
+    return Math.max(...a) > Math.min(...b) && Math.max(...b) > Math.min(...a);
+  });
+};
+
 describe('panel arrangements', () => {
   it('keeps a two-panel sphere near the forward working area', () => {
     const poses = calculateArrangement('sphere', [size(1.72, 1.1), size(1.72, 1.1)]);
@@ -59,7 +95,7 @@ describe('panel arrangements', () => {
         row[index].position.x -
           row[index - 1].position.x -
           (sizes[index].width + sizes[index - 1].width) / 2,
-      ).toBeCloseTo(0.12);
+      ).toBeGreaterThanOrEqual(0.12 - 1e-6);
     }
     const grid = calculateArrangement('grid', sizes);
     expect(new Set(grid.map((pose) => pose.position.z))).toHaveLength(1);
@@ -140,4 +176,27 @@ describe('panel arrangements', () => {
     expect(Math.abs(Math.atan2(poses[0].position.x, -poses[0].position.z))).toBeLessThan(0.4);
     expect(Math.abs(Math.atan2(poses[1].position.x, -poses[1].position.z))).toBeLessThan(0.4);
   });
+
+  it.each(['row', 'grid', 'arc', 'sphere'] as const)(
+    'separates projected mixed-size %s panels',
+    (pattern) => {
+      const sizes = [
+        size(0.3, 0.3),
+        size(3.2, 0.45),
+        size(0.45, 2.2),
+        size(1.8, 1.1),
+        size(0.5, 0.35),
+        size(2.4, 1.7),
+      ];
+      const poses = calculateArrangement(pattern, sizes);
+      for (let first = 0; first < poses.length; first += 1) {
+        const firstQuad = projectedQuad(poses[first], sizes[first]);
+        expect(
+          firstQuad.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y)),
+        ).toBe(true);
+        for (let second = first + 1; second < poses.length; second += 1)
+          expect(overlaps(firstQuad, projectedQuad(poses[second], sizes[second]))).toBe(false);
+      }
+    },
+  );
 });
