@@ -228,19 +228,30 @@ export function getConservativeTerminalArrangementSize(span: TerminalWarpSpan): 
 
 export function createTerminalFrameGeometry(span: TerminalWarpSpan): THREE.BufferGeometry {
   const segments = span.radians > 0 ? 32 : 1;
+  // The scene positions the frame at z = -0.025. Keep the rim surface aligned
+  // with the screen and omit rear/inner faces that could occlude transparent text.
+  const frameSurfaceZ = 0.025;
   const pieces = [
-    new THREE.BoxGeometry(span.width + 0.035, 0.03, 0.035, segments).translate(
+    new THREE.PlaneGeometry(span.width + 0.035, 0.03, segments, 1).translate(
       0,
       span.height / 2 + 0.015,
-      0,
+      frameSurfaceZ,
     ),
-    new THREE.BoxGeometry(span.width + 0.035, 0.03, 0.035, segments).translate(
+    new THREE.PlaneGeometry(span.width + 0.035, 0.03, segments, 1).translate(
       0,
       -span.height / 2 - 0.015,
-      0,
+      frameSurfaceZ,
     ),
-    new THREE.BoxGeometry(0.0175, span.height, 0.035).translate(-span.width / 2 - 0.00875, 0, 0),
-    new THREE.BoxGeometry(0.0175, span.height, 0.035).translate(span.width / 2 + 0.00875, 0, 0),
+    new THREE.PlaneGeometry(0.0175, span.height, 1, 1).translate(
+      -span.width / 2 - 0.00875,
+      0,
+      frameSurfaceZ,
+    ),
+    new THREE.PlaneGeometry(0.0175, span.height, 1, 1).translate(
+      span.width / 2 + 0.00875,
+      0,
+      frameSurfaceZ,
+    ),
   ];
   const merged = mergeGeometries(pieces, false);
   for (const piece of pieces) piece.dispose();

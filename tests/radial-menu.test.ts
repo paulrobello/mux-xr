@@ -36,7 +36,7 @@ function actionNodes(menu: ReturnType<typeof createRadialMenu>): THREE.Object3D[
 }
 
 describe('animated radial menu', () => {
-  it('animates from center to a clockwise, upright five-action fan', () => {
+  it('animates from center to a clockwise, upright seven-action fan', () => {
     const menu = createRadialMenu();
     menu.root.scale.setScalar(0.8);
     menu.open();
@@ -46,7 +46,7 @@ describe('animated radial menu', () => {
       (child) => child.userData.radialAction !== 'cancel' && child.name.startsWith('radial-menu-'),
     );
     expect(new Set(targets.map((target) => target.userData.radialAction))).toEqual(
-      new Set(['keyboard', 'commands', 'layout', 'warp', 'widgets']),
+      new Set(['keyboard', 'commands', 'panes', 'layout', 'warp', 'widgets', 'settings']),
     );
     expect(targets.every((target) => target.position.length() < 0.01)).toBe(true);
     menu.update(0.16);
@@ -82,6 +82,9 @@ describe('animated radial menu', () => {
       .filter(Boolean) as RadialMenuAction[];
     expect(actions).toContain('cancel');
     expect(actions).toContain('keyboard');
+    expect(actions).toContain('panes');
+    expect(actions).toContain('layout');
+    expect(actions).toContain('settings');
     menu.setHovered('keyboard');
     menu.close();
     expect(menu.interactive).toBe(false);

@@ -99,6 +99,7 @@ export interface WorkspaceActions {
   runCommand(command: QuickCommand, paneId: string): void;
   openKeyboard(): void;
   openCommands(): void;
+  setXREntryMode?(mode: 'vr' | 'ar'): void;
   exitPreview?(): void;
   resizeGrid?(paneId: string, cols: number, rows: number): boolean;
   setTerminalColorMode?(mode: TerminalColorMode): void;

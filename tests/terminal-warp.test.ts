@@ -4,11 +4,44 @@ import {
   clampTerminalCurvatureRadians,
   createCurvedTerminalGeometry,
   createCurvedTerminalSelection,
+  createTerminalFrameGeometry,
   getConservativeTerminalArrangementSize,
   getTerminalWarpBounds,
   MAX_TERMINAL_CURVATURE_RADIANS,
+  terminalWarpPoint,
   warpGeometryPositions,
 } from '../src/xr/terminal-warp';
+
+function countInteriorFrameRayHits(
+  span: {
+    width: number;
+    height: number;
+    radians: number;
+  },
+  rootX: number,
+  yaw: number,
+): number {
+  const root = new THREE.Group();
+  root.position.set(rootX, 1.5, -1.5);
+  root.rotation.y = yaw;
+  const frame = new THREE.Mesh(createTerminalFrameGeometry(span));
+  frame.position.z = -0.025;
+  root.add(frame);
+  root.updateMatrixWorld(true);
+
+  const eye = new THREE.Vector3(0, 1.6, 0.1);
+  const raycaster = new THREE.Raycaster();
+  let hits = 0;
+  for (let column = 0; column < 80; column += 1) {
+    const x = ((column + 0.5) / 80 - 0.5) * span.width;
+    const point = terminalWarpPoint(x, span);
+    const target = new THREE.Vector3(point.x, 0, point.z).applyMatrix4(root.matrixWorld);
+    raycaster.set(eye, target.sub(eye).normalize());
+    if (raycaster.intersectObject(frame, false).length > 0) hits += 1;
+  }
+  frame.geometry.dispose();
+  return hits;
+}
 
 describe('curved terminal geometry', () => {
   it('clamps curvature to the supported 100 degree maximum', () => {
@@ -87,5 +120,33 @@ describe('curved terminal geometry', () => {
     expect(warped).toBe(geometry);
     expect(geometry.getAttribute('position').getZ(0)).toBeGreaterThan(0);
     geometry.dispose();
+  });
+
+  it('builds a front-only frame rim aligned with the screen surface', () => {
+    const geometry = createTerminalFrameGeometry({ width: 4, height: 2, radians: 0 });
+    const positions = geometry.getAttribute('position');
+    const zValues = Array.from({ length: positions.count }, (_, index) =>
+      Number(positions.getZ(index).toFixed(6)),
+    );
+    expect(new Set(zValues)).toEqual(new Set([0.025]));
+    geometry.computeBoundingBox();
+    expect(geometry.boundingBox?.min.x).toBeCloseTo(-2.0175);
+    expect(geometry.boundingBox?.max.x).toBeCloseTo(2.0175);
+    expect(geometry.boundingBox?.min.y).toBeCloseTo(-1.03);
+    expect(geometry.boundingBox?.max.y).toBeCloseTo(1.03);
+    geometry.dispose();
+  });
+
+  it('keeps interior text-column rays clear of the frame at representative poses', () => {
+    for (const radians of [0, Math.PI / 3]) {
+      for (const [rootX, yaw] of [
+        [-0.87, 0.06],
+        [0.87, -0.06],
+      ]) {
+        expect(countInteriorFrameRayHits({ width: 1.68, height: 0.88, radians }, rootX, yaw)).toBe(
+          0,
+        );
+      }
+    }
   });
 });

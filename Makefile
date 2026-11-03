@@ -1,4 +1,4 @@
-.PHONY: install build test lint fmt typecheck checkall checkall-ci asset-check e2e production-label-check update-notice-check arrangement-check focus-mode-check input-comfort-check terminal-shimmer-check widgets-clarity-check terminal-capacity-check live-check real-app-check dev dev-start dev-stop dev-restart preview pre-commit
+.PHONY: install build test lint fmt typecheck checkall checkall-ci asset-check e2e auto-entry-check production-label-check update-notice-check arrangement-check focus-mode-check input-comfort-check terminal-shimmer-check widgets-clarity-check terminal-capacity-check live-check real-app-check dev dev-start dev-stop dev-restart preview pre-commit
 
 install:
 	bun install --frozen-lockfile
@@ -18,6 +18,8 @@ checkall-ci: checkall asset-check
 	bun audit --audit-level high
 e2e:
 	bun run e2e
+auto-entry-check:
+	bun run scripts/auto-entry-check.ts
 production-label-check:
 	bun run scripts/production-label-check.ts
 update-notice-check:

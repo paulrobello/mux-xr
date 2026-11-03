@@ -49,6 +49,7 @@ type ControlExpectation = {
   cols?: number;
   rows?: number;
   label?: string;
+  radialAction?: string;
 };
 
 async function clickControl(
@@ -79,6 +80,11 @@ async function clickControl(
         if (expected.cols !== undefined && object.userData.cols !== expected.cols) return;
         if (expected.rows !== undefined && object.userData.rows !== expected.rows) return;
         if (expected.label !== undefined && object.userData.labelText !== expected.label) return;
+        if (
+          expected.radialAction !== undefined &&
+          object.userData.radialAction !== expected.radialAction
+        )
+          return;
         target = object;
       });
       if (!target)
@@ -106,6 +112,46 @@ async function clickControl(
 
 async function key(page: Page, value: string): Promise<void> {
   await clickControl(page, 'key', { key: value });
+}
+
+async function radial(page: Page, action: string): Promise<void> {
+  await page.evaluate(async () => {
+    const w = window as unknown as {
+      __questControllers: import('three').Group[];
+      __questPad?: { buttons: Array<{ pressed: boolean }>; axes: number[] };
+    };
+    if (!w.__questPad)
+      w.__questPad = {
+        buttons: Array.from({ length: 6 }, () => ({ pressed: false })),
+        axes: [0, 0, 0, 0],
+      };
+    const pad = w.__questPad;
+    if (!w.__questControllers[1].userData.questPadConnected) {
+      w.__questControllers[1].dispatchEvent({
+        type: 'connected',
+        data: { gamepad: pad, handedness: 'right' },
+      } as never);
+      w.__questControllers[1].userData.questPadConnected = true;
+    }
+    pad.buttons[4].pressed = true;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    pad.buttons[4].pressed = false;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
+  await waitFor(
+    () =>
+      page.evaluate(() =>
+        Boolean(
+          (
+            window as unknown as { __questScene: import('three').Scene }
+          ).__questScene.getObjectByName('radial-menu')?.userData.interactive,
+        ),
+      ),
+    (value) => value,
+    'Radial menu did not become interactive',
+  );
+  await clickControl(page, 'radialAction', { radialAction: action });
+  await page.waitForTimeout(180);
 }
 
 async function typeNative(page: Page, text: string): Promise<void> {
@@ -267,8 +313,8 @@ async function main(): Promise<void> {
         ),
       ]);
     });
-    await clickControl(page, 'openInput', { mode: 'widgets' });
-    await clickControl(page, 'mode', { mode: 'keyboard' });
+    await radial(page, 'widgets');
+    await radial(page, 'keyboard');
     for (const paneId of paneIds) {
       const beforePixels = await panelMetrics(page, paneId);
       await page.evaluate(
@@ -278,7 +324,14 @@ async function main(): Promise<void> {
           ).__muxXR.selectPane(id),
         paneId,
       );
-      await clickControl(page, 'mode', { mode: 'keyboard' });
+      const keyboardOpen = await page.evaluate(() =>
+        Boolean(
+          (
+            window as unknown as { __questScene: import('three').Scene }
+          ).__questScene.getObjectByName('xr-keyboard-controls'),
+        ),
+      );
+      if (!keyboardOpen) await radial(page, 'keyboard');
       await typeNative(page, `echo native${paneId.slice(1)}`);
       await key(page, 'Enter');
       await waitFor(
@@ -304,7 +357,8 @@ async function main(): Promise<void> {
     const originalGrid = (await state(page)).streams.find((stream) => stream.id === paneIds[0]);
     assert(originalGrid, 'Original grid was not available');
     const initialPanel = await panelMetrics(page, paneIds[0]);
-    await clickControl(page, 'openInput', { mode: 'terminal' });
+    await radial(page, 'settings');
+    await clickControl(page, 'openInput', { mode: 'display' });
     const colorHashes: number[] = [];
     for (const colorMode of ['original', 'monochrome', 'comfort'] as const) {
       await clickControl(page, 'terminalColors', { colorMode });
@@ -340,6 +394,8 @@ async function main(): Promise<void> {
       new Set(colorHashes).size >= 2,
       `terminal color modes did not change rendered pixels: ${colorHashes.join(',')}`,
     );
+    await clickControl(page, 'openInput', { mode: 'settings' });
+    await clickControl(page, 'openInput', { mode: 'terminal' });
     await clickControl(page, 'gridPreset', { cols: 100, rows: 30 });
     await clickControl(page, 'gridApply');
     await waitFor(
@@ -385,7 +441,7 @@ async function main(): Promise<void> {
         ),
       'server did not acknowledge restored grid geometry',
     );
-    await clickControl(page, 'openInput', { mode: 'commands' });
+    await radial(page, 'commands');
     await clickControl(page, 'newCommand');
     await clickControl(page, 'commandField', { field: 'label' });
     await typeNative(page, 'native command');

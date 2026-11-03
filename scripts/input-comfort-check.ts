@@ -160,6 +160,32 @@ async function target(
     { action, extra, controller, hold },
   );
 }
+
+async function openRadial(page: Page, action: string): Promise<void> {
+  await page.evaluate(async () => {
+    const w = window as unknown as {
+      __questControllers: import('three').Group[];
+      __comfortPad: { buttons: Array<{ pressed: boolean }>; axes: number[] };
+    };
+    w.__comfortPad.buttons[4].pressed = true;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    w.__comfortPad.buttons[4].pressed = false;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
+  await waitFor(
+    page,
+    async () =>
+      await page.evaluate(() =>
+        Boolean(
+          (window as unknown as FixtureWindow).__questScene.getObjectByName('radial-menu')?.userData
+            .interactive,
+        ),
+      ),
+    'Radial menu did not become interactive',
+  );
+  await target(page, 'radialAction', { radialAction: action });
+  await page.waitForTimeout(180);
+}
 async function main(): Promise<void> {
   await mkdir(testRoot, { recursive: true });
   prepareQuestFixture(testRoot);
@@ -320,7 +346,7 @@ async function main(): Promise<void> {
       input.every((f) => f.paneId === '%1'),
       'Input leaked to a different pane',
     );
-    await target(page, 'openInput', { mode: 'arrange' });
+    await openRadial(page, 'layout');
     const positions = () =>
       page.evaluate(() =>
         (window as unknown as FixtureWindow).__questScene.children

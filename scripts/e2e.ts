@@ -305,18 +305,25 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
     const hints = await page.evaluate(() =>
       (window as unknown as { __muxXR: { getControlHints(): Hint[] } }).__muxXR.getControlHints(),
     );
-    const stripEnter = hints.find(
-      (hint) => hint.key === 'Enter' && hint.terminalId === '%1' && !hint.inputAction,
+    const closeView = hints.find(
+      (hint) => hint.inputAction === 'closePane' && hint.terminalId === '%1',
     );
-    assert(stripEnter, 'terminal Enter strip target missing');
-    await page.mouse.move(stripEnter.clientX, stripEnter.clientY);
+    assert(closeView, 'terminal lifecycle control missing');
     assert(
-      (await sceneCanvas.getAttribute('title'))?.includes('Send Enter'),
+      !hints.some((hint) => hint.key && !hint.inputAction),
+      'Removed terminal key strip remains',
+    );
+    await page.mouse.move(closeView.clientX, closeView.clientY);
+    assert(
+      (await sceneCanvas.getAttribute('title'))?.includes('shell keeps running'),
       'spatial hover explanation missing',
     );
-    const stripStart = state.frames.length;
-    await page.mouse.click(stripEnter.clientX, stripEnter.clientY);
-    await observedInputFrames(page, state, '%1', stripStart, '\r');
+    await page.locator('[data-select="%1"]').click();
+    await page.locator('[data-action="keyboard"]').click();
+    const keyStart = state.frames.length;
+    await page.locator('[data-key="Enter"]').click();
+    await observedInputFrames(page, state, '%1', keyStart, '\r');
+    await page.locator('[data-action="close-drawer"]').click();
     const currentHints = async (): Promise<Hint[]> =>
       page.evaluate(() =>
         (window as unknown as { __muxXR: { getControlHints(): Hint[] } }).__muxXR.getControlHints(),
@@ -349,11 +356,7 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
       fullPage: true,
     });
     await page.locator('[data-action="close-drawer"]').click();
-    const commandsHud = (await currentHints()).find(
-      (hint) => hint.inputAction === 'openInput' && hint.label === 'Commands',
-    );
-    assert(commandsHud, 'Commands HUD target missing');
-    await page.mouse.click(commandsHud.clientX, commandsHud.clientY);
+    await page.locator('[data-action="commands"]').click();
     assert(await page.locator('[data-command-label]').isVisible(), 'HUD Commands editor missing');
     assert(!(await page.locator('[data-keyboard]').isVisible()), 'HUD Commands shows keyboard');
     await page.locator('[data-action="close-drawer"]').click();
@@ -384,16 +387,6 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
     });
     await recovery.click();
     await page.locator('[data-action="desktop-reset-layout"]').click();
-    const backgroundSelect = (await currentHints()).find(
-      (hint) => hint.inputAction === 'backgroundSelect',
-    );
-    assert(backgroundSelect, 'background selector missing');
-    await page.mouse.click(backgroundSelect.clientX, backgroundSelect.clientY);
-    const black = (await currentHints()).find(
-      (hint) => hint.inputAction === 'background' && hint.label === 'Black',
-    );
-    assert(black, 'background HUD target missing');
-    await page.mouse.click(black.clientX, black.clientY);
     const exit = (await currentHints()).find((hint) => hint.inputAction === 'exit');
     assert(exit, 'Exit HUD target missing');
 
@@ -660,6 +653,8 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
       !(await page.locator('[data-gaze-input]').isChecked()),
       'gaze keyboard input must default off',
     );
+    await page.locator('[data-action="close-settings"]').click();
+    await page.locator('[data-action="keyboard"]').click();
     await page.locator('[data-gaze-input]').check();
     assert(
       await page.evaluate(
@@ -698,6 +693,8 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
       (await page.locator('[data-gaze]').count()) === 0,
       'independent gaze emphasis control should be absent',
     );
+    await page.locator('[data-action="close-drawer"]').click();
+    await page.locator('[data-action="settings"]').click();
     await page.screenshot({
       path: join(REVIEW_DIR, `${viewport.name}-settings.png`),
       fullPage: true,

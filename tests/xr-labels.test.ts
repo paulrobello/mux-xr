@@ -87,6 +87,19 @@ describe('scalable XR labels', () => {
     await expect(waitForLabelSync(root)).resolves.toBeUndefined();
   });
 
+  it('supports glyph-only labels without a depth-writing backplate', () => {
+    const root = createScalableLabel('Layout', 0.2, 0.075, { backplate: false });
+    const material = root.material as THREE.MeshBasicMaterial;
+    const text = root.userData.labelTextObject as MockTextLike;
+
+    expect(material.map).toBeNull();
+    expect(material.opacity).toBe(0);
+    expect(material.depthWrite).toBe(false);
+    expect(text.position.z).toBeGreaterThan(0);
+    expect(root.userData.labelText).toBe('Layout');
+    disposeScalableLabel(root);
+  });
+
   it('uses the local symbol font for arrow and backspace glyphs', () => {
     for (const label of ['←', '→', '⌫', '← Next']) {
       const root = createScalableLabel(label, 0.12, 0.035);

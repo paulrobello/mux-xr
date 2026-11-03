@@ -15,6 +15,7 @@ export interface XrEntryControllerOptions {
   enter: (mode: XrEntryMode) => Promise<void>;
   isActive: () => boolean;
   onError: (error: unknown) => void;
+  onActivationRequired?: () => void;
   xr?: XrSystemLike;
   eventTarget?: XrEntryEventTarget;
   userActivation?: () => boolean;
@@ -97,6 +98,7 @@ export function createXREntryController(options: XrEntryControllerOptions): XrEn
         if (disposed || options.isActive()) return;
         if (automatic && isExpectedAutomaticError(error)) {
           armFallback();
+          options.onActivationRequired?.();
           return;
         }
         options.onError(error);
@@ -115,10 +117,6 @@ export function createXREntryController(options: XrEntryControllerOptions): XrEn
     autoEnabled = true;
     const supported = await options.xr?.isSessionSupported?.('immersive-vr');
     if (disposed || !autoEnabled || supported !== true) return;
-    if (options.userActivation && !options.userActivation()) {
-      armFallback();
-      return;
-    }
     await start('vr', true);
   };
 

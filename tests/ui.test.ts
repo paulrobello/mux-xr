@@ -161,6 +161,21 @@ describe('mux XR local UI state', () => {
     localStorage.clear();
   });
 
+  it('offers a fresh named entry action when changing XR mode', () => {
+    const root = document.createElement('div');
+    const enter = vi.fn();
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined, onEnterXR: enter });
+    ui.setXREntryMode('ar');
+    const button = query<HTMLButtonElement>(root, '[data-action="xr"]');
+    expect(button.textContent).toBe('Enter passthrough');
+    expect(enter).not.toHaveBeenCalled();
+    button.click();
+    expect(enter).toHaveBeenCalledOnce();
+    ui.setXREntryMode('vr');
+    expect(button.textContent).toBe('Enter VR');
+    ui.destroy();
+  });
+
   it('keeps gaze keyboard routing opt-in and persists changes from browser and XR', () => {
     expect(validateSettings({ gazeInput: 'true' }).gazeInput).toBe(false);
     localStorage.clear();
@@ -172,6 +187,11 @@ describe('mux XR local UI state', () => {
       onSettingsChange: (settings) => changes.push(settings.gazeInput),
     });
     const checkbox = query<HTMLInputElement>(root, '[data-gaze-input]');
+    expect(root.querySelector('[data-settings] [data-gaze-input]')).toBeNull();
+    ui.openInput('commands');
+    expect(checkbox.closest<HTMLElement>('[data-keyboard-controls]')?.hidden).toBe(true);
+    ui.openInput('keyboard');
+    expect(checkbox.closest<HTMLElement>('[data-keyboard-controls]')?.hidden).toBe(false);
     expect(checkbox.checked).toBe(false);
     checkbox.click();
     expect(ui.getSettings().gazeInput).toBe(true);

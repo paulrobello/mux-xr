@@ -210,7 +210,7 @@ function openRadialMenu(gamepad: Gamepad, time: number): void {
 function selectRadialAction(
   workspace: ReturnType<typeof createWorkspaceScene>,
   gamepad: Gamepad,
-  action: 'keyboard' | 'commands' | 'layout' | 'warp' | 'widgets' | 'cancel',
+  action: 'keyboard' | 'commands' | 'panes' | 'layout' | 'warp' | 'widgets' | 'settings' | 'cancel',
   time: number,
 ): void {
   openRadialMenu(gamepad, time);
@@ -244,9 +244,9 @@ describe('native XR controller event routing', () => {
     const { workspace, actions, container } = fixture();
     const hud = workspace.scene.getObjectByName('xr-workspace-hud');
     const modes = hud?.children.map((object) => object.userData.mode);
-    expect(modes).toContain('widgets');
+    expect(modes).not.toContain('widgets');
     expect(modes).not.toContain('keyboard');
-    hit(workspace, { inputAction: 'openInput', mode: 'widgets' });
+    workspace.showInput('widgets');
     hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'digital-clock' });
     expect(workspace.state.widgets).toEqual(['digital-clock']);
     const root = objectWithData(workspace, {
@@ -643,57 +643,60 @@ describe('native XR controller event routing', () => {
     vi.unstubAllGlobals();
   });
 
-  it('uses synchronized background selectors in the HUD and input root', () => {
+  it('owns the background selector only in World and closes it after selection', () => {
     const { workspace, container } = fixture();
-    const backgroundMenus = (): THREE.Object3D[] => {
-      const menus: THREE.Object3D[] = [];
-      workspace.scene.traverse((object) => {
-        if (object.name === 'background-options') menus.push(object);
-      });
-      return menus;
-    };
-    const trigger = (owner: 'hud' | 'input'): THREE.Object3D =>
-      objectWithData(workspace, { inputAction: 'backgroundSelect', backgroundSelectOwner: owner });
-    const label = (owner: 'hud' | 'input'): string => String(trigger(owner).userData.labelText);
-    const visibleMenu = (): THREE.Object3D | undefined =>
-      backgroundMenus().find((menu) => menu.visible);
-
-    expect(backgroundMenus()).toHaveLength(1);
-    expect(label('hud')).toBe('Observatory');
-    expect(trigger('hud').userData.helpText).toContain('background');
-    expect(visibleMenu()).toBeUndefined();
-
-    hit(workspace, { inputAction: 'backgroundSelect', backgroundSelectOwner: 'hud' });
-    expect(visibleMenu()).toBeDefined();
+    workspace.showInput('settings');
+    hit(workspace, { inputAction: 'openInput', mode: 'world' });
+    const world = workspace.scene.getObjectByName('xr-world-controls');
+    if (!world) throw new Error('World missing');
+    const menu = world.getObjectByName('background-options');
+    expect(menu?.visible).toBe(false);
+    hit(workspace, { inputAction: 'backgroundSelect', backgroundSelectOwner: 'input' });
+    expect(menu?.visible).toBe(true);
     hit(workspace, { inputAction: 'background', background: 'gradient' });
-    expect(label('hud')).toBe('Gradient');
-    expect(visibleMenu()).toBeUndefined();
-
-    workspace.showInput('keyboard');
-    expect(backgroundMenus()).toHaveLength(2);
-    expect(label('input')).toBe('Gradient');
-    expect(label('hud')).toBe('Gradient');
-    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
-    if (!keyboard) throw new Error('Keyboard missing');
-    const inputOptions = keyboard.getObjectByName('background-options');
-    expect(inputOptions).toBeDefined();
-    const optionWidths = inputOptions?.children
+    expect(workspace.state.background).toBe('gradient');
+    expect(menu?.visible).toBe(false);
+    const widths = menu?.children
       .filter((child) => child.userData.inputAction === 'background')
-      .map((child) => Number(child.userData.labelWidth));
-    expect(optionWidths?.length).toBe(3);
-    expect(new Set(optionWidths).size).toBe(1);
+      .map((child) => child.userData.labelWidth);
+    expect(widths).toHaveLength(3);
+    expect(new Set(widths).size).toBe(1);
+    const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+    expect(hud?.children.some((child) => child.userData.inputAction === 'backgroundSelect')).toBe(
+      false,
+    );
+    workspace.showInput('keyboard');
+    expect(workspace.scene.getObjectByName('background-options')).toBeUndefined();
+    workspace.dispose();
+    container.remove();
+  });
 
-    hit(workspace, { inputAction: 'backgroundSelect', backgroundSelectOwner: 'input' });
-    expect(visibleMenu()).toBe(inputOptions);
-    hit(workspace, { inputAction: 'background', background: 'observatory' });
-    expect(label('input')).toBe('Observatory');
-    expect(label('hud')).toBe('Observatory');
-    expect(visibleMenu()).toBeUndefined();
-
-    hit(workspace, { inputAction: 'backgroundSelect', backgroundSelectOwner: 'input' });
-    expect(visibleMenu()).toBe(inputOptions);
-    hit(workspace, { inputAction: 'key', key: 'a' });
-    expect(visibleMenu()).toBeUndefined();
+  it('keeps preferences in their owning panels and removes terminal key strips', () => {
+    const { workspace, container } = fixture();
+    for (const mode of [
+      'keyboard',
+      'commands',
+      'panes',
+      'arrange',
+      'widgets',
+      'settings',
+      'display',
+      'world',
+      'terminal',
+      'filtering',
+    ] as const) {
+      workspace.showInput(mode);
+      const root = workspace.scene.getObjectByName(`xr-${mode}-controls`);
+      if (!root) throw new Error(`Panel missing: ${mode}`);
+      const actions = root.children.map((child) => child.userData.inputAction);
+      expect(actions.includes('gazeInput')).toBe(mode === 'keyboard');
+      expect(Boolean(root.getObjectByName('background-select'))).toBe(mode === 'world');
+      expect(actions).not.toContain('mode');
+      if (mode === 'commands') expect(actions).not.toContain('pane');
+      expect(actions.includes('terminalColors')).toBe(mode === 'display');
+      expect(actions.includes('glassOpacity')).toBe(mode === 'terminal');
+    }
+    expect(workspace.scene.getObjectByName('terminal-key-strip')).toBeUndefined();
     workspace.dispose();
     container.remove();
   });
@@ -732,7 +735,7 @@ describe('native XR controller event routing', () => {
     expect(actions.openKeyboard).toHaveBeenCalledTimes(1);
     expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
     workspace.showInput('panes');
-    hit(workspace, { inputAction: 'mode', mode: 'keyboard' });
+    workspace.showInput('keyboard');
     expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
     expect(workspace.scene.getObjectByName('xr-panes-controls')).toBeUndefined();
     expect(actions.openKeyboard).toHaveBeenCalledTimes(2);
@@ -812,7 +815,7 @@ describe('native XR controller event routing', () => {
 
   it('routes the native Arrange menu and keeps the arranged panels grabbable', () => {
     const { workspace, actions, container } = fixture();
-    hit(workspace, { inputAction: 'openInput', mode: 'arrange' });
+    workspace.showInput('arrange');
     const menu = workspace.scene.getObjectByName('xr-arrange-controls') as THREE.Group;
     const position = menu.position.clone();
     hit(workspace, { inputAction: 'arrange', pattern: 'sphere' });
@@ -839,13 +842,10 @@ describe('native XR controller event routing', () => {
     connectController(1);
     const first = fakeXR.controllers[0] as THREE.Group;
     const second = fakeXR.controllers[1] as THREE.Group;
-    aimController(
-      first,
-      objectWithData(workspace, { inputAction: 'fontZoom', direction: -1, terminalId: 'pane-a' }),
-    );
+    aimController(first, objectWithData(workspace, { terminalTitle: true, terminalId: 'pane-a' }));
     aimController(
       second,
-      objectWithData(workspace, { inputAction: 'fontZoom', direction: 1, terminalId: 'pane-a' }),
+      objectWithData(workspace, { inputAction: 'closePane', terminalId: 'pane-a' }),
     );
     first.dispatchEvent({ type: 'squeezestart' } as never);
     second.dispatchEvent({ type: 'squeezestart' } as never);
@@ -857,7 +857,9 @@ describe('native XR controller event routing', () => {
     fakeXR.frame?.(16);
     expect(panel.position.distanceTo(position)).toBeLessThan(1e-9);
     expect(panel.quaternion.angleTo(orientation)).toBeLessThan(1e-6);
-    second.position.x += 0.2;
+    second.position.add(
+      second.position.clone().sub(first.position).normalize().multiplyScalar(0.2),
+    );
     fakeXR.frame?.(32);
     expect(panel.scale.x).toBeGreaterThan(1);
     second.dispatchEvent({ type: 'squeezeend' } as never);
@@ -1099,48 +1101,43 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('routes browser hover and clicks through the terminal control actions', () => {
+  it('routes browser hover and clicks through terminal lifecycle controls', () => {
     fakeXR.presenting = false;
     const { workspace, actions, container, right } = fixture();
     Object.defineProperty(workspace.canvas, 'getBoundingClientRect', {
       value: () => ({ left: 0, top: 0, width: 1000, height: 700 }),
     });
-    const enter = workspace
-      .getControlHints()
-      .find((hint) => hint.key === 'Enter' && hint.terminalId === 'pane-b');
-    if (!enter) throw new Error('Enter strip target missing');
-    const pointer = (type: string, control: { clientX: number; clientY: number }) =>
+    const pointer = (type: string, action: string): void => {
+      const control = workspace
+        .getControlHints()
+        .find((hint) => hint.inputAction === action && hint.terminalId === 'pane-b');
+      if (!control) throw new Error(`Terminal control missing: ${action}`);
       workspace.canvas.dispatchEvent(
         new PointerEvent(type, { clientX: control.clientX, clientY: control.clientY }),
       );
-    pointer('pointermove', enter);
-    expect(workspace.canvas.title).toContain('Send Enter');
+    };
+    pointer('pointermove', 'toggleConnection');
+    expect(workspace.canvas.title).toContain('Disconnect');
     expect(workspace.scene.getObjectByName('xr-hover-help')?.visible).toBe(false);
+    pointer('pointerdown', 'toggleConnection');
+    expect(actions.togglePaneConnection).toHaveBeenLastCalledWith('pane-b');
+    pointer('pointermove', 'closePane');
+    expect(workspace.canvas.title).toContain('shell keeps running');
+    pointer('pointerdown', 'closePane');
+    expect(actions.closePane).toHaveBeenLastCalledWith('pane-b');
     expect(actions.sendKey).not.toHaveBeenCalled();
-    pointer('pointerdown', enter);
-    expect(actions.selectPane).toHaveBeenLastCalledWith('pane-b');
-    expect(actions.sendKey).toHaveBeenLastCalledWith('Enter', undefined);
-    const fontDown = workspace
-      .getControlHints()
-      .find(
-        (hint) =>
-          hint.inputAction === 'fontZoom' && hint.label === 'A−' && hint.terminalId === 'pane-b',
-      );
-    if (!fontDown) throw new Error('Font zoom target missing');
-    pointer('pointermove', fontDown);
-    expect(workspace.canvas.title).toContain('text');
-    pointer('pointerdown', fontDown);
     expect(right.resizeGrid).not.toHaveBeenCalled();
     workspace.canvas.dispatchEvent(new PointerEvent('pointerleave'));
     expect(workspace.canvas.title).toBe('');
-    expect(workspace.scene.getObjectByName('xr-hover-help')?.visible).toBe(false);
     workspace.dispose();
     container.remove();
   });
 
   it('delays compact action hints and hides them while gripping', () => {
     const { workspace, actions, container } = fixture();
-    hit(workspace, { key: 'Tab', terminalId: 'pane-b' }, 'hover');
+    workspace.selectTerminal('pane-b');
+    workspace.showInput('keyboard');
+    hit(workspace, { inputAction: 'key', key: 'Tab' }, 'hover');
     fakeXR.frame?.(0);
     fakeXR.frame?.(699);
     expect(workspace.scene.getObjectByName('xr-hover-help')?.visible).toBe(false);
@@ -1166,6 +1163,29 @@ describe('native XR controller event routing', () => {
     workspace.scene.updateMatrixWorld(true);
     expect(() => controller.dispatchEvent({ type: 'selectstart' } as never)).not.toThrow();
     expect(actions.selectPane).toHaveBeenCalledWith('pane-b');
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('keeps the surface-aligned frame grabbable from behind', () => {
+    const { workspace, container } = fixture();
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    const frame = panel?.getObjectByName('terminal-frame') as THREE.Mesh | undefined;
+    if (!panel || !frame) throw new Error('Frame missing');
+    workspace.scene.updateMatrixWorld(true);
+    const orientation = panel.getWorldQuaternion(new THREE.Quaternion());
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    controller.position
+      .copy(panel.localToWorld(new THREE.Vector3(1.42 / 2 + 0.00875, 0, 0)))
+      .add(new THREE.Vector3(0, 0, -0.3).applyQuaternion(orientation));
+    controller.quaternion
+      .copy(orientation)
+      .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI));
+    const before = panel.position.clone();
+    controller.dispatchEvent({ type: 'squeezestart' } as never);
+    controller.position.x += 0.2;
+    fakeXR.frame?.(16);
+    expect(panel.position.x).toBeCloseTo(before.x + 0.2);
     workspace.dispose();
     container.remove();
   });
@@ -1197,6 +1217,7 @@ describe('native XR controller event routing', () => {
 
   it('grips panel and HUD roots as movable workspace objects', () => {
     const { workspace, actions, container } = fixture();
+    workspace.showInput('keyboard');
     workspace.selectTerminal('pane-a');
     const paneA = workspace.scene.getObjectByName('terminal-panel-pane-a');
     const paneB = workspace.scene.getObjectByName('terminal-panel-pane-b');
@@ -1212,7 +1233,7 @@ describe('native XR controller event routing', () => {
     expect(paneA.position.distanceTo(originalA)).toBeLessThan(0.000001);
     expect(paneB.position.x).toBeCloseTo(originalB.x + 0.2, 5);
     controller.dispatchEvent({ type: 'squeezeend' } as never);
-    hit(workspace, { inputAction: 'gazeInput' }, 'squeezestart');
+    hit(workspace, { inputAction: 'exit' }, 'squeezestart');
     controller.position.y += 0.2;
     fakeXR.frame?.(32);
     expect(hud.position.distanceTo(originalHud)).toBeGreaterThan(0.01);
@@ -1238,7 +1259,7 @@ describe('native XR controller event routing', () => {
     const command = { id: 'saved', label: 'Original', text: 'printf original', sendNewline: true };
     workspace.selectTerminal('pane-a');
     workspace.setQuickCommands([command]);
-    hit(workspace, { inputAction: 'openInput', mode: 'commands' });
+    workspace.showInput('commands');
     expect(workspace.state.inputTargetId).toBe('pane-a');
     const nextCommand = { ...command, text: 'printf changed' };
     workspace.setQuickCommands([nextCommand]);
@@ -1281,10 +1302,12 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('selects a pane when its own terminal key strip is activated', () => {
+  it('routes the keyboard to the explicitly selected pane', () => {
     const { workspace, actions, container } = fixture();
     workspace.selectTerminal('pane-a');
-    hit(workspace, { key: 'Enter', terminalId: 'pane-b' });
+    workspace.selectTerminal('pane-b');
+    workspace.showInput('keyboard');
+    hit(workspace, { inputAction: 'key', key: 'Enter' });
     expect(actions.selectPane).toHaveBeenLastCalledWith('pane-b');
     expect(actions.sendKey).toHaveBeenLastCalledWith('Enter', undefined);
     workspace.dispose();
@@ -1318,6 +1341,8 @@ describe('native XR controller event routing', () => {
 
   it('zooms terminal text in without tiling or resizing the PTY', () => {
     const { workspace, right, container } = fixture();
+    workspace.selectTerminal('pane-b');
+    workspace.showInput('terminal');
     hit(workspace, { inputAction: 'fontZoom', direction: 1, terminalId: 'pane-b' });
     const panel = workspace.scene.getObjectByName('terminal-panel-pane-b');
     const screen = panel?.getObjectByName('terminal-surface') as THREE.Mesh;
@@ -1332,7 +1357,7 @@ describe('native XR controller event routing', () => {
   it('requests an unattached pane through the native hierarchy', () => {
     const { workspace, actions, left, right, container } = fixture();
     workspace.setAvailablePanes([left.pane, right.pane, pane('pane-c', 'Other')]);
-    hit(workspace, { inputAction: 'openInput', mode: 'panes' });
+    workspace.showInput('panes');
     hit(workspace, { inputAction: 'hierarchyNext' });
     hit(workspace, { inputAction: 'hierarchyNext' });
     hit(workspace, { inputAction: 'hierarchyNext' });
@@ -1583,7 +1608,7 @@ describe('native XR controller event routing', () => {
     const panel = workspace.scene.getObjectByName('terminal-panel-pane-b');
     if (!panel) throw new Error('Pane B missing');
     const title = objectWithData(workspace, { terminalTitle: true, terminalId: 'pane-b' });
-    const zoom = objectWithData(workspace, { inputAction: 'fontZoom', terminalId: 'pane-b' });
+    const zoom = objectWithData(workspace, { inputAction: 'closePane', terminalId: 'pane-b' });
     const left = fakeXR.controllers[0] as THREE.Group;
     const rightController = fakeXR.controllers[1] as THREE.Group;
     connectController(0);
@@ -1678,7 +1703,7 @@ describe('native XR controller event routing', () => {
       'terminal-panel-pane-a',
       undefined,
       { terminalTitle: true, terminalId: 'pane-a' },
-      { inputAction: 'fontZoom', terminalId: 'pane-a' },
+      { inputAction: 'closePane', terminalId: 'pane-a' },
     ],
     [
       'keyboard',
@@ -1691,32 +1716,35 @@ describe('native XR controller event routing', () => {
       'commands',
       'xr-commands-controls',
       'commands',
-      { inputAction: 'pane', paneId: 'pane-a' },
-      { inputAction: 'mode', mode: 'keyboard' },
+      { inputAction: 'newCommand' },
+      { inputAction: 'close' },
     ],
     [
       'panes',
       'xr-panes-controls',
       'panes',
       { inputAction: 'hierarchyNext' },
-      { inputAction: 'mode', mode: 'keyboard' },
+      { inputAction: 'close' },
     ],
-    [
-      'hud',
-      'xr-workspace-hud',
-      undefined,
-      { inputAction: 'openInput', mode: 'commands' },
-      { inputAction: 'openInput', mode: 'widgets' },
-    ],
+    ['hud', 'xr-workspace-hud', undefined, { inputAction: 'exit' }, { inputAction: 'exit' }],
   ])(
     'pair-grips the %s root without activating controls or resizing PTY',
     (_label, rootName, mode, firstData, secondData) => {
       const { workspace, actions, right, container } = fixture();
       if (mode) workspace.showInput(mode as 'commands' | 'keyboard' | 'panes');
+      if (_label === 'commands')
+        workspace.setQuickCommands([
+          { id: 'pair', label: 'Pair', text: 'pair', sendNewline: true },
+        ]);
+      if (_label === 'commands') workspace.showInput('commands');
       const root = workspace.scene.getObjectByName(rootName);
       if (!root) throw new Error(`${rootName} missing`);
       const first = objectWithData(workspace, firstData);
-      const second = objectWithData(workspace, secondData);
+      const second =
+        _label === 'hud'
+          ? workspace.scene.getObjectByName('xr-active-pane')
+          : objectWithData(workspace, secondData);
+      if (!second) throw new Error('Second grip target missing');
       connectController(0);
       connectController(1);
       aimController(fakeXR.controllers[0] as THREE.Group, first);
@@ -1926,6 +1954,8 @@ describe('native XR controller event routing', () => {
     expect(actions.resizeGrid).toHaveBeenCalledExactlyOnceWith('pane-b', 120, 36);
     expect(left.resizeGrid).not.toHaveBeenCalled();
     expect(right.cols).toBe(80);
+    workspace.showInput('settings');
+    hit(workspace, { inputAction: 'openInput', mode: 'display' });
     hit(workspace, { inputAction: 'terminalColors', colorMode: 'monochrome' });
     expect(actions.setTerminalColorMode).toHaveBeenLastCalledWith('monochrome');
     expect(workspace.state.terminalColorMode).toBe('monochrome');
@@ -2103,15 +2133,244 @@ describe('native XR controller event routing', () => {
     expect(workspace.scene.getObjectByName('xr-commands-controls')).toBeDefined();
     selectRadialAction(workspace, gamepad, 'layout', 2600);
     expect(workspace.scene.getObjectByName('xr-arrange-controls')).toBeDefined();
-    selectRadialAction(workspace, gamepad, 'warp', 3800);
-    expect(workspace.scene.getObjectByName('xr-warp-controls')).toBeDefined();
-    selectRadialAction(workspace, gamepad, 'widgets', 5000);
+    selectRadialAction(workspace, gamepad, 'widgets', 3800);
     expect(workspace.scene.getObjectByName('xr-widgets-controls')).toBeDefined();
-    selectRadialAction(workspace, gamepad, 'cancel', 6200);
+    selectRadialAction(workspace, gamepad, 'warp', 5000);
+    expect(workspace.state.warpTerminalId).toBe('pane-a');
+    expect(workspace.scene.getObjectByName('xr-warp-controls')).toBeUndefined();
     expect(radial?.visible).toBe(false);
     workspace.dispose();
     container.remove();
   });
+
+  it('keeps Exit available during direct Warp and discards its preview', () => {
+    const { workspace, actions, container } = fixture();
+    actions.exitPreview = vi.fn();
+    const pad = connectController(1, [0, 0, 0, 0], 'right');
+    selectRadialAction(workspace, pad, 'warp', 0);
+    (pad.axes as number[])[2] = 1;
+    fakeXR.frame?.(1200);
+    expect(workspace.getTerminalCurvature('pane-a')).toBeGreaterThan(0);
+    hit(workspace, { inputAction: 'exit' });
+    expect(workspace.state.warpTerminalId).toBeNull();
+    expect(workspace.getTerminalCurvature('pane-a')).toBe(0);
+    expect(actions.exitPreview).toHaveBeenCalledOnce();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('refreshes the compact HUD when active pane status and title change', () => {
+    const { workspace, container } = fixture();
+    const live = surface(pane('live', 'Live'));
+    let changed = (): void => undefined;
+    live.subscribe = (listener) => {
+      changed = listener;
+      return () => undefined;
+    };
+    workspace.addTerminal(live);
+    workspace.selectTerminal('live');
+    const label = workspace.scene.getObjectByName('xr-active-pane');
+    expect(label?.userData.labelText).toBe('Live · connected');
+    Object.assign(live, { status: 'disconnected' });
+    changed();
+    expect(label?.userData.labelText).toBe('Live · disconnected');
+    workspace.setAvailablePanes([pane('live', 'Renamed')]);
+    expect(label?.userData.labelText).toBe('Renamed · disconnected');
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('pauses Warp while gripping and retains normal physical movement', () => {
+    const { workspace, actions, container } = fixture();
+    const pad = connectController(1, [0, 0, 0, 0], 'right');
+    selectRadialAction(workspace, pad, 'warp', 0);
+    (pad.axes as number[])[2] = 1;
+    fakeXR.frame?.(1200);
+    const curve = workspace.getTerminalCurvature('pane-a');
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    if (!panel) throw new Error('Pane A missing');
+    const position = panel.position.clone();
+    hit(workspace, { terminalTitle: true, terminalId: 'pane-a' }, 'squeezestart');
+    const left = fakeXR.controllers[0] as THREE.Group;
+    left.position.x += 0.2;
+    fakeXR.frame?.(1300);
+    expect(workspace.getTerminalCurvature('pane-a')).toBe(curve);
+    expect(panel.position.x).toBeCloseTo(position.x + 0.2);
+    left.dispatchEvent({ type: 'squeezeend' } as never);
+    fakeXR.frame?.(1400);
+    expect(workspace.getTerminalCurvature('pane-a')).toBeGreaterThan(curve);
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    expect(actions.resizeGrid).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('cancels an unsaved Warp when the immersive session ends', async () => {
+    const listeners = new Map<string, () => void>();
+    const session = {
+      addEventListener: (name: string, callback: () => void) => listeners.set(name, callback),
+    };
+    vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+    const { workspace, container } = fixture();
+    try {
+      await workspace.enterXR('vr');
+      const pad = connectController(1, [0, 0, 0, 0], 'right');
+      selectRadialAction(workspace, pad, 'warp', 0);
+      (pad.axes as number[])[2] = 1;
+      fakeXR.frame?.(1200);
+      expect(workspace.getTerminalCurvature('pane-a')).toBeGreaterThan(0);
+      fakeXR.presenting = false;
+      listeners.get('end')?.();
+      expect(workspace.state.warpTerminalId).toBeNull();
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(0);
+    } finally {
+      workspace.dispose();
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('leaves XR and prepares a fresh browser action for a different immersive mode', async () => {
+    const listeners = new Map<string, () => void>();
+    const session = {
+      addEventListener: (name: string, callback: () => void) => listeners.set(name, callback),
+      end: vi.fn(async () => {
+        fakeXR.presenting = false;
+        listeners.get('end')?.();
+      }),
+    };
+    const request = vi.fn(async () => session);
+    vi.stubGlobal('navigator', { xr: { requestSession: request } });
+    const { workspace, actions, container } = fixture();
+    actions.setXREntryMode = vi.fn();
+    try {
+      await workspace.enterXR('vr');
+      workspace.showInput('settings');
+      hit(workspace, { inputAction: 'openInput', mode: 'world' });
+      hit(workspace, { inputAction: 'xrMode', xrMode: 'ar' });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(actions.setXREntryMode).toHaveBeenCalledWith('ar');
+      expect(session.end).toHaveBeenCalledOnce();
+      expect(request).toHaveBeenCalledOnce();
+      expect(workspace.state.xrMode).toBe('desktop');
+      expect(workspace.state.notice).toContain('Enter passthrough');
+    } finally {
+      workspace.dispose();
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('previews the aimed pane without persistence or UI broadcasts and saves with A', () => {
+    const { workspace, container } = fixture();
+    const controller = fakeXR.controllers[1] as THREE.Group;
+    const gamepad = connectController(1, [0, 0, 0, 0], 'right');
+    const screen = workspace.scene
+      .getObjectByName('terminal-panel-pane-b')
+      ?.getObjectByName('terminal-surface');
+    if (!screen) throw new Error('Pane B screen missing');
+    workspace.selectTerminal('pane-a');
+    aimController(controller, screen);
+    selectRadialAction(workspace, gamepad, 'warp', 7000);
+    expect(workspace.state.warpTerminalId).toBe('pane-b');
+    expect(workspace.scene.getObjectByName('xr-warp-controls')).toBeUndefined();
+    expect(workspace.scene.getObjectByName('xr-warp-readout')).toBeDefined();
+    const originalStorage = localStorage.getItem('mux-xr:terminal-warp:v1');
+    const changed = vi.fn();
+    const stop = workspace.subscribe(changed);
+    (gamepad.axes as number[])[2] = 1;
+    fakeXR.frame?.(8200);
+    const preview = workspace.getTerminalCurvature('pane-b');
+    expect(preview).toBeGreaterThan(0);
+    expect(localStorage.getItem('mux-xr:terminal-warp:v1')).toBe(originalStorage);
+    expect(changed).not.toHaveBeenCalled();
+    (gamepad.axes as number[])[2] = 0;
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(8300);
+    fakeXR.frame?.(8400);
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(8416);
+    expect(workspace.state.warpTerminalId).toBeNull();
+    expect(workspace.state.radialOpen).toBe(false);
+    expect(workspace.getTerminalCurvature('pane-b')).toBe(preview);
+    expect(localStorage.getItem('mux-xr:terminal-warp:v1')).not.toBe(originalStorage);
+    stop();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('blocks actual mouse, stick scroll and enabled gaze routing during Warp, then B cancels without Focus', () => {
+    const { workspace, actions, container } = fixture();
+    actions.scrollTerminal = vi.fn(() => true);
+    const controller = fakeXR.controllers[1] as THREE.Group;
+    const gamepad = connectController(1, [0, 0, 0, 1], 'right');
+    const a = workspace.scene
+      .getObjectByName('terminal-panel-pane-a')
+      ?.getObjectByName('terminal-surface');
+    const b = workspace.scene
+      .getObjectByName('terminal-panel-pane-b')
+      ?.getObjectByName('terminal-surface');
+    if (!a || !b) throw new Error('Screens missing');
+    aimController(controller, a);
+    fakeXR.frame?.(8000);
+    expect(actions.scrollTerminal).toHaveBeenCalled();
+    actions.scrollTerminal = vi.fn(() => true);
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    controller.dispatchEvent({ type: 'selectend' } as never);
+    expect(actions.sendMouse).toHaveBeenCalled();
+    vi.mocked(actions.sendMouse)?.mockClear();
+    workspace.setTerminalCurvature('pane-a', 30);
+    const saved = localStorage.getItem('mux-xr:terminal-warp:v1');
+    workspace.setGazeInputEnabled(true);
+    workspace.camera.lookAt(b.getWorldPosition(new THREE.Vector3()));
+    selectRadialAction(workspace, gamepad, 'warp', 9000);
+    (gamepad.axes as number[])[2] = 1;
+    fakeXR.frame?.(10200);
+    fakeXR.frame?.(10600);
+    aimController(controller, a);
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    controller.dispatchEvent({ type: 'selectend' } as never);
+    expect(workspace.getTerminalCurvature('pane-a')).toBeGreaterThan(30);
+    expect(actions.scrollTerminal).not.toHaveBeenCalled();
+    expect(workspace.state.gazeInputEnabled).toBe(true);
+    expect(workspace.state.selectedTerminalId).toBe('pane-a');
+    expect(actions.sendMouse).not.toHaveBeenCalled();
+    (gamepad.axes as number[])[2] = 0;
+    (gamepad.buttons[5] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(10700);
+    (gamepad.buttons[5] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(10716);
+    expect(workspace.state.warpTerminalId).toBeNull();
+    expect(workspace.state.focusModeTerminalId).toBeNull();
+    expect(workspace.getTerminalCurvature('pane-a')).toBe(30);
+    expect(localStorage.getItem('mux-xr:terminal-warp:v1')).toBe(saved);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it.each(['disconnect', 'remove', 'reset', 'dispose'] as const)(
+    'cancels an unsaved Warp on %s',
+    (reason) => {
+      const { workspace, container } = fixture();
+      const pad = connectController(1, [0, 0, 0, 0], 'right');
+      selectRadialAction(workspace, pad, 'warp', 0);
+      const saved = localStorage.getItem('mux-xr:terminal-warp:v1');
+      (pad.axes as number[])[2] = 1;
+      fakeXR.frame?.(1200);
+      expect(workspace.getTerminalCurvature('pane-a')).toBeGreaterThan(0);
+      if (reason === 'disconnect')
+        (fakeXR.controllers[1] as THREE.Group).dispatchEvent({ type: 'disconnected' } as never);
+      else if (reason === 'remove') workspace.removeTerminal('pane-a');
+      else if (reason === 'reset') workspace.resetLayout();
+      else workspace.dispose();
+      expect(workspace.state.warpTerminalId).toBeNull();
+      expect(localStorage.getItem('mux-xr:terminal-warp:v1')).toBe(saved);
+      expect(workspace.scene.getObjectByName('xr-warp-readout')).toBeUndefined();
+      workspace.dispose();
+      container.remove();
+    },
+  );
 
   it('remembers terminal scale and captures original placement during transient focus', () => {
     const { workspace, container } = fixture();
@@ -2220,13 +2479,16 @@ describe('native XR controller event routing', () => {
       toJSON: () => ({}),
     });
     workspace.canvas.setPointerCapture = vi.fn();
+    fakeXR.presenting = true;
+    workspace.showInput('keyboard');
+    fakeXR.presenting = false;
     const control = workspace
       .getControlHints()
-      .find((hint) => hint.key === 'Control' && hint.terminalId === 'pane-a');
+      .find((hint) => hint.key === 'Control' && hint.inputAction === 'key');
     const tab = workspace
       .getControlHints()
-      .find((hint) => hint.key === 'Tab' && hint.terminalId === 'pane-a');
-    if (!control || !tab) throw new Error('Key strip hints missing');
+      .find((hint) => hint.key === 'Tab' && hint.inputAction === 'key');
+    if (!control || !tab) throw new Error('Keyboard pointer targets missing');
     workspace.canvas.dispatchEvent(
       new PointerEvent('pointerdown', {
         pointerId: 3,

@@ -29,7 +29,10 @@ type FixtureWindow = Window & {
   __questScene: import('three').Scene;
   __questControllers: import('three').Group[];
   __questThree: typeof import('three');
-  __questRenderer: { getContext(): WebGLRenderingContext | WebGL2RenderingContext };
+  __questRenderer: {
+    getContext(): WebGLRenderingContext | WebGL2RenderingContext;
+    render(scene: import('three').Scene, camera: import('three').Camera): void;
+  };
   __designScene: import('../src/xr/scene').WorkspaceScene;
   __testRadialMenu: import('../src/xr/radial-menu').RadialMenu;
   __radialFreeze?: boolean;
@@ -227,7 +230,15 @@ async function main(): Promise<void> {
         : String(gl.getParameter(gl.RENDERER));
     });
     assert(renderer && !/swiftshader/i.test(renderer), `Unsupported renderer: ${renderer}`);
-    const modes = ['keyboard', 'commands', 'arrange', 'warp', 'widgets'] as const;
+    const modes = [
+      'keyboard',
+      'commands',
+      'panes',
+      'layout',
+      'warp',
+      'widgets',
+      'settings',
+    ] as const;
     await page.evaluate(() => {
       const w = window as unknown as FixtureWindow;
       const pad = {
@@ -252,7 +263,7 @@ async function main(): Promise<void> {
         samples.push({
           time: performance.now() - started,
           center: root.getObjectByName('radial-menu-cancel')?.scale.x ?? 0,
-          targets: ['keyboard', 'commands', 'layout', 'warp', 'widgets'].map(
+          targets: ['keyboard', 'commands', 'panes', 'layout', 'warp', 'widgets', 'settings'].map(
             (action) => root.getObjectByName(`radial-menu-${action}`)?.position.toArray() ?? [],
           ),
         });
@@ -298,9 +309,11 @@ async function main(): Promise<void> {
     for (const [action, mode] of [
       ['keyboard', 'keyboard'],
       ['commands', 'commands'],
+      ['panes', 'panes'],
       ['layout', 'arrange'],
-      ['warp', 'warp'],
+      ['warp', null],
       ['widgets', 'widgets'],
+      ['settings', 'settings'],
     ] as const) {
       await page.evaluate(async () => {
         const w = window as unknown as FixtureWindow;
@@ -316,24 +329,326 @@ async function main(): Promise<void> {
       );
       await nativeAction(page, 'radialAction', { radialAction: action });
       await page.waitForTimeout(180);
-      assert(
-        await page.evaluate(
-          (mode) =>
-            !!(window as unknown as FixtureWindow).__questScene.getObjectByName(
-              `xr-${mode}-controls`,
-            ),
-          mode,
-        ),
-        `wrong radial destination ${action}`,
-      );
-      await nativeAction(page, 'close');
+      if (mode) {
+        assert(
+          await page.evaluate(
+            (mode) =>
+              !!(window as unknown as FixtureWindow).__questScene.getObjectByName(
+                `xr-${mode}-controls`,
+              ),
+            mode,
+          ),
+          `wrong radial destination ${action}`,
+        );
+        await nativeAction(page, 'close');
+      } else {
+        assert(
+          commandFrames.every((frame) => frame !== 'input'),
+          'Warp emitted PTY input',
+        );
+        await page.evaluate(() => {
+          const w = window as unknown as FixtureWindow;
+          w.__radialPad.buttons[5].pressed = true;
+        });
+        await page.waitForTimeout(50);
+        await page.evaluate(() => {
+          const w = window as unknown as FixtureWindow;
+          w.__radialPad.buttons[5].pressed = false;
+        });
+      }
     }
     await page.waitForTimeout(180);
-    await page.evaluate(() => {
-      (window as unknown as FixtureWindow).__designScene.showInput('warp');
+    const radialEvidence = await page.evaluate(async () => {
+      const w = window as unknown as FixtureWindow;
+      const gl = w.__questRenderer.getContext();
+      const root = w.__testRadialMenu.root;
+      const actions = ['keyboard', 'commands', 'panes', 'layout', 'warp', 'widgets', 'settings'];
+      const labels = ['cancel', ...actions];
+      const originalRotation = root.rotation.y;
+      const originalVisible = root.visible;
+      const originalFreeze = w.__radialFreeze;
+      const originalLabelVisibility = new Map<import('three').Object3D, boolean>();
+      const readCrop = (center: import('three').Vector3): number => {
+        const projected = center
+          .clone()
+          .project((w as unknown as { __questCamera: import('three').Camera }).__questCamera);
+        const x = Math.max(
+          0,
+          Math.min(
+            gl.drawingBufferWidth - 32,
+            Math.round(((projected.x + 1) * gl.drawingBufferWidth) / 2 - 16),
+          ),
+        );
+        const y = Math.max(
+          0,
+          Math.min(
+            gl.drawingBufferHeight - 24,
+            Math.round(((1 + projected.y) * gl.drawingBufferHeight) / 2 - 12),
+          ),
+        );
+        const pixels = new Uint8Array(32 * 24 * 4);
+        gl.readPixels(x, y, 32, 24, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        let count = 0;
+        for (let i = 0; i < pixels.length; i += 4)
+          if (pixels[i] + pixels[i + 1] + pixels[i + 2] > 420) count++;
+        return count;
+      };
+      const capture = (yaw: number) => {
+        for (const [object] of originalLabelVisibility) object.visible = true;
+        root.rotation.y = originalRotation + yaw;
+        root.updateMatrixWorld(true);
+        w.__questRenderer.render(
+          (w as unknown as { __questScene: import('three').Scene }).__questScene,
+          (w as unknown as { __questCamera: import('three').Camera }).__questCamera,
+        );
+        const visible: Record<string, number> = {};
+        for (const label of labels) {
+          const object =
+            root.getObjectByName(`radial-menu-${label}`) ??
+            root.getObjectByName('radial-menu-cancel');
+          if (!object) continue;
+          const labelRoot = object.children.find((child) => child.userData.labelText) ?? object;
+          const text = labelRoot.userData.labelTextObject as import('three').Object3D | undefined;
+          const center = object.getWorldPosition(new w.__questThree.Vector3());
+          visible[label] = readCrop(center);
+          if (text) {
+            if (!originalLabelVisibility.has(text)) originalLabelVisibility.set(text, text.visible);
+            text.visible = false;
+          }
+        }
+        w.__questRenderer.render(
+          (w as unknown as { __questScene: import('three').Scene }).__questScene,
+          (w as unknown as { __questCamera: import('three').Camera }).__questCamera,
+        );
+        const hidden: Record<string, number> = {};
+        for (const label of labels) {
+          const object =
+            root.getObjectByName(`radial-menu-${label}`) ??
+            root.getObjectByName('radial-menu-cancel');
+          if (object)
+            hidden[label] = readCrop(object.getWorldPosition(new w.__questThree.Vector3()));
+        }
+        return { yaw, visible, hidden };
+      };
+      try {
+        w.__radialFreeze = true;
+        root.visible = true;
+        w.__testRadialMenu.open();
+        w.__testRadialMenu.update(0.81);
+        const pendingLabels: Promise<void>[] = [];
+        root.traverse((object) => {
+          const promise = object.userData.labelSyncPromise as Promise<void> | undefined;
+          if (promise) pendingLabels.push(promise);
+        });
+        await Promise.all(pendingLabels);
+        const structural: Record<string, unknown> = {};
+        root.traverse((object) => {
+          if (!object.userData.labelText) return;
+          const material = (object as import('three').Mesh).material as
+            | import('three').MeshBasicMaterial
+            | undefined;
+          structural[object.userData.labelText as string] = {
+            backplateTransparent: Boolean(material?.transparent && material.opacity === 0),
+            depthWrite: material?.depthWrite ?? null,
+          };
+        });
+        const samples = [capture(-0.3), capture(0), capture(0.3)];
+        return {
+          labels,
+          structural,
+          angles: samples,
+          glyphsVisible: labels.every((label) =>
+            samples.every((sample) => (sample.visible[label] ?? 0) > (sample.hidden[label] ?? 0)),
+          ),
+        };
+      } finally {
+        for (const [object, visible] of originalLabelVisibility) object.visible = visible;
+        root.rotation.y = originalRotation;
+        if (!originalVisible) {
+          w.__testRadialMenu.close();
+          w.__testRadialMenu.update(0.2);
+        }
+        root.visible = originalVisible;
+        w.__radialFreeze = originalFreeze;
+      }
     });
-    await nativeAction(page, 'glassOpacity', { delta: -0.1 });
-    await nativeAction(page, 'close');
+    assert(radialEvidence.labels.length === 8, 'Radial label set is incomplete');
+    assert(
+      Object.values(radialEvidence.structural).every(
+        (value) =>
+          (value as { backplateTransparent: boolean; depthWrite: boolean }).backplateTransparent &&
+          !(value as { depthWrite: boolean }).depthWrite,
+      ),
+      `Radial label material regression: ${JSON.stringify(radialEvidence.structural)}`,
+    );
+    assert(
+      radialEvidence.glyphsVisible,
+      `Radial glyph pixels were blank: ${JSON.stringify(radialEvidence.angles)}`,
+    );
+    await page.evaluate(() => {
+      const w = window as unknown as FixtureWindow;
+      w.__radialFreeze = true;
+      w.__testRadialMenu.root.visible = true;
+      w.__testRadialMenu.open();
+      w.__testRadialMenu.update(0.81);
+      w.__testRadialMenu.root.rotation.y = 0.3;
+      w.__questRenderer.render(
+        (w as unknown as { __questScene: import('three').Scene }).__questScene,
+        (w as unknown as { __questCamera: import('three').Camera }).__questCamera,
+      );
+    });
+    await page.screenshot({ path: join(root, 'radial-labels-oblique.png') });
+    await page.evaluate(() => {
+      const w = window as unknown as FixtureWindow;
+      w.__testRadialMenu.close();
+      w.__testRadialMenu.root.rotation.y = 0;
+      w.__radialFreeze = false;
+    });
+
+    const frameProbe = await page.evaluate(() => {
+      const w = window as unknown as FixtureWindow;
+      const scene = (w as unknown as { __questScene: import('three').Scene }).__questScene;
+      const camera = (w as unknown as { __questCamera: import('three').PerspectiveCamera })
+        .__questCamera;
+      const gl = w.__questRenderer.getContext();
+      const panel = scene.getObjectByName('terminal-panel-%1');
+      const screen = panel?.getObjectByName('terminal-surface') as import('three').Mesh | undefined;
+      const frame = panel?.getObjectByName('terminal-frame') as import('three').Mesh | undefined;
+      if (!panel || !screen || !frame) throw new Error('Terminal frame evidence geometry missing');
+      const saved = {
+        position: panel.position.clone(),
+        quaternion: panel.quaternion.clone(),
+        scale: panel.scale.clone(),
+        opacity: w.__designScene.getTerminalOpacity('%1'),
+        curvature: Number(panel.userData.curvatureDegrees ?? 0),
+        background: scene.background,
+        cameraPosition: camera.position.clone(),
+        cameraQuaternion: camera.quaternion.clone(),
+        fov: camera.fov,
+        visibility: new Map<import('three').Object3D, boolean>(),
+      };
+      scene.traverse((object) => saved.visibility.set(object, object.visible));
+      const sample = (): number[][] => {
+        scene.updateMatrixWorld(true);
+        w.__questRenderer.render(scene, camera);
+        const positions = screen.geometry.getAttribute('position');
+        const uvs = screen.geometry.getAttribute('uv');
+        const centerline: Array<{ u: number; point: import('three').Vector3 }> = [];
+        for (let index = 0; index < positions.count; index += 1) {
+          if (Math.abs(uvs.getY(index)) > 1e-6) continue;
+          const point = new w.__questThree.Vector3().fromBufferAttribute(positions, index);
+          point.y = 0;
+          centerline.push({ u: uvs.getX(index), point });
+        }
+        centerline.sort((left, right) => left.u - right.u);
+        if (centerline.length < 2) throw new Error('Screen centerline UVs missing');
+        const points: number[][] = [];
+        for (let column = 0; column < 80; column += 1) {
+          const u = (column + 0.5) / 80;
+          const upper = centerline.findIndex((vertex) => vertex.u >= u);
+          if (upper < 1) throw new Error(`Screen UV missing at ${u}`);
+          const left = centerline[upper - 1];
+          const right = centerline[upper];
+          const local = left.point.clone().lerp(right.point, (u - left.u) / (right.u - left.u));
+          const point = screen.localToWorld(local).project(camera);
+          if (Math.abs(point.x) >= 1 || Math.abs(point.y) >= 1)
+            throw new Error(`Glass sample outside viewport at column ${column}`);
+          const x = Math.max(
+            0,
+            Math.min(
+              gl.drawingBufferWidth - 1,
+              Math.round(((point.x + 1) * gl.drawingBufferWidth) / 2),
+            ),
+          );
+          const y = Math.max(
+            0,
+            Math.min(
+              gl.drawingBufferHeight - 1,
+              Math.round(((1 + point.y) * gl.drawingBufferHeight) / 2),
+            ),
+          );
+          const pixels = new Uint8Array(4);
+          gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+          points.push([pixels[0], pixels[1], pixels[2]]);
+        }
+        return points;
+      };
+      try {
+        camera.position.set(0, 1.6, 0.1);
+        camera.lookAt(0, 1.5, -1.5);
+        camera.fov = 90;
+        camera.updateProjectionMatrix();
+        panel.position.set(-0.87, 1.5, -1.5);
+        panel.rotation.set(0, 0.06, 0);
+        panel.scale.setScalar(1);
+        scene.background = new w.__questThree.Color(0xf0f0f0);
+        scene.traverse((object) => {
+          if (object !== scene && object !== panel && !panel.getObjectById(object.id))
+            object.visible = false;
+        });
+        const samples: Array<{ side: string; opacity: number; angle: number; maxDelta: number }> =
+          [];
+        let screenshot = '';
+        for (const sign of [-1, 1]) {
+          panel.position.x = sign * 0.87;
+          panel.rotation.y = -sign * 0.06;
+          for (const opacity of [0.1, 0.5, 1]) {
+            w.__designScene.setTerminalOpacity('%1', opacity);
+            for (const angle of [0, 30, 60, 90]) {
+              w.__designScene.setTerminalCurvature('%1', angle);
+              frame.visible = true;
+              const withFrame = sample();
+              frame.visible = false;
+              const withoutFrame = sample();
+              if (!withoutFrame.every((rgb) => Math.min(...rgb) < 250))
+                throw new Error(
+                  `Terminal did not paint the sampled viewport at ${sign}/${opacity}/${angle}`,
+                );
+              const error = gl.getError();
+              if (error !== gl.NO_ERROR) throw new Error(`Glass WebGL error ${error}`);
+              frame.visible = true;
+              samples.push({
+                side: sign < 0 ? 'left' : 'right',
+                opacity,
+                angle,
+                maxDelta: Math.max(
+                  ...withFrame.flatMap((rgb, index) =>
+                    rgb.map((value, channel) => Math.abs(value - withoutFrame[index][channel])),
+                  ),
+                ),
+              });
+              if (sign < 0 && opacity === 0.1 && angle === 60) {
+                w.__questRenderer.render(scene, camera);
+                screenshot = (gl.canvas as HTMLCanvasElement).toDataURL('image/png');
+              }
+            }
+          }
+        }
+        return { samples, screenshot };
+      } finally {
+        panel.position.copy(saved.position);
+        panel.quaternion.copy(saved.quaternion);
+        panel.scale.copy(saved.scale);
+        camera.position.copy(saved.cameraPosition);
+        camera.quaternion.copy(saved.cameraQuaternion);
+        camera.fov = saved.fov;
+        camera.updateProjectionMatrix();
+        scene.background = saved.background;
+        for (const [object, visible] of saved.visibility) object.visible = visible;
+        frame.visible = true;
+        w.__designScene.setTerminalOpacity('%1', saved.opacity);
+        w.__designScene.setTerminalCurvature('%1', saved.curvature);
+      }
+    });
+    await writeFile(
+      join(root, 'glass-frame-60deg.png'),
+      Buffer.from(frameProbe.screenshot.split(',')[1], 'base64'),
+    );
+    const frameEvidence = { samples: frameProbe.samples };
+    assert(
+      frameEvidence.samples.every((sample) => sample.maxDelta <= 2),
+      `Terminal frame projected through viewport: ${JSON.stringify(frameEvidence.samples.map((sample) => ({ angle: sample.angle, maxDelta: sample.maxDelta })))}`,
+    );
     const savedPose = await page.evaluate(() => {
       const w = window as unknown as FixtureWindow;
       const api = w.__muxXR as unknown as { selectPane(id: string): void };
@@ -413,6 +728,8 @@ async function main(): Promise<void> {
       renderer,
       modes,
       radialTiming,
+      radialEvidence,
+      frameEvidence,
       restoredViews: 3,
       partialRestore: 2,
       closedAll: true,

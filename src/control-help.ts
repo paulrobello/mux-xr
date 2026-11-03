@@ -22,9 +22,13 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
     case 'glassOpacity':
       return 'Adjust the dark terminal background opacity';
     case 'radialAction':
-      return data.radialAction === 'cancel'
-        ? 'Close the action menu'
-        : `Open ${String(data.radialAction)}`;
+      return data.radialAction === 'warp'
+        ? 'Adjust the aimed terminal curvature with the right stick; A saves and B cancels'
+        : data.radialAction === 'layout'
+          ? 'Arrange terminals and adjust layout distance'
+          : data.radialAction === 'cancel'
+            ? 'Close the action menu'
+            : `Open ${String(data.radialAction)}`;
     case 'grabRadial':
       return undefined;
     case 'dismissNotice':
@@ -64,6 +68,12 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
       return Number(data.direction) < 0
         ? 'Move all terminals closer; keep sizes'
         : 'Move all terminals farther; keep sizes';
+    case 'resetLayout':
+      return 'Recover the workspace and UI near the current view';
+    case 'xrMode':
+      return data.xrMode === 'ar'
+        ? 'Leave XR, then press Enter passthrough in the browser'
+        : 'Leave XR, then press Enter VR in the browser';
     case 'arrange':
       return data.pattern === 'sphere'
         ? 'Arrange terminals on a sphere in front of you'
@@ -93,18 +103,24 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
         : data.mode === 'panes'
           ? 'Browse workspaces, sessions, windows and panes'
           : data.mode === 'terminal'
-            ? 'Open terminal grid and color settings'
-            : data.mode === 'widgets'
-              ? 'Open movable digital and analog clocks'
-              : data.mode === 'filtering'
-                ? 'Choose filtering and viewed-terminal clarity'
-                : data.mode === 'arrange'
-                  ? 'Arrange attached terminals in a spatial pattern'
-                  : 'Open saved quick commands';
+            ? 'Adjust the selected terminal grid, text zoom and glass opacity'
+            : data.mode === 'settings'
+              ? 'Open display, world and selected-terminal settings'
+              : data.mode === 'display'
+                ? 'Choose terminal colors, filtering and gaze clarity'
+                : data.mode === 'world'
+                  ? 'Choose VR background or passthrough'
+                  : data.mode === 'widgets'
+                    ? 'Open movable digital and analog clocks'
+                    : data.mode === 'filtering'
+                      ? 'Choose filtering and viewed-terminal clarity'
+                      : data.mode === 'arrange'
+                        ? 'Arrange attached terminals in a spatial pattern'
+                        : 'Open saved quick commands';
     case 'exit':
       return 'Exit immersive mode or the 3D preview';
     case 'close':
-      return 'Close terminal input controls';
+      return 'Close this panel';
     case 'closePane':
       return 'Close this terminal view; the shell keeps running';
     case 'toggleConnection':

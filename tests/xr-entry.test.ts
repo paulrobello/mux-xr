@@ -167,7 +167,7 @@ describe('XR entry coordinator', () => {
     expect(onError).toHaveBeenCalledWith(error);
   });
 
-  it('does not auto-enter outside activation when activation is unavailable', async () => {
+  it('attempts automatic entry after reload even without fresh activation', async () => {
     const target = events();
     const enter = vi.fn(async () => undefined);
     const controller = createXREntryController({
@@ -179,7 +179,37 @@ describe('XR entry coordinator', () => {
       userActivation: () => false,
     });
     await controller.enableAutoStart();
-    expect(enter).not.toHaveBeenCalled();
+    expect(enter).toHaveBeenCalledOnce();
+    expect(enter).toHaveBeenCalledWith('vr');
+  });
+
+  it('explains a rejected reload attempt and retries only on a fresh activation', async () => {
+    const target = events();
+    let activated = false;
+    const enter = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException('Activation required', 'NotAllowedError'))
+      .mockResolvedValue(undefined);
+    const blocked = vi.fn();
+    const controller = createXREntryController({
+      enter,
+      isActive: () => false,
+      onError: vi.fn(),
+      onActivationRequired: blocked,
+      xr: { isSessionSupported: async () => true },
+      eventTarget: target,
+      userActivation: () => activated,
+    });
+    await controller.enableAutoStart();
+    expect(enter).toHaveBeenCalledOnce();
+    expect(blocked).toHaveBeenCalledOnce();
+    target.dispatchEvent(new Event('pointerup'));
+    expect(enter).toHaveBeenCalledOnce();
+    activated = true;
+    target.dispatchEvent(new Event('pointerup'));
+    await Promise.resolve();
+    expect(enter).toHaveBeenCalledTimes(2);
+    controller.dispose();
   });
 
   it('removes fallback listeners and ignores pending callbacks after dispose', async () => {

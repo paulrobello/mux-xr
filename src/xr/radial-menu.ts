@@ -1,7 +1,15 @@
 import * as THREE from 'three';
 import { createScalableLabel, disposeScalableLabel } from './labels';
 
-export type RadialMenuAction = 'keyboard' | 'commands' | 'layout' | 'warp' | 'widgets' | 'cancel';
+export type RadialMenuAction =
+  | 'keyboard'
+  | 'commands'
+  | 'panes'
+  | 'layout'
+  | 'warp'
+  | 'widgets'
+  | 'settings'
+  | 'cancel';
 export type RadialAction = RadialMenuAction;
 
 export interface RadialMenu {
@@ -15,13 +23,15 @@ export interface RadialMenu {
   dispose(): void;
 }
 
-const ACTIONS = ['keyboard', 'commands', 'layout', 'warp', 'widgets'] as const;
+const ACTIONS = ['keyboard', 'commands', 'panes', 'layout', 'warp', 'widgets', 'settings'] as const;
 const LABELS: Record<RadialMenuAction, string> = {
   keyboard: 'Keyboard',
   commands: 'Commands',
+  panes: 'Panes',
   layout: 'Layout',
   warp: 'Warp',
   widgets: 'Widgets',
+  settings: 'Settings',
   cancel: 'Cancel',
 };
 const COLORS = {
@@ -41,7 +51,7 @@ function sectorGeometry(
   center: number,
 ): THREE.ShapeGeometry {
   const shape = new THREE.Shape();
-  const half = Math.PI / 5 - 0.035;
+  const half = Math.PI / ACTIONS.length - 0.035;
   const steps = 10;
   const start = center - half;
   const end = center + half;
@@ -107,7 +117,10 @@ export function createRadialMenu(): RadialMenu {
   centerDisc.userData.inputAction = 'radialAction';
   centerDisc.userData.radialAction = 'cancel';
   center.add(centerDisc);
-  const cancelLabel = createScalableLabel(LABELS.cancel, 0.15, 0.06, { background: COLORS.cancel });
+  const cancelLabel = createScalableLabel(LABELS.cancel, 0.15, 0.06, {
+    background: COLORS.cancel,
+    backplate: false,
+  });
   cancelLabel.userData.inputAction = 'radialAction';
   cancelLabel.userData.radialAction = 'cancel';
   cancelLabel.traverse((child) => {
@@ -137,7 +150,10 @@ export function createRadialMenu(): RadialMenu {
     mesh.userData.inputAction = 'radialAction';
     mesh.userData.radialAction = action;
     group.add(mesh);
-    const label = createScalableLabel(LABELS[action], 0.2, 0.075, { background: COLORS.glass });
+    const label = createScalableLabel(LABELS[action], 0.2, 0.075, {
+      background: COLORS.glass,
+      backplate: false,
+    });
     label.userData.inputAction = 'radialAction';
     label.userData.radialAction = action;
     label.userData.labelColor = COLORS.text;

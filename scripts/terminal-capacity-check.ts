@@ -329,9 +329,11 @@ async function prepareScene(page: Page, count: number): Promise<Record<string, u
   }, 'all streams did not connect');
   await page.locator('[data-action="settings"]').click();
   await page.locator('[data-background]').selectOption(BACKGROUND);
+  await page.locator('[data-action="close-settings"]').click();
+  await page.locator('[data-action="keyboard"]').click();
   const gaze = page.locator('[data-gaze-input]');
   if (await gaze.isChecked()) await gaze.uncheck();
-  await page.locator('[data-action="close-settings"]').click();
+  await page.locator('[data-action="close-drawer"]').click();
   await page.locator('[data-action="xr"]').click();
   await waitFor(async () => {
     const state = await page.evaluate(() =>

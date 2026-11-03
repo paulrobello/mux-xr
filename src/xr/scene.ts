@@ -17,7 +17,6 @@ import {
   type KeyboardModifier,
   keyboardDimensions,
   keyboardKeys,
-  type SemanticKey,
 } from '../keyboard';
 import {
   DEFAULT_TERMINAL_FILTERING,
@@ -73,7 +72,10 @@ type InputMode =
   | 'command-editor'
   | 'widgets'
   | 'filtering'
-  | 'warp';
+  | 'warp'
+  | 'settings'
+  | 'display'
+  | 'world';
 
 export interface PanelTransform {
   position: THREE.Vector3;
@@ -90,6 +92,7 @@ export interface GazeState {
 export interface WorkspaceSceneState {
   layoutRevision: number;
   radialOpen: boolean;
+  warpTerminalId: string | null;
   selectedTerminalId: string | null;
   background: BackgroundMode;
   gazeInputEnabled: boolean;
@@ -426,31 +429,6 @@ function createSelection(): THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMate
   return line;
 }
 
-function createKeyStrip(): THREE.Group {
-  const group = new THREE.Group();
-  group.name = 'terminal-key-strip';
-  const keys: readonly SemanticKey[] = [
-    { label: 'Esc', key: 'Escape' },
-    { label: 'Tab', key: 'Tab' },
-    { label: 'Ctrl', key: 'Control', modifier: 'ctrl' },
-    { label: 'Alt', key: 'Alt', modifier: 'alt' },
-    { label: '↑', key: 'ArrowUp' },
-    { label: '↓', key: 'ArrowDown' },
-    { label: '←', key: 'ArrowLeft' },
-    { label: '→', key: 'ArrowRight' },
-    { label: 'Enter', key: 'Enter' },
-  ];
-  for (let i = 0; i < keys.length; i += 1) {
-    const key = createLabelButton(keys[i].label, 0.12, 0.035, {
-      key: keys[i].key,
-      modifier: keys[i].modifier,
-    });
-    key.position.set((i - (keys.length - 1) / 2) * 0.14, -0.48, 0);
-    group.add(key);
-  }
-  return group;
-}
-
 function isControlVisible(object: THREE.Object3D): boolean {
   for (let current: THREE.Object3D | null = object; current; current = current.parent)
     if (!current.visible || current.userData.focusHidden) return false;
@@ -545,6 +523,7 @@ export function createWorkspaceScene(
   const mutableState: WorkspaceSceneState = {
     layoutRevision: 0,
     radialOpen: false,
+    warpTerminalId: null,
     selectedTerminalId: null,
     background: 'observatory',
     gazeInputEnabled: false,
@@ -677,6 +656,11 @@ export function createWorkspaceScene(
   let lodWasPresenting = false;
   const frameCounter = createFrameCounter();
   let fpsLabel: THREE.Mesh | null = null;
+  let activePaneLabel: THREE.Mesh | null = null;
+  let radialTargetId: string | null = null;
+  let radialController: THREE.Group | null = null;
+  let warpEdit: { id: string; original: number; controller: THREE.Group | null } | null = null;
+  let warpReadout: THREE.Mesh | null = null;
   let gridDraft: { target: string; cols: number; rows: number } | null = null;
   let gridRequestStatus = '';
   let gazeRetargeting = false;
@@ -827,7 +811,7 @@ export function createWorkspaceScene(
     button: number,
     modifiers?: KeyModifiers,
   ): boolean => {
-    if (gripActive() || !target?.uv || button < 0 || button > 2) return false;
+    if (warpEdit || gripActive() || !target?.uv || button < 0 || button > 2) return false;
     const panel = panels.get(target.terminalId);
     if (
       !panel ||
@@ -868,6 +852,13 @@ export function createWorkspaceScene(
   };
 
   const notify = (): void => {
+    if (activePaneLabel) {
+      const panel = panels.get(mutableState.selectedTerminalId ?? '');
+      updateLabel(
+        activePaneLabel,
+        panel ? `${panel.surface.pane.title} · ${panel.status}` : 'No active pane',
+      );
+    }
     for (const listener of listeners) listener(mutableState);
   };
   const hoverHelp = createLabelButton('', 0.32, 0.05, { wrap: true });
@@ -1093,7 +1084,7 @@ export function createWorkspaceScene(
           !disconnectedControllers.has(controller) &&
           !gripActive()
         )
-          toggleRadialMenu();
+          toggleRadialMenu(controller);
         const pressed = Boolean(controllerGamepads.get(controller)?.buttons[5]?.pressed);
         const wasPressed = focusButtonDown.has(controller);
         if (pressed) focusButtonDown.add(controller);
@@ -1104,12 +1095,29 @@ export function createWorkspaceScene(
           controller.visible &&
           !disconnectedControllers.has(controller) &&
           !gripActive() &&
-          !radialMenu.root.visible
+          (!radialMenu.root.visible || warpEdit)
         ) {
-          const target = targetFromController(controller);
-          toggleFocusMode(
-            target?.terminalId && panels.has(target.terminalId) ? target.terminalId : undefined,
-          );
+          if (warpEdit) finishWarp(false);
+          else {
+            const target = targetFromController(controller);
+            toggleFocusMode(
+              target?.terminalId && panels.has(target.terminalId) ? target.terminalId : undefined,
+            );
+          }
+        }
+      }
+      if (warpEdit && !gripActive()) {
+        const controller = warpEdit.controller;
+        if (controller && (!controller.visible || disconnectedControllers.has(controller)))
+          finishWarp(false);
+        else if (controller) {
+          const pad = controllerGamepads.get(controller);
+          const axis = pad?.axes[pad.axes.length >= 4 ? 2 : 0] ?? 0;
+          if (Math.abs(axis) >= 0.2) {
+            const panel = panels.get(warpEdit.id);
+            if (panel)
+              setTerminalCurvature(panel.id, panel.curvature + axis * 45 * deltaSeconds, false);
+          }
         }
       }
       for (const controller of controllerRoots) {
@@ -1120,6 +1128,7 @@ export function createWorkspaceScene(
           disconnectedControllers.has(controller) ||
           gripActive() ||
           mouseCaptures.size ||
+          warpEdit ||
           radialMenu.root.visible ||
           pad.buttons[3]?.pressed ||
           (inputRoot && inputMode !== 'keyboard')
@@ -1280,7 +1289,7 @@ export function createWorkspaceScene(
       }
     }
     lodWasPresenting = Boolean(renderer?.xr.isPresenting);
-    if (mutableState.gazeInputEnabled && !radialMenu.root.visible) {
+    if (mutableState.gazeInputEnabled && !radialMenu.root.visible && !warpEdit) {
       const gazeCamera = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
       gazeCamera.updateMatrixWorld(true);
       raycaster.far = camera.far;
@@ -1396,7 +1405,8 @@ export function createWorkspaceScene(
   if (renderer) renderer.setAnimationLoop((time: number) => render(time));
   window.addEventListener('resize', resize);
   const onWheel = (event: WheelEvent): void => {
-    if (renderer?.xr.isPresenting || !setPointerRay(event as unknown as PointerEvent)) return;
+    if (warpEdit || renderer?.xr.isPresenting || !setPointerRay(event as unknown as PointerEvent))
+      return;
     const target = targetFromRay();
     const panel = target?.terminalId ? panels.get(target.terminalId) : undefined;
     if (!panel || target?.object !== panel.screen || !target.uv) return;
@@ -1558,20 +1568,9 @@ export function createWorkspaceScene(
       captureGrab(controller, inputRoot);
     }
     if (previousPair) beginPairGrab(inputRoot, ...previousPair.controllers);
-    const modeCommands = createLabelButton('Commands', 0.28, 0.09, {
-      inputAction: 'mode',
-      mode: 'commands',
-    });
-    const modeKeyboard = createLabelButton('Keyboard', 0.28, 0.09, {
-      inputAction: 'mode',
-      mode: 'keyboard',
-    });
-    modeCommands.position.set(-0.2, 0.7, 0);
-    modeKeyboard.position.set(0.2, 0.7, 0);
-    if (mode !== 'command-editor') inputRoot.add(modeCommands, modeKeyboard);
     if (mode === 'commands') {
       const add = createLabelButton('New command', 0.5, 0.09, { inputAction: 'newCommand' });
-      add.position.set(0.75, 0.7, 0);
+      add.position.set(0, 0.7, 0);
       inputRoot.add(add);
     }
     if (mode === 'keyboard') {
@@ -1581,19 +1580,17 @@ export function createWorkspaceScene(
         0.09,
         { inputAction: 'keyboardBackground' },
       );
-      backdropToggle.position.set(0.65, 0.7, 0);
+      backdropToggle.position.set(0.35, 0.7, 0);
       inputRoot.add(backdropToggle);
+      const gazeToggle = createLabelButton(
+        `Gaze input: ${mutableState.gazeInputEnabled ? 'on' : 'off'}`,
+        0.5,
+        0.09,
+        { inputAction: 'gazeInput' },
+      );
+      gazeToggle.position.set(-0.25, 0.7, 0);
+      inputRoot.add(gazeToggle);
     }
-    const gazeToggle = createLabelButton(
-      `Gaze input: ${mutableState.gazeInputEnabled ? 'on' : 'off'}`,
-      0.34,
-      0.08,
-      {
-        inputAction: 'gazeInput',
-      },
-    );
-    gazeToggle.position.set(0, 0.84, 0);
-    if (mode !== 'command-editor') inputRoot.add(gazeToggle);
     const targetTitle = mutableState.inputTargetTitle
       ? `Target: ${mutableState.inputTargetTitle}`
       : 'No target selected';
@@ -1602,13 +1599,19 @@ export function createWorkspaceScene(
         ? commandEditorMessage || 'New quick command'
         : mode === 'widgets'
           ? 'Widgets'
-          : mode === 'filtering'
-            ? 'Terminal filtering'
-            : mode === 'warp'
-              ? 'Terminal curvature'
-              : mode === 'arrange'
-                ? 'Arrange terminals'
-                : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? 'Keyboard' : mode === 'terminal' ? 'Terminal settings' : `Panes · ${hierarchyLevel}`} · ${targetTitle}`,
+          : mode === 'settings'
+            ? 'Settings'
+            : mode === 'display'
+              ? 'Display settings'
+              : mode === 'world'
+                ? 'World settings'
+                : mode === 'filtering'
+                  ? 'Terminal filtering'
+                  : mode === 'warp'
+                    ? 'Terminal curvature'
+                    : mode === 'arrange'
+                      ? 'Arrange terminals'
+                      : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? 'Keyboard' : mode === 'terminal' ? 'Terminal settings' : `Panes · ${hierarchyLevel}`} · ${targetTitle}`,
       0.9,
       0.12,
       { inputAction: 'grabInput' },
@@ -1657,7 +1660,59 @@ export function createWorkspaceScene(
       cancel.position.set(0.28, -0.53, 0);
       inputRoot.add(scope, enter, save, clear, cancel);
     }
-    if (mode === 'arrange') {
+    if (mode === 'settings') {
+      for (const [index, [label, destination]] of (
+        [
+          ['Display', 'display'],
+          ['World', 'world'],
+          ['Selected terminal', 'terminal'],
+        ] as const
+      ).entries()) {
+        const button = createLabelButton(label, 1.15, 0.13, {
+          inputAction: 'openInput',
+          mode: destination,
+        });
+        button.position.set(0, 0.3 - index * 0.2, 0);
+        inputRoot.add(button);
+      }
+    } else if (mode === 'world') {
+      const backgroundSelect = createBackgroundSelect(mutableState.background, 'input');
+      backgroundSelect.position.y = 0.25;
+      inputRoot.add(backgroundSelect);
+      for (const [index, [label, xrMode]] of (
+        [
+          ['VR', 'vr'],
+          ['Passthrough', 'ar'],
+        ] as const
+      ).entries()) {
+        const button = createLabelButton(label, 0.65, 0.12, { inputAction: 'xrMode', xrMode });
+        button.position.set(index ? 0.38 : -0.38, -0.1, 0);
+        setModifierVisual(button, mutableState.xrMode === xrMode);
+        inputRoot.add(button);
+      }
+    } else if (mode === 'display') {
+      (
+        [
+          ['Comfort', 'comfort'],
+          ['Original', 'original'],
+          ['Mono', 'monochrome'],
+        ] as const
+      ).forEach(([label, colorMode], index) => {
+        const button = createLabelButton(label, 0.4, 0.12, {
+          inputAction: 'terminalColors',
+          colorMode,
+        });
+        button.position.set((index - 1) * 0.46, 0.25, 0);
+        setModifierVisual(button, mutableState.terminalColorMode === colorMode);
+        inputRoot?.add(button);
+      });
+      const filteringButton = createLabelButton('Filtering and gaze clarity', 1.3, 0.12, {
+        inputAction: 'openInput',
+        mode: 'filtering',
+      });
+      filteringButton.position.y = 0;
+      inputRoot.add(filteringButton);
+    } else if (mode === 'arrange') {
       const status = createLabelButton(
         panels.size
           ? `${panels.size} terminals · keep sizes and input target`
@@ -1696,6 +1751,9 @@ export function createWorkspaceScene(
           inputRoot.add(button);
         }
       }
+      const reset = createLabelButton('Reset layout', 0.65, 0.1, { inputAction: 'resetLayout' });
+      reset.position.y = -0.45;
+      inputRoot.add(reset);
     } else if (mode === 'panes') {
       const visible = availablePanes.filter(
         (pane) =>
@@ -1750,32 +1808,13 @@ export function createWorkspaceScene(
         inputRoot.add(back);
       }
     } else if (mode === 'commands') {
-      const pageStart = panePage * 4;
-      availablePanes.slice(pageStart, pageStart + 4).forEach((pane, index) => {
-        const button = createLabelButton(`Pane: ${pane.title}`, 0.7, 0.11, {
-          inputAction: 'pane',
-          paneId: pane.id,
-        });
-        button.position.set(index % 2 ? 0.4 : -0.4, 0.4 - Math.floor(index / 2) * 0.14, 0);
-        inputRoot?.add(button);
-      });
-      if (availablePanes.length > 4) {
-        const page = createLabelButton(
-          `Panes ${pageStart + 1}-${Math.min(pageStart + 4, availablePanes.length)} · Next`,
-          0.7,
-          0.1,
-          { inputAction: 'panePage' },
-        );
-        page.position.set(0, -0.18, 0);
-        inputRoot.add(page);
-      }
       const commandStart = commandPage * 8;
       menuCommands.slice(commandStart, commandStart + 8).forEach((command, index) => {
         const button = createLabelButton(command.label, 0.7, 0.11, {
           inputAction: 'command',
           commandId: command.id,
         });
-        const row = Math.floor((index + Math.min(availablePanes.length, 4)) / 2);
+        const row = Math.floor(index / 2);
         button.position.set(index % 2 ? 0.4 : -0.4, 0.4 - row * 0.14, 0);
         inputRoot?.add(button);
       });
@@ -1843,40 +1882,38 @@ export function createWorkspaceScene(
         apply.position.y = -0.2;
         inputRoot.add(apply);
       }
-      const modes: Array<[string, TerminalColorMode]> = [
-        ['Comfort', 'comfort'],
-        ['Original', 'original'],
-        ['Mono', 'monochrome'],
-      ];
-      modes.forEach(([label, colorMode], index) => {
-        const button = createLabelButton(label, 0.34, 0.09, {
-          inputAction: 'terminalColors',
-          colorMode,
+      if (target && surface) {
+        const panel = panels.get(target);
+        const zoom = Number(panel?.root.userData.fontZoom ?? 1);
+        const textSize = createLabelButton(`Text zoom: ${Math.round(zoom * 100)}%`, 1.05, 0.08, {
+          inputAction: 'noop',
         });
-        button.position.set((index - 1) * 0.4, -0.36, 0);
-        setModifierVisual(button, mutableState.terminalColorMode === colorMode);
-        inputRoot?.add(button);
-      });
-      const modeStatus = createLabelButton(
-        `Colors: ${mutableState.terminalColorMode}`,
-        1.08,
-        0.05,
-        { inputAction: 'noop' },
-      );
-      modeStatus.position.y = -0.455;
-      inputRoot.add(modeStatus);
-      const filteringButton = createLabelButton('Filtering', 0.4, 0.09, {
-        inputAction: 'openInput',
-        mode: 'filtering',
-      });
-      filteringButton.position.set(0.8, 0.55, 0);
-      inputRoot.add(filteringButton);
-      const warpButton = createLabelButton('Warp', 0.4, 0.09, {
-        inputAction: 'openInput',
-        mode: 'warp',
-      });
-      warpButton.position.set(-0.8, 0.55, 0);
-      inputRoot.add(warpButton);
+        textSize.position.y = -0.34;
+        inputRoot.add(textSize);
+        for (const direction of [-1, 1]) {
+          const button = createLabelButton(direction < 0 ? '−' : '+', 0.15, 0.09, {
+            inputAction: 'fontZoom',
+            terminalId: target,
+            direction,
+          });
+          button.position.set(direction * 0.7, -0.34, 0);
+          inputRoot.add(button);
+        }
+        const opacity = getTerminalOpacity(target);
+        const glass = createLabelButton(`Glass opacity: ${Math.round(opacity * 100)}%`, 1.1, 0.08, {
+          inputAction: 'noop',
+        });
+        glass.position.y = -0.48;
+        inputRoot.add(glass);
+        for (const [index, delta] of [-0.1, 0.1].entries()) {
+          const button = createLabelButton(delta < 0 ? '−' : '+', 0.15, 0.09, {
+            inputAction: 'glassOpacity',
+            delta,
+          });
+          button.position.set(index ? 0.7 : -0.7, -0.48, 0);
+          inputRoot.add(button);
+        }
+      }
     } else if (mode === 'warp') {
       const target = mutableState.inputTargetId;
       const degrees = target ? getTerminalCurvature(target) : 0;
@@ -1903,22 +1940,6 @@ export function createWorkspaceScene(
           delta,
         });
         button.position.set(index ? 0.4 : -0.4, -0.36, 0);
-        inputRoot.add(button);
-      }
-      const opacity = mutableState.inputTargetId
-        ? getTerminalOpacity(mutableState.inputTargetId)
-        : 1;
-      const glass = createLabelButton(`Glass opacity: ${Math.round(opacity * 100)}%`, 1.1, 0.08, {
-        inputAction: 'noop',
-      });
-      glass.position.y = -0.51;
-      inputRoot.add(glass);
-      for (const [index, delta] of [-0.1, 0.1].entries()) {
-        const button = createLabelButton(delta < 0 ? '−' : '+', 0.15, 0.1, {
-          inputAction: 'glassOpacity',
-          delta,
-        });
-        button.position.set(index ? 0.7 : -0.7, -0.51, 0);
         inputRoot.add(button);
       }
     } else if (mode === 'widgets') {
@@ -2017,10 +2038,14 @@ export function createWorkspaceScene(
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
     close.position.set(0, -0.66, 0);
     inputRoot.add(close);
-    if (mode !== 'command-editor') {
-      const backgroundSelect = createBackgroundSelect(mutableState.background, 'input');
-      backgroundSelect.position.y = -0.53;
-      inputRoot.add(backgroundSelect);
+    if (['terminal', 'display', 'world', 'filtering'].includes(mode)) {
+      close.position.x = 0.22;
+      const back = createLabelButton('Back', 0.3, 0.09, {
+        inputAction: 'openInput',
+        mode: mode === 'filtering' ? 'display' : 'settings',
+      });
+      back.position.set(-0.22, -0.66, 0);
+      inputRoot.add(back);
     }
     inputRoot.updateMatrixWorld(true);
     const bounds = new THREE.Box3();
@@ -2060,34 +2085,13 @@ export function createWorkspaceScene(
     hudRoot.userData.scaleLimits = [0.25, 1.4];
     hudRoot.position.set(0, 0.78, -1.35);
     hudRoot.scale.setScalar(0.62);
-    const controls: Array<[string, Record<string, unknown>]> = [
-      ['Commands', { inputAction: 'openInput', mode: 'commands' }],
-      ['Widgets', { inputAction: 'openInput', mode: 'widgets' }],
-      ['Panes', { inputAction: 'openInput', mode: 'panes' }],
-      ['Terminal', { inputAction: 'openInput', mode: 'terminal' }],
-      ['Arrange', { inputAction: 'openInput', mode: 'arrange' }],
-      ['Exit', { inputAction: 'exit' }],
-      [BACKGROUND_LABELS[mutableState.background], { inputAction: 'backgroundSelect' }],
-      ['Gaze input: off', { inputAction: 'gazeInput', gazeInputEnabled: false }],
-    ];
-    const widths = controls.map(([, data]) =>
-      data.inputAction === 'backgroundSelect'
-        ? 0.48
-        : data.inputAction === 'gazeInput'
-          ? 0.34
-          : 0.27,
-    );
-    const totalWidth = widths.reduce((sum, width) => sum + width, 0) + (controls.length - 1) * 0.04;
-    let left = -totalWidth / 2;
-    controls.forEach(([label, data], index) => {
-      const button =
-        data.inputAction === 'backgroundSelect'
-          ? createBackgroundSelect(mutableState.background, 'hud')
-          : createLabelButton(label, widths[index], 0.09, data);
-      button.position.x = left + widths[index] / 2;
-      left += widths[index] + 0.04;
-      hudRoot?.add(button);
-    });
+    const totalWidth = 1.6;
+    activePaneLabel = createLabelButton('No active pane', 1.1, 0.09, { inputAction: 'noop' });
+    activePaneLabel.name = 'xr-active-pane';
+    activePaneLabel.position.x = -0.2;
+    const exit = createLabelButton('Exit', 0.27, 0.09, { inputAction: 'exit' });
+    exit.position.x = 0.57;
+    hudRoot.add(activePaneLabel, exit);
     updateNotice = createLabelButton('Update: Reload', 0.42, 0.09, { inputAction: 'reloadUpdate' });
     updateNotice.position.set(0, 0.16, 0);
     updateNotice.visible = false;
@@ -2115,7 +2119,7 @@ export function createWorkspaceScene(
     (fpsLabel.material as THREE.MeshBasicMaterial).opacity = 0;
     (fpsLabel.material as THREE.MeshBasicMaterial).depthWrite = false;
     fpsLabel.name = 'xr-fps-counter';
-    fpsLabel.position.set(1.12, 0.13, 0);
+    fpsLabel.position.set(0.6, 0.13, 0);
     hudRoot.add(fpsLabel);
     scene.add(hudRoot);
   };
@@ -2285,6 +2289,7 @@ export function createWorkspaceScene(
       radialMenu.close();
       mutableState.radialOpen = false;
       if (choice === 'keyboard') toggleKeyboard();
+      else if (choice === 'warp') startWarp(radialTargetId, radialController);
       else if (choice !== 'cancel') showInput(choice === 'layout' ? 'arrange' : choice);
       notify();
       return true;
@@ -2300,6 +2305,25 @@ export function createWorkspaceScene(
     }
     if (action === 'openInput') {
       showInput(hit.userData.mode as InputMode);
+      return true;
+    }
+    if (action === 'xrMode') {
+      const mode = hit.userData.xrMode as 'vr' | 'ar';
+      if (mutableState.xrMode !== mode) {
+        void (async (): Promise<void> => {
+          try {
+            await exitXR();
+            actions.setXREntryMode?.(mode);
+            setNotice(`Press ${mode === 'ar' ? 'Enter passthrough' : 'Enter VR'} to continue`);
+          } catch (error) {
+            setNotice(error instanceof Error ? error.message : 'XR mode could not be changed');
+          }
+        })();
+      }
+      return true;
+    }
+    if (action === 'resetLayout') {
+      resetLayout();
       return true;
     }
     if (action === 'exit') {
@@ -2407,9 +2431,7 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'fontZoom') {
-      let parent: THREE.Object3D | null = hit;
-      while (parent && !parent.userData.terminalId) parent = parent.parent;
-      const panel = parent ? panels.get(parent.userData.terminalId as string) : undefined;
+      const panel = panels.get(String(hit.userData.terminalId ?? mutableState.inputTargetId ?? ''));
       if (panel) {
         const next = Math.max(
           1,
@@ -2425,6 +2447,7 @@ export function createWorkspaceScene(
         panel.texture.repeat.set(1 / next, 1 / next);
         panel.texture.offset.set(0, 0);
         panel.texture.needsUpdate = true;
+        if (inputRoot && inputMode === 'terminal') refreshInputRoot('terminal');
       }
       return true;
     }
@@ -2559,6 +2582,10 @@ export function createWorkspaceScene(
     return target;
   };
   const activateTarget = (target: InputTarget | null): void => {
+    if (warpEdit) {
+      if (target?.object?.userData.inputAction !== 'exit') return;
+      finishWarp(false);
+    }
     if (target?.object?.userData.inputAction !== 'backgroundSelect') closeBackgroundMenus();
     if (!target) return;
     if (target.kind === 'keyboard' && target.object) {
@@ -2587,6 +2614,10 @@ export function createWorkspaceScene(
   };
   const onControllerSelect = (controller: THREE.Group): void => {
     const target = targetFromController(controller);
+    if (warpEdit) {
+      activateTarget(target);
+      return;
+    }
     const modifiers = Object.keys(modifierState.active).length
       ? { ...modifierState.active }
       : undefined;
@@ -2707,6 +2738,7 @@ export function createWorkspaceScene(
         if (gamepad) controllerGamepads.set(root, gamepad);
       };
       const onDisconnected = (): void => {
+        if (warpEdit?.controller === root) finishWarp(false);
         releaseMouse(root);
         modifierPresses.delete(root);
         radialButtonDown.delete(root);
@@ -2787,13 +2819,6 @@ export function createWorkspaceScene(
         })
       : selectionGeometry(width, height);
     panel.titleLabel.position.y = height / 2 + 0.07;
-    const strip = panel.root.getObjectByName('terminal-key-strip');
-    if (strip) strip.position.y = -(height - PANEL_HEIGHT) / 2;
-    for (const child of panel.root.children) {
-      if (child.userData.inputAction !== 'fontZoom') continue;
-      child.position.x = Number(child.userData.direction) * (width / 2 + 0.08);
-      child.position.y = height / 2 - 0.18;
-    }
     panel.connectionButton.position.set(0.24, -(height / 2 + 0.24), 0.02);
     panel.closeButton.position.set(-0.24, -(height / 2 + 0.24), 0.02);
     const followCurve = (object: THREE.Object3D): void => {
@@ -2803,15 +2828,8 @@ export function createWorkspaceScene(
       object.position.z = 0.02 + point.z;
       object.rotation.y = radians ? -(flatX / width) * radians : 0;
     };
-    for (const child of panel.root.children)
-      if (child.userData.inputAction === 'fontZoom') followCurve(child);
     followCurve(panel.connectionButton);
     followCurve(panel.closeButton);
-    strip?.children.forEach((child) => {
-      child.userData.flatX ??= child.position.x;
-      child.position.x = Number(child.userData.flatX);
-      followCurve(child);
-    });
   };
   const addTerminal = (surface: TerminalSurface): void => {
     if (panels.has(surface.pane.id)) return;
@@ -2842,27 +2860,17 @@ export function createWorkspaceScene(
     root.add(screen);
     const frame = new THREE.Mesh(
       createTerminalFrameGeometry({ width: PANEL_WIDTH, height: PANEL_HEIGHT, radians: 0 }),
-      new THREE.MeshStandardMaterial({ color: 0x101820, roughness: 0.72, metalness: 0.3 }),
+      new THREE.MeshStandardMaterial({
+        color: 0x101820,
+        roughness: 0.72,
+        metalness: 0.3,
+        side: THREE.DoubleSide,
+      }),
     );
+    frame.name = 'terminal-frame';
     frame.position.z = -0.025;
     root.add(frame);
     const selection = createSelection();
-    const keyStrip = createKeyStrip();
-    keyStrip.traverse((child: THREE.Object3D) => {
-      child.userData.terminalId = surface.pane.id;
-    });
-    const fontDown = createLabelButton('A−', 0.12, 0.1, {
-      inputAction: 'fontZoom',
-      direction: -1,
-      terminalId: surface.pane.id,
-    });
-    const fontUp = createLabelButton('A+', 0.12, 0.1, {
-      inputAction: 'fontZoom',
-      direction: 1,
-      terminalId: surface.pane.id,
-    });
-    fontDown.position.set(-0.79, 0.22, 0.02);
-    fontUp.position.set(0.79, 0.22, 0.02);
     root.userData.fontZoom = 1;
     const shortError = surface.error ? ` · ${surface.error.slice(0, 28)}` : '';
     const titleLabel = createLabelButton(
@@ -2890,7 +2898,7 @@ export function createWorkspaceScene(
       inputAction: 'closePane',
       terminalId: surface.pane.id,
     });
-    root.add(selection, keyStrip, fontDown, fontUp, titleLabel, connectionButton, closeButton);
+    root.add(selection, titleLabel, connectionButton, closeButton);
     const panel: TerminalPanel = {
       id: surface.pane.id,
       surface,
@@ -2951,6 +2959,7 @@ export function createWorkspaceScene(
           panel.titleLabel,
           `${surface.pane.title} · ${surface.status}${surface.error ? ` · ${surface.error.slice(0, 28)}` : ''}`,
         );
+        notify();
       }
       if (errorChanged) {
         panel.error = surface.error;
@@ -2973,6 +2982,7 @@ export function createWorkspaceScene(
   const removeTerminal = (id: string): void => {
     const panel = panels.get(id);
     if (!panel) return;
+    if (warpEdit?.id === id) finishWarp(false);
     terminalScreens.splice(terminalScreens.indexOf(panel.screen), 1);
     paneFocus.remove(panel.root);
     mutableState.focusModeTerminalId = paneFocus.activeId;
@@ -3002,6 +3012,7 @@ export function createWorkspaceScene(
   };
   const selectTerminal = (id: string | null): void => {
     const nextId = id && panels.has(id) ? id : null;
+    if (warpEdit && nextId !== warpEdit.id && !gripActive()) finishWarp(false);
     if (paneFocus.activeId && nextId !== paneFocus.activeId) endFocusMode(true);
     if (nextId === mutableState.selectedTerminalId && mutableState.focusedTerminalId === nextId)
       return;
@@ -3036,7 +3047,7 @@ export function createWorkspaceScene(
     applyTerminalOpacity(panel);
     if (!warpStore.setOpacity(warpKey(panel.surface), panel.opacity))
       setNotice('Glass opacity could not be saved on this device');
-    if (inputRoot && inputMode === 'warp') refreshInputRoot('warp');
+    if (inputRoot && inputMode === 'terminal') refreshInputRoot('terminal');
     notify();
   };
   const copyTerminalPose = (pose: SavedUIPose): SavedUIPose => ({
@@ -3087,14 +3098,70 @@ export function createWorkspaceScene(
     for (const [kind, widget] of widgets) saveWidgetPose(kind, widget);
     rememberTerminalPlacements();
   };
-  const toggleRadialMenu = (): void => {
+  const finishWarp = (commit: boolean): void => {
+    const edit = warpEdit;
+    if (!edit) return;
+    warpEdit = null;
+    mutableState.warpTerminalId = null;
+    if (warpReadout) {
+      warpReadout.removeFromParent();
+      disposeObject(warpReadout);
+      warpReadout = null;
+    }
+    if (commit) {
+      const panel = panels.get(edit.id);
+      if (panel && !warpStore.set(warpKey(panel.surface), panel.curvature))
+        setNotice('Curvature could not be saved on this device');
+    } else setTerminalCurvature(edit.id, edit.original, false);
+    scrollDue.clear();
+    gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
+    notify();
+  };
+  const startWarp = (id: string | null, owner: THREE.Group | null): void => {
+    const panel = panels.get(id ?? mutableState.selectedTerminalId ?? '');
+    if (!panel) {
+      setNotice('Select an open terminal to warp');
+      return;
+    }
+    finishWarp(false);
+    releaseAllMouse();
+    hideInput();
+    clearArmedModifiers();
+    selectTerminal(panel.id);
+    const controller =
+      owner ?? controllerRoots.find((root) => controllerHandedness.get(root) === 'right') ?? null;
+    warpEdit = { id: panel.id, original: panel.curvature, controller };
+    mutableState.warpTerminalId = panel.id;
+    gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
+    scrollDue.clear();
+    warpReadout = createLabelButton('', 1.25, 0.08, { inputAction: 'noop' });
+    warpReadout.name = 'xr-warp-readout';
+    warpReadout.position.set(0, panel.height / 2 + 0.22, 0.04);
+    warpReadout.traverse((object) => {
+      object.raycast = () => undefined;
+    });
+    panel.root.add(warpReadout);
+    updateLabel(
+      warpReadout,
+      `Warp ${Math.round(panel.curvature)}° · stick ← / → · A save · B cancel`,
+    );
+    notify();
+  };
+  const toggleRadialMenu = (controller?: THREE.Group): void => {
     if (gripActive()) return;
+    if (warpEdit) {
+      finishWarp(true);
+      return;
+    }
     if (radialMenu.isOpen) {
       radialMenu.close();
       mutableState.radialOpen = false;
       notify();
       return;
     }
+    const aimed = controller ? targetFromController(controller)?.terminalId : null;
+    radialTargetId = aimed && panels.has(aimed) ? aimed : mutableState.selectedTerminalId;
+    radialController = controller ?? null;
     releaseAllMouse();
     modifierPresses.clear();
     gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
@@ -3110,15 +3177,20 @@ export function createWorkspaceScene(
     notify();
   };
   const getTerminalCurvature = (id: string): number => panels.get(id)?.curvature ?? 0;
-  const setTerminalCurvature = (id: string, degrees: number): void => {
+  const setTerminalCurvature = (id: string, degrees: number, persist = true): void => {
     const panel = panels.get(id);
     if (!panel || !Number.isFinite(degrees)) return;
     panel.curvature = THREE.MathUtils.clamp(degrees, 0, 100);
     syncPanelGrid(panel);
-    if (!warpStore.set(warpKey(panel.surface), panel.curvature))
+    if (persist && !warpStore.set(warpKey(panel.surface), panel.curvature))
       setNotice('Curvature could not be saved on this device');
+    if (warpEdit?.id === id && warpReadout)
+      updateLabel(
+        warpReadout,
+        `Warp ${Math.round(panel.curvature)}° · stick ← / → · A save · B cancel`,
+      );
     if (inputRoot && inputMode === 'warp') refreshInputRoot('warp');
-    notify();
+    if (persist) notify();
   };
   const setTerminalFiltering = (filtering: TerminalFiltering): void => {
     const next = validateTerminalFiltering({
@@ -3171,13 +3243,6 @@ export function createWorkspaceScene(
     if (mutableState.gazeInputEnabled === enabled) return;
     mutableState.gazeInputEnabled = enabled;
     gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
-    if (hudRoot) {
-      const toggle = hudRoot.children.find((child) => child.userData.inputAction === 'gazeInput');
-      if (toggle) {
-        toggle.userData.gazeInputEnabled = enabled;
-        updateLabel(toggle as THREE.Mesh, `Gaze input: ${enabled ? 'on' : 'off'}`);
-      }
-    }
     const inputToggle = inputRoot?.children.find(
       (child) => child.userData.inputAction === 'gazeInput',
     );
@@ -3189,7 +3254,7 @@ export function createWorkspaceScene(
     if (mutableState.terminalColorMode === mode) return;
     mutableState.terminalColorMode = mode;
     for (const panel of panels.values()) panel.surface.setColorMode(mode);
-    if (inputRoot && inputMode === 'terminal') refreshInputRoot(inputMode);
+    if (inputRoot && inputMode === 'display') refreshInputRoot(inputMode);
     notify();
   };
   const setKeyboardBackgroundEnabled = (enabled: boolean): void => {
@@ -3229,20 +3294,21 @@ export function createWorkspaceScene(
       hierarchySessionId = null;
       hierarchyWindowId = null;
     }
+    notify();
   };
   const setQuickCommands = (commands: QuickCommand[]): void => {
     quickCommands = commands.map((command) => ({ ...command }));
   };
   const showInput = (mode: InputMode): void => {
+    if (mode === 'warp' && renderer?.xr.isPresenting) {
+      startWarp(mutableState.selectedTerminalId, null);
+      return;
+    }
+    if (warpEdit) finishWarp(false);
     keyboardResume = null;
     if (
       !renderer?.xr.isPresenting &&
-      mode !== 'panes' &&
-      mode !== 'terminal' &&
-      mode !== 'arrange' &&
-      mode !== 'widgets' &&
-      mode !== 'filtering' &&
-      mode !== 'warp'
+      (mode === 'commands' || mode === 'keyboard' || mode === 'command-editor')
     ) {
       hideInput();
       if (mode === 'commands') actions.openCommands();
@@ -3346,6 +3412,7 @@ export function createWorkspaceScene(
     }
     notify();
     session.addEventListener('end', () => {
+      finishWarp(false);
       radialMenu.close();
       mutableState.radialOpen = false;
       rememberTerminalPlacements();
@@ -3550,6 +3617,7 @@ export function createWorkspaceScene(
     rememberTerminalPlacements();
   };
   const resetLayout = (): void => {
+    finishWarp(false);
     radialMenu.close();
     mutableState.radialOpen = false;
     radialMenu.root.scale.setScalar(0.8);
@@ -3641,6 +3709,7 @@ export function createWorkspaceScene(
   };
   const dispose = (): void => {
     if (disposed) return;
+    finishWarp(false);
     disposed = true;
     paneFocus.dispose();
     window.cancelAnimationFrame(frameHandle);

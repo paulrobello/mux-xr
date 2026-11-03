@@ -80,10 +80,13 @@ try {
       }
     ).__muxXR.getControlHints(),
   );
-  const controls = ['Commands', 'Widgets', 'Terminal']
-    .map((label) => hints.find((h) => h.label === label && h.inputAction === 'openInput'))
-    .filter(Boolean);
-  if (controls.length !== 3) throw new Error('Production HUD controls missing');
+  const legacyControls = hints.filter(
+    (hint) =>
+      hint.inputAction === 'openInput' && ['Commands', 'Widgets', 'Terminal'].includes(hint.label),
+  );
+  if (legacyControls.length) throw new Error('Removed native HUD controls are still present');
+  const controls = hints.filter((hint) => hint.inputAction === 'exit');
+  if (controls.length !== 1) throw new Error('Production HUD Exit control missing');
   let counts: number[] = [];
   const deadline = Date.now() + 10000;
   do {
@@ -133,7 +136,7 @@ try {
         ),
       controls as Array<{ clientX: number; clientY: number }>,
     );
-    if (counts.length === 3 && counts.every((n) => n > 8)) break;
+    if (counts.length === controls.length && counts.every((n) => n > 8)) break;
     await page.waitForTimeout(100);
   } while (Date.now() < deadline);
   const renderer = await page.evaluate(() => {
@@ -161,7 +164,7 @@ try {
   };
   console.log(JSON.stringify(result, null, 2));
   await writeFile(`${output}/production-labels.json`, JSON.stringify(result, null, 2));
-  if (counts.length !== 3 || counts.some((n) => n <= 8) || errors.length || labelFailures.length)
+  if (counts.length !== 1 || counts.some((n) => n <= 8) || errors.length || labelFailures.length)
     throw new Error('Production UI glyph pixels missing or runtime errors');
   if (String(renderer).includes('SwiftShader') || renderer === 'unknown')
     throw new Error('Native renderer unavailable');

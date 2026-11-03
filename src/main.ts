@@ -55,6 +55,7 @@ let updateChecker: UpdateChecker | undefined;
 let reloading = false;
 let updateAvailable = false;
 let enteringXR = false;
+let xrEntryMode: 'vr' | 'ar' = 'vr';
 let xrEntry: XrEntryController;
 
 function maybeReloadUpdate(): void {
@@ -355,6 +356,10 @@ const actions: WorkspaceActions = {
     ui.openInput('commands');
   },
   openKeyboard: () => ui.openInput('keyboard'),
+  setXREntryMode: (mode) => {
+    xrEntryMode = mode;
+    ui.setXREntryMode(mode);
+  },
   exitPreview: () => desktop.showTerminals(),
   resizeGrid,
   setTerminalColorMode,
@@ -378,7 +383,7 @@ ui = mountWorkspaceUI(app, {
   onResizeGrid: resizeGrid,
   onCommandsChange: syncCommands,
   onEnterXR: () => {
-    void enterXR('vr');
+    void enterXR(xrEntryMode);
   },
   onPassthrough: () => {
     void enterXR('ar');
@@ -420,6 +425,8 @@ xrEntry = createXREntryController({
   },
   isActive: () => scene.state.xrMode !== 'desktop',
   onError: (error) => notice(error instanceof Error ? error.message : 'Could not enter XR.'),
+  onActivationRequired: () =>
+    scene.setNotice('Automatic XR entry was blocked. Select Enter XR to continue.'),
   xr: navigator.xr,
   eventTarget: window,
   userActivation: () => navigator.userActivation?.isActive ?? false,

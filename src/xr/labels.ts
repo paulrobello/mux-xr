@@ -18,6 +18,8 @@ configureTextBuilder({ defaultFontURL: LABEL_FONT_URL, useWorker: false });
 export interface ScalableLabelOptions {
   wrap?: boolean;
   background?: string;
+  /** Keep the interaction plane, but omit its visible rectangular backplate. */
+  backplate?: boolean;
 }
 
 interface LabelUserData {
@@ -146,10 +148,17 @@ export function createScalableLabel(
 ): THREE.Mesh {
   const safeWidth = Math.max(width, 0.001);
   const safeHeight = Math.max(height, 0.001);
+  const backplate = options.backplate ?? true;
   const texture = backgroundTexture(options.background ?? '#1c2a35', safeWidth, safeHeight);
   const root = new THREE.Mesh(
     new THREE.PlaneGeometry(safeWidth, safeHeight),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, map: texture, transparent: true }),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      map: backplate ? texture : null,
+      transparent: true,
+      opacity: backplate ? 1 : 0,
+      depthWrite: false,
+    }),
   ) as LabelRoot;
   const textMesh = new Text();
   configureText(textMesh, label, safeWidth, safeHeight, options.wrap ?? false);

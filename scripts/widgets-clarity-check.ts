@@ -98,6 +98,17 @@ async function target(
 async function toggleKeyboardFromMenu(page: Page): Promise<void> {
   await page.evaluate(async () => {
     const w = window as unknown as FixtureWindow;
+    if (!w.__widgetsPad) {
+      const pad = {
+        buttons: Array.from({ length: 6 }, () => ({ pressed: false })),
+        axes: [0, 0, 0, 0],
+      };
+      w.__widgetsPad = pad;
+      w.__questControllers[1].dispatchEvent({
+        type: 'connected',
+        data: { gamepad: pad, handedness: 'right' },
+      } as never);
+    }
     w.__widgetsPad.buttons[4].pressed = true;
     await new Promise<void>((resolve) =>
       requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
@@ -119,6 +130,44 @@ async function toggleKeyboardFromMenu(page: Page): Promise<void> {
     'A menu did not settle',
   );
   await target(page, 'radialAction', { radialAction: 'keyboard' });
+  await page.waitForTimeout(180);
+}
+
+async function selectRadial(page: Page, action: string): Promise<void> {
+  await page.evaluate(async () => {
+    const w = window as unknown as FixtureWindow;
+    if (!w.__widgetsPad) {
+      const pad = {
+        buttons: Array.from({ length: 6 }, () => ({ pressed: false })),
+        axes: [0, 0, 0, 0],
+      };
+      w.__widgetsPad = pad;
+      w.__questControllers[1].dispatchEvent({
+        type: 'connected',
+        data: { gamepad: pad, handedness: 'right' },
+      } as never);
+    }
+    w.__widgetsPad.buttons[4].pressed = true;
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+    w.__widgetsPad.buttons[4].pressed = false;
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+  });
+  await waitFor(
+    page,
+    async () =>
+      await page.evaluate(() =>
+        Boolean(
+          (window as unknown as FixtureWindow).__questScene.getObjectByName('radial-menu')?.userData
+            .interactive,
+        ),
+      ),
+    'A menu did not settle',
+  );
+  await target(page, 'radialAction', { radialAction: action });
   await page.waitForTimeout(180);
 }
 async function widgetPixels(page: Page, name: string): Promise<{ visible: number; delta: number }> {
@@ -216,7 +265,7 @@ try {
     `Unsupported renderer: ${renderer}`,
   );
 
-  await target(page, 'openInput', { mode: 'widgets' });
+  await selectRadial(page, 'widgets');
   assert(
     await page.evaluate(() =>
       Boolean(
@@ -263,7 +312,7 @@ try {
     digitalPixels.visible > 0 && digitalPixels.delta > 0,
     'Digital clock did not change rendered pixels',
   );
-  await target(page, 'openInput', { mode: 'widgets' });
+  await selectRadial(page, 'widgets');
   await target(page, 'toggleWidget', { widgetKind: 'analog-clock' });
   await waitFor(
     page,
@@ -294,7 +343,8 @@ try {
     'Clock close controls did not remove both clocks',
   );
 
-  await target(page, 'openInput', { mode: 'terminal' });
+  await selectRadial(page, 'settings');
+  await target(page, 'openInput', { mode: 'display' });
   await target(page, 'openInput', { mode: 'filtering' });
   await target(page, 'filterMode', { filterMode: 'mipmap-linear' });
   await target(page, 'filterAnisotropy', { anisotropy: 4 });
