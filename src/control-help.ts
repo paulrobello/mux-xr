@@ -19,6 +19,10 @@ export function getKeyHelp(key: string): string | undefined {
 export function getControlHelp(data: Record<string, unknown>): string | undefined {
   if (typeof data.key === 'string') return getKeyHelp(data.key);
   switch (data.inputAction) {
+    case 'hierarchyStyle':
+      return 'Switch the mux tree between Helix Navigator and Spatial Docks';
+    case 'hierarchyNode':
+      return 'Explore this branch of the mux tree; grip to move or rotate the whole tree';
     case 'windowPreference':
       return data.preference === 'defaultOpacity'
         ? 'Set glass opacity for newly opened windows; existing panes keep their opacity'

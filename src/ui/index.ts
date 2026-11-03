@@ -17,6 +17,11 @@ import {
 } from '../terminal/filtering';
 import { terminalKeyLabel } from '../terminal/protocol';
 import {
+  DEFAULT_HIERARCHY_STYLE,
+  type HierarchyStyle,
+  validateHierarchyStyle,
+} from '../workspace/hierarchy-style';
+import {
   DEFAULT_WINDOW_PREFERENCES,
   validateWindowPreferences,
   type WindowPreferences,
@@ -67,6 +72,7 @@ export interface WorkspaceSettings {
   arrangement: PanelArrangement;
   filtering: TerminalFiltering;
   windowPreferences: WindowPreferences;
+  hierarchyStyle: HierarchyStyle;
 }
 
 export interface WorkspaceUI {
@@ -100,6 +106,7 @@ export interface WorkspaceUI {
   setArrangement(pattern: PanelArrangement, persist?: boolean): void;
   setTerminalFiltering(filtering: TerminalFiltering, persist?: boolean): void;
   setWindowPreferences(value: WindowPreferences, persist?: boolean): void;
+  setHierarchyStyle(style: HierarchyStyle, persist?: boolean): void;
   setFilteringCapabilities(maxAnisotropy: number): void;
 }
 
@@ -120,6 +127,7 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   arrangement: 'arc',
   filtering: { ...DEFAULT_TERMINAL_FILTERING },
   windowPreferences: { ...DEFAULT_WINDOW_PREFERENCES },
+  hierarchyStyle: DEFAULT_HIERARCHY_STYLE,
 };
 
 export function workspaceScope(endpoint: string, workspaceId: string): string {
@@ -159,6 +167,7 @@ export function validateSettings(value: unknown): WorkspaceSettings {
     keyboardBackground: candidate.keyboardBackground !== false,
     filtering: validateTerminalFiltering(candidate.filtering),
     windowPreferences: validateWindowPreferences(candidate.windowPreferences),
+    hierarchyStyle: validateHierarchyStyle(candidate.hierarchyStyle),
     arrangement:
       candidate.arrangement === 'row' ||
       candidate.arrangement === 'grid' ||
@@ -366,6 +375,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   root.querySelector('[data-gaze]')?.parentElement?.remove();
   let arrangementSelect: HTMLSelectElement | null = null;
   let arrangementApply: HTMLButtonElement | null = null;
+  let hierarchyStyleSelect: HTMLSelectElement | null = null;
   let filteringMaxAnisotropy = 16;
   let updateWindowPreferenceControls = (): void => undefined;
   const updateArrangementAvailability = (): void => {
@@ -450,6 +460,16 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     filterGaze.checked = settings.filtering.gazeClarity;
     filterDistance.value = String(settings.filtering.gazeMaxDistance);
     updateFilteringVisibility();
+    const hierarchyStyle = document.createElement('label');
+    hierarchyStyle.innerHTML =
+      '<span>Hierarchy style</span><select data-hierarchy-style aria-label="Hierarchy style"><option value="helix">Helix Navigator</option><option value="spatial-docks">Spatial Docks</option></select>';
+    settingsPanel.insertBefore(
+      hierarchyStyle,
+      settingsPanel.querySelector('[data-action="passthrough"]'),
+    );
+    hierarchyStyleSelect = hierarchyStyle.querySelector('[data-hierarchy-style]');
+    if (!hierarchyStyleSelect) throw new Error('Hierarchy style control missing');
+    hierarchyStyleSelect.value = settings.hierarchyStyle;
     const windowControls = document.createElement('div');
     windowControls.dataset.windowPreferences = 'true';
     windowControls.innerHTML =
@@ -972,6 +992,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   });
   qs<HTMLInputElement>('#endpoint').value = settings.endpoint;
   qs<HTMLSelectElement>('[data-background]').value = settings.background;
+  qs<HTMLSelectElement>('[data-hierarchy-style]').value = settings.hierarchyStyle;
   qs<HTMLSelectElement>('[data-color-mode]').value = settings.colorMode;
   qs<HTMLInputElement>('[data-keyboard-background]').checked = settings.keyboardBackground;
   qs<HTMLInputElement>('[data-gaze-input]').checked = settings.gazeInput;
@@ -979,6 +1000,13 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     settings = {
       ...settings,
       background: (event.target as HTMLSelectElement).value as BackgroundMode,
+    };
+    saveSettings();
+  });
+  qs<HTMLSelectElement>('[data-hierarchy-style]').addEventListener('change', (event) => {
+    settings = {
+      ...settings,
+      hierarchyStyle: validateHierarchyStyle((event.target as HTMLSelectElement).value),
     };
     saveSettings();
   });
@@ -1209,6 +1237,13 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       if (JSON.stringify(settings.windowPreferences) === JSON.stringify(next)) return;
       settings = { ...settings, windowPreferences: next };
       updateWindowPreferenceControls();
+      if (persist) saveSettings();
+    },
+    setHierarchyStyle(style, persist = false) {
+      const next = validateHierarchyStyle(style);
+      if (settings.hierarchyStyle === next) return;
+      settings = { ...settings, hierarchyStyle: next };
+      if (hierarchyStyleSelect) hierarchyStyleSelect.value = next;
       if (persist) saveSettings();
     },
     setFilteringCapabilities(maxAnisotropy) {

@@ -170,6 +170,11 @@ The form language is compact and gently softened. Desktop containers use an 8px 
 ### Navigation
 - **Style:** The mux hierarchy is a compact tree in the sidebar. Summaries use 12px cool blue-gray text, 7px vertical padding, and indentation to communicate workspace/session/window/pane structure.
 
+### XR mux hierarchy
+The immersive Panes surface renders the same workspace/session/window/pane hierarchy as native 3D geometry through `src/xr/hierarchy-navigator.ts`. **Helix Navigator** is the default style; **Spatial Docks** is the alternate spatial grouping. Both use muted teal (`#3c91a0`) and ivory (`#dce7ed`) solid node bodies, amber (`#e4a84a`) for the selected branch and attached rings, muted teal (`#1d4c59`) connectors, dark depth (`#102832`), locally bundled crisp labels and a short scale-in transition. The desktop DOM tree remains the accessible fallback.
+
+Panes navigation owns the hierarchy path and page. Home, Up and paging retain parent context. A pane leaf selects the existing terminal view and closes the navigator. The navigator is a grabbable root with the same one- and two-controller gestures as other XR surfaces. Its path and transform persist across style changes. Opening it temporarily hides terminal view roots, and closing or switching away restores their prior visibility. The browser Workspace **Hierarchy style** selector and native Settings → Display **Mux tree** control are one saved, synchronized preference. These controls do not alter terminal processes or remote grids.
+
 ### Cards / Containers
 - **Corner Style:** 8px for the scene host and larger application containers, 4px for controls and labels.
 - **Background:** Layer space black, field black, panel navy, and control navy by function.

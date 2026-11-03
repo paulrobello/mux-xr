@@ -27,6 +27,11 @@ import {
 } from '../terminal/filtering';
 import { terminalKeyLabel } from '../terminal/protocol';
 import {
+  DEFAULT_HIERARCHY_STYLE,
+  type HierarchyStyle,
+  validateHierarchyStyle,
+} from '../workspace/hierarchy-style';
+import {
   DEFAULT_WINDOW_PREFERENCES,
   validateWindowPreferences,
   type WindowPreferences,
@@ -40,6 +45,11 @@ import {
 } from './command-editor';
 import { keepLayoutAboveFloor, workspaceFloorY } from './floor-layout';
 import { createFrameCounter } from './fps';
+import {
+  createHierarchyNavigator,
+  type HierarchyNavigation,
+  type HierarchyNavigator,
+} from './hierarchy-navigator';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
@@ -105,6 +115,7 @@ export interface WorkspaceSceneState {
   terminalColorMode: TerminalColorMode;
   filtering: TerminalFiltering;
   windowPreferences: WindowPreferences;
+  hierarchyStyle: HierarchyStyle;
   widgets: WidgetKind[];
   keyboardBackgroundEnabled: boolean;
   fps: number | null;
@@ -133,6 +144,7 @@ export interface WorkspaceScene {
   setTerminalColorMode(mode: TerminalColorMode): void;
   setTerminalFiltering(filtering: TerminalFiltering): void;
   setWindowPreferences(preferences: WindowPreferences): void;
+  setHierarchyStyle(style: HierarchyStyle): void;
   setTerminalOpacity(id: string, value: number): void;
   getTerminalOpacity(id: string): number;
   captureTerminalPose(id: string): SavedUIPose | null;
@@ -539,6 +551,7 @@ export function createWorkspaceScene(
     terminalColorMode: 'comfort',
     filtering: { ...DEFAULT_TERMINAL_FILTERING },
     windowPreferences: { ...DEFAULT_WINDOW_PREFERENCES },
+    hierarchyStyle: DEFAULT_HIERARCHY_STYLE,
     widgets: [],
     keyboardBackgroundEnabled: true,
     fps: null,
@@ -690,6 +703,9 @@ export function createWorkspaceScene(
   let commandEditorMessage = '';
   let commandPage = 0;
   let inputRoot: THREE.Group | null = null;
+  let hierarchyNavigator: HierarchyNavigator | null = null;
+  let hierarchyNavigation: HierarchyNavigation = { path: [], page: 0 };
+  const hierarchyHiddenPanels = new Map<THREE.Object3D, boolean>();
   let hudRoot: THREE.Group | null = null;
   const closeBackgroundMenus = (): void => {
     for (const owner of [hudRoot, inputRoot]) {
@@ -703,7 +719,6 @@ export function createWorkspaceScene(
   let xrStartPromise: Promise<void> | null = null;
   let activeSession: XrSessionLike | null = null;
   let inputMode: InputMode = 'commands';
-  let panePage = 0;
   const modifierState = createModifierState();
   const modifierPresses = new Map<
     THREE.Group | number,
@@ -721,10 +736,6 @@ export function createWorkspaceScene(
     target: string | null;
     locked: Readonly<KeyModifiers>;
   } | null = null;
-  let hierarchyLevel: 'workspace' | 'session' | 'window' | 'pane' = 'workspace';
-  let hierarchyWorkspaceId: string | null = null;
-  let hierarchySessionId: string | null = null;
-  let hierarchyWindowId: string | null = null;
   let gazeInputState: GazeState = { candidateId: null, emphasizedId: null, since: 0 };
   let lastRayDistance = CONTROLLER_RAY_LENGTH;
   const hoveredByController = new Map<THREE.Group, THREE.Object3D>();
@@ -1153,6 +1164,10 @@ export function createWorkspaceScene(
     }
     const nowMs = Date.now();
     for (const widget of widgets.values()) widget.update(nowMs);
+    hierarchyNavigator?.update(
+      deltaSeconds,
+      renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera,
+    );
     (scene.userData.updateEnvironment as ((delta: number) => void) | undefined)?.(deltaSeconds);
     if (gripActive()) modifierPresses.clear();
     for (const press of modifierPresses.values()) {
@@ -1617,6 +1632,13 @@ export function createWorkspaceScene(
     for (const [controller, object] of hoveredByController)
       if (inputRoot.getObjectById(object.id)) hoveredByController.delete(controller);
     if (hoveredControl && inputRoot.getObjectById(hoveredControl.id)) showHover(null);
+    if (hierarchyNavigator) {
+      hierarchyNavigator.dispose();
+      hierarchyNavigator.root.removeFromParent();
+      hierarchyNavigator = null;
+    }
+    for (const [root, visible] of hierarchyHiddenPanels) root.visible = visible;
+    hierarchyHiddenPanels.clear();
     scene.remove(inputRoot);
     disposeObject(inputRoot);
     inputRoot = null;
@@ -1727,13 +1749,15 @@ export function createWorkspaceScene(
                     ? 'Terminal curvature'
                     : mode === 'arrange'
                       ? 'Arrange terminals'
-                      : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? 'Keyboard' : mode === 'terminal' ? 'Terminal settings' : `Panes · ${hierarchyLevel}`} · ${targetTitle}`,
-      0.9,
+                      : mode === 'panes'
+                        ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
+                        : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? 'Keyboard' : 'Terminal settings'} · ${targetTitle}`,
+      mode === 'panes' ? 1.8 : 0.9,
       0.12,
       { inputAction: 'grabInput' },
     );
     title.userData.dragHandle = true;
-    title.position.y = mode === 'command-editor' ? 0.88 : 0.56;
+    title.position.y = mode === 'panes' ? 1.65 : mode === 'command-editor' ? 0.88 : 0.56;
     inputRoot.add(title);
     if (mode === 'command-editor' && commandDraft) {
       for (const [field, y] of [
@@ -1828,6 +1852,17 @@ export function createWorkspaceScene(
       });
       filteringButton.position.y = 0;
       inputRoot.add(filteringButton);
+      const hierarchyStyle = createLabelButton(
+        `Mux tree: ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`,
+        1.45,
+        0.11,
+        {
+          inputAction: 'hierarchyStyle',
+          hierarchyStyle: mutableState.hierarchyStyle === 'helix' ? 'spatial-docks' : 'helix',
+        },
+      );
+      hierarchyStyle.position.y = -0.16;
+      inputRoot.add(hierarchyStyle);
       const preferences = mutableState.windowPreferences;
       for (const [index, [preference, label, step]] of (
         [
@@ -1840,7 +1875,7 @@ export function createWorkspaceScene(
           ['focusCurvature', `Focus warp: ${Math.round(preferences.focusCurvature)}°`, 5],
         ] as const
       ).entries()) {
-        const y = -0.18 - index * 0.14;
+        const y = -0.32 - index * 0.13;
         const value = createLabelButton(label, 1.05, 0.1, { inputAction: 'noop' });
         value.position.set(0, y, 0);
         inputRoot.add(value);
@@ -1897,58 +1932,21 @@ export function createWorkspaceScene(
       reset.position.y = -0.45;
       inputRoot.add(reset);
     } else if (mode === 'panes') {
-      const visible = availablePanes.filter(
-        (pane) =>
-          hierarchyLevel === 'workspace' ||
-          (hierarchyLevel === 'session' && pane.workspaceId === hierarchyWorkspaceId) ||
-          (hierarchyLevel === 'window' &&
-            pane.workspaceId === hierarchyWorkspaceId &&
-            pane.sessionId === hierarchySessionId) ||
-          (hierarchyLevel === 'pane' &&
-            pane.workspaceId === hierarchyWorkspaceId &&
-            pane.sessionId === hierarchySessionId &&
-            pane.windowId === hierarchyWindowId),
+      for (const panel of panels.values()) {
+        hierarchyHiddenPanels.set(panel.root, panel.root.visible);
+        panel.root.visible = false;
+      }
+      hierarchyNavigator = createHierarchyNavigator(
+        availablePanes,
+        mutableState.hierarchyStyle,
+        hierarchyNavigation,
+        new Set(panels.keys()),
       );
-      const groups = new Map<string, PaneDescriptor[]>();
-      visible.forEach((pane) => {
-        const key =
-          hierarchyLevel === 'workspace'
-            ? pane.workspaceId
-            : hierarchyLevel === 'session'
-              ? pane.sessionId
-              : hierarchyLevel === 'window'
-                ? pane.windowId
-                : pane.id;
-        groups.set(key, [...(groups.get(key) ?? []), pane]);
-      });
-      [...groups.values()].slice(panePage * 4, panePage * 4 + 4).forEach((group, index) => {
-        const pane = group[0];
-        const label =
-          hierarchyLevel === 'workspace'
-            ? pane.workspaceName
-            : hierarchyLevel === 'session'
-              ? pane.sessionName
-              : hierarchyLevel === 'window'
-                ? pane.windowName
-                : `${pane.title} · ${pane.sessionName}/${pane.windowName}`;
-        const button = createLabelButton(label, 0.78, 0.11, {
-          inputAction: hierarchyLevel === 'pane' ? 'pane' : 'hierarchyNext',
-          hierarchyKey: pane.id,
-          paneId: pane.id,
-        });
-        button.position.set(index % 2 ? 0.42 : -0.42, 0.4 - Math.floor(index / 2) * 0.15, 0);
-        inputRoot?.add(button);
-      });
-      if (groups.size > 4) {
-        const page = createLabelButton('Next page', 0.28, 0.08, { inputAction: 'panePage' });
-        page.position.set(0.2, -0.18, 0);
-        inputRoot.add(page);
-      }
-      if (hierarchyLevel !== 'workspace') {
-        const back = createLabelButton('Back', 0.25, 0.08, { inputAction: 'hierarchyBack' });
-        back.position.set(-0.2, -0.18, 0);
-        inputRoot.add(back);
-      }
+      hierarchyNavigation = {
+        path: hierarchyNavigator.root.userData.hierarchyPath as string[],
+        page: hierarchyNavigator.root.userData.hierarchyPage as number,
+      };
+      inputRoot.add(hierarchyNavigator.root);
     } else if (mode === 'commands') {
       const commandStart = commandPage * 8;
       menuCommands.slice(commandStart, commandStart + 8).forEach((command, index) => {
@@ -2178,7 +2176,11 @@ export function createWorkspaceScene(
       }
     }
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
-    close.position.set(0, -0.66, 0);
+    close.position.set(
+      mode === 'panes' ? -1.2 : 0,
+      mode === 'panes' ? -0.9 : mode === 'display' ? -0.76 : -0.66,
+      0,
+    );
     inputRoot.add(close);
     if (['terminal', 'display', 'world', 'filtering'].includes(mode)) {
       close.position.x = 0.22;
@@ -2186,8 +2188,14 @@ export function createWorkspaceScene(
         inputAction: 'openInput',
         mode: mode === 'filtering' ? 'display' : 'settings',
       });
-      back.position.set(-0.22, -0.66, 0);
+      back.position.set(-0.22, mode === 'display' ? -0.76 : -0.66, 0);
       inputRoot.add(back);
+    }
+    if (mode === 'panes') {
+      inputRoot.updateMatrixWorld(true);
+      hierarchyNavigator?.update(0, renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera);
+      scene.add(inputRoot);
+      return;
     }
     inputRoot.updateMatrixWorld(true);
     const bounds = new THREE.Box3();
@@ -2399,30 +2407,20 @@ export function createWorkspaceScene(
       else showInput(mode);
       return true;
     }
-    if (action === 'hierarchyNext') {
-      const pane = availablePanes.find((item) => item.id === hit.userData.hierarchyKey);
-      if (pane) {
-        if (hierarchyLevel === 'workspace') {
-          hierarchyWorkspaceId = pane.workspaceId;
-          hierarchyLevel = 'session';
-        } else if (hierarchyLevel === 'session') {
-          hierarchySessionId = pane.sessionId;
-          hierarchyLevel = 'window';
-        } else if (hierarchyLevel === 'window') {
-          hierarchyWindowId = pane.windowId;
-          hierarchyLevel = 'pane';
-        }
-        panePage = 0;
-        refreshInputRoot('panes');
-      }
+    if (action === 'hierarchyNode') {
+      hierarchyNavigation = {
+        path: Array.isArray(hit.userData.hierarchyPath)
+          ? hit.userData.hierarchyPath.filter(
+              (part: unknown): part is string => typeof part === 'string',
+            )
+          : [],
+        page: Number(hit.userData.hierarchyPage) || 0,
+      };
+      refreshInputRoot('panes');
       return true;
     }
-    if (action === 'hierarchyBack') {
-      if (hierarchyLevel === 'pane') hierarchyLevel = 'window';
-      else if (hierarchyLevel === 'window') hierarchyLevel = 'session';
-      else if (hierarchyLevel === 'session') hierarchyLevel = 'workspace';
-      panePage = 0;
-      refreshInputRoot('panes');
+    if (action === 'hierarchyStyle') {
+      setHierarchyStyle(validateHierarchyStyle(hit.userData.hierarchyStyle));
       return true;
     }
     if (radialMenu.root.visible && !radialMenu.interactive) return true;
@@ -2608,24 +2606,6 @@ export function createWorkspaceScene(
         actions.selectPane(paneId);
         hideInput();
       }
-      return true;
-    }
-    if (action === 'panePage') {
-      const keys = new Set(
-        availablePanes.map((pane) =>
-          inputMode === 'panes'
-            ? hierarchyLevel === 'workspace'
-              ? pane.workspaceId
-              : hierarchyLevel === 'session'
-                ? pane.sessionId
-                : hierarchyLevel === 'window'
-                  ? pane.windowId
-                  : pane.id
-            : pane.id,
-        ),
-      );
-      panePage = (panePage + 1) % Math.max(1, Math.ceil(keys.size / 4));
-      refreshInputRoot(inputMode);
       return true;
     }
     if (action === 'commandPage') {
@@ -3435,27 +3415,7 @@ export function createWorkspaceScene(
         updateLabel(panel.titleLabel, `${pane.title} · ${panel.surface.status}`);
       }
     }
-    panePage = 0;
-    const validWorkspace =
-      hierarchyWorkspaceId === null ||
-      panes.some((pane) => pane.workspaceId === hierarchyWorkspaceId);
-    const validSession =
-      hierarchySessionId === null ||
-      panes.some(
-        (pane) =>
-          pane.sessionId === hierarchySessionId && pane.workspaceId === hierarchyWorkspaceId,
-      );
-    const validWindow =
-      hierarchyWindowId === null ||
-      panes.some(
-        (pane) => pane.windowId === hierarchyWindowId && pane.sessionId === hierarchySessionId,
-      );
-    if (!validWorkspace || !validSession || !validWindow) {
-      hierarchyLevel = 'workspace';
-      hierarchyWorkspaceId = null;
-      hierarchySessionId = null;
-      hierarchyWindowId = null;
-    }
+    if (inputRoot && inputMode === 'panes') refreshInputRoot('panes');
     notify();
   };
   const setQuickCommands = (commands: QuickCommand[]): void => {
@@ -3666,6 +3626,14 @@ export function createWorkspaceScene(
       rotation.premultiply(panel.root.parent.getWorldQuaternion(new THREE.Quaternion()).invert());
     }
     return { position, rotation };
+  };
+  const setHierarchyStyle = (style: HierarchyStyle): void => {
+    const next = validateHierarchyStyle(style);
+    if (next === mutableState.hierarchyStyle) return;
+    mutableState.hierarchyStyle = next;
+    if (inputRoot && (inputMode === 'panes' || inputMode === 'display'))
+      refreshInputRoot(inputMode);
+    notify();
   };
   const setWindowPreferences = (preferences: WindowPreferences): void => {
     const next = validateWindowPreferences(preferences);
@@ -3979,6 +3947,7 @@ export function createWorkspaceScene(
     setTerminalColorMode,
     setTerminalFiltering,
     setWindowPreferences,
+    setHierarchyStyle,
     getTerminalOpacity,
     setTerminalOpacity,
     captureTerminalPose,

@@ -68,6 +68,14 @@ Mouse clicks in 3D preview and controller triggers in VR use the same actions, w
 | Widgets | Add/show/hide digital and analog clocks. |
 | Settings | Display, World and Selected terminal pages. |
 
+### Mux hierarchy navigation
+
+The XR **Panes** surface presents the workspace/session/window/pane hierarchy as real 3D geometry. The default **Helix Navigator** arranges nodes around a compact helix; **Spatial Docks** places the same hierarchy in spatial dock groups. Choose **Hierarchy style** in browser Workspace settings, or use the native **Settings → Display → Mux tree** control. The choice is saved locally and stays synchronized between browser and native settings.
+
+Selecting a branch keeps the current hierarchy path and page context. **Home**, **Up** and paging retain that context while browsing. Selecting a pane leaf opens the existing pane view and closes the navigator, without changing the remote process. The navigator is a movable XR root: one- and two-controller grip gestures use the same manipulation behavior as other XR surfaces, and its transform and navigation state survive style changes. While it is open, terminal view roots are temporarily hidden. Closing or switching away restores their original visibility.
+
+The desktop DOM hierarchy remains the accessible fallback. The bundled XR labels use crisp local text and the hierarchy uses muted teal and ivory node bodies, amber branch/attached states, dim connectors and a short scale-in transition.
+
 Display owns color modes and Filtering, including independent Sharper gaze. World owns the background selector and VR/passthrough. Changing immersive mode ends the current session and prepares a named Enter VR/Enter passthrough browser button for a fresh press. Selected terminal owns grid dimensions, text zoom and per-pane glass opacity. Gaze input appears only on Keyboard. The HUD shows active-pane/connection status, FPS, notices, updates and Exit. Terminal views retain title/status, Disconnect/Reconnect and Close view. Typing keys and local text-size buttons no longer repeat on every terminal.
 
 Settings → Display also owns new-window opacity and Focus preferences. New terminal views use the saved default glass opacity (10–100%, initially 100%) unless that pane has a saved override. Changing the default leaves open views unchanged. Focus distance is saved from 0.5–5 m, defaulting to 1.5 m. Focus warp is saved from 0–100°, defaulting to flat. Both focus settings apply to any focused window and update an active focus immediately. Exiting focus restores its original placement, scale and per-pane curvature.
@@ -126,6 +134,7 @@ Arrangements keep the full terminal bounds above the Observatory deck or passthr
 - `make checkall-ci`: fast gate plus asset-chain validation, secret scan and dependency audit.
 - `MUX_XR_BASE_URL=https://localhost:4240 make production-label-check`: verify actual UI glyph pixels in a built app served with the streamer CSP. A Vite development server is not sufficient.
 - `MUX_XR_PRIVATE_TEST=1 MUX_XR_BASE_URL=http://127.0.0.1:4241 MUX_XR_TEST_ROOT=/path/to/private/dist make widgets-clarity-check`: native widget, filter and pose checks using a private built fixture.
+- `MUX_XR_PRIVATE_TEST=1 MUX_XR_TEST_ROOT=/path/to/private/dist make hierarchy-check`: private loopback GPU check for both hierarchy styles, browser/native synchronization, navigation, screenshots and reload persistence.
 - `make e2e`: local native-GPU browser tests with explicitly synthetic protocol fixtures.
 - `make real-app-check`: actual built app against a private compatible core pair, requiring `MUX_XR_PRIVATE_TEST=1` and `MUX_XR_BASE_URL`. It issues two harmless marker commands, so use isolated test panes.
 - `MUX_XR_BASE_URL=http://127.0.0.1:4241 bun run scripts/xr-visual-check.ts`: native GPU rendering of the spatial keyboard using an explicit test XR camera/controller. This requires a Vite development server and does not replace headset testing.

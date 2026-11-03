@@ -1537,18 +1537,22 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('requests an unattached pane through the native hierarchy', () => {
-    const { workspace, actions, left, right, container } = fixture();
-    workspace.setAvailablePanes([left.pane, right.pane, pane('pane-c', 'Other')]);
-    workspace.showInput('panes');
-    hit(workspace, { inputAction: 'hierarchyNext' });
-    hit(workspace, { inputAction: 'hierarchyNext' });
-    hit(workspace, { inputAction: 'hierarchyNext' });
-    hit(workspace, { inputAction: 'pane', paneId: 'pane-c' });
-    expect(actions.selectPane).toHaveBeenLastCalledWith('pane-c');
-    workspace.dispose();
-    container.remove();
-  });
+  it.each(['helix', 'spatial-docks'] as const)(
+    'requests an unattached pane through the %s hierarchy',
+    (style) => {
+      const { workspace, actions, left, right, container } = fixture();
+      workspace.setHierarchyStyle(style);
+      workspace.setAvailablePanes([left.pane, right.pane, pane('pane-c', 'Other')]);
+      workspace.showInput('panes');
+      hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Workspace' });
+      hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Session' });
+      hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Window' });
+      hit(workspace, { inputAction: 'pane', paneId: 'pane-c' });
+      expect(actions.selectPane).toHaveBeenLastCalledWith('pane-c');
+      workspace.dispose();
+      container.remove();
+    },
+  );
 
   it('keeps the native keyboard compact and omits physical transform buttons', () => {
     const { workspace, container } = fixture();
@@ -1906,7 +1910,7 @@ describe('native XR controller event routing', () => {
       'panes',
       'xr-panes-controls',
       'panes',
-      { inputAction: 'hierarchyNext' },
+      { inputAction: 'hierarchyNode', originalTitle: 'Workspace' },
       { inputAction: 'close' },
     ],
     ['hud', 'xr-workspace-hud', undefined, { inputAction: 'exit' }, { inputAction: 'exit' }],
