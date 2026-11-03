@@ -20,6 +20,9 @@ e2e:
 	bun run e2e
 hierarchy-check:
 	bun run scripts/hierarchy-check.ts
+.PHONY: input-refinement-check
+input-refinement-check:
+	bun run scripts/input-refinement-check.ts
 auto-entry-check:
 	bun run scripts/auto-entry-check.ts
 production-label-check:

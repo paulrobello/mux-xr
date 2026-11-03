@@ -19,6 +19,7 @@ import {
   keyboardDimensions,
   keyboardKeys,
 } from '../keyboard';
+import type { DictationState } from '../speech-input';
 import {
   DEFAULT_TERMINAL_FILTERING,
   type TerminalFiltering,
@@ -31,6 +32,7 @@ import {
   type HierarchyStyle,
   validateHierarchyStyle,
 } from '../workspace/hierarchy-style';
+import { validateKeyboardCurvature } from '../workspace/keyboard-curvature';
 import {
   DEFAULT_WINDOW_PREFERENCES,
   validateWindowPreferences,
@@ -50,6 +52,7 @@ import {
   type HierarchyNavigation,
   type HierarchyNavigator,
 } from './hierarchy-navigator';
+import { curveKeyboardContent } from './keyboard-surface';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
@@ -118,6 +121,8 @@ export interface WorkspaceSceneState {
   hierarchyStyle: HierarchyStyle;
   widgets: WidgetKind[];
   keyboardBackgroundEnabled: boolean;
+  keyboardCurvature: number;
+  dictation: DictationState;
   fps: number | null;
   xrMode: 'desktop' | 'vr' | 'ar';
   focusedTerminalId: string | null;
@@ -154,6 +159,8 @@ export interface WorkspaceScene {
   setTerminalCurvature(id: string, degrees: number): void;
   getTerminalCurvature(id: string): number;
   setKeyboardBackgroundEnabled(enabled: boolean): void;
+  setKeyboardCurvature(degrees: number): void;
+  setDictationState(state: DictationState): void;
   setAvailablePanes(panes: PaneDescriptor[]): void;
   setQuickCommands(commands: QuickCommand[]): void;
   showInput(mode: InputMode): void;
@@ -338,6 +345,7 @@ function createLabelButton(
   const mesh = createScalableLabel(label, width, height, {
     background: '#1c2a35',
     wrap: Boolean(data.wrap),
+    border: typeof data.key === 'string' ? '#7197a8' : undefined,
   });
   Object.assign(mesh.userData, data, { helpText: getControlHelp(data) });
   return mesh;
@@ -554,6 +562,8 @@ export function createWorkspaceScene(
     hierarchyStyle: DEFAULT_HIERARCHY_STYLE,
     widgets: [],
     keyboardBackgroundEnabled: true,
+    keyboardCurvature: 0,
+    dictation: { supported: false, status: 'idle', transcript: '', error: null },
     fps: null,
     xrMode: 'desktop',
     focusedTerminalId: null,
@@ -705,6 +715,18 @@ export function createWorkspaceScene(
   let inputRoot: THREE.Group | null = null;
   let hierarchyNavigator: HierarchyNavigator | null = null;
   let hierarchyNavigation: HierarchyNavigation = { path: [], page: 0 };
+  let hierarchyOpened = false;
+  let dictationCursor = 0;
+  const dictationCaption = (): string => {
+    const draft = mutableState.dictation;
+    if (draft.error) return draft.error;
+    if (draft.status === 'review') {
+      const characters = Array.from(draft.transcript);
+      characters.splice(dictationCursor, 0, '|');
+      return characters.join('');
+    }
+    return draft.transcript || 'Listening…';
+  };
   const hierarchyHiddenPanels = new Map<THREE.Object3D, boolean>();
   let hudRoot: THREE.Group | null = null;
   const closeBackgroundMenus = (): void => {
@@ -1224,6 +1246,7 @@ export function createWorkspaceScene(
           (!radialMenu.root.visible || warpEdit)
         ) {
           if (warpEdit) finishWarp(false);
+          else if (inputRoot && inputMode === 'panes') hideInput();
           else {
             const target = targetFromController(controller);
             toggleFocusMode(
@@ -1666,6 +1689,8 @@ export function createWorkspaceScene(
   };
   const refreshInputRoot = (mode: InputMode): void => {
     inputMode = mode;
+    if (mode !== 'keyboard' && mutableState.dictation.status === 'listening')
+      actions.dictationAction?.('cancel');
     const previousRoot = inputRoot;
     const previousPair = previousRoot ? pairGrabs.get(previousRoot) : undefined;
     if (previousRoot) pairGrabs.delete(previousRoot);
@@ -1728,6 +1753,61 @@ export function createWorkspaceScene(
       );
       gazeToggle.position.set(-0.25, 0.7, 0);
       inputRoot.add(gazeToggle);
+      const curvature = createLabelButton(
+        `Keyboard curve: ${Math.round(mutableState.keyboardCurvature)}°`,
+        0.8,
+        0.09,
+        { inputAction: 'noop' },
+      );
+      curvature.position.set(0, 0.86, 0);
+      inputRoot.add(curvature);
+      for (const direction of [-1, 1]) {
+        const step = createLabelButton(direction < 0 ? '−' : '+', 0.16, 0.09, {
+          inputAction: 'keyboardCurvature',
+          delta: direction * 10,
+        });
+        step.position.set(direction * 0.52, 0.86, 0);
+        inputRoot.add(step);
+      }
+      const dictation = mutableState.dictation;
+      const dictate = createLabelButton(
+        dictation.status === 'listening'
+          ? 'Stop dictation'
+          : dictation.supported
+            ? 'Dictate'
+            : 'Speech unavailable',
+        0.7,
+        0.1,
+        {
+          inputAction: dictation.supported ? 'dictation' : 'noop',
+          dictationAction: dictation.status === 'listening' ? 'stop' : 'start',
+        },
+      );
+      dictate.position.set(-0.42, 1.03, 0);
+      inputRoot.add(dictate);
+      if (dictation.transcript && dictation.status !== 'listening') {
+        const insert = createLabelButton('Insert text', 0.5, 0.1, {
+          inputAction: 'dictation',
+          dictationAction: 'insert',
+        });
+        insert.position.set(0.25, 1.03, 0);
+        inputRoot.add(insert);
+      }
+      if (dictation.status !== 'idle') {
+        const cancel = createLabelButton('Cancel', 0.35, 0.1, {
+          inputAction: 'dictation',
+          dictationAction: 'cancel',
+        });
+        cancel.position.set(0.73, 1.03, 0);
+        inputRoot.add(cancel);
+        const transcript = createLabelButton(dictationCaption(), 1.85, 0.14, {
+          inputAction: 'noop',
+          wrap: true,
+        });
+        transcript.name = 'xr-dictation-transcript';
+        transcript.position.set(0, 1.22, 0);
+        inputRoot.add(transcript);
+      }
     }
     const targetTitle = mutableState.inputTargetTitle
       ? `Target: ${mutableState.inputTargetTitle}`
@@ -2208,13 +2288,24 @@ export function createWorkspaceScene(
     }
     const size = bounds.getSize(new THREE.Vector3());
     const center = bounds.getCenter(new THREE.Vector3());
+    const keyboardRadians =
+      mode === 'keyboard' || mode === 'command-editor'
+        ? THREE.MathUtils.degToRad(mutableState.keyboardCurvature)
+        : 0;
     const backing = new THREE.Mesh(
-      new THREE.PlaneGeometry(size.x + 0.12, size.y + 0.12),
+      keyboardRadians
+        ? createCurvedTerminalGeometry({
+            width: size.x + 0.12,
+            height: size.y + 0.12,
+            radians: keyboardRadians,
+          })
+        : new THREE.PlaneGeometry(size.x + 0.12, size.y + 0.12),
       new THREE.MeshBasicMaterial({ color: 0x0d1720 }),
     );
     backing.position.copy(center);
     backing.position.z = -0.015;
     backing.name = 'input-backdrop';
+    if (keyboardRadians) backing.material.depthWrite = false;
     if (
       (mode === 'keyboard' || mode === 'command-editor') &&
       !mutableState.keyboardBackgroundEnabled
@@ -2226,6 +2317,7 @@ export function createWorkspaceScene(
     backing.userData.inputAction = 'grabInput';
     backing.userData.helpText = getControlHelp({ inputAction: 'grabInput' });
     inputRoot.add(backing);
+    if (keyboardRadians) curveKeyboardContent(inputRoot, size.x + 0.12, keyboardRadians);
     scene.add(inputRoot);
     syncModifierVisuals();
   };
@@ -2421,6 +2513,16 @@ export function createWorkspaceScene(
     }
     if (action === 'hierarchyStyle') {
       setHierarchyStyle(validateHierarchyStyle(hit.userData.hierarchyStyle));
+      return true;
+    }
+    if (action === 'keyboardCurvature') {
+      setKeyboardCurvature(mutableState.keyboardCurvature + Number(hit.userData.delta));
+      return true;
+    }
+    if (action === 'dictation') {
+      actions.dictationAction?.(
+        hit.userData.dictationAction as 'start' | 'stop' | 'cancel' | 'insert',
+      );
       return true;
     }
     if (radialMenu.root.visible && !radialMenu.interactive) return true;
@@ -2628,6 +2730,47 @@ export function createWorkspaceScene(
       refreshInputRoot('command-editor');
       return true;
     }
+    if (
+      action === 'key' &&
+      inputMode === 'keyboard' &&
+      (mutableState.dictation.status === 'review' ||
+        (mutableState.dictation.status === 'error' && mutableState.dictation.transcript))
+    ) {
+      const key = String(hit.userData.key);
+      const characters = Array.from(mutableState.dictation.transcript);
+      if (key === 'Enter') actions.dictationAction?.('insert');
+      else if (key === 'Escape') actions.dictationAction?.('cancel');
+      else if (hit.userData.modifier) {
+        modifierState.tap(hit.userData.modifier as KeyboardModifier);
+        syncModifierVisuals();
+      } else {
+        dictationCursor = Math.max(0, Math.min(characters.length, dictationCursor));
+        if (key === 'ArrowLeft') dictationCursor = Math.max(0, dictationCursor - 1);
+        else if (key === 'ArrowRight')
+          dictationCursor = Math.min(characters.length, dictationCursor + 1);
+        else if (key === 'Home') dictationCursor = 0;
+        else if (key === 'End') dictationCursor = characters.length;
+        else if (key === 'Backspace' && dictationCursor > 0)
+          characters.splice(--dictationCursor, 1);
+        else if (key === 'Delete') characters.splice(dictationCursor, 1);
+        else if (key.length === 1) {
+          characters.splice(
+            dictationCursor++,
+            0,
+            terminalKeyLabel(key, Boolean(modifierState.active.shift)),
+          );
+          consumeArmedModifiers();
+        }
+        actions.editDictation?.(characters.join(''));
+      }
+      return true;
+    }
+    if (
+      action === 'key' &&
+      inputMode === 'keyboard' &&
+      mutableState.dictation.status === 'listening'
+    )
+      return true;
     const paneId = mutableState.inputTargetId;
     if (!paneId) return true;
     if (action === 'key') {
@@ -2948,6 +3091,7 @@ export function createWorkspaceScene(
     panel.selection.geometry = bent
       ? createCurvedTerminalSelection({
           width: width + 0.07,
+          surfaceWidth: width,
           height: height + 0.07,
           radians,
           border: 0.03,
@@ -3406,6 +3550,43 @@ export function createWorkspaceScene(
       refreshInputRoot(inputMode);
     notify();
   };
+  const setKeyboardCurvature = (degrees: number): void => {
+    const next = validateKeyboardCurvature(degrees);
+    if (next === mutableState.keyboardCurvature) return;
+    mutableState.keyboardCurvature = next;
+    if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
+      refreshInputRoot(inputMode);
+    notify();
+  };
+  const setDictationState = (state: DictationState): void => {
+    const previous = mutableState.dictation;
+    mutableState.dictation = { ...state };
+    if (previous.status !== state.status) dictationCursor = Array.from(state.transcript).length;
+    if (inputRoot && inputMode === 'keyboard') {
+      if (
+        previous.status !== state.status ||
+        previous.supported !== state.supported ||
+        Boolean(previous.transcript) !== Boolean(state.transcript)
+      )
+        refreshInputRoot('keyboard');
+      else {
+        const transcript = inputRoot.getObjectByName('xr-dictation-transcript') as
+          | THREE.Mesh
+          | undefined;
+        if (transcript) updateLabel(transcript, dictationCaption());
+      }
+    }
+  };
+  const initializeHierarchy = (): void => {
+    if (hierarchyOpened) return;
+    const workspaceId =
+      availablePanes.find(
+        (pane) => pane.id === (mutableState.inputTargetId ?? mutableState.selectedTerminalId),
+      )?.workspaceId ?? availablePanes[0]?.workspaceId;
+    if (!workspaceId) return;
+    hierarchyNavigation = { path: [`workspace:${encodeURIComponent(workspaceId)}`], page: 0 };
+    hierarchyOpened = true;
+  };
   const setAvailablePanes = (panes: PaneDescriptor[]): void => {
     availablePanes.splice(0, availablePanes.length, ...panes);
     for (const pane of panes) {
@@ -3415,7 +3596,10 @@ export function createWorkspaceScene(
         updateLabel(panel.titleLabel, `${pane.title} · ${panel.surface.status}`);
       }
     }
-    if (inputRoot && inputMode === 'panes') refreshInputRoot('panes');
+    if (inputRoot && inputMode === 'panes') {
+      initializeHierarchy();
+      refreshInputRoot('panes');
+    }
     notify();
   };
   const setQuickCommands = (commands: QuickCommand[]): void => {
@@ -3444,6 +3628,7 @@ export function createWorkspaceScene(
     menuCommands = quickCommands.map((command) => ({ ...command }));
     commandPage = 0;
     clearArmedModifiers();
+    if (mode === 'panes') initializeHierarchy();
     refreshInputRoot(mode);
   };
   const toggleKeyboard = (): void => {
@@ -3482,6 +3667,8 @@ export function createWorkspaceScene(
       if (drag.object === inputRoot) releaseGrab(controller);
     });
     clearInputRoot();
+    if (inputMode === 'keyboard' && mutableState.dictation.status === 'listening')
+      actions.dictationAction?.('cancel');
     clearInputCapture();
     notify();
   };
@@ -3957,6 +4144,8 @@ export function createWorkspaceScene(
     getTerminalCurvature,
     setTerminalCurvature,
     setKeyboardBackgroundEnabled,
+    setKeyboardCurvature,
+    setDictationState,
     setAvailablePanes,
     setQuickCommands,
     showInput,

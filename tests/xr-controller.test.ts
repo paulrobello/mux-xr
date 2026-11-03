@@ -1554,6 +1554,60 @@ describe('native XR controller event routing', () => {
     },
   );
 
+  it('picks curved keyboard keys and keeps curvature separate from the PTY', () => {
+    const { workspace, actions, right, container } = fixture();
+    workspace.selectTerminal('pane-b');
+    workspace.setKeyboardCurvature(90);
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    const key = objectWithData(workspace, { inputAction: 'key', key: 'q' });
+    expect(Math.abs(key.rotation.y)).toBeGreaterThan(0.1);
+    expect(key.position.z).toBeGreaterThan(0);
+    expect(keyboard.userData.keyboardCurvature).toBeCloseTo(90);
+    hit(workspace, { inputAction: 'key', key: 'q' });
+    expect(actions.sendKey).toHaveBeenLastCalledWith('q', undefined);
+    expect(right.resizeGrid).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('cancels hierarchy navigation with B without entering Focus', () => {
+    const { workspace, container } = fixture();
+    const gamepad = connectController(0);
+    workspace.showInput('panes');
+    expect(workspace.scene.getObjectByName('hierarchy-navigator')?.userData.hierarchyPath).toEqual([
+      'workspace:workspace',
+    ]);
+    pressFocusButton(gamepad, 16);
+    expect(workspace.scene.getObjectByName('hierarchy-navigator')).toBeUndefined();
+    expect(workspace.state.focusModeTerminalId).toBeNull();
+    expect(workspace.scene.getObjectByName('terminal-panel-pane-a')?.visible).toBe(true);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('edits a reviewed dictation locally and inserts only through its explicit action', () => {
+    const { workspace, actions, container } = fixture();
+    actions.editDictation = vi.fn();
+    actions.dictationAction = vi.fn();
+    workspace.setDictationState({
+      supported: true,
+      status: 'review',
+      transcript: 'echo',
+      error: null,
+    });
+    workspace.showInput('keyboard');
+    hit(workspace, { inputAction: 'key', key: ' ' });
+    expect(actions.editDictation).toHaveBeenCalledWith('echo ');
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    hit(workspace, { inputAction: 'key', key: 'Enter' });
+    expect(actions.dictationAction).toHaveBeenCalledWith('insert');
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
   it('keeps the native keyboard compact and omits physical transform buttons', () => {
     const { workspace, container } = fixture();
     workspace.showInput('keyboard');

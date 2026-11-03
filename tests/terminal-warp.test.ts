@@ -44,6 +44,30 @@ function countInteriorFrameRayHits(
 }
 
 describe('curved terminal geometry', () => {
+  it('keeps the expanded selection border on the screen cylinder', () => {
+    const span = { width: 1.4, height: 0.8, radians: (100 * Math.PI) / 180 };
+    const geometry = createCurvedTerminalSelection({
+      ...span,
+      width: span.width + 0.07,
+      height: span.height + 0.07,
+      surfaceWidth: span.width,
+      border: 0.03,
+    });
+    const positions = geometry.getAttribute('position');
+    for (const column of [0, 8, 16, 24, 32]) {
+      const point = terminalWarpPoint((column / 32 - 0.5) * span.width, span);
+      let aligned = false;
+      for (let vertex = 0; vertex < positions.count; vertex++) {
+        if (
+          Math.abs(positions.getX(vertex) - point.x) < 1e-6 &&
+          Math.abs(positions.getZ(vertex) - point.z) < 1e-6
+        )
+          aligned = true;
+      }
+      expect(aligned).toBe(true);
+    }
+    geometry.dispose();
+  });
   it('clamps curvature to the supported 100 degree maximum', () => {
     expect(clampTerminalCurvatureRadians(-1)).toBe(0);
     expect(clampTerminalCurvatureRadians(10)).toBe(MAX_TERMINAL_CURVATURE_RADIANS);
@@ -187,10 +211,10 @@ describe('curved terminal geometry', () => {
         geometry.computeBoundingBox();
         const bounds = geometry.boundingBox;
         if (!bounds) throw new Error('frame geometry must have bounds');
-        const outerX = span.width / 2 + 0.0175;
-        const expected = terminalWarpPoint(outerX, { ...span, radians });
-        expect(bounds.min.x).toBeCloseTo(-expected.x, 4);
-        expect(bounds.max.x).toBeCloseTo(expected.x, 4);
+        const edge = terminalWarpPoint(span.width / 2, { ...span, radians });
+        const expectedX = edge.x + Math.cos(radians / 2) * 0.0175;
+        expect(bounds.min.x).toBeCloseTo(-expectedX, 4);
+        expect(bounds.max.x).toBeCloseTo(expectedX, 4);
 
         const positions = geometry.getAttribute('position');
         for (const y of [-span.height / 2, span.height / 2]) {
@@ -208,6 +232,40 @@ describe('curved terminal geometry', () => {
                 Math.abs(vertexZ - (0.025 + point.z)) < 1e-5,
             );
             expect(hasSeamVertex).toBe(true);
+          }
+        }
+        geometry.dispose();
+      }
+    }
+  });
+
+  it('joins top and bottom borders to the outer side-rim endpoints', () => {
+    for (const span of [
+      { width: 1.2, height: 0.7 },
+      { width: 4, height: 2 },
+      { width: 8.5, height: 3.2 },
+    ]) {
+      for (const degrees of [60, 100]) {
+        const radians = (degrees * Math.PI) / 180;
+        const geometry = createTerminalFrameGeometry({ ...span, radians });
+        const positions = geometry.getAttribute('position');
+        const outerX = span.width / 2 + 0.0175;
+        const outerTop = span.height / 2 + 0.03;
+        const outerBottom = -span.height / 2 - 0.03;
+        for (const x of [-outerX, outerX]) {
+          const edge = terminalWarpPoint((Math.sign(x) * span.width) / 2, { ...span, radians });
+          const point = {
+            x: edge.x + Math.sign(x) * Math.cos(radians / 2) * 0.0175,
+            z: edge.z + Math.sin(radians / 2) * 0.0175,
+          };
+          for (const y of [outerBottom, outerTop]) {
+            const matches = Array.from({ length: positions.count }, (_, index) => index).filter(
+              (index) =>
+                Math.abs(positions.getX(index) - point.x) < 1e-5 &&
+                Math.abs(positions.getY(index) - y) < 1e-5 &&
+                Math.abs(positions.getZ(index) - (0.025 + point.z)) < 1e-5,
+            );
+            expect(matches.length).toBeGreaterThanOrEqual(2);
           }
         }
         geometry.dispose();

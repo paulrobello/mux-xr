@@ -10,6 +10,7 @@ import type {
 } from '../contracts';
 import { getKeyHelp } from '../control-help';
 import { createModifierState, keyboardDimensions, keyboardKeys } from '../keyboard';
+import type { DictationAction, DictationState } from '../speech-input';
 import {
   DEFAULT_TERMINAL_FILTERING,
   type TerminalFiltering,
@@ -21,6 +22,7 @@ import {
   type HierarchyStyle,
   validateHierarchyStyle,
 } from '../workspace/hierarchy-style';
+import { validateKeyboardCurvature } from '../workspace/keyboard-curvature';
 import {
   DEFAULT_WINDOW_PREFERENCES,
   validateWindowPreferences,
@@ -60,6 +62,8 @@ export interface UICallbacks {
   onMoveLayout?(direction: number): void;
   onWidgets?(): void;
   onDismissNotice?(): void;
+  onDictationAction?(action: DictationAction): void;
+  onDictationDraftChange?(text: string): void;
 }
 
 export interface WorkspaceSettings {
@@ -69,6 +73,7 @@ export interface WorkspaceSettings {
   gazeInput: boolean;
   colorMode: TerminalColorMode;
   keyboardBackground: boolean;
+  keyboardCurvature: number;
   arrangement: PanelArrangement;
   filtering: TerminalFiltering;
   windowPreferences: WindowPreferences;
@@ -108,6 +113,8 @@ export interface WorkspaceUI {
   setWindowPreferences(value: WindowPreferences, persist?: boolean): void;
   setHierarchyStyle(style: HierarchyStyle, persist?: boolean): void;
   setFilteringCapabilities(maxAnisotropy: number): void;
+  setDictationState(state: DictationState): void;
+  setKeyboardCurvature(degrees: number, persist?: boolean): void;
 }
 
 export interface CommandStore {
@@ -124,6 +131,7 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   gazeInput: false,
   colorMode: 'comfort',
   keyboardBackground: true,
+  keyboardCurvature: 0,
   arrangement: 'arc',
   filtering: { ...DEFAULT_TERMINAL_FILTERING },
   windowPreferences: { ...DEFAULT_WINDOW_PREFERENCES },
@@ -165,6 +173,7 @@ export function validateSettings(value: unknown): WorkspaceSettings {
         ? candidate.colorMode
         : 'comfort',
     keyboardBackground: candidate.keyboardBackground !== false,
+    keyboardCurvature: validateKeyboardCurvature(candidate.keyboardCurvature),
     filtering: validateTerminalFiltering(candidate.filtering),
     windowPreferences: validateWindowPreferences(candidate.windowPreferences),
     hierarchyStyle: validateHierarchyStyle(candidate.hierarchyStyle),
@@ -285,6 +294,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   const terminalOpacity = new Map<string, number>();
   const pendingGrid = new Map<string, { cols: number; rows: number }>();
   let inputMode: 'commands' | 'keyboard' = 'commands';
+  let dictationState: DictationState | undefined;
   const modifierState = createModifierState();
   const holdTimers = new Map<HTMLButtonElement, number>();
   const keyboardLabel = (key: string, shift = false): string => {
@@ -328,7 +338,20 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     .join('');
   root.innerHTML = `<style>${CSS}</style><header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. No process control.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="update-notice" data-update-notice hidden role="status"><span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button></div><div class="workspace-notice" data-notice hidden role="status"><span data-notice-text></span><button data-action="dismiss-notice" class="icon-btn" aria-label="Dismiss notice" title="Dismiss notice">×</button></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${keyboardMarkup}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Highlight the pane at the center of your view.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
   const keyboardElement = root.querySelector<HTMLElement>('[data-keyboard]');
+  root
+    .querySelector('style')
+    ?.append(
+      document.createTextNode(
+        '.dictation-controls:not([hidden]){display:grid;gap:8px}.dictation-actions{display:flex;flex-wrap:wrap;gap:8px}.dictation-controls textarea{box-sizing:border-box;width:100%;min-height:72px;resize:vertical;background:#0b1016;color:#dce7ed;border:1px solid #3a5363;border-radius:4px;padding:8px;font:inherit}.dictation-controls textarea:focus-visible{outline:2px solid #8be0ea;outline-offset:2px}',
+      ),
+    );
   const drawer = root.querySelector<HTMLElement>('[data-drawer]');
+  const dictationControls = document.createElement('div');
+  dictationControls.dataset.keyboardControls = 'true';
+  dictationControls.className = 'dictation-controls';
+  dictationControls.innerHTML =
+    '<div class="dictation-actions"><button data-action="dictation-start" class="secondary">Dictate</button><button data-action="dictation-stop" class="secondary" hidden>Stop</button><button data-action="dictation-insert" class="send-btn" disabled>Insert text</button><button data-action="dictation-cancel" class="text-btn">Cancel</button></div><textarea data-dictation-draft rows="3" aria-label="Dictation transcript" placeholder="Dictation transcript appears here for review" disabled></textarea><small data-dictation-status>Speech input is idle.</small>';
+  drawer?.append(dictationControls);
   const gazeInput = document.createElement('label');
   gazeInput.className = 'check';
   gazeInput.dataset.keyboardControls = 'true';
@@ -402,6 +425,34 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       keyboardBackground,
       settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
     );
+    const keyboardCurvature = document.createElement('label');
+    keyboardCurvature.innerHTML =
+      '<span>Keyboard curvature <span data-keyboard-curvature-value>0°</span></span><input data-keyboard-curvature type="range" min="0" max="100" step="1" aria-label="Keyboard curvature in degrees">';
+    settingsPanel.insertBefore(
+      keyboardCurvature,
+      settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
+    );
+    const keyboardCurvatureInput = keyboardCurvature.querySelector<HTMLInputElement>(
+      '[data-keyboard-curvature]',
+    );
+    const keyboardCurvatureValue = keyboardCurvature.querySelector<HTMLElement>(
+      '[data-keyboard-curvature-value]',
+    );
+    if (!keyboardCurvatureInput || !keyboardCurvatureValue)
+      throw new Error('Keyboard curvature control missing');
+    const updateKeyboardCurvature = (): void => {
+      keyboardCurvatureInput.value = String(settings.keyboardCurvature);
+      keyboardCurvatureValue.textContent = `${settings.keyboardCurvature}°`;
+    };
+    keyboardCurvatureInput.addEventListener('input', () => {
+      settings = {
+        ...settings,
+        keyboardCurvature: validateKeyboardCurvature(Number(keyboardCurvatureInput.value)),
+      };
+      updateKeyboardCurvature();
+      saveSettings();
+    });
+    updateKeyboardCurvature();
     const filteringControls = document.createElement('div');
     filteringControls.innerHTML =
       '<label>Terminal filtering<select data-filter-mode aria-label="Terminal filtering"><option value="nearest">Nearest pixels</option><option value="linear">Linear (sharp)</option><option value="mipmap-nearest">Mipmap bilinear</option><option value="mipmap-linear">Mipmap trilinear (smooth)</option></select></label><label data-filter-anisotropy-row>Anisotropy (mipmap modes)<select data-filter-anisotropy aria-label="Terminal anisotropy"><option value="1">Off</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option><option value="16">16x</option></select><span>Anisotropy matters for oblique minification. 8x and 16x may look the same front-facing.</span></label><label class="check"><input type="checkbox" data-filter-gaze> Sharper gazed terminal <span>Use sharp linear sampling while looking at a terminal.</span></label><label data-filter-distance-row>Gaze max distance<input data-filter-distance type="number" min="0.25" max="20" step="0.25" aria-label="Gaze maximum distance in meters"><span>Sharper gaze ignores mipmaps within this distance.</span></label>';
@@ -750,6 +801,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     renderCommands();
   };
   const updateInputMode = (): void => {
+    if (inputMode !== 'keyboard') callbacks.onDictationAction?.('cancel');
     qs<HTMLElement>('[data-drawer-heading]').textContent =
       inputMode === 'commands' ? 'Commands' : 'Keyboard';
     root.querySelectorAll<HTMLElement>('[data-command-controls]').forEach((element) => {
@@ -773,7 +825,25 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     qs<HTMLElement>('[data-notice-text]').textContent = message ?? '';
     notice.hidden = message === null;
   };
+  const setDictationState = (state: DictationState): void => {
+    dictationState = { ...state };
+    const start = qs<HTMLButtonElement>('[data-action="dictation-start"]');
+    const stop = qs<HTMLButtonElement>('[data-action="dictation-stop"]');
+    const insert = qs<HTMLButtonElement>('[data-action="dictation-insert"]');
+    const draft = qs<HTMLTextAreaElement>('[data-dictation-draft]');
+    const status = qs<HTMLElement>('[data-dictation-status]');
+    start.disabled = !state.supported || state.status === 'listening';
+    stop.hidden = state.status !== 'listening';
+    insert.disabled = !['review', 'error'].includes(state.status) || !state.transcript.trim();
+    draft.disabled =
+      state.status === 'idle' ||
+      state.status === 'listening' ||
+      (state.status === 'error' && !state.transcript.trim());
+    if (draft.value !== state.transcript) draft.value = state.transcript;
+    status.textContent = state.error ?? `Speech input is ${state.status}.`;
+  };
   const closeInput = (): void => {
+    callbacks.onDictationAction?.('cancel');
     capturedTarget = undefined;
     clearModifiers();
     qs<HTMLElement>('[data-drawer]').hidden = true;
@@ -856,6 +926,42 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         syncModifierVisuals();
         return;
       }
+      if (dictationState?.status === 'listening') return;
+      if (
+        dictationState?.status === 'review' ||
+        (dictationState?.status === 'error' && dictationState.transcript)
+      ) {
+        const draft = qs<HTMLTextAreaElement>('[data-dictation-draft]');
+        let start = draft.selectionStart;
+        let end = draft.selectionEnd;
+        if (key === 'Enter') callbacks.onDictationAction?.('insert');
+        else if (key === 'Escape') callbacks.onDictationAction?.('cancel');
+        else {
+          if (key === 'ArrowLeft')
+            start = end =
+              draft.value.slice(0, start).length -
+              (Array.from(draft.value.slice(0, start)).at(-1)?.length ?? 0);
+          else if (key === 'ArrowRight')
+            start = end = end + (Array.from(draft.value.slice(end))[0]?.length ?? 0);
+          else if (key === 'Home') start = end = 0;
+          else if (key === 'End') start = end = draft.value.length;
+          else if (key === 'Backspace' || key === 'Delete' || key.length === 1) {
+            if (key === 'Backspace' && start === end)
+              start -= Array.from(draft.value.slice(0, start)).at(-1)?.length ?? 0;
+            if (key === 'Delete' && start === end)
+              end += Array.from(draft.value.slice(end))[0]?.length ?? 0;
+            const text =
+              key.length === 1 ? terminalKeyLabel(key, Boolean(modifierState.active.shift)) : '';
+            draft.setRangeText(text, start, end, 'end');
+            start = end = draft.selectionEnd;
+            callbacks.onDictationDraftChange?.(draft.value);
+          }
+          draft.setSelectionRange(start, end);
+        }
+        modifierState.consume();
+        syncModifierVisuals();
+        return;
+      }
       if (capturedTarget) callbacks.onSendKey?.(capturedTarget, key, { ...modifierState.active });
       modifierState.consume();
       syncModifierVisuals();
@@ -898,6 +1004,18 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         break;
       case 'close-drawer':
         closeInput();
+        break;
+      case 'dictation-start':
+        callbacks.onDictationAction?.('start');
+        break;
+      case 'dictation-stop':
+        callbacks.onDictationAction?.('stop');
+        break;
+      case 'dictation-insert':
+        callbacks.onDictationAction?.('insert');
+        break;
+      case 'dictation-cancel':
+        callbacks.onDictationAction?.('cancel');
         break;
       case 'settings':
         qs<HTMLElement>('[data-settings]').hidden = false;
@@ -996,6 +1114,12 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   qs<HTMLSelectElement>('[data-color-mode]').value = settings.colorMode;
   qs<HTMLInputElement>('[data-keyboard-background]').checked = settings.keyboardBackground;
   qs<HTMLInputElement>('[data-gaze-input]').checked = settings.gazeInput;
+  setDictationState({
+    supported: false,
+    status: 'idle',
+    transcript: '',
+    error: null,
+  });
   qs<HTMLSelectElement>('[data-background]').addEventListener('change', (event) => {
     settings = {
       ...settings,
@@ -1027,6 +1151,9 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       keyboardBackground: (event.target as HTMLInputElement).checked,
     };
     saveSettings();
+  });
+  qs<HTMLTextAreaElement>('[data-dictation-draft]').addEventListener('input', (event) => {
+    callbacks.onDictationDraftChange?.((event.target as HTMLTextAreaElement).value);
   });
   qs<HTMLButtonElement>('[data-action="apply-grid"]').addEventListener('click', () => {
     const paneId = activePaneId;
@@ -1213,6 +1340,15 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       qs<HTMLInputElement>('[data-keyboard-background]').checked = enabled;
       if (persist) saveSettings();
     },
+    setKeyboardCurvature(degrees, persist = false) {
+      const value = validateKeyboardCurvature(degrees);
+      if (settings.keyboardCurvature === value) return;
+      settings = { ...settings, keyboardCurvature: value };
+      const input = qs<HTMLInputElement>('[data-keyboard-curvature]');
+      input.value = String(value);
+      qs<HTMLElement>('[data-keyboard-curvature-value]').textContent = `${value}°`;
+      if (persist) saveSettings();
+    },
     setTerminalFiltering(filtering, persist = false) {
       const next = validateTerminalFiltering(filtering);
       if (JSON.stringify(settings.filtering) === JSON.stringify(next)) return;
@@ -1266,6 +1402,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       };
       saveSettings();
     },
+    setDictationState,
     setArrangement(pattern, persist = true) {
       settings = { ...settings, arrangement: pattern };
       if (arrangementSelect) arrangementSelect.value = pattern;

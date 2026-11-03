@@ -29,6 +29,8 @@ export interface TerminalWarpBounds {
 export interface TerminalSelectionOptions extends TerminalWarpOptions {
   /** Border thickness in local screen units. Defaults to 0.025. */
   border?: number;
+  /** Original screen width when the outline includes outer padding. */
+  surfaceWidth?: number;
 }
 
 function validateSpan(span: TerminalWarpSpan): void {
@@ -113,11 +115,13 @@ export function createCurvedTerminalSelection(
   validateSpan(options);
   const segmentCount = Math.max(4, Math.floor(options.segments ?? 32));
   const border = Math.min(options.border ?? 0.025, options.width / 2, options.height / 2);
+  const surfaceWidth = options.surfaceWidth ?? options.width;
+  const surface = { width: surfaceWidth, height: options.height, radians: options.radians };
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
   const addVertex = (x: number, y: number, u: number, v: number): number => {
-    const point = terminalWarpPoint(x, options);
+    const point = terminalWarpPoint(x, surface);
     positions.push(point.x, y, point.z);
     uvs.push(u, v);
     return positions.length / 3 - 1;
@@ -130,8 +134,10 @@ export function createCurvedTerminalSelection(
     ...new Set([
       ...Array.from(
         { length: segmentCount + 1 },
-        (_, column) => (column / segmentCount - 0.5) * options.width,
+        (_, column) => (column / segmentCount - 0.5) * surfaceWidth,
       ),
+      -options.width / 2,
+      options.width / 2,
       -options.width / 2 + border,
       options.width / 2 - border,
     ]),
@@ -238,13 +244,12 @@ export function getConservativeTerminalArrangementSize(span: TerminalWarpSpan): 
 export function createTerminalFrameGeometry(span: TerminalWarpSpan): THREE.BufferGeometry {
   const segments = 32;
   const outer = span.width / 2 + 0.0175;
-  // The scene positions the frame at z = -0.025. Keep the rim surface aligned
-  // with the screen and omit rear/inner faces that could occlude transparent text.
-  const frameSurfaceZ = 0.025;
   const positions: number[] = [];
+  const localXs: number[] = [];
   const indices: number[] = [];
   const addVertex = (x: number, y: number): number => {
-    positions.push(x, y, frameSurfaceZ);
+    positions.push(x, y, 0);
+    localXs.push(x);
     return positions.length / 3 - 1;
   };
   const addQuad = (a: number, b: number, c: number, d: number): void => {
@@ -255,9 +260,13 @@ export function createTerminalFrameGeometry(span: TerminalWarpSpan): THREE.Buffe
     (_, index) => (index / segments - 0.5) * span.width,
   );
   const rimSamples = [-outer, ...screenSamples, outer];
+  const innerTop = span.height / 2;
+  const innerBottom = -span.height / 2;
+  const outerTop = innerTop + 0.03;
+  const outerBottom = innerBottom - 0.03;
   for (const [innerY, outerY] of [
-    [span.height / 2, span.height / 2 + 0.03],
-    [-span.height / 2 - 0.03, -span.height / 2],
+    [innerTop, outerTop],
+    [outerBottom, innerBottom],
   ]) {
     for (let index = 0; index < rimSamples.length - 1; index += 1) {
       const x0 = rimSamples[index];
@@ -271,19 +280,41 @@ export function createTerminalFrameGeometry(span: TerminalWarpSpan): THREE.Buffe
     }
   }
   addQuad(
-    addVertex(-outer, -span.height / 2),
-    addVertex(-span.width / 2, -span.height / 2),
-    addVertex(-span.width / 2, span.height / 2),
-    addVertex(-outer, span.height / 2),
+    addVertex(-outer, outerBottom),
+    addVertex(-span.width / 2, outerBottom),
+    addVertex(-span.width / 2, outerTop),
+    addVertex(-outer, outerTop),
   );
   addQuad(
-    addVertex(span.width / 2, -span.height / 2),
-    addVertex(outer, -span.height / 2),
-    addVertex(outer, span.height / 2),
-    addVertex(span.width / 2, span.height / 2),
+    addVertex(span.width / 2, outerBottom),
+    addVertex(outer, outerBottom),
+    addVertex(outer, outerTop),
+    addVertex(span.width / 2, outerTop),
   );
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setIndex(indices);
-  return warpGeometryPositions(geometry, span);
+  warpGeometryPositions(geometry, span);
+  // The frame root's -0.025 offset is in parent Z, not the curved surface normal.
+  const position = geometry.getAttribute('position');
+  const edgeAngle = clampTerminalCurvatureRadians(span.radians) / 2;
+  const edgeCos = Math.cos(edgeAngle);
+  const edgeSin = Math.sin(edgeAngle);
+  for (let index = 0; index < position.count; index += 1) {
+    const localX = localXs[index];
+    if (Math.abs(localX) <= span.width / 2) continue;
+    const sign = Math.sign(localX);
+    const endpoint = terminalWarpPoint((sign * span.width) / 2, span);
+    const delta = Math.abs(localX) - span.width / 2;
+    position.setX(index, endpoint.x + sign * edgeCos * delta);
+    position.setZ(index, endpoint.z + edgeSin * delta + 0.025);
+  }
+  for (let index = 0; index < position.count; index += 1)
+    if (Math.abs(localXs[index]) <= span.width / 2)
+      position.setZ(index, position.getZ(index) + 0.025);
+  position.needsUpdate = true;
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
 }

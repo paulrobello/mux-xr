@@ -67,7 +67,7 @@ describe('volumetric hierarchy navigator', () => {
     'places %s nodes in 3D and exposes scoped actions',
     (style) => {
       const navigator = createHierarchyNavigator([pane('a'), pane('b', 'other')], style, {
-        path: [],
+        path: ['workspace:ws'],
         page: 0,
       });
       const meshes = nodeMeshes(navigator);
@@ -111,22 +111,23 @@ describe('volumetric hierarchy navigator', () => {
     const source = createHierarchyNavigator(
       [pane('a'), pane('b', 'ws', 'other-session')],
       'spatial-docks',
-      { path: [], page: 0 },
+      { path: ['workspace:ws'], page: 0 },
     );
     const workspacePath = nodeMeshes(source).find(
       (object) => object.userData.originalTitle === 'Workspace ws',
     )?.userData.hierarchyPath as string[];
     source.dispose();
+    const fullPath = [...workspacePath, 'session:ws/session', 'window:ws/session/window'];
     const active = createHierarchyNavigator(
       [pane('a')],
       'spatial-docks',
-      { path: workspacePath, page: 99 },
+      { path: fullPath, page: 99 },
       new Set(['a']),
     );
     const leaf = nodeMeshes(active).find((object) => object.userData.inputAction === 'pane');
     expect(leaf?.userData.paneId).toBe('a');
     expect(leaf?.userData.originalTitle).toBe('Pane a');
-    expect(active.root.userData.hierarchyPath).toEqual(workspacePath);
+    expect(active.root.userData.hierarchyPath).toEqual(fullPath);
     expect(active.root.userData.hierarchyPage).toBe(0);
     expect(active.root.children.some((object) => object.userData.attachedRing)).toBe(true);
     active.dispose();
@@ -143,6 +144,43 @@ describe('volumetric hierarchy navigator', () => {
     expect(empty.root.userData.hierarchyPath).toEqual([]);
     expect(empty.root.userData.hierarchyPage).toBe(0);
     empty.dispose();
+  });
+
+  it('shows only the active level plus clickable ancestor breadcrumbs', () => {
+    const panes = [pane('a', 'ws', 's1', 'w1'), pane('b', 'ws', 's2', 'w2')];
+    const chooser = createHierarchyNavigator(panes, 'helix', { path: [], page: 0 });
+    const chooserGroups = hierarchyObjects(chooser).filter(
+      (object) => object.userData.hierarchyNode,
+    );
+    expect(chooserGroups.every((object) => object.name.includes('workspace-'))).toBe(true);
+    const workspacePath = chooserGroups[0].userData.hierarchyPath as string[];
+    chooser.dispose();
+
+    const expanded = createHierarchyNavigator(panes, 'helix', { path: workspacePath, page: 0 });
+    const groups = hierarchyObjects(expanded).filter((object) => object.userData.hierarchyNode);
+    expect(groups.some((object) => object.name.includes('workspace-'))).toBe(true);
+    expect(groups.some((object) => object.name.includes('session-'))).toBe(true);
+    expect(groups.some((object) => object.name.includes('window-'))).toBe(false);
+    expect(groups.some((object) => object.name.includes('pane-'))).toBe(false);
+    const childPositions = groups
+      .filter((object) => object.name.includes('session-'))
+      .map((object) => object.position.clone());
+    expect(
+      new Set(childPositions.map((position) => position.toArray().join(','))).size,
+    ).toBeGreaterThan(1);
+    expanded.dispose();
+
+    const full = createHierarchyNavigator(panes, 'spatial-docks', {
+      path: [...workspacePath, 'session:ws/s1', 'window:ws/s1/w1'],
+      page: 0,
+    });
+    const shapeTypes = hierarchyObjects(full)
+      .filter((object) => object.userData.hierarchyNode)
+      .map((object) => object.children.find((child) => child instanceof THREE.Mesh) as THREE.Mesh)
+      .filter(Boolean)
+      .map((mesh) => mesh.geometry.type);
+    expect(new Set(shapeTypes).size).toBeGreaterThanOrEqual(4);
+    full.dispose();
   });
 
   it('billboards labels in the parent local space under transformed roots', () => {

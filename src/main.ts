@@ -12,6 +12,12 @@ import { createDemoSurface, demoSnapshot } from './demo';
 import { createDesktopPanels, type DesktopPanels } from './desktop/panels';
 import { loadObservatory } from './environment';
 import { reloadAfterXR } from './reload';
+import {
+  createSpeechInput,
+  type DictationAction,
+  type DictationState,
+  type SpeechInput,
+} from './speech-input';
 import { createTerminalSurface } from './terminal';
 import { mountWorkspaceUI, type WorkspaceSettings, type WorkspaceUI } from './ui';
 import { createUpdateChecker, type UpdateChecker } from './update-check';
@@ -57,6 +63,7 @@ let updateAvailable = false;
 let enteringXR = false;
 let xrEntryMode: 'vr' | 'ar' = 'vr';
 let xrEntry: XrEntryController;
+let speechInput: SpeechInput | undefined;
 
 function maybeReloadUpdate(): void {
   if (shouldAutoReload(updateAvailable, scene.state.xrMode, enteringXR)) void reloadApp();
@@ -149,6 +156,7 @@ function selectPane(id: string): void {
   }
   if (selectedId === id) return;
   selectedId = id;
+  speechInput?.dispatch('cancel');
   ui.setActivePane(id);
   desktop.select(id);
   syncCommands();
@@ -160,6 +168,7 @@ function selectPane(id: string): void {
 }
 
 function closePane(id: string): void {
+  if (selectedId === id) speechInput?.dispatch('cancel');
   desktop.remove(id);
   scene.removeTerminal(id);
   surfaces.get(id)?.dispose();
@@ -230,6 +239,7 @@ function applySettings(settings: WorkspaceSettings): void {
   try {
     scene.setTerminalColorMode(settings.colorMode);
     scene.setKeyboardBackgroundEnabled(settings.keyboardBackground);
+    scene.setKeyboardCurvature(settings.keyboardCurvature);
     scene.setGazeInputEnabled(settings.gazeInput);
     scene.setTerminalFiltering(settings.filtering);
     scene.setWindowPreferences(settings.windowPreferences);
@@ -366,6 +376,8 @@ const actions: WorkspaceActions = {
   resizeGrid,
   setTerminalColorMode,
   setKeyboardBackground,
+  dictationAction: (action: DictationAction) => speechInput?.dispatch(action),
+  editDictation: (text: string) => speechInput?.editDraft(text),
 };
 
 ui = mountWorkspaceUI(app, {
@@ -411,8 +423,19 @@ ui = mountWorkspaceUI(app, {
     scene.moveLayoutDepth(direction);
   },
   onDemo: startDemo,
+  onDictationAction: (action) => speechInput?.dispatch(action),
+  onDictationDraftChange: (text) => speechInput?.editDraft(text),
 });
 scene = createWorkspaceScene(ui.sceneHost, actions);
+speechInput = createSpeechInput({
+  getTargetPaneId: () => selectedId,
+  canInsert: (target) => selectedId === target && surfaces.get(target)?.status === 'connected',
+  onInsert: (target, text) => surfaces.get(target)?.sendText(text) ?? false,
+  onState: (state: DictationState) => {
+    ui.setDictationState(state);
+    scene.setDictationState(state);
+  },
+});
 xrEntry = createXREntryController({
   enter: async (mode) => {
     enteringXR = true;
@@ -444,6 +467,7 @@ const stopPresentation = scene.subscribe((state) => {
   if (!applyingSettings) {
     ui.setGazeInputEnabled(state.gazeInputEnabled);
     ui.setKeyboardBackgroundEnabled(state.keyboardBackgroundEnabled, false);
+    ui.setKeyboardCurvature(state.keyboardCurvature, true);
     ui.setTerminalColorMode(state.terminalColorMode, false);
     ui.setTerminalFiltering(state.filtering, true);
     ui.setWindowPreferences(state.windowPreferences, true);
@@ -489,6 +513,7 @@ window.addEventListener(
     xrEntry.dispose();
     updateChecker?.dispose();
     environmentAbort.abort();
+    speechInput?.dispose();
     withoutViewPersistence(detachAll);
     stopPresentation();
     desktop.dispose();

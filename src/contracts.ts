@@ -116,4 +116,6 @@ export interface WorkspaceActions {
   reloadApp?(): void;
   saveCommand?(command: QuickCommand): boolean;
   togglePaneConnection?(id: string): void;
+  dictationAction?(action: import('./speech-input').DictationAction): void;
+  editDictation?(text: string): void;
 }

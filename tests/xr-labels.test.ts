@@ -87,6 +87,21 @@ describe('scalable XR labels', () => {
     await expect(waitForLabelSync(root)).resolves.toBeUndefined();
   });
 
+  it('draws key borders while retaining the original interior color', () => {
+    const root = createScalableLabel('Space', 0.7, 0.1, {
+      background: '#1c2a35',
+      border: '#7197a8',
+    });
+    const texture = (root.material as THREE.MeshBasicMaterial).map as THREE.DataTexture;
+    const data = texture.image.data as Uint8Array;
+    const width = texture.image.width;
+    expect(Array.from(data.slice(0, 4))).toEqual([113, 151, 168, 255]);
+    expect(Array.from(data.slice((32 * width + 32) * 4, (32 * width + 32) * 4 + 4))).toEqual([
+      28, 42, 53, 255,
+    ]);
+    disposeScalableLabel(root);
+  });
+
   it('supports glyph-only labels without a depth-writing backplate', () => {
     const root = createScalableLabel('Layout', 0.2, 0.075, { backplate: false });
     const material = root.material as THREE.MeshBasicMaterial;

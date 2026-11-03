@@ -155,7 +155,7 @@ export function createHierarchyNavigator(
   const normalized = normalizeNavigation(tree, navigation);
   const root = new THREE.Group();
   root.name = 'hierarchy-navigator';
-  root.position.y = 0.25;
+  root.position.y = 0.45;
   root.userData.hierarchyPath = normalized.path.slice();
   root.userData.hierarchyPage = normalized.page;
   root.userData.hierarchyStyle = style;
@@ -215,54 +215,45 @@ export function createHierarchyNavigator(
     sharedSolidMaterials.set(color, value);
     return value;
   };
-  const positionFor = (level: number, index: number, kind: Node['kind']): THREE.Vector3 => {
-    const position = new THREE.Vector3();
-    const angle = index * 1.31 + level * 1.7;
-    if (style === 'helix') {
-      position.set(
-        Math.cos(angle) * 0.78,
-        -0.65 + level * 0.45 + Math.sin(index * 1.31) * 0.16,
-        Math.sin(angle) * 0.62,
-      );
-    } else if (level === 0) {
-      position.set(
-        index === 0 ? 0 : Math.cos(angle) * 0.85,
-        -0.6 + Math.sin(angle) * 0.2,
-        -0.35 + Math.sin(angle) * 0.3,
-      );
-    } else {
-      const radius = 0.65 + level * 0.16;
-      position.set(
-        Math.cos(angle) * radius,
-        -0.45 + level * 0.4 + Math.sin(angle) * 0.18,
-        Math.sin(angle) * 0.62,
-      );
-    }
-    if (kind === 'pane') position.multiplyScalar(0.9);
-    return position;
+  const sphericalPosition = (index: number, count: number): THREE.Vector3 => {
+    const radius = 1;
+    const angle = (index * Math.PI * 2) / Math.max(1, count);
+    const radial = radius * (index % 2 ? 0.95 : 0.8);
+    return new THREE.Vector3(
+      Math.cos(angle) * radial,
+      Math.sin(angle) * radial,
+      Math.sqrt(radius * radius - radial * radial),
+    );
   };
   const drawNode = (
     node: Node,
     path: string[],
     page: number,
-    level: number,
-    index: number,
-    preview = false,
+    position: THREE.Vector3,
+    breadcrumb = false,
   ): void => {
     const object = new THREE.Group();
     object.name = `hierarchy-${node.kind}-${node.key}`;
-    const selected = normalized.path[level] === node.key;
     const nextPath = [...path, node.key];
     const nodeMaterial = sharedSolidMaterial(
-      selected ? AMBER : preview ? MUTED_TEAL : node.kind === 'pane' ? IVORY : TEAL,
+      !breadcrumb &&
+        nextPath.length === normalized.path.length &&
+        node.key === normalized.path.at(-1)
+        ? AMBER
+        : node.kind === 'pane'
+          ? IVORY
+          : breadcrumb
+            ? MUTED_TEAL
+            : TEAL,
     );
     const geometry =
       node.kind === 'pane'
         ? sharedGeometry('pane-cartridge', () => new THREE.OctahedronGeometry(0.105, 0))
-        : sharedGeometry(
-            `node-${node.kind}`,
-            () => new THREE.IcosahedronGeometry(node.kind === 'workspace' ? 0.2 : 0.13, 0),
-          );
+        : node.kind === 'workspace'
+          ? sharedGeometry('node-workspace', () => new THREE.IcosahedronGeometry(0.2, 0))
+          : node.kind === 'session'
+            ? sharedGeometry('node-session', () => new THREE.DodecahedronGeometry(0.15, 0))
+            : sharedGeometry('node-window', () => new THREE.TetrahedronGeometry(0.14, 0));
     const mesh = new THREE.Mesh(geometry, nodeMaterial);
     const action = node.kind === 'pane' ? 'pane' : 'hierarchyNode';
     setAction(mesh, {
@@ -280,8 +271,7 @@ export function createHierarchyNavigator(
       node.kind === 'workspace' ? 0.13 : 0.105,
       { background: DARK },
     );
-    label.position.set(0, node.kind === 'session' || node.kind === 'pane' ? 0.22 : -0.22, 0.2);
-    label.visible = !preview;
+    label.position.set(0, -0.22, 0.2);
     label.traverse((child) => {
       const mesh = child as THREE.Mesh;
       const labelMaterials = Array.isArray(mesh.material)
@@ -306,7 +296,7 @@ export function createHierarchyNavigator(
     label.traverse((child) => setAction(child, label.userData));
     object.add(label);
     labels.push(label);
-    object.position.copy(positionFor(level, index, node.kind));
+    object.position.copy(position);
     if (style === 'spatial-docks' && node.kind === 'window') {
       const frame = new THREE.Mesh(
         sharedGeometry('dock-frame', () => new THREE.TorusGeometry(0.22, 0.025, 6, 4)),
@@ -331,7 +321,6 @@ export function createHierarchyNavigator(
     object.userData.hierarchyPath = nextPath;
     object.userData.hierarchyPage = action === 'pane' ? undefined : 0;
     object.userData.attached = node.pane ? attachedPaneIds.has(node.pane.id) : false;
-    object.userData.hierarchyPreview = preview;
     root.add(object);
     drawn.push({ node, path, page, object });
   };
@@ -400,11 +389,11 @@ export function createHierarchyNavigator(
       const railPoints: THREE.Vector3[] = [];
       const secondRailPoints: THREE.Vector3[] = [];
       for (let index = 0; index < 18; index += 1) {
-        const y = -0.9 + index * 0.12;
+        const y = -0.24 + index * 0.03;
         const angle = index * 0.68;
-        railPoints.push(new THREE.Vector3(Math.cos(angle) * 0.88, y, Math.sin(angle) * 0.88));
+        railPoints.push(new THREE.Vector3(Math.cos(angle) * 0.32, y, Math.sin(angle) * 0.32));
         secondRailPoints.push(
-          new THREE.Vector3(Math.cos(angle + Math.PI) * 0.88, y, Math.sin(angle + Math.PI) * 0.88),
+          new THREE.Vector3(Math.cos(angle + Math.PI) * 0.32, y, Math.sin(angle + Math.PI) * 0.32),
         );
       }
       addTube('helix-rail-primary', railPoints, TEAL, 0.025);
@@ -466,42 +455,46 @@ export function createHierarchyNavigator(
       { key: '', kind: 'workspace', title: '', children: tree },
       normalized.path,
     );
+    const parentPath = normalized.path;
+    const level = normalized.path.length;
     const visibleChildren = (expanded?.children ?? tree).slice(
       normalized.page * PAGE_SIZE,
       (normalized.page + 1) * PAGE_SIZE,
     );
-    const parentPath = normalized.path;
-    const level = normalized.path.length;
-    for (let depth = 0; depth < normalized.path.length; depth += 1) {
+    const currentPosition = new THREE.Vector3(0, 0, 0);
+    if (normalized.path.length > 0 && expanded) {
+      drawNode(expanded, normalized.path.slice(0, -1), normalized.page, currentPosition);
+    }
+    for (let depth = 0; depth < Math.max(0, normalized.path.length - 1); depth += 1) {
       const ancestor = descendants(
         { key: '', kind: 'workspace', title: '', children: tree },
         normalized.path.slice(0, depth + 1),
       );
-      if (ancestor) drawNode(ancestor, normalized.path.slice(0, depth), 0, depth, 0);
+      if (ancestor) {
+        drawNode(
+          ancestor,
+          normalized.path.slice(0, depth),
+          0,
+          new THREE.Vector3(-1.35, 0.95 - depth * 0.5, -0.4 - depth * 0.08),
+          true,
+        );
+      }
     }
     visibleChildren.forEach((node, index) => {
-      drawNode(node, parentPath, normalized.page, level, index);
+      drawNode(
+        node,
+        normalized.path,
+        normalized.page,
+        sphericalPosition(index, visibleChildren.length),
+      );
     });
-    let previewCount = 0;
-    const previewCounts = new Map<number, number>();
-    const previewBranch = (node: Node, path: string[], depth: number): void => {
-      for (const child of node.children.slice(0, 2)) {
-        if (previewCount >= 14) return;
-        const index = previewCounts.get(depth) ?? 0;
-        previewCounts.set(depth, index + 1);
-        previewCount += 1;
-        drawNode(child, path, normalized.page, depth, index, true);
-        previewBranch(child, [...path, child.key], depth + 1);
-      }
-    };
-    for (const node of visibleChildren) previewBranch(node, [...parentPath, node.key], level + 1);
     drawPaging(expanded?.children ?? tree, parentPath, normalized.page, level);
   }
 
   addSculpture();
   if (normalized.path.length > 0) {
-    addNavigationControl('Home', [], new THREE.Vector3(-1.18, 1.1, 0.12));
-    addNavigationControl('Up', normalized.path.slice(0, -1), new THREE.Vector3(-0.72, 1.1, 0.12));
+    addNavigationControl('Home', [], new THREE.Vector3(-1.25, 1.2, 0.12));
+    addNavigationControl('Up', normalized.path.slice(0, -1), new THREE.Vector3(1.25, 1.2, 0.12));
   }
   for (const item of drawn) {
     if (item.path.length === 0) continue;

@@ -166,25 +166,39 @@ try {
     return geometry;
   };
   const spatial = await inspectStyle('spatial-docks', 'hierarchy-spatial-docks.png');
-  const node = await page.evaluate(() => {
-    const scene = (window as unknown as FixtureWindow).__designScene.scene;
-    let target: THREE.Object3D | undefined;
-    scene.getObjectByName('hierarchy-navigator')?.traverse((object) => {
-      if (!target && object.userData.inputAction === 'hierarchyNode') target = object;
+  for (let depth = 0; depth < 4; depth++) {
+    const branch = await page.evaluate(() => {
+      const root = (window as unknown as FixtureWindow).__designScene.scene.getObjectByName(
+        'hierarchy-navigator',
+      );
+      const length = Number(root?.userData.hierarchyPath?.length ?? 0);
+      let target: THREE.Object3D | undefined;
+      let hasPane = false;
+      root?.traverse((object) => {
+        if (object.userData.inputAction === 'pane') hasPane = true;
+        if (
+          !target &&
+          object.userData.inputAction === 'hierarchyNode' &&
+          object.userData.hierarchyPath?.length === length + 1
+        )
+          target = object;
+      });
+      if (hasPane) return null;
+      if (!target) throw new Error('No direct child available in hierarchy');
+      target.name = '__hierarchy-branch-target';
+      return { name: target.name, length };
     });
-    if (!target) throw new Error('No hierarchy node action target');
-    target.name = '__hierarchy-branch-target';
-    return target.name;
-  });
-  await selectControllerTarget(node);
-  await page.waitForTimeout(100);
-  const pathLength = await page.evaluate(() => {
-    const root = (window as unknown as FixtureWindow).__designScene.scene.getObjectByName(
-      'hierarchy-navigator',
+    if (!branch) break;
+    await selectControllerTarget(branch.name);
+    await page.waitForFunction(
+      (length) =>
+        (window as unknown as FixtureWindow).__designScene.scene.getObjectByName(
+          'hierarchy-navigator',
+        )?.userData.hierarchyPath.length ===
+        length + 1,
+      branch.length,
     );
-    return Array.isArray(root?.userData.hierarchyPath) ? root.userData.hierarchyPath.length : 0;
-  });
-  if (pathLength < 1) throw new Error('Controller selection did not advance hierarchy path');
+  }
   const paneTarget = await page.evaluate(() => {
     const w = window as unknown as FixtureWindow;
     let target: THREE.Object3D | undefined;

@@ -18,6 +18,7 @@ configureTextBuilder({ defaultFontURL: LABEL_FONT_URL, useWorker: false });
 export interface ScalableLabelOptions {
   wrap?: boolean;
   background?: string;
+  border?: string;
   /** Keep the interaction plane, but omit its visible rectangular backplate. */
   backplate?: boolean;
 }
@@ -39,16 +40,24 @@ type LabelRoot = THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> & {
   userData: LabelUserData & Record<string, unknown>;
 };
 
-function backgroundTexture(background: string, width: number, height: number): THREE.DataTexture {
+function backgroundTexture(
+  background: string,
+  width: number,
+  height: number,
+  border?: string,
+): THREE.DataTexture {
   // THREE.Color stores linear values. Convert back to sRGB before writing texture bytes.
   const fill = new THREE.Color(background).convertLinearToSRGB();
   const fillRgb = [Math.round(fill.r * 255), Math.round(fill.g * 255), Math.round(fill.b * 255)];
+  const edge = border ? new THREE.Color(border).convertLinearToSRGB() : fill;
+  const edgeRgb = [Math.round(edge.r * 255), Math.round(edge.g * 255), Math.round(edge.b * 255)];
   const textureSize = 64;
   const textureWidth = Math.max(8, Math.min(2048, Math.round((textureSize * width) / height)));
   const data = new Uint8Array(textureWidth * textureSize * 4);
   for (let y = 0; y < textureSize; y += 1) {
     for (let x = 0; x < textureWidth; x += 1) {
-      data.set([...fillRgb, 255], (y * textureWidth + x) * 4);
+      const edgePixel = border && (x < 2 || y < 2 || x >= textureWidth - 2 || y >= textureSize - 2);
+      data.set([...(edgePixel ? edgeRgb : fillRgb), 255], (y * textureWidth + x) * 4);
     }
   }
   const texture = new THREE.DataTexture(data, textureWidth, textureSize, THREE.RGBAFormat);
@@ -149,7 +158,12 @@ export function createScalableLabel(
   const safeWidth = Math.max(width, 0.001);
   const safeHeight = Math.max(height, 0.001);
   const backplate = options.backplate ?? true;
-  const texture = backgroundTexture(options.background ?? '#1c2a35', safeWidth, safeHeight);
+  const texture = backgroundTexture(
+    options.background ?? '#1c2a35',
+    safeWidth,
+    safeHeight,
+    options.border,
+  );
   const root = new THREE.Mesh(
     new THREE.PlaneGeometry(safeWidth, safeHeight),
     new THREE.MeshBasicMaterial({
