@@ -1,4 +1,4 @@
-.PHONY: install build test lint fmt typecheck checkall checkall-ci asset-check e2e auto-entry-check production-label-check update-notice-check arrangement-check focus-mode-check window-preferences-check input-comfort-check terminal-shimmer-check widgets-clarity-check terminal-capacity-check live-check real-app-check dev dev-start dev-stop dev-restart preview pre-commit
+.PHONY: install build test lint fmt typecheck checkall checkall-ci asset-check e2e auto-entry-check production-label-check update-notice-check arrangement-check focus-mode-check window-preferences-check clipboard-selection-check input-comfort-check terminal-shimmer-check widgets-clarity-check terminal-capacity-check live-check real-app-check dev dev-start dev-stop dev-restart preview pre-commit
 
 install:
 	bun install --frozen-lockfile
@@ -30,6 +30,8 @@ focus-mode-check:
 	bun run scripts/focus-mode-check.ts
 window-preferences-check:
 	bun run scripts/window-preferences-check.ts
+clipboard-selection-check:
+	bun run scripts/clipboard-selection-check.ts
 input-comfort-check:
 	bun run scripts/input-comfort-check.ts
 widgets-clarity-check:

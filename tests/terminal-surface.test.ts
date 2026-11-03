@@ -12,6 +12,13 @@ const fakeResets: number[] = [];
 const fakeCells: unknown[] = [];
 const paintStyles: string[] = [];
 const paintTextStyles: string[] = [];
+const selectionCalls: Array<{ col: number; row: number; length: number }> = [];
+let selectionText = '';
+let selectionClears = 0;
+let fakeViewportY = 0;
+let selectionChanged: (() => void) | undefined;
+let fakeMarker: { line: number; dispose(): void } | undefined;
+let fakeBufferType = 'normal';
 function basicFakeCell(chars: string): Record<string, unknown> {
   return {
     getWidth: () => 1,
@@ -32,7 +39,12 @@ vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     public buffer = {
       active: {
-        viewportY: 0,
+        get type() {
+          return fakeBufferType;
+        },
+        get viewportY() {
+          return fakeViewportY;
+        },
         baseY: 0,
         cursorY: 0,
         cursorX: 0,
@@ -46,6 +58,26 @@ vi.mock('@xterm/xterm', () => ({
     public resize(): void {}
     public reset(): void {
       fakeResets.push(1);
+    }
+    public select(col: number, row: number, length: number): void {
+      selectionCalls.push({ col, row, length });
+    }
+    public getSelection(): string {
+      return selectionText;
+    }
+    public hasSelection(): boolean {
+      return selectionText.length > 0;
+    }
+    public onSelectionChange(listener: () => void): void {
+      selectionChanged = listener;
+    }
+    public registerMarker(): typeof fakeMarker {
+      return fakeMarker;
+    }
+    public clearSelection(): void {
+      selectionClears += 1;
+      selectionText = '';
+      selectionChanged?.();
     }
     public write(data: Uint8Array, callback?: () => void): void {
       fakeWrites.push(data);
@@ -116,6 +148,13 @@ beforeEach(() => {
   fakeCells.length = 0;
   paintStyles.length = 0;
   paintTextStyles.length = 0;
+  selectionCalls.length = 0;
+  selectionText = '';
+  selectionClears = 0;
+  fakeViewportY = 0;
+  selectionChanged = undefined;
+  fakeMarker = undefined;
+  fakeBufferType = 'normal';
   MockSocket.instances.length = 0;
   (globalThis as Record<string, unknown>).WebSocket = MockSocket;
   (globalThis as Record<string, unknown>).document = {
@@ -508,5 +547,113 @@ describe('terminal color modes', () => {
     expect(monochromeForeground.slice(1, 3)).toBe(monochromeForeground.slice(3, 5));
     expect(monochromeForeground.slice(3, 5)).toBe(monochromeForeground.slice(5, 7));
     expect(terminalColor('monochrome', false, false, 0, '#070707', false, true)).toBe('#070707');
+  });
+
+  it('snaps a wide-character continuation cell to the complete glyph', async () => {
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    fakeCells.push(
+      { ...basicFakeCell('界'), getWidth: () => 2 },
+      { ...basicFakeCell(''), getWidth: () => 0 },
+    );
+    surface.beginSelection?.({ col: 1, row: 0 });
+    expect(selectionCalls[0]).toEqual({ col: 0, row: 0, length: 1 });
+    surface.dispose();
+  });
+
+  it('clears native selection events without recursively clearing again', async () => {
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    selectionText = 'text';
+    surface.beginSelection?.({ col: 0, row: 0 });
+    surface.clearSelection?.();
+    expect(selectionClears).toBe(1);
+    expect(surface.getSelectionText?.()).toBe('');
+    surface.dispose();
+  });
+
+  it('tracks a marker through buffer trimming and rejects a trimmed-away anchor', async () => {
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    fakeViewportY = 4;
+    selectionText = 'text';
+    fakeMarker = {
+      line: 7,
+      dispose() {
+        this.line = -1;
+      },
+    };
+    surface.beginSelection?.({ col: 2, row: 3 });
+    fakeMarker.line = 5;
+    surface.updateSelection?.({ col: 6, row: 4 });
+    expect(selectionCalls.at(-1)).toEqual({ col: 2, row: 5, length: 245 });
+    fakeMarker.line = -1;
+    expect(surface.getSelectionText?.()).toBe('');
+    surface.dispose();
+  });
+
+  it('rejects selection after the active buffer is replaced', async () => {
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    selectionText = 'old text';
+    surface.beginSelection?.({ col: 2, row: 3 });
+    fakeBufferType = 'alternate';
+    surface.updateSelection?.({ col: 6, row: 4 });
+    expect(surface.getSelectionText?.()).toBe('');
+    expect(selectionCalls).toHaveLength(1);
+    surface.dispose();
+  });
+
+  it('selects inclusive reverse ranges, preserves live output, and invalidates on reset and resize', async () => {
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    selectionText = '界\nwrapped';
+    expect(surface.beginSelection?.({ col: 3, row: 2 })).toBe(true);
+    surface.updateSelection?.({ col: 1, row: 0 });
+    expect(selectionCalls).toEqual([
+      { col: 3, row: 2, length: 1 },
+      { col: 1, row: 0, length: 163 },
+    ]);
+    expect(surface.getSelectionText?.()).toBe('界\nwrapped');
+    expect(selectionClears).toBe(0);
+    surface.connect();
+    const ws = MockSocket.instances[0];
+    ws.open();
+    ws.message(
+      frame(
+        create(ServerMessageSchema, {
+          message: { case: 'connected', value: create(ConnectedSchema, { cols: 80, rows: 24 }) },
+        }),
+      ),
+    );
+    expect(selectionClears).toBeGreaterThan(0);
+    expect(surface.beginSelection?.({ col: 0, row: 0 })).toBe(true);
+    fakeViewportY = 5;
+    surface.updateSelection?.({ col: 1, row: 1 });
+    expect(selectionCalls.at(-1)).toEqual({ col: 0, row: 0, length: 482 });
+    const clearsBeforeOutput = selectionClears;
+    ws.message(
+      frame(
+        create(ServerMessageSchema, {
+          message: {
+            case: 'output',
+            value: create(OutputSchema, { data: new TextEncoder().encode('live') }),
+          },
+        }),
+      ),
+    );
+    expect(selectionClears).toBe(clearsBeforeOutput);
+    ws.message(
+      frame(
+        create(ServerMessageSchema, {
+          message: { case: 'resize', value: create(ResizeSchema, { cols: 90, rows: 24 }) },
+        }),
+      ),
+    );
+    expect(selectionClears).toBeGreaterThan(1);
+    surface.disconnect();
+    expect(surface.beginSelection?.({ col: 2, row: 1 })).toBe(true);
+    surface.updateSelection?.({ col: 3, row: 1 });
+    surface.dispose();
   });
 });

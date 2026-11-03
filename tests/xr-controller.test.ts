@@ -1,6 +1,6 @@
 vi.mock('../src/xr/labels', () => import('./helpers/labels'));
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fakeXR = vi.hoisted(() => ({
   controllers: [] as unknown[],
@@ -41,6 +41,7 @@ import * as THREE from 'three';
 import type { PaneDescriptor, TerminalSurface, WorkspaceActions } from '../src/contracts';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
 import { createWorkspaceScene } from '../src/xr/scene';
+import { terminalWarpPoint } from '../src/xr/terminal-warp';
 
 const pane = (id: string, title = id): PaneDescriptor => ({
   id,
@@ -238,6 +239,187 @@ describe('native XR controller event routing', () => {
       object.position.set(0, 0, 0);
       object.visible = true;
       object.rotation.set(0, 0, 0);
+    });
+  });
+
+  describe('trigger text selection', () => {
+    const cleanups: Array<() => void> = [];
+    afterEach(() => {
+      for (const cleanup of cleanups.splice(0)) cleanup();
+      vi.unstubAllGlobals();
+    });
+    const setupSelection = (writeText = vi.fn(() => Promise.resolve())) => {
+      const value = fixture();
+      const { workspace, actions, left, container } = value;
+      cleanups.push(() => {
+        workspace.dispose();
+        container.remove();
+      });
+      actions.sendMouse = vi.fn(() => false);
+      left.beginSelection = vi.fn(() => true);
+      left.updateSelection = vi.fn();
+      left.getSelectionText = vi.fn(() => 'exact text\n界 😀');
+      left.clearSelection = vi.fn();
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      connectController(0);
+      const screen = workspace.scene
+        .getObjectByName('terminal-panel-pane-a')
+        ?.getObjectByName('terminal-surface') as THREE.Mesh<THREE.PlaneGeometry>;
+      const width = screen.geometry.parameters.width;
+      const height = screen.geometry.parameters.height;
+      const aimCell = (col: number, row: number): void => {
+        const point = terminalWarpPoint(((col + 0.5) / left.cols - 0.5) * width, {
+          width,
+          height,
+          radians: THREE.MathUtils.degToRad(workspace.getTerminalCurvature('pane-a')),
+        });
+        aimControllerAtScreen(
+          controller,
+          screen,
+          new THREE.Vector3(point.x, (0.5 - (row + 0.5) / left.rows) * height, point.z),
+        );
+      };
+      vi.stubGlobal('navigator', { clipboard: { writeText } });
+      const start = (): void => {
+        aimCell(2, 3);
+        controller.dispatchEvent({ type: 'selectstart' } as never);
+      };
+      const drag = (): void => {
+        aimCell(8, 5);
+        fakeXR.frame?.(100);
+      };
+      const finish = (): void => {
+        controller.dispatchEvent({ type: 'select' } as never);
+        controller.dispatchEvent({ type: 'selectend' } as never);
+      };
+      return { ...value, controller, aimCell, start, drag, finish, writeText };
+    };
+
+    it('copies curved-grid text on completed trigger release and clears only after success', async () => {
+      let resolveWrite: (() => void) | undefined;
+      const write = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveWrite = resolve;
+          }),
+      );
+      const { workspace, left, start, drag, finish } = setupSelection(write);
+      workspace.setTerminalCurvature('pane-a', 60);
+      start();
+      expect(left.beginSelection).toHaveBeenCalledWith({ col: 2, row: 3 });
+      drag();
+      expect(left.updateSelection).toHaveBeenLastCalledWith({ col: 8, row: 5 });
+      expect(write).not.toHaveBeenCalled();
+      finish();
+      expect(write).toHaveBeenCalledExactlyOnceWith('exact text\n界 😀');
+      expect(left.clearSelection).not.toHaveBeenCalled();
+      resolveWrite?.();
+      await Promise.resolve();
+      expect(left.clearSelection).toHaveBeenCalledTimes(1);
+    });
+
+    it('retains the selection and reports clipboard rejection', async () => {
+      const { workspace, left, start, drag, finish } = setupSelection(
+        vi.fn(() => Promise.reject(new Error('denied'))),
+      );
+      start();
+      drag();
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(left.clearSelection).not.toHaveBeenCalled();
+      expect(workspace.state.notice).toContain('Clipboard copy failed');
+    });
+
+    it('keeps a pending selection through grip and recenter until clipboard result', async () => {
+      let rejectWrite: ((reason: Error) => void) | undefined;
+      const { workspace, left, controller, start, drag, finish } = setupSelection(
+        vi.fn(
+          () =>
+            new Promise<void>((_resolve, reject) => {
+              rejectWrite = reject;
+            }),
+        ),
+      );
+      start();
+      drag();
+      finish();
+      controller.dispatchEvent({ type: 'squeezestart' } as never);
+      controller.dispatchEvent({ type: 'squeezeend' } as never);
+      workspace.resetLayout();
+      expect(left.clearSelection).not.toHaveBeenCalled();
+      rejectWrite?.(new Error('denied'));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(left.clearSelection).not.toHaveBeenCalled();
+      expect(workspace.state.notice).toContain('Clipboard copy failed');
+    });
+
+    it('does not copy a click or a cancelled selectend', () => {
+      const { left, controller, start, drag, finish, writeText } = setupSelection();
+      start();
+      finish();
+      expect(writeText).not.toHaveBeenCalled();
+      start();
+      drag();
+      controller.dispatchEvent({ type: 'selectend' } as never);
+      expect(writeText).not.toHaveBeenCalled();
+      expect(left.clearSelection).toHaveBeenCalledTimes(2);
+    });
+
+    it('cancels selection on grip, disconnect, recenter and removal without copying', () => {
+      for (const action of ['grip', 'disconnect', 'reset', 'remove'] as const) {
+        const { workspace, left, controller, start, drag, finish, writeText } = setupSelection();
+        start();
+        drag();
+        if (action === 'grip') controller.dispatchEvent({ type: 'squeezestart' } as never);
+        else if (action === 'disconnect')
+          controller.dispatchEvent({ type: 'disconnected' } as never);
+        else if (action === 'reset') workspace.resetLayout();
+        else workspace.removeTerminal('pane-a');
+        finish();
+        expect(writeText).not.toHaveBeenCalled();
+        expect(left.clearSelection).toHaveBeenCalledTimes(1);
+        workspace.dispose();
+      }
+    });
+
+    it('keeps TUI mouse reporting and suppresses selection while gripping', () => {
+      const { actions, left, controller, start, drag, finish, writeText } = setupSelection();
+      Object.defineProperty(left, 'mouseTracking', { value: 'drag' });
+      actions.sendMouse = vi.fn(() => true);
+      start();
+      drag();
+      finish();
+      expect(actions.sendMouse).toHaveBeenCalled();
+      expect(left.beginSelection).not.toHaveBeenCalled();
+      expect(writeText).not.toHaveBeenCalled();
+      controller.dispatchEvent({ type: 'squeezestart' } as never);
+      start();
+      expect(left.beginSelection).not.toHaveBeenCalled();
+    });
+
+    it('does not clear a newer selection when an older clipboard write resolves', async () => {
+      let resolveWrite: (() => void) | undefined;
+      const { left, start, drag, finish } = setupSelection(
+        vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              resolveWrite = resolve;
+            }),
+        ),
+      );
+      start();
+      drag();
+      finish();
+      start();
+      drag();
+      const clear = left.clearSelection;
+      if (!clear) throw new Error('Selection cleanup missing');
+      const cleared = vi.mocked(clear).mock.calls.length;
+      resolveWrite?.();
+      await Promise.resolve();
+      expect(left.clearSelection).toHaveBeenCalledTimes(cleared);
     });
   });
 

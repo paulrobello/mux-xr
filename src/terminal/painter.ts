@@ -9,7 +9,10 @@ const DEFAULT_FOREGROUND = '#d8e1ef';
 const CANVAS_BACKGROUND = '#05070b';
 const MONOCHROME_BACKGROUND = '#070707';
 
-type TerminalLike = Pick<Terminal, 'buffer'>;
+type SelectionPosition = { start: { x: number; y: number }; end: { x: number; y: number } } | null;
+type TerminalLike = Pick<Terminal, 'buffer'> & {
+  getSelectionPosition?: () => SelectionPosition | undefined;
+};
 type PainterContext = CanvasRenderingContext2D;
 
 export interface TerminalPainter {
@@ -43,6 +46,33 @@ export function createTerminalPainter(
   let dirtyRows = new Uint8Array(0);
   let previousCursorRow = -1;
   let previousCursorX = -1;
+  let previousSelectionKey = '';
+  let previousViewportY = 0;
+
+  const selectionKey = (selection: SelectionPosition | undefined): string => {
+    return selection
+      ? `${selection.start.x},${selection.start.y}:${selection.end.x},${selection.end.y}`
+      : '';
+  };
+
+  const selectionContains = (
+    selection: SelectionPosition | undefined,
+    col: number,
+    bufferRow: number,
+  ): boolean => {
+    if (!selection) return false;
+    const { start: rawStart, end: rawEnd } = selection;
+    const start =
+      rawStart.y < rawEnd.y || (rawStart.y === rawEnd.y && rawStart.x <= rawEnd.x)
+        ? rawStart
+        : rawEnd;
+    const end = start === rawStart ? rawEnd : rawStart;
+    if (bufferRow < start.y || bufferRow > end.y) return false;
+    if (start.y === end.y) return col >= start.x && col < end.x;
+    if (bufferRow === start.y) return col >= start.x;
+    if (bufferRow === end.y) return col < end.x;
+    return true;
+  };
 
   const resizeCache = (cols: number, rows: number): void => {
     const length = cols * rows;
@@ -98,6 +128,7 @@ export function createTerminalPainter(
     colorMode: TerminalColorMode,
     background: string,
     cell: IBufferCell,
+    selection: SelectionPosition | undefined,
   ): void => {
     setFillStyle(ctx, background);
     ctx.fillRect(0, row * LINE_HEIGHT, cols * CELL_WIDTH, LINE_HEIGHT);
@@ -108,7 +139,12 @@ export function createTerminalPainter(
       const index = row * cols + col;
       const current = line?.getCell(col, cell);
       const width = cachedWidth[index];
+      const x = col * CELL_WIDTH;
       if (!current || width === 0) continue;
+      const bufferRow = terminal.buffer.active.viewportY + row;
+      const selected =
+        selectionContains(selection, col, bufferRow) ||
+        (width === 2 && selectionContains(selection, col + 1, bufferRow));
       const inverse = (cachedFlags[index] & 8) !== 0;
       const fg = terminalColor(
         colorMode,
@@ -128,9 +164,8 @@ export function createTerminalPainter(
         false,
         true,
       );
-      const foreground = inverse ? bg : fg;
-      const cellBackground = inverse ? fg : bg;
-      const x = col * CELL_WIDTH;
+      const foreground = selected ? '#ffffff' : inverse ? bg : fg;
+      const cellBackground = selected ? '#284f5b' : inverse ? fg : bg;
       if (cellBackground !== background) {
         setFillStyle(ctx, cellBackground);
         ctx.fillRect(x, row * LINE_HEIGHT, Math.max(1, width) * CELL_WIDTH, LINE_HEIGHT);
@@ -185,9 +220,23 @@ export function createTerminalPainter(
         density !== cachedDensity ||
         colorMode !== cachedMode;
       const active = terminal.buffer.active;
+      const selection = terminal.getSelectionPosition?.();
+      const currentSelectionKey = selectionKey(selection);
       const cursorRow = active.baseY + active.cursorY - active.viewportY;
       dirtyRows.fill(0);
       if (full) dirtyRows.fill(1);
+      if (currentSelectionKey !== previousSelectionKey || active.viewportY !== previousViewportY) {
+        const markSelectionRows = (key: string, viewportY: number): void => {
+          if (!key) return;
+          const [start, end] = key.split(':').map((part) => part.split(',').map(Number));
+          const first = Math.min(start[1], end[1]) - viewportY;
+          const last = Math.max(start[1], end[1]) - viewportY;
+          for (let row = Math.max(0, first); row <= Math.min(rows - 1, last); row += 1)
+            dirtyRows[row] = 1;
+        };
+        markSelectionRows(previousSelectionKey, previousViewportY);
+        markSelectionRows(currentSelectionKey, active.viewportY);
+      }
       const cell = active.getNullCell();
       for (let row = 0; row < rows; row += 1) {
         const line = active.getLine(active.viewportY + row);
@@ -207,7 +256,7 @@ export function createTerminalPainter(
       if (ctx.strokeStyle !== '#ffffff') ctx.strokeStyle = '#ffffff';
       for (let row = 0; row < rows; row += 1) {
         if (!dirtyRows[row]) continue;
-        drawRow(ctx, row, cols, colorMode, background, cell);
+        drawRow(ctx, row, cols, colorMode, background, cell, selection);
         changed = true;
       }
       if (cursorRow >= 0 && cursorRow < rows && (dirtyRows[cursorRow] !== 0 || full)) {
@@ -224,6 +273,8 @@ export function createTerminalPainter(
       cachedDensity = density;
       previousCursorRow = cursorRow;
       previousCursorX = active.cursorX;
+      previousSelectionKey = currentSelectionKey;
+      previousViewportY = active.viewportY;
       return changed;
     },
     invalidate(): void {

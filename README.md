@@ -98,6 +98,8 @@ The observatory planet rotates slowly about its own center. A subtle shooting st
 
 For TUIs that enable mouse tracking, point at the terminal and press the controller trigger for a left click. Hold the trigger and move the ray to drag, then release it. Movement is sent only over the captured pane, and the release stays with that pane. Grip suppresses mouse input and safely ends an existing drag before window manipulation. Desktop terminal canvases also support pointer click/drag. Mouse coordinates follow the remote grid, physical transforms and local text zoom. Disabled tracking, read-only and disconnected streams reject mouse input.
 
+In XR, trigger-drag over ordinary terminal text selects it locally. Completing the drag copies the exact text to the headset clipboard, then clears the highlight after the clipboard write succeeds. A click without a drag only selects the pane. If clipboard access is blocked, the highlight remains and a notice explains the failure. Grip cancels an active text drag without copying. Gripping or moving UI after a completed drag preserves a pending clipboard write. Mouse-enabled TUIs keep their mouse behavior. Local text copy also works from a disconnected pane's retained view and never sends terminal input or clipboard commands to par-mux.
+
 ## Quick command setup
 
 In XR, open **Commands → New command**. Select **Name** or **Command**, type with the virtual keys, choose **Global** or **Workspace** scope and whether running should append **Enter**, then **Save**. Saving stores the command on this device without running it. Run a saved command explicitly from the Commands menu. The browser drawer provides label/text fields and Save for the same command store.

@@ -37,9 +37,15 @@ function fixture(
   rows = 3,
 ): {
   canvas: HTMLCanvasElement;
-  terminal: { buffer: { active: Record<string, unknown> } };
+  terminal: {
+    buffer: { active: Record<string, unknown> };
+    getSelectionPosition: () =>
+      | { start: { x: number; y: number }; end: { x: number; y: number } }
+      | undefined;
+  };
   lines: Record<string, unknown>[][];
   context: Record<string, unknown>;
+  selection: { current?: { start: { x: number; y: number }; end: { x: number; y: number } } };
 } {
   const lines = Array.from({ length: rows + 2 }, () => Array.from({ length: cols }, () => cell()));
   const active = {
@@ -50,6 +56,9 @@ function fixture(
     getNullCell: () => cell(),
     getLine: (row: number) => ({ getCell: (column: number) => lines[row]?.[column] }),
   };
+  const selection: {
+    current?: { start: { x: number; y: number }; end: { x: number; y: number } };
+  } = {};
   const calls: string[] = [];
   const context = {
     fillStyle: '',
@@ -64,7 +73,13 @@ function fixture(
   } as unknown as Record<string, unknown>;
   const canvas = document.createElement('canvas');
   vi.spyOn(canvas, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D);
-  return { canvas, terminal: { buffer: { active } }, lines, context };
+  return {
+    canvas,
+    terminal: { buffer: { active }, getSelectionPosition: () => selection.current },
+    lines,
+    context,
+    selection,
+  };
 }
 
 describe('terminal painter', () => {
@@ -164,5 +179,42 @@ describe('terminal painter', () => {
     expect(
       (f.context.fillText as ReturnType<typeof vi.fn>).mock.calls.map(([text]) => text),
     ).toEqual(['界', 'é']);
+  });
+
+  it('does not paint a continuation-cell highlight over a selected wide glyph', () => {
+    const f = fixture(2, 1);
+    f.lines[0][0] = cell({ chars: '界', width: 2 });
+    f.lines[0][1] = cell({ width: 0 });
+    f.selection.current = { start: { x: 1, y: 0 }, end: { x: 2, y: 0 } };
+    const painter = createTerminalPainter(f.canvas, f.terminal as never);
+    painter.paint(2, 1, 'comfort');
+    const calls = f.context.calls as string[];
+    const afterGlyph = calls.slice(calls.indexOf('text') + 1);
+    expect(afterGlyph).not.toContain('fill');
+    expect((f.context.fillText as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('界');
+  });
+
+  it('highlights zero-based exclusive multiline selections and dirties only changed rows', () => {
+    const f = fixture(4, 3);
+    f.lines[0][0] = cell({ chars: 'a' });
+    f.lines[1][0] = cell({ chars: '界', width: 2 });
+    const terminal = f.terminal as typeof f.terminal & {
+      getSelectionPosition: () =>
+        | { start: { x: number; y: number }; end: { x: number; y: number } }
+        | undefined;
+    };
+    const painter = createTerminalPainter(f.canvas, terminal as never);
+    painter.paint(4, 3, 'comfort');
+    f.selection.current = { start: { x: 1, y: 1 }, end: { x: 2, y: 2 } };
+    (f.context.calls as string[]).length = 0;
+    expect(painter.paint(4, 3, 'comfort')).toBe(true);
+    expect(painter.dirtyRows).toEqual(new Uint8Array([0, 1, 1]));
+    expect(
+      (f.context.calls as string[]).filter((value) => value === 'fill').length,
+    ).toBeGreaterThan(2);
+    f.selection.current = undefined;
+    (f.context.calls as string[]).length = 0;
+    expect(painter.paint(4, 3, 'comfort')).toBe(true);
+    expect(painter.dirtyRows).toEqual(new Uint8Array([0, 1, 1]));
   });
 });

@@ -43,6 +43,11 @@ export interface TerminalMouseInput {
   modifiers?: KeyModifiers;
 }
 
+export interface TerminalCellPosition {
+  col: number;
+  row: number;
+}
+
 export interface TerminalSurface {
   readonly serverId?: string;
   readonly canvas: HTMLCanvasElement;
@@ -62,6 +67,10 @@ export interface TerminalSurface {
   sendText(text: string): boolean;
   sendKey(key: string, modifiers?: KeyModifiers): boolean;
   sendMouse?(input: TerminalMouseInput): boolean;
+  beginSelection?(cell: TerminalCellPosition): boolean;
+  updateSelection?(cell: TerminalCellPosition): void;
+  getSelectionText?(): string;
+  clearSelection?(): void;
   scroll?(lines: number, cell?: { col: number; row: number }): boolean;
   readonly mouseTracking?: TerminalMouseTrackingMode;
   paste(text: string): boolean;

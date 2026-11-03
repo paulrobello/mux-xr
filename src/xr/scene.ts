@@ -5,6 +5,7 @@ import type {
   PaneDescriptor,
   PanelArrangement,
   QuickCommand,
+  TerminalCellPosition,
   TerminalColorMode,
   TerminalMouseInput,
   TerminalRenderQuality,
@@ -567,6 +568,7 @@ export function createWorkspaceScene(
     root: THREE.Group;
     onSelect: (event: Event) => void;
     onSelectEnd: (event: Event) => void;
+    onSelectComplete: (event: Event) => void;
     onSqueeze: (event: Event) => void;
     onSqueezeEnd: (event: Event) => void;
     onConnected: (event: Event) => void;
@@ -661,6 +663,14 @@ export function createWorkspaceScene(
       modifiers?: KeyModifiers;
     }
   >();
+  let textSelection: {
+    source: THREE.Group;
+    id: string;
+    surface: TerminalSurface;
+    last: TerminalCellPosition;
+    dragged: boolean;
+    phase: 'dragging' | 'copying' | 'retained';
+  } | null = null;
   let previousRenderTime: number | null = null;
   let lodWasPresenting = false;
   const frameCounter = createFrameCounter();
@@ -793,6 +803,7 @@ export function createWorkspaceScene(
       refreshInputRoot(inputMode);
   };
   const releaseAllMouse = (): void => {
+    cancelTextSelection(undefined, true);
     for (const source of [...mouseCaptures.keys()]) releaseMouse(source);
   };
   const gripActive = (): boolean =>
@@ -813,6 +824,97 @@ export function createWorkspaceScene(
         panel.surface.rows - 1,
       ),
     };
+  };
+  const cancelTextSelection = (id?: string, draggingOnly = false): void => {
+    const selection = textSelection;
+    if (
+      !selection ||
+      (id !== undefined && selection.id !== id) ||
+      (draggingOnly && selection.phase !== 'dragging')
+    )
+      return;
+    textSelection = null;
+    selection.surface.clearSelection?.();
+  };
+  const startTextSelection = (source: THREE.Group, target: InputTarget | null): void => {
+    if (
+      !renderer?.xr.isPresenting ||
+      gripActive() ||
+      warpEdit ||
+      radialMenu.root.visible ||
+      !target?.uv
+    )
+      return;
+    const panel = panels.get(target.terminalId);
+    if (
+      !panel ||
+      target.object !== panel.screen ||
+      (panel.surface.mouseTracking ?? 'none') !== 'none'
+    )
+      return;
+    cancelTextSelection();
+    const cell = cellAtUV(panel, target.uv);
+    if (!panel.surface.beginSelection?.(cell)) return;
+    textSelection = {
+      source,
+      id: panel.id,
+      surface: panel.surface,
+      last: cell,
+      dragged: false,
+      phase: 'dragging',
+    };
+    gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
+  };
+  const moveTextSelection = (source: THREE.Group, target: InputTarget | null): void => {
+    const selection = textSelection;
+    if (!selection || selection.source !== source || selection.phase !== 'dragging') return;
+    const panel = panels.get(selection.id);
+    if (gripActive() || !panel || (panel.surface.mouseTracking ?? 'none') !== 'none') {
+      cancelTextSelection();
+      return;
+    }
+    if (target?.object !== panel.screen || !target.uv) return;
+    const cell = cellAtUV(panel, target.uv);
+    if (cell.col === selection.last.col && cell.row === selection.last.row) return;
+    selection.last = cell;
+    selection.dragged = true;
+    panel.surface.updateSelection?.(cell);
+  };
+  const copyTextSelection = (source: THREE.Group): void => {
+    const selection = textSelection;
+    if (!selection || selection.source !== source || selection.phase !== 'dragging') return;
+    if (gripActive() || disconnectedControllers.has(source)) {
+      cancelTextSelection();
+      return;
+    }
+    moveTextSelection(source, targetFromController(source));
+    if (textSelection !== selection) return;
+    const text = selection.surface.getSelectionText?.() ?? '';
+    if (!selection.dragged || !text) {
+      cancelTextSelection();
+      return;
+    }
+    selection.phase = 'copying';
+    const failed = (): void => {
+      if (textSelection !== selection || disposed) return;
+      selection.phase = 'retained';
+      setNotice('Clipboard copy failed. Allow clipboard access, then select the text again.');
+    };
+    try {
+      if (!navigator.clipboard?.writeText) {
+        failed();
+        return;
+      }
+      void navigator.clipboard
+        .writeText(text)
+        .then(() => {
+          if (textSelection !== selection || disposed) return;
+          cancelTextSelection();
+        })
+        .catch(failed);
+    } catch {
+      failed();
+    }
   };
   const startMouse = (
     source: THREE.Group | number,
@@ -1137,6 +1239,8 @@ export function createWorkspaceScene(
           disconnectedControllers.has(controller) ||
           gripActive() ||
           mouseCaptures.size ||
+          textSelection?.phase === 'dragging' ||
+          textSelection?.phase === 'copying' ||
           warpEdit ||
           radialMenu.root.visible ||
           pad.buttons[3]?.pressed ||
@@ -1321,7 +1425,9 @@ export function createWorkspaceScene(
         mutableState.xrMode !== 'desktop' &&
         inputMode !== 'command-editor' &&
         dragStates.size === 0 &&
-        mouseCaptures.size === 0
+        mouseCaptures.size === 0 &&
+        textSelection?.phase !== 'dragging' &&
+        textSelection?.phase !== 'copying'
       ) {
         const nextGaze = updateGaze(
           gazeInputState,
@@ -1348,6 +1454,7 @@ export function createWorkspaceScene(
         controller.updateMatrixWorld(true);
         const target = targetFromController(controller, false);
         moveMouse(controller, target);
+        moveTextSelection(controller, target);
         const distance =
           (controller.userData.rayDistance as number | undefined) ?? CONTROLLER_RAY_LENGTH;
         const line = controller.children.find((child) => child instanceof THREE.Line) as
@@ -2667,7 +2774,7 @@ export function createWorkspaceScene(
       : undefined;
     activateTarget(target);
     beginModifierPress(controller, target);
-    startMouse(controller, target, 0, modifiers);
+    if (!startMouse(controller, target, 0, modifiers)) startTextSelection(controller, target);
     showHover(null);
   };
   const setupControllers = (): void => {
@@ -2704,7 +2811,11 @@ export function createWorkspaceScene(
           moveMouse(root, targetFromController(root));
         }
         releaseMouse(root);
+        // A cancelled XR gesture emits selectend without the user-activation select event.
+        if (textSelection?.source === root && textSelection.phase === 'dragging')
+          cancelTextSelection();
       };
+      const onSelectComplete = (): void => copyTextSelection(root);
       const onSqueeze = (event: Event): void => {
         if (heldControllers.has(root) || disconnectedControllers.has(root)) return;
         releaseAllMouse();
@@ -2782,6 +2893,7 @@ export function createWorkspaceScene(
         if (gamepad) controllerGamepads.set(root, gamepad);
       };
       const onDisconnected = (): void => {
+        if (textSelection?.source === root) cancelTextSelection(undefined, true);
         if (warpEdit?.controller === root) finishWarp(false);
         releaseMouse(root);
         modifierPresses.delete(root);
@@ -2812,6 +2924,7 @@ export function createWorkspaceScene(
       const eventRoot = root as unknown as EventRoot;
       eventRoot.addEventListener('selectstart', onSelect);
       eventRoot.addEventListener('selectend', onSelectEnd);
+      eventRoot.addEventListener('select', onSelectComplete);
       eventRoot.addEventListener('squeezestart', onSqueeze);
       eventRoot.addEventListener('squeezeend', onSqueezeEnd);
       eventRoot.addEventListener('connected', onConnected);
@@ -2821,6 +2934,7 @@ export function createWorkspaceScene(
         root,
         onSelect,
         onSelectEnd,
+        onSelectComplete,
         onSqueeze,
         onSqueezeEnd,
         onConnected,
@@ -3027,6 +3141,7 @@ export function createWorkspaceScene(
   const removeTerminal = (id: string): void => {
     const panel = panels.get(id);
     if (!panel) return;
+    cancelTextSelection(id);
     if (warpEdit?.id === id) finishWarp(false);
     terminalScreens.splice(terminalScreens.indexOf(panel.screen), 1);
     paneFocus.remove(panel.root);
@@ -3057,6 +3172,7 @@ export function createWorkspaceScene(
   };
   const selectTerminal = (id: string | null): void => {
     const nextId = id && panels.has(id) ? id : null;
+    if (textSelection && nextId !== textSelection.id) cancelTextSelection(undefined, true);
     if (warpEdit && nextId !== warpEdit.id && !gripActive()) finishWarp(false);
     if (paneFocus.activeId && nextId !== paneFocus.activeId) endFocusMode(true);
     if (nextId === mutableState.selectedTerminalId && mutableState.focusedTerminalId === nextId)
@@ -3688,6 +3804,7 @@ export function createWorkspaceScene(
     rememberTerminalPlacements();
   };
   const resetLayout = (): void => {
+    cancelTextSelection(undefined, true);
     finishWarp(false);
     radialMenu.close();
     mutableState.radialOpen = false;
@@ -3800,6 +3917,7 @@ export function createWorkspaceScene(
       root,
       onSelect,
       onSelectEnd,
+      onSelectComplete,
       onSqueeze,
       onSqueezeEnd,
       onConnected,
@@ -3808,6 +3926,7 @@ export function createWorkspaceScene(
       const eventRoot = root as unknown as EventRoot;
       eventRoot.removeEventListener('selectstart', onSelect);
       eventRoot.removeEventListener('selectend', onSelectEnd);
+      eventRoot.removeEventListener('select', onSelectComplete);
       eventRoot.removeEventListener('squeezestart', onSqueeze);
       eventRoot.removeEventListener('squeezeend', onSqueezeEnd);
       eventRoot.removeEventListener('connected', onConnected);

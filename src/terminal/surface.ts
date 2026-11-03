@@ -2,6 +2,7 @@ import { Terminal } from '@xterm/xterm';
 import type {
   KeyModifiers,
   PaneDescriptor,
+  TerminalCellPosition,
   TerminalColorMode,
   TerminalMouseInput,
   TerminalMouseTrackingMode,
@@ -144,6 +145,9 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   let mouseTrackingDisabled = false;
   let serverMouseMode: TerminalMouseTrackingMode | null = null;
   let serverMouseModeKnown = false;
+  let selectionAnchor: TerminalCellPosition | null = null;
+  let selectionMarker: { line: number; dispose(): void } | undefined;
+  let selectionBufferType: string | undefined;
   let error: string | null = null;
   const listeners = new Set<() => void>();
   const notify = (): void => {
@@ -223,6 +227,32 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       notify();
     }
   };
+  const invalidateSelection = (): void => {
+    selectionAnchor = null;
+    selectionBufferType = undefined;
+    selectionMarker?.dispose();
+    selectionMarker = undefined;
+    terminal.clearSelection?.();
+  };
+  const paintSelection = (): void => {
+    if (!disposed && renderQuality !== 'hidden') paint();
+  };
+  const selectionCell = (cell: TerminalCellPosition): TerminalCellPosition | null => {
+    if (!Number.isInteger(cell.col) || !Number.isInteger(cell.row)) return null;
+    if (cell.col < 0 || cell.col >= cols || cell.row < 0 || cell.row >= rows) return null;
+    const line = terminal.buffer.active.getLine(terminal.buffer.active.viewportY + cell.row);
+    let col = cell.col;
+    while (col > 0 && line?.getCell(col)?.getWidth() === 0) col -= 1;
+    return { col, row: cell.row };
+  };
+  terminal.onSelectionChange?.(() => {
+    if (!terminal.hasSelection()) {
+      selectionAnchor = null;
+      selectionBufferType = undefined;
+      selectionMarker?.dispose();
+      selectionMarker = undefined;
+    } else if (selectionMarker?.line === -1) invalidateSelection();
+  });
   const failProtocol = (message: string): void => {
     error = message.slice(0, 256);
     ready = false;
@@ -299,6 +329,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             }
             terminal.resize(cols, rows);
             terminal.reset();
+            invalidateSelection();
             const current = (): boolean => token === generation;
             if (connected.initialScreen?.length)
               terminal.write(connected.initialScreen, () => queuePaint(current));
@@ -314,6 +345,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             cols = msg.message.value.cols;
             rows = msg.message.value.rows;
             terminal.resize(cols, rows);
+            invalidateSelection();
             cancelPaint();
             queuePaint();
             break;
@@ -463,6 +495,60 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
         return false;
       return send(createMouseMessage(input));
     },
+    beginSelection: (cell): boolean => {
+      if (disposed || surface.mouseTracking !== 'none') return false;
+      const valid = selectionCell(cell);
+      if (!valid) return false;
+      selectionAnchor = { col: valid.col, row: valid.row + terminal.buffer.active.viewportY };
+      selectionBufferType = terminal.buffer.active.type;
+      selectionMarker?.dispose();
+      selectionMarker = terminal.registerMarker?.(
+        selectionAnchor.row - (terminal.buffer.active.baseY + terminal.buffer.active.cursorY),
+      );
+      terminal.select(valid.col, valid.row + terminal.buffer.active.viewportY, 1);
+      paintSelection();
+      return true;
+    },
+    updateSelection: (cell): void => {
+      if (disposed || !selectionAnchor) return;
+      if (selectionMarker?.line === -1 || selectionBufferType !== terminal.buffer.active.type) {
+        invalidateSelection();
+        paintSelection();
+        return;
+      }
+      const valid = selectionCell(cell);
+      if (!valid) return;
+      const anchorRow = selectionMarker?.line ?? selectionAnchor.row;
+      const anchorOffset = anchorRow * cols + selectionAnchor.col;
+      const endOffset = (valid.row + terminal.buffer.active.viewportY) * cols + valid.col;
+      const startOffset = Math.min(anchorOffset, endOffset);
+      terminal.select(
+        startOffset % cols,
+        Math.floor(startOffset / cols),
+        Math.abs(endOffset - anchorOffset) + 1,
+      );
+      paintSelection();
+    },
+    getSelectionText: (): string => {
+      if (
+        selectionMarker?.line === -1 ||
+        (selectionAnchor && selectionBufferType !== terminal.buffer.active.type)
+      ) {
+        invalidateSelection();
+        paintSelection();
+        return '';
+      }
+      if (!terminal.hasSelection?.()) {
+        selectionAnchor = null;
+        return '';
+      }
+      return terminal.getSelection();
+    },
+    clearSelection: (): void => {
+      if (disposed) return;
+      invalidateSelection();
+      paintSelection();
+    },
     scroll: (lines, cell = { col: Math.floor(cols / 2), row: Math.floor(rows / 2) }): boolean => {
       if (!Number.isFinite(lines) || lines === 0 || disposed) return false;
       const wholeLines = Math.trunc(lines);
@@ -519,6 +605,9 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       socket = null;
       current?.close();
       terminal.dispose();
+      selectionMarker?.dispose();
+      selectionMarker = undefined;
+      selectionAnchor = null;
       host.remove();
       setStatus('closed');
     },
