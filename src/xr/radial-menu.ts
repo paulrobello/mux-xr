@@ -40,7 +40,7 @@ const COLORS = {
   cancel: '#17212d',
   text: '#dce7ed',
 };
-const OPEN_SECONDS = 0.8;
+const OPEN_SECONDS = 0.64;
 const CLOSE_SECONDS = 0.15;
 const FAN_RADIUS = 0.245;
 const STACK_ANGLE = -Math.PI / 2;
@@ -253,12 +253,12 @@ export function createRadialMenu(): RadialMenu {
         }
         return;
       }
-      const centerProgress = ease(elapsed / 0.16);
+      const centerProgress = ease(elapsed / 0.128);
       center.scale.setScalar(Math.max(0.001, centerProgress));
-      const stackProgress = ease((elapsed - 0.16) / 0.16);
-      const fanProgress = ease((elapsed - 0.32) / 0.48);
+      const stackProgress = ease((elapsed - 0.128) / 0.128);
+      const fanProgress = ease((elapsed - 0.256) / 0.384);
       for (const target of targets) {
-        if (elapsed < 0.32) {
+        if (elapsed < 0.256) {
           target.group.position.lerpVectors(origin, target.stackPosition, stackProgress);
         } else {
           const angle = STACK_ANGLE + (target.finalAngle - STACK_ANGLE) * fanProgress;

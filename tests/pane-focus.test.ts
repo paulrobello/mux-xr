@@ -13,6 +13,22 @@ function pane(opacity = 0.8): { root: THREE.Group; mesh: THREE.Mesh } {
 }
 
 describe('pane focus', () => {
+  it('retargets an active focus without jumping or replacing the original pose', () => {
+    const focus = createPaneFocus();
+    const { root } = pane();
+    root.position.set(3, 2, -4);
+    const original = root.position.clone();
+    focus.enter('a', root, [root], new THREE.Vector3(0, 0, -2), new THREE.Quaternion());
+    focus.update(0.25);
+    const current = root.position.clone();
+    focus.retarget(new THREE.Vector3(0, 0, -1.5), new THREE.Quaternion());
+    expect(root.position).toEqual(current);
+    focus.update(0.25);
+    expect(root.position.z).toBe(-1.5);
+    focus.exit(true);
+    expect(root.position).toEqual(original);
+    focus.dispose();
+  });
   it('animates the focus root and restores its exact transform', () => {
     const focus = createPaneFocus();
     const { root } = pane();

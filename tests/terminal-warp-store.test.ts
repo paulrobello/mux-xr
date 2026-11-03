@@ -16,6 +16,16 @@ function memoryStorage(): Storage {
 }
 
 describe('terminal warp store', () => {
+  it('uses a new-window default only when the pane has no saved opacity', () => {
+    const storage = memoryStorage();
+    const store = createTerminalWarpStore(storage);
+    store.set('curvature-only', 25);
+    store.setOpacity('custom', 0.7);
+    expect(store.getOpacity('new', 0.4)).toBe(0.4);
+    expect(store.getOpacity('curvature-only', 0.4)).toBe(0.4);
+    expect(store.getOpacity('custom', 0.4)).toBe(0.7);
+    expect(createTerminalWarpStore(null).getOpacity('new', 0.4)).toBe(0.4);
+  });
   it('stores values by opaque pane identity and clamps them to degrees', () => {
     const store = createTerminalWarpStore(memoryStorage());
     expect(store.get('workspace/session/window/pane')).toBe(0);

@@ -19,6 +19,12 @@ export function getKeyHelp(key: string): string | undefined {
 export function getControlHelp(data: Record<string, unknown>): string | undefined {
   if (typeof data.key === 'string') return getKeyHelp(data.key);
   switch (data.inputAction) {
+    case 'windowPreference':
+      return data.preference === 'defaultOpacity'
+        ? 'Set glass opacity for newly opened windows; existing panes keep their opacity'
+        : data.preference === 'focusDistance'
+          ? 'Set how far the focused window appears in front of you'
+          : 'Set temporary focus curvature; the original warp returns when focus ends';
     case 'glassOpacity':
       return 'Adjust the dark terminal background opacity';
     case 'radialAction':
@@ -107,7 +113,7 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
             : data.mode === 'settings'
               ? 'Open display, world and selected-terminal settings'
               : data.mode === 'display'
-                ? 'Choose terminal colors, filtering and gaze clarity'
+                ? 'Choose colors, filtering, new-window opacity and focus preferences'
                 : data.mode === 'world'
                   ? 'Choose VR background or passthrough'
                   : data.mode === 'widgets'

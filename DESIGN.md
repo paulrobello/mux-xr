@@ -219,4 +219,6 @@ The A radial has seven direct items: Keyboard, Commands, Panes, Layout, Warp, Wi
 
 Warp captures the aimed pane when A opens the radial, falling back to the active pane. Right-stick X previews curvature, A commits once, and B restores the initial curvature instead of invoking Focus. Preview changes are not persisted until commit. Grips retain manipulation and pause editing. Gaze retargeting, terminal trigger input and scrolling are suppressed. Removing the target, controller disconnect, recovery, disposal or XR exit cancels safely.
 
+Display also owns new-window glass opacity and Focus distance/warp. The new-view opacity default never overwrites a live pane or a saved pane override. Focus defaults to 1.5 m and flat curvature, applies settings live, and keeps its temporary curve separate from the saved per-pane warp. Exiting restores the original transform and curvature. Starting direct Warp first exits Focus. The screen and hollow rim use the same horizontal subdivision samples so their curved top/bottom edges meet continuously without opaque geometry behind text.
+
 Radial glyphs have no rectangular backplate, retain full interaction targets and sit in front of sector glass. The terminal bezel uses a surface-aligned rim, keeping opaque interior/back faces out of transparent text columns.

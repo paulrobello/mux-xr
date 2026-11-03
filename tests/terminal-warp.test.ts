@@ -149,4 +149,69 @@ describe('curved terminal geometry', () => {
       }
     }
   });
+
+  it('joins curved selection strips at their exact inner corners', () => {
+    for (const width of [1.2, 4, 8.5]) {
+      for (const degrees of [0, 30, 60, 90, 100]) {
+        const span = { width, height: 2, radians: (degrees * Math.PI) / 180 };
+        const geometry = createCurvedTerminalSelection({ ...span, border: 0.03 });
+        const positions = geometry.getAttribute('position');
+        for (const sign of [-1, 1]) {
+          const corner = terminalWarpPoint(sign * (width / 2 - 0.03), span);
+          for (const y of [-0.97, 0.97]) {
+            let matches = 0;
+            for (let index = 0; index < positions.count; index++)
+              if (
+                Math.abs(positions.getX(index) - corner.x) < 1e-5 &&
+                Math.abs(positions.getY(index) - y) < 1e-5 &&
+                Math.abs(positions.getZ(index) - corner.z) < 1e-5
+              )
+                matches++;
+            expect(matches).toBeGreaterThanOrEqual(2);
+          }
+        }
+        geometry.dispose();
+      }
+    }
+  });
+
+  it('keeps the warped rim outer corners continuous across curvature and size', () => {
+    for (const span of [
+      { width: 1.2, height: 0.7 },
+      { width: 4, height: 2 },
+      { width: 8.5, height: 3.2 },
+    ]) {
+      for (const degrees of [0, 30, 60, 90, 100]) {
+        const radians = (degrees * Math.PI) / 180;
+        const geometry = createTerminalFrameGeometry({ ...span, radians });
+        geometry.computeBoundingBox();
+        const bounds = geometry.boundingBox;
+        if (!bounds) throw new Error('frame geometry must have bounds');
+        const outerX = span.width / 2 + 0.0175;
+        const expected = terminalWarpPoint(outerX, { ...span, radians });
+        expect(bounds.min.x).toBeCloseTo(-expected.x, 4);
+        expect(bounds.max.x).toBeCloseTo(expected.x, 4);
+
+        const positions = geometry.getAttribute('position');
+        for (const y of [-span.height / 2, span.height / 2]) {
+          for (let index = 0; index <= 32; index += 1) {
+            const x = (index / 32 - 0.5) * span.width;
+            const point = terminalWarpPoint(x, { ...span, radians });
+            const hasSeamVertex = Array.from(
+              { length: positions.count },
+              (_, vertex) =>
+                [positions.getX(vertex), positions.getY(vertex), positions.getZ(vertex)] as const,
+            ).some(
+              ([vertexX, vertexY, vertexZ]) =>
+                Math.abs(vertexY - y) < 1e-6 &&
+                Math.abs(vertexX - point.x) < 1e-5 &&
+                Math.abs(vertexZ - (0.025 + point.z)) < 1e-5,
+            );
+            expect(hasSeamVertex).toBe(true);
+          }
+        }
+        geometry.dispose();
+      }
+    }
+  });
 });

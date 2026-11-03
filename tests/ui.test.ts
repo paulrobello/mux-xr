@@ -209,6 +209,55 @@ describe('mux XR local UI state', () => {
     localStorage.clear();
   });
 
+  it('exposes new-window display defaults separately from per-pane opacity', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const changes: number[] = [];
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onSettingsChange: (settings) => changes.push(settings.windowPreferences.defaultOpacity),
+    });
+    const opacity = query<HTMLInputElement>(root, '[data-window-opacity]');
+    const distance = query<HTMLInputElement>(root, '[data-focus-distance]');
+    const curvature = query<HTMLInputElement>(root, '[data-focus-curvature]');
+    expect(opacity.value).toBe('100');
+    expect(distance.value).toBe('1.5');
+    expect(curvature.value).toBe('0');
+    expect(root.querySelector('legend')?.textContent).toBe('Window and focus preferences');
+    expect(opacity.getAttribute('aria-label')).toContain('New window');
+    expect(distance.getAttribute('aria-label')).toBe('Focus distance in meters');
+    expect(curvature.getAttribute('aria-label')).toBe('Focus curvature in degrees');
+    expect(distance.parentElement?.textContent).toContain(
+      'Distance in front of you when focusing any window.',
+    );
+    opacity.value = '65';
+    opacity.dispatchEvent(new Event('input'));
+    distance.value = '2.4';
+    distance.dispatchEvent(new Event('input'));
+    curvature.value = '25';
+    curvature.dispatchEvent(new Event('input'));
+    expect(ui.getSettings().windowPreferences).toEqual({
+      defaultOpacity: 0.65,
+      focusDistance: 2.4,
+      focusCurvature: 25,
+    });
+    expect(changes).toEqual([0.65, 0.65, 0.65]);
+    ui.setWindowPreferences({ defaultOpacity: 0.4, focusDistance: 3, focusCurvature: 50 }, true);
+    expect(opacity.value).toBe('40');
+    expect(distance.value).toBe('3');
+    expect(curvature.value).toBe('50');
+    ui.destroy();
+    const restored = mountWorkspaceUI(root, { onConnect: () => undefined });
+    expect(restored.getSettings().windowPreferences).toEqual({
+      defaultOpacity: 0.4,
+      focusDistance: 3,
+      focusCurvature: 50,
+    });
+    restored.destroy();
+    root.remove();
+    localStorage.clear();
+  });
+
   it('exposes all terminal filtering controls, persists them, and restores their live state', () => {
     localStorage.clear();
     const root = document.createElement('div');

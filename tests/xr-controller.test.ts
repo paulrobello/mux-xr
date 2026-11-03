@@ -39,6 +39,7 @@ vi.mock('three', async (importOriginal) => {
 
 import * as THREE from 'three';
 import type { PaneDescriptor, TerminalSurface, WorkspaceActions } from '../src/contracts';
+import { measurePanelBounds } from '../src/xr/panel-bounds';
 import { createWorkspaceScene } from '../src/xr/scene';
 
 const pane = (id: string, title = id): PaneDescriptor => ({
@@ -2673,6 +2674,58 @@ describe('native XR controller event routing', () => {
     workspace.camera.rotation.y += 0.5;
     fakeXR.frame?.(1000);
     expect(root.position).toEqual(focused);
+    expect(actions.resizeGrid).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('uses new-window opacity without changing open panes or saved overrides', () => {
+    const { workspace, container } = fixture();
+    workspace.setTerminalOpacity('pane-a', 0.7);
+    workspace.setWindowPreferences({ defaultOpacity: 0.4, focusDistance: 1.5, focusCurvature: 0 });
+    expect(workspace.getTerminalOpacity('pane-a')).toBe(0.7);
+    expect(workspace.getTerminalOpacity('pane-b')).toBe(1);
+    workspace.addTerminal(surface(pane('pane-c')));
+    expect(workspace.getTerminalOpacity('pane-c')).toBe(0.4);
+    workspace.removeTerminal('pane-a');
+    workspace.addTerminal(surface(pane('pane-a')));
+    expect(workspace.getTerminalOpacity('pane-a')).toBe(0.7);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('applies focus distance and temporary warp and restores the saved pane geometry and pose', () => {
+    const { workspace, actions, container } = fixture();
+    const root = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+    workspace.setTerminalCurvature('pane-a', 65);
+    const original = {
+      position: root.position.clone(),
+      quaternion: root.quaternion.clone(),
+      scale: root.scale.clone(),
+    };
+    const stored = localStorage.getItem('mux-xr:terminal-warp:v1');
+    workspace.toggleFocusMode('pane-a');
+    for (let frame = 0; frame < 20; frame++) fakeXR.frame?.(frame * 20);
+    expect(root.userData.curvatureDegrees).toBe(0);
+    const checkDistance = (distance: number): void => {
+      const center = root.localToWorld(measurePanelBounds(root).center);
+      const target = workspace.camera
+        .getWorldPosition(new THREE.Vector3())
+        .addScaledVector(workspace.camera.getWorldDirection(new THREE.Vector3()), distance);
+      expect(center.distanceTo(target)).toBeLessThan(1e-5);
+    };
+    checkDistance(1.5);
+    workspace.setWindowPreferences({ defaultOpacity: 0.4, focusDistance: 2.2, focusCurvature: 40 });
+    for (let frame = 20; frame < 40; frame++) fakeXR.frame?.(frame * 20);
+    checkDistance(2.2);
+    expect(root.userData.curvatureDegrees).toBe(40);
+    expect(workspace.getTerminalCurvature('pane-a')).toBe(65);
+    expect(localStorage.getItem('mux-xr:terminal-warp:v1')).toBe(stored);
+    workspace.toggleFocusMode();
+    expect(root.userData.curvatureDegrees).toBe(65);
+    expect(root.position.distanceTo(original.position)).toBeLessThan(1e-6);
+    expect(root.quaternion.angleTo(original.quaternion)).toBeLessThan(1e-6);
+    expect(root.scale).toEqual(original.scale);
     expect(actions.resizeGrid).not.toHaveBeenCalled();
     workspace.dispose();
     container.remove();

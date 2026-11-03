@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 /** The largest supported horizontal terminal bend. */
 export const MAX_TERMINAL_CURVATURE_RADIANS = (100 * Math.PI) / 180;
@@ -127,11 +126,21 @@ export function createCurvedTerminalSelection(
     indices.push(a, b, d, b, c, d);
   };
 
-  for (let column = 0; column < segmentCount; column += 1) {
-    const u0 = column / segmentCount;
-    const u1 = (column + 1) / segmentCount;
-    const x0 = (u0 - 0.5) * options.width;
-    const x1 = (u1 - 0.5) * options.width;
+  const samples = [
+    ...new Set([
+      ...Array.from(
+        { length: segmentCount + 1 },
+        (_, column) => (column / segmentCount - 0.5) * options.width,
+      ),
+      -options.width / 2 + border,
+      options.width / 2 - border,
+    ]),
+  ].sort((a, b) => a - b);
+  for (let column = 0; column < samples.length - 1; column += 1) {
+    const x0 = samples[column];
+    const x1 = samples[column + 1];
+    const u0 = x0 / options.width + 0.5;
+    const u1 = x1 / options.width + 0.5;
     addQuad(
       addVertex(x0, options.height / 2 - border, u0, 1),
       addVertex(x1, options.height / 2 - border, u1, 1),
@@ -227,34 +236,54 @@ export function getConservativeTerminalArrangementSize(span: TerminalWarpSpan): 
 }
 
 export function createTerminalFrameGeometry(span: TerminalWarpSpan): THREE.BufferGeometry {
-  const segments = span.radians > 0 ? 32 : 1;
+  const segments = 32;
+  const outer = span.width / 2 + 0.0175;
   // The scene positions the frame at z = -0.025. Keep the rim surface aligned
   // with the screen and omit rear/inner faces that could occlude transparent text.
   const frameSurfaceZ = 0.025;
-  const pieces = [
-    new THREE.PlaneGeometry(span.width + 0.035, 0.03, segments, 1).translate(
-      0,
-      span.height / 2 + 0.015,
-      frameSurfaceZ,
-    ),
-    new THREE.PlaneGeometry(span.width + 0.035, 0.03, segments, 1).translate(
-      0,
-      -span.height / 2 - 0.015,
-      frameSurfaceZ,
-    ),
-    new THREE.PlaneGeometry(0.0175, span.height, 1, 1).translate(
-      -span.width / 2 - 0.00875,
-      0,
-      frameSurfaceZ,
-    ),
-    new THREE.PlaneGeometry(0.0175, span.height, 1, 1).translate(
-      span.width / 2 + 0.00875,
-      0,
-      frameSurfaceZ,
-    ),
-  ];
-  const merged = mergeGeometries(pieces, false);
-  for (const piece of pieces) piece.dispose();
-  if (!merged) throw new Error('Terminal frame geometries are incompatible');
-  return warpGeometryPositions(merged, span);
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const addVertex = (x: number, y: number): number => {
+    positions.push(x, y, frameSurfaceZ);
+    return positions.length / 3 - 1;
+  };
+  const addQuad = (a: number, b: number, c: number, d: number): void => {
+    indices.push(a, b, d, b, c, d);
+  };
+  const screenSamples = Array.from(
+    { length: segments + 1 },
+    (_, index) => (index / segments - 0.5) * span.width,
+  );
+  const rimSamples = [-outer, ...screenSamples, outer];
+  for (const [innerY, outerY] of [
+    [span.height / 2, span.height / 2 + 0.03],
+    [-span.height / 2 - 0.03, -span.height / 2],
+  ]) {
+    for (let index = 0; index < rimSamples.length - 1; index += 1) {
+      const x0 = rimSamples[index];
+      const x1 = rimSamples[index + 1];
+      addQuad(
+        addVertex(x0, innerY),
+        addVertex(x1, innerY),
+        addVertex(x1, outerY),
+        addVertex(x0, outerY),
+      );
+    }
+  }
+  addQuad(
+    addVertex(-outer, -span.height / 2),
+    addVertex(-span.width / 2, -span.height / 2),
+    addVertex(-span.width / 2, span.height / 2),
+    addVertex(-outer, span.height / 2),
+  );
+  addQuad(
+    addVertex(span.width / 2, -span.height / 2),
+    addVertex(outer, -span.height / 2),
+    addVertex(outer, span.height / 2),
+    addVertex(span.width / 2, span.height / 2),
+  );
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  return warpGeometryPositions(geometry, span);
 }

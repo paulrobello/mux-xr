@@ -25,6 +25,11 @@ import {
   validateTerminalFiltering,
 } from '../terminal/filtering';
 import { terminalKeyLabel } from '../terminal/protocol';
+import {
+  DEFAULT_WINDOW_PREFERENCES,
+  validateWindowPreferences,
+  type WindowPreferences,
+} from '../workspace/window-preferences';
 import { calculateArrangement } from './arrangements';
 import {
   type CommandDraft,
@@ -98,6 +103,7 @@ export interface WorkspaceSceneState {
   gazeInputEnabled: boolean;
   terminalColorMode: TerminalColorMode;
   filtering: TerminalFiltering;
+  windowPreferences: WindowPreferences;
   widgets: WidgetKind[];
   keyboardBackgroundEnabled: boolean;
   fps: number | null;
@@ -125,6 +131,7 @@ export interface WorkspaceScene {
   setGazeInputEnabled(enabled: boolean): void;
   setTerminalColorMode(mode: TerminalColorMode): void;
   setTerminalFiltering(filtering: TerminalFiltering): void;
+  setWindowPreferences(preferences: WindowPreferences): void;
   setTerminalOpacity(id: string, value: number): void;
   getTerminalOpacity(id: string): number;
   captureTerminalPose(id: string): SavedUIPose | null;
@@ -285,6 +292,7 @@ interface TerminalPanel {
   filterGazeAt: number;
   curvature: number;
   geometryCurvature: number;
+  focusCurvature: number | null;
   opacity: number;
 }
 
@@ -529,6 +537,7 @@ export function createWorkspaceScene(
     gazeInputEnabled: false,
     terminalColorMode: 'comfort',
     filtering: { ...DEFAULT_TERMINAL_FILTERING },
+    windowPreferences: { ...DEFAULT_WINDOW_PREFERENCES },
     widgets: [],
     keyboardBackgroundEnabled: true,
     fps: null,
@@ -1712,6 +1721,32 @@ export function createWorkspaceScene(
       });
       filteringButton.position.y = 0;
       inputRoot.add(filteringButton);
+      const preferences = mutableState.windowPreferences;
+      for (const [index, [preference, label, step]] of (
+        [
+          [
+            'defaultOpacity',
+            `New window glass: ${Math.round(preferences.defaultOpacity * 100)}%`,
+            0.1,
+          ],
+          ['focusDistance', `Focus distance: ${preferences.focusDistance.toFixed(1)} m`, 0.1],
+          ['focusCurvature', `Focus warp: ${Math.round(preferences.focusCurvature)}°`, 5],
+        ] as const
+      ).entries()) {
+        const y = -0.18 - index * 0.14;
+        const value = createLabelButton(label, 1.05, 0.1, { inputAction: 'noop' });
+        value.position.set(0, y, 0);
+        inputRoot.add(value);
+        for (const direction of [-1, 1]) {
+          const button = createLabelButton(direction < 0 ? '−' : '+', 0.12, 0.1, {
+            inputAction: 'windowPreference',
+            preference,
+            delta: direction * step,
+          });
+          button.position.set(direction * 0.65, y, 0);
+          inputRoot.add(button);
+        }
+      }
     } else if (mode === 'arrange') {
       const status = createLabelButton(
         panels.size
@@ -2299,6 +2334,15 @@ export function createWorkspaceScene(
       if (id) setTerminalOpacity(id, getTerminalOpacity(id) + Number(hit.userData.delta));
       return true;
     }
+    if (action === 'windowPreference') {
+      const preference = hit.userData.preference as keyof WindowPreferences;
+      if (['defaultOpacity', 'focusDistance', 'focusCurvature'].includes(preference))
+        setWindowPreferences({
+          ...mutableState.windowPreferences,
+          [preference]: mutableState.windowPreferences[preference] + Number(hit.userData.delta),
+        });
+      return true;
+    }
     if (action === 'dismissNotice') {
       setNotice(null);
       return true;
@@ -2789,19 +2833,16 @@ export function createWorkspaceScene(
   const syncPanelGrid = (panel: TerminalPanel): void => {
     const width = (PANEL_WIDTH * panel.surface.cols) / 80;
     const height = (PANEL_HEIGHT * panel.surface.rows) / 24;
-    if (
-      width === panel.width &&
-      height === panel.height &&
-      panel.curvature === panel.geometryCurvature
-    )
+    const curvature = panel.focusCurvature ?? panel.curvature;
+    if (width === panel.width && height === panel.height && curvature === panel.geometryCurvature)
       return;
     panel.width = width;
     panel.height = height;
-    panel.geometryCurvature = panel.curvature;
-    const radians = THREE.MathUtils.degToRad(panel.curvature);
+    panel.geometryCurvature = curvature;
+    const radians = THREE.MathUtils.degToRad(curvature);
     const span = { width, height, radians };
     const bent = radians > 0;
-    panel.root.userData.curvatureDegrees = panel.curvature;
+    panel.root.userData.curvatureDegrees = curvature;
     panel.root.userData.curvatureDepth = getTerminalWarpBounds(span).depth;
     panel.screen.geometry.dispose();
     panel.screen.geometry = bent
@@ -2927,7 +2968,11 @@ export function createWorkspaceScene(
       filterGazeAt: 0,
       curvature: warpStore.get(warpKey(surface)),
       geometryCurvature: -1,
-      opacity: warpStore.getOpacity(warpKey(surface)),
+      focusCurvature: null,
+      opacity: warpStore.getOpacity(
+        warpKey(surface),
+        mutableState.windowPreferences.defaultOpacity,
+      ),
     };
     syncPanelGrid(panel);
     applyTerminalOpacity(panel);
@@ -3124,6 +3169,7 @@ export function createWorkspaceScene(
       return;
     }
     finishWarp(false);
+    endFocusMode(true);
     releaseAllMouse();
     hideInput();
     clearArmedModifiers();
@@ -3476,8 +3522,51 @@ export function createWorkspaceScene(
     if (activeSession) await activeSession.end();
   };
   const endFocusMode = (immediate = false): void => {
+    const panel = panels.get(paneFocus.activeId ?? '');
+    if (panel) {
+      panel.focusCurvature = null;
+      syncPanelGrid(panel);
+    }
     paneFocus.exit(immediate);
     mutableState.focusModeTerminalId = null;
+  };
+  const focusPlacement = (
+    panel: TerminalPanel,
+  ): { position: THREE.Vector3; rotation: THREE.Quaternion } => {
+    const bounds = measurePanelBounds(panel.root);
+    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    view.updateWorldMatrix(true, false);
+    const eye = view.getWorldPosition(new THREE.Vector3());
+    const forward = view.getWorldDirection(new THREE.Vector3());
+    const rotation = new THREE.Quaternion().setFromRotationMatrix(
+      new THREE.Matrix4().lookAt(eye, eye.clone().add(forward), new THREE.Vector3(0, 1, 0)),
+    );
+    const position = new THREE.Vector3(0, 0, -mutableState.windowPreferences.focusDistance)
+      .applyQuaternion(rotation)
+      .add(eye)
+      .sub(bounds.center.clone().multiply(panel.root.scale).applyQuaternion(rotation));
+    if (panel.root.parent) {
+      panel.root.parent.worldToLocal(position);
+      rotation.premultiply(panel.root.parent.getWorldQuaternion(new THREE.Quaternion()).invert());
+    }
+    return { position, rotation };
+  };
+  const setWindowPreferences = (preferences: WindowPreferences): void => {
+    const next = validateWindowPreferences(preferences);
+    if (JSON.stringify(next) === JSON.stringify(mutableState.windowPreferences)) return;
+    const focusChanged =
+      next.focusDistance !== mutableState.windowPreferences.focusDistance ||
+      next.focusCurvature !== mutableState.windowPreferences.focusCurvature;
+    mutableState.windowPreferences = next;
+    const panel = panels.get(paneFocus.activeId ?? '');
+    if (panel && focusChanged) {
+      panel.focusCurvature = next.focusCurvature;
+      syncPanelGrid(panel);
+      const placement = focusPlacement(panel);
+      paneFocus.retarget(placement.position, placement.rotation);
+    }
+    if (inputRoot && inputMode === 'display') refreshInputRoot('display');
+    notify();
   };
   const toggleFocusMode = (id?: string): void => {
     if (gripActive()) return;
@@ -3493,27 +3582,9 @@ export function createWorkspaceScene(
     const panel = panels.get(id ?? mutableState.selectedTerminalId ?? '');
     if (!panel) return;
     selectTerminal(panel.id);
-    const bounds = measurePanelBounds(panel.root);
-    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
-    view.updateWorldMatrix(true, false);
-    const eye = view.getWorldPosition(new THREE.Vector3());
-    const forward = view.getWorldDirection(new THREE.Vector3());
-    const rotation = new THREE.Quaternion().setFromRotationMatrix(
-      new THREE.Matrix4().lookAt(eye, eye.clone().add(forward), new THREE.Vector3(0, 1, 0)),
-    );
-    const distance = Math.max(
-      0.8,
-      bounds.size.width / (2 * Math.tan(THREE.MathUtils.degToRad(25))),
-      bounds.size.height / (2 * Math.tan(THREE.MathUtils.degToRad(18))),
-    );
-    const position = new THREE.Vector3(0, 0, -distance)
-      .applyQuaternion(rotation)
-      .add(eye)
-      .sub(bounds.center.clone().multiply(panel.root.scale).applyQuaternion(rotation));
-    if (panel.root.parent) {
-      panel.root.parent.worldToLocal(position);
-      rotation.premultiply(panel.root.parent.getWorldQuaternion(new THREE.Quaternion()).invert());
-    }
+    panel.focusCurvature = mutableState.windowPreferences.focusCurvature;
+    syncPanelGrid(panel);
+    const { position, rotation } = focusPlacement(panel);
     paneFocus.enter(
       panel.id,
       panel.root,
@@ -3788,6 +3859,7 @@ export function createWorkspaceScene(
     setGazeInputEnabled,
     setTerminalColorMode,
     setTerminalFiltering,
+    setWindowPreferences,
     getTerminalOpacity,
     setTerminalOpacity,
     captureTerminalPose,

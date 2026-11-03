@@ -40,7 +40,7 @@ describe('animated radial menu', () => {
     const menu = createRadialMenu();
     menu.root.scale.setScalar(0.8);
     menu.open();
-    menu.update(0.16);
+    menu.update(0.128);
     expect(menu.interactive).toBe(false);
     const targets = actionNodes(menu).filter(
       (child) => child.userData.radialAction !== 'cancel' && child.name.startsWith('radial-menu-'),
@@ -49,10 +49,10 @@ describe('animated radial menu', () => {
       new Set(['keyboard', 'commands', 'panes', 'layout', 'warp', 'widgets', 'settings']),
     );
     expect(targets.every((target) => target.position.length() < 0.01)).toBe(true);
-    menu.update(0.16);
+    menu.update(0.128);
     expect(targets.every((target) => target.position.y < -0.2)).toBe(true);
     const stackDistance = targets[0].position.length();
-    menu.update(0.48);
+    menu.update(0.384);
     menu.update(0.01);
     expect(menu.interactive).toBe(true);
     const angles = targets.map((target) => target.userData.finalAngle as number);
@@ -95,6 +95,16 @@ describe('animated radial menu', () => {
     expect(menu.interactive).toBe(true);
     menu.dispose();
     expect(menu.root.children).toHaveLength(0);
+    menu.dispose();
+  });
+
+  it('reaches interactive state after the shortened opening duration', () => {
+    const menu = createRadialMenu();
+    menu.open();
+    menu.update(0.63);
+    expect(menu.interactive).toBe(false);
+    menu.update(0.01);
+    expect(menu.interactive).toBe(true);
     menu.dispose();
   });
 });

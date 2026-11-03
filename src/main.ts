@@ -232,6 +232,7 @@ function applySettings(settings: WorkspaceSettings): void {
     scene.setKeyboardBackgroundEnabled(settings.keyboardBackground);
     scene.setGazeInputEnabled(settings.gazeInput);
     scene.setTerminalFiltering(settings.filtering);
+    scene.setWindowPreferences(settings.windowPreferences);
     scene.setBackground(settings.background);
     for (const surface of surfaces.values()) surface.setColorMode(settings.colorMode);
   } finally {
@@ -444,6 +445,7 @@ const stopPresentation = scene.subscribe((state) => {
     ui.setKeyboardBackgroundEnabled(state.keyboardBackgroundEnabled, false);
     ui.setTerminalColorMode(state.terminalColorMode, false);
     ui.setTerminalFiltering(state.filtering, true);
+    ui.setWindowPreferences(state.windowPreferences, true);
     ui.setFilteringCapabilities(Number(scene.scene.userData.maxAnisotropy ?? 1));
     for (const id of surfaces.keys()) {
       ui.setTerminalCurvature(id, scene.getTerminalCurvature(id));

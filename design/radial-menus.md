@@ -31,9 +31,9 @@ open, suppress scrolling so a ray selection cannot accidentally move a terminal
 surface. Selecting an action should open the actual existing surface or action,
 not a mock destination.
 
-The initial 120–180 ms recommendation was superseded by the accepted 800 ms
-sequence: center expansion for 160 ms, stack emergence for 160 ms and fan-out
-for 480 ms. The caller places the menu about 1.05 m ahead at 0.8 scale. Radial
+The opening sequence lasts 640 ms after the owner's 20% speed-up: center
+expansion for 128 ms, stack emergence for 128 ms and fan-out for 384 ms.
+The caller places the menu about 1.05 m ahead at 0.8 scale. Radial
 labels now have no rectangular backplates and retain a front glyph offset. Controller
 ray hover is the primary feedback. Headset acceptance still needs a real Quest
 check for comfort, target size, occlusion, and label readability.

@@ -85,6 +85,7 @@ export interface PaneFocus {
     quaternion: THREE.Quaternion,
   ): void;
   exit(immediate?: boolean): void;
+  retarget(position: THREE.Vector3, quaternion: THREE.Quaternion): void;
   update(deltaSeconds: number): void;
   add(root: THREE.Group): void;
   remove(root: THREE.Group): void;
@@ -221,6 +222,16 @@ export function createPaneFocus(): PaneFocus {
     },
     enter,
     exit,
+    retarget(position, quaternion) {
+      if (!focusedRoot) return;
+      motion = {
+        fromPosition: focusedRoot.position.clone(),
+        fromQuaternion: focusedRoot.quaternion.clone(),
+        toPosition: position.clone(),
+        toQuaternion: quaternion.clone(),
+        elapsed: 0,
+      };
+    },
     update(deltaSeconds: number) {
       const delta = Math.max(0, deltaSeconds);
       if (motion && focusedRoot) {

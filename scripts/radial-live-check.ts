@@ -273,8 +273,8 @@ async function main(): Promise<void> {
       throw new Error('radial did not become interactive in1200ms');
     });
     assert(
-      radialTiming.duration < 1000,
-      `Radial opening exceeded one second: ${radialTiming.duration}`,
+      radialTiming.duration >= 620 && radialTiming.duration < 800,
+      `Radial opening missed the shortened 640ms timeline: ${radialTiming.duration}`,
     );
     await page.screenshot({ path: join(root, 'radial-live-open.png') });
     await nativeAction(page, 'radialAction', { radialAction: 'cancel' });
@@ -291,15 +291,15 @@ async function main(): Promise<void> {
       const w = window as unknown as FixtureWindow;
       w.__radialFreeze = true;
       w.__testRadialMenu.open();
-      w.__testRadialMenu.update(0.16);
+      w.__testRadialMenu.update(0.128);
     });
-    await page.screenshot({ path: join(root, 'radial-center-160ms.png') });
-    await page.evaluate(() => (window as unknown as FixtureWindow).__testRadialMenu.update(0.16));
-    await page.screenshot({ path: join(root, 'radial-stack-320ms.png') });
+    await page.screenshot({ path: join(root, 'radial-center-128ms.png') });
+    await page.evaluate(() => (window as unknown as FixtureWindow).__testRadialMenu.update(0.128));
+    await page.screenshot({ path: join(root, 'radial-stack-256ms.png') });
     await page.evaluate(() =>
-      (window as unknown as FixtureWindow).__testRadialMenu.update(0.48 + 0.00001),
+      (window as unknown as FixtureWindow).__testRadialMenu.update(0.384 + 0.00001),
     );
-    await page.screenshot({ path: join(root, 'radial-fan-800ms.png') });
+    await page.screenshot({ path: join(root, 'radial-fan-640ms.png') });
     await page.evaluate(() => {
       const w = window as unknown as FixtureWindow;
       w.__testRadialMenu.close();
@@ -594,7 +594,7 @@ async function main(): Promise<void> {
           panel.rotation.y = -sign * 0.06;
           for (const opacity of [0.1, 0.5, 1]) {
             w.__designScene.setTerminalOpacity('%1', opacity);
-            for (const angle of [0, 30, 60, 90]) {
+            for (const angle of [0, 30, 60, 90, 100]) {
               w.__designScene.setTerminalCurvature('%1', angle);
               frame.visible = true;
               const withFrame = sample();

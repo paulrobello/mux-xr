@@ -16,6 +16,11 @@ import {
   validateTerminalFiltering,
 } from '../terminal/filtering';
 import { terminalKeyLabel } from '../terminal/protocol';
+import {
+  DEFAULT_WINDOW_PREFERENCES,
+  validateWindowPreferences,
+  type WindowPreferences,
+} from '../workspace/window-preferences';
 
 export type { SemanticKey } from '../keyboard';
 export {
@@ -61,6 +66,7 @@ export interface WorkspaceSettings {
   keyboardBackground: boolean;
   arrangement: PanelArrangement;
   filtering: TerminalFiltering;
+  windowPreferences: WindowPreferences;
 }
 
 export interface WorkspaceUI {
@@ -93,6 +99,7 @@ export interface WorkspaceUI {
   setNotice(message: string | null): void;
   setArrangement(pattern: PanelArrangement, persist?: boolean): void;
   setTerminalFiltering(filtering: TerminalFiltering, persist?: boolean): void;
+  setWindowPreferences(value: WindowPreferences, persist?: boolean): void;
   setFilteringCapabilities(maxAnisotropy: number): void;
 }
 
@@ -112,6 +119,7 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   keyboardBackground: true,
   arrangement: 'arc',
   filtering: { ...DEFAULT_TERMINAL_FILTERING },
+  windowPreferences: { ...DEFAULT_WINDOW_PREFERENCES },
 };
 
 export function workspaceScope(endpoint: string, workspaceId: string): string {
@@ -150,6 +158,7 @@ export function validateSettings(value: unknown): WorkspaceSettings {
         : 'comfort',
     keyboardBackground: candidate.keyboardBackground !== false,
     filtering: validateTerminalFiltering(candidate.filtering),
+    windowPreferences: validateWindowPreferences(candidate.windowPreferences),
     arrangement:
       candidate.arrangement === 'row' ||
       candidate.arrangement === 'grid' ||
@@ -358,6 +367,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   let arrangementSelect: HTMLSelectElement | null = null;
   let arrangementApply: HTMLButtonElement | null = null;
   let filteringMaxAnisotropy = 16;
+  let updateWindowPreferenceControls = (): void => undefined;
   const updateArrangementAvailability = (): void => {
     if (arrangementApply) arrangementApply.disabled = attachedPaneIds.length === 0;
   };
@@ -440,6 +450,60 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     filterGaze.checked = settings.filtering.gazeClarity;
     filterDistance.value = String(settings.filtering.gazeMaxDistance);
     updateFilteringVisibility();
+    const windowControls = document.createElement('div');
+    windowControls.dataset.windowPreferences = 'true';
+    windowControls.innerHTML =
+      '<fieldset><legend>Window and focus preferences</legend><label>New window glass opacity <span data-window-opacity-value>100%</span><input data-window-opacity type="range" min="10" max="100" step="1" aria-label="New window glass opacity percentage"><small>Applies to new windows only. Existing panes are unchanged.</small></label><label>Focus distance <span data-focus-distance-value>1.5 m</span><input data-focus-distance type="range" min="0.5" max="5" step="0.1" aria-label="Focus distance in meters"><small>Distance in front of you when focusing any window.</small></label><label>Focus warp <span data-focus-curvature-value>0°</span><input data-focus-curvature type="range" min="0" max="100" step="5" aria-label="Focus curvature in degrees"><small>Temporary focus curvature. The original curvature restores when focus ends.</small></label></fieldset>';
+    settingsPanel.insertBefore(
+      windowControls,
+      settingsPanel.querySelector('[data-action="passthrough"]'),
+    );
+    const windowOpacity = windowControls.querySelector<HTMLInputElement>('[data-window-opacity]');
+    const windowDistance = windowControls.querySelector<HTMLInputElement>('[data-focus-distance]');
+    const windowCurvature =
+      windowControls.querySelector<HTMLInputElement>('[data-focus-curvature]');
+    const windowOpacityValue = windowControls.querySelector<HTMLElement>(
+      '[data-window-opacity-value]',
+    );
+    const windowDistanceValue = windowControls.querySelector<HTMLElement>(
+      '[data-focus-distance-value]',
+    );
+    const windowCurvatureValue = windowControls.querySelector<HTMLElement>(
+      '[data-focus-curvature-value]',
+    );
+    if (
+      !windowOpacity ||
+      !windowDistance ||
+      !windowCurvature ||
+      !windowOpacityValue ||
+      !windowDistanceValue ||
+      !windowCurvatureValue
+    )
+      throw new Error('Window preference controls missing');
+    updateWindowPreferenceControls = (): void => {
+      windowOpacity.value = String(Math.round(settings.windowPreferences.defaultOpacity * 100));
+      windowDistance.value = String(settings.windowPreferences.focusDistance);
+      windowCurvature.value = String(settings.windowPreferences.focusCurvature);
+      windowOpacityValue.textContent = `${windowOpacity.value}%`;
+      windowDistanceValue.textContent = `${windowDistance.value} m`;
+      windowCurvatureValue.textContent = `${windowCurvature.value}°`;
+    };
+    const changeWindowPreferences = (): void => {
+      settings = {
+        ...settings,
+        windowPreferences: validateWindowPreferences({
+          defaultOpacity: Number(windowOpacity.value) / 100,
+          focusDistance: Number(windowDistance.value),
+          focusCurvature: Number(windowCurvature.value),
+        }),
+      };
+      updateWindowPreferenceControls();
+      saveSettings();
+    };
+    windowOpacity.addEventListener('input', changeWindowPreferences);
+    windowDistance.addEventListener('input', changeWindowPreferences);
+    windowCurvature.addEventListener('input', changeWindowPreferences);
+    updateWindowPreferenceControls();
     const grid = document.createElement('div');
     grid.dataset.gridControls = 'true';
     grid.innerHTML =
@@ -1138,6 +1202,13 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       qs<HTMLElement>('[data-filter-anisotropy-row]').hidden = !mipmapMode;
       qs<HTMLElement>('[data-filter-distance-row]').hidden =
         !mipmapMode || !settings.filtering.gazeClarity;
+      if (persist) saveSettings();
+    },
+    setWindowPreferences(value, persist = false) {
+      const next = validateWindowPreferences(value);
+      if (JSON.stringify(settings.windowPreferences) === JSON.stringify(next)) return;
+      settings = { ...settings, windowPreferences: next };
+      updateWindowPreferenceControls();
       if (persist) saveSettings();
     },
     setFilteringCapabilities(maxAnisotropy) {
