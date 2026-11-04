@@ -13,6 +13,7 @@ export function curveKeyboardContent(root: THREE.Group, width: number, radians: 
     child.traverse((descendant) => {
       if (descendant !== child) descendant.renderOrder = 11;
     });
+    if (child.userData.keyborb) continue;
     const mesh = child as THREE.Mesh;
     const keyWidth = Number(child.userData.labelWidth);
     const keyHeight = Number(child.userData.labelHeight);

@@ -128,6 +128,34 @@ describe('mux XR local UI state', () => {
       arrangement: 'arc',
     });
     expect(validateSettings({ arrangement: 'invalid' }).arrangement).toBe('arc');
+    expect(validateSettings({ keyborbMode: 'invalid' }).keyborbMode).toBe('auto');
+    expect(validateSettings({ keyborbMode: 'on' }).keyborbMode).toBe('on');
+  });
+
+  it('persists and synchronizes Keyborb mode selection', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const changes: string[] = [];
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onSettingsChange: (settings) => changes.push(settings.keyborbMode),
+    });
+    const select = query<HTMLSelectElement>(root, '[data-keyborb-mode]');
+    expect(select.getAttribute('aria-label')).toBe('Keyborb');
+    expect(select.value).toBe('auto');
+    for (const mode of ['off', 'on', 'auto']) {
+      select.value = mode;
+      select.dispatchEvent(new Event('change'));
+      expect(ui.getSettings().keyborbMode).toBe(mode);
+      expect(JSON.parse(localStorage.getItem('mux-xr:settings:v1') ?? '{}').keyborbMode).toBe(mode);
+    }
+    ui.setKeyborbMode('off');
+    expect(select.value).toBe('off');
+    ui.setKeyborbMode('on', true);
+    expect(select.value).toBe('on');
+    expect(changes).toContain('on');
+    ui.destroy();
+    localStorage.clear();
   });
 
   it('applies an explicit 3D arrangement only when terminals are attached', () => {

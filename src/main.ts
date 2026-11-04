@@ -246,6 +246,7 @@ function applySettings(settings: WorkspaceSettings): void {
     scene.setTerminalFiltering(settings.filtering);
     scene.setWindowPreferences(settings.windowPreferences);
     scene.setHierarchyStyle(settings.hierarchyStyle);
+    scene.setKeyborbMode(settings.keyborbMode);
     scene.setBackground(settings.background);
     for (const surface of surfaces.values()) surface.setColorMode(settings.colorMode);
   } finally {
@@ -485,6 +486,7 @@ const stopPresentation = scene.subscribe((state) => {
     ui.setTerminalFiltering(state.filtering, true);
     ui.setWindowPreferences(state.windowPreferences, true);
     ui.setHierarchyStyle(state.hierarchyStyle, true);
+    ui.setKeyborbMode(state.keyborbMode, true);
     ui.setFilteringCapabilities(Number(scene.scene.userData.maxAnisotropy ?? 1));
     for (const id of surfaces.keys()) {
       ui.setTerminalCurvature(id, scene.getTerminalCurvature(id));

@@ -110,6 +110,12 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
       return 'Exit XR and reload the available update';
     case 'keyboardBackground':
       return 'Show or hide the keyboard backing';
+    case 'keyborbMode':
+      return data.keyborbMode === 'auto'
+        ? 'Use Keyborb with hand tracking and the standard keyboard with controllers'
+        : data.keyborbMode === 'on'
+          ? 'Use spherical keys; trigger or pinch to type'
+          : 'Use the standard keyboard';
     case 'terminalColors':
       return 'Choose terminal color presentation';
     case 'gridPreset':

@@ -3,6 +3,15 @@
   "generatedAt": "2026-11-01T00:00:00-07:00",
   "title": "Design System: Mux XR",
   "extensions": {
+    "keyborb": {
+      "keyDiameter": 0.105,
+      "surfaceLinearRGB": [0.04, 0.12, 0.19],
+      "rimLinearRGB": [0.32, 0.72, 0.84],
+      "glyphColor": "#ffffff",
+      "minimumOpacity": 0.18,
+      "defaultMode": "auto",
+      "interaction": "Controller trigger or index-thumb pinch; hover and contact never type."
+    },
     "colorMeta": {
       "space-black": { "role": "neutral", "displayName": "Space Black", "canonical": "#080c12", "tonalRamp": ["#020509", "#050a10", "#080c12", "#0b1016", "#17212d", "#203c48", "#315c6d", "#edf7fa"] },
       "accent-cyan": { "role": "primary", "displayName": "Signal Cyan", "canonical": "#8be0ea", "tonalRamp": ["#082f38", "#0b5662", "#147785", "#269aa6", "#53bdc7", "#8be0ea", "#c2f4f5", "#f1fcff"] },

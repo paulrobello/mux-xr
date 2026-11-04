@@ -268,8 +268,9 @@ describe('native XR controller event routing', () => {
       for (const cleanup of cleanups.splice(0)) cleanup();
       vi.unstubAllGlobals();
     });
-    const setup = () => {
+    const setup = (keyborbMode: 'off' | 'on' | 'auto' = 'off') => {
       const value = fixture();
+      value.workspace.setKeyborbMode(keyborbMode);
       cleanups.push(() => {
         value.workspace.dispose();
         value.container.remove();
@@ -333,6 +334,104 @@ describe('native XR controller event routing', () => {
       hand.joints['index-finger-tip'].position.copy(point).addScaledVector(normal, depth);
       fakeXR.frame?.(time);
     };
+
+    it('switches Auto on hand source changes without moving or retargeting the keyboard', () => {
+      const { workspace, actions } = setup('auto');
+      workspace.showInput('keyboard');
+      expect(workspace.state.keyborbEnabled).toBe(false);
+      let root = workspace.scene.getObjectByName('xr-keyboard-controls') as THREE.Group;
+      root.position.set(0.2, 1.1, -0.9);
+      root.rotation.set(0.1, 0.2, -0.1);
+      root.scale.setScalar(0.5);
+      const position = root.position.clone();
+      const quaternion = root.quaternion.clone();
+      connectHand();
+      expect(workspace.state.keyborbEnabled).toBe(true);
+      root = workspace.scene.getObjectByName('xr-keyboard-controls') as THREE.Group;
+      expect(root.position.distanceTo(position)).toBeLessThan(1e-8);
+      expect(root.quaternion.angleTo(quaternion)).toBeLessThan(1e-8);
+      expect(root.scale.x).toBe(0.5);
+      expect(workspace.state.inputTargetId).toBe('pane-a');
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      connectController(0);
+      expect(workspace.state.keyborbEnabled).toBe(false);
+      expect(objectWithData(workspace, { key: 'a' }).userData.keyborb).toBeUndefined();
+    });
+
+    it('renders all 62 spherical keys and keeps them spherical on a curved keyboard', () => {
+      const { workspace, actions } = setup('on');
+      workspace.showInput('keyboard');
+      workspace.setKeyboardCurvature(60);
+      const root = workspace.scene.getObjectByName('xr-keyboard-controls') as THREE.Group;
+      const keys = root.children.filter((child) => child.userData.inputAction === 'key');
+      expect(keys).toHaveLength(62);
+      for (const key of keys) {
+        expect((key as THREE.Mesh).geometry).toBeInstanceOf(THREE.SphereGeometry);
+        expect(key.userData.labelText).toBeTruthy();
+        expect((key as THREE.Mesh).material).toMatchObject({
+          transparent: true,
+          depthWrite: false,
+        });
+      }
+      hit(workspace, { key: 'a' });
+      expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
+      hit(workspace, { key: 'Shift' });
+      expect(objectWithData(workspace, { key: 'b' }).userData.labelText).toBe('B');
+      hit(workspace, { key: 'b' });
+      expect(actions.sendKey).toHaveBeenLastCalledWith('b', { shift: true });
+      expect(objectWithData(workspace, { key: 'b' }).userData.labelText).toBe('b');
+      const key = objectWithData(workspace, { key: 'a' }) as THREE.Mesh;
+      const disposeGeometry = vi.spyOn(key.geometry, 'dispose');
+      const disposeMaterial = vi.spyOn(key.material as THREE.Material, 'dispose');
+      workspace.setKeyborbMode('off');
+      expect(disposeGeometry).toHaveBeenCalledOnce();
+      expect(disposeMaterial).toHaveBeenCalledOnce();
+    });
+
+    it('requires pinch selection instead of typing from Keyborb hand contact', () => {
+      const { workspace, actions } = setup('auto');
+      workspace.showInput('keyboard');
+      const hand = connectHand();
+      expect(workspace.state.keyborbEnabled).toBe(true);
+      contactKey(workspace, hand, 'a', 0.06, 20);
+      contactKey(workspace, hand, 'a', 0.004, 40);
+      fakeXR.frame?.(60);
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      hand.joints['index-finger-tip'].position.copy(hand.joints['thumb-tip'].position);
+      fakeXR.frame?.(80);
+      hit(workspace, { key: 'a' });
+      for (let frame = 0; frame < 20; frame++) fakeXR.frame?.(100 + frame * 16);
+      expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
+      hand.joints['index-finger-tip'].position.x += 0.08;
+      fakeXR.frame?.(500);
+      nativeEvent(0, 'selectend');
+      nativeEvent(0, 'select');
+      expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
+      expect(
+        (fakeXR.controllers[0] as THREE.Group).children.find((child) => child instanceof THREE.Line)
+          ?.visible,
+      ).toBe(true);
+      workspace.setKeyborbMode('off');
+      expect(workspace.state.keyborbEnabled).toBe(false);
+      workspace.setKeyborbMode('on');
+      connectController(0);
+      expect(workspace.state.keyborbEnabled).toBe(true);
+    });
+
+    it('changes Keyborb modes through native Settings controls', () => {
+      const { workspace } = setup('off');
+      workspace.showInput('settings');
+      hit(workspace, { inputAction: 'keyborbMode', keyborbMode: 'on' });
+      expect(workspace.state.keyborbMode).toBe('on');
+      expect(workspace.state.keyborbEnabled).toBe(true);
+      hit(workspace, { inputAction: 'keyborbMode', keyborbMode: 'auto' });
+      expect(workspace.state.keyborbMode).toBe('auto');
+      expect(workspace.state.keyborbEnabled).toBe(false);
+      connectHand();
+      expect(workspace.state.keyborbEnabled).toBe(true);
+      nativeEvent(0, 'disconnected');
+      expect(workspace.state.keyborbEnabled).toBe(false);
+    });
 
     it('hides only the near hand ray and types once per index poke without ray selection', () => {
       const { workspace, actions } = setup();

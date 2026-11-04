@@ -34,6 +34,7 @@ import {
   validateHierarchyStyle,
 } from '../workspace/hierarchy-style';
 import { validateKeyboardCurvature } from '../workspace/keyboard-curvature';
+import { type KeyborbMode, keyborbEnabled, validateKeyborbMode } from '../workspace/keyborb';
 import {
   DEFAULT_WINDOW_PREFERENCES,
   validateWindowPreferences,
@@ -57,6 +58,7 @@ import {
   type HierarchyNavigator,
 } from './hierarchy-navigator';
 import { curveKeyboardContent } from './keyboard-surface';
+import { createKeyborbKey } from './keyborb';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
@@ -127,6 +129,8 @@ export interface WorkspaceSceneState {
   widgets: WidgetKind[];
   keyboardBackgroundEnabled: boolean;
   keyboardCurvature: number;
+  keyborbMode: KeyborbMode;
+  keyborbEnabled: boolean;
   dictation: DictationState;
   fps: number | null;
   xrMode: 'desktop' | 'vr' | 'ar';
@@ -166,6 +170,7 @@ export interface WorkspaceScene {
   getTerminalCurvature(id: string): number;
   setKeyboardBackgroundEnabled(enabled: boolean): void;
   setKeyboardCurvature(degrees: number): void;
+  setKeyborbMode(mode: KeyborbMode): void;
   setDictationState(state: DictationState): void;
   setAvailablePanes(panes: PaneDescriptor[]): void;
   setQuickCommands(commands: QuickCommand[]): void;
@@ -366,7 +371,13 @@ function setModifierVisual(object: THREE.Object3D, armed: boolean): void {
 }
 
 function updateLabel(object: THREE.Mesh, label: string): void {
-  if (object.userData.labelText !== label) updateScalableLabel(object, label);
+  if (object.userData.labelText === label) return;
+  const keyborbLabel = object.userData.keyborbLabel as THREE.Mesh | undefined;
+  updateScalableLabel(
+    keyborbLabel ?? object,
+    keyborbLabel ? label.replace(' lock', '\nlock') : label,
+  );
+  object.userData.labelText = label;
 }
 
 const BACKGROUND_LABELS: Record<BackgroundMode, string> = {
@@ -577,6 +588,8 @@ export function createWorkspaceScene(
     widgets: [],
     keyboardBackgroundEnabled: true,
     keyboardCurvature: 0,
+    keyborbMode: 'auto',
+    keyborbEnabled: false,
     dictation: { supported: false, status: 'idle', transcript: '', error: null },
     fps: null,
     xrMode: 'desktop',
@@ -1290,6 +1303,7 @@ export function createWorkspaceScene(
   };
   const contactKeyboard = (): THREE.Group | null =>
     inputRoot &&
+    !mutableState.keyborbEnabled &&
     (inputMode === 'keyboard' || inputMode === 'command-editor') &&
     !radialMenu.root.visible &&
     !warpEdit
@@ -1372,6 +1386,7 @@ export function createWorkspaceScene(
   };
   const render = (time = 0): void => {
     if (disposed) return;
+    syncKeyborb();
     pendingPokes.clear();
     const radialDelta =
       previousRenderTime === null ? 0 : Math.max(0, (time - previousRenderTime) / 1000);
@@ -2242,7 +2257,7 @@ export function createWorkspaceScene(
                       ? 'Arrange terminals'
                       : mode === 'panes'
                         ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
-                        : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? 'Keyboard' : 'Terminal settings'} · ${targetTitle}`,
+                        : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? (mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard') : 'Terminal settings'} · ${targetTitle}`,
       mode === 'panes' ? 1.8 : 0.9,
       0.12,
       { inputAction: 'grabInput' },
@@ -2306,6 +2321,25 @@ export function createWorkspaceScene(
         button.position.set(0, 0.3 - index * 0.2, 0);
         inputRoot.add(button);
       }
+      const caption = createLabelButton('Keyborb keyboard', 1.15, 0.1, { inputAction: 'noop' });
+      caption.position.y = -0.28;
+      inputRoot.add(caption);
+      for (const [index, keyborbMode] of (['off', 'on', 'auto'] as const).entries()) {
+        const button = createLabelButton(
+          keyborbMode[0].toUpperCase() + keyborbMode.slice(1),
+          0.34,
+          0.12,
+          { inputAction: 'keyborbMode', keyborbMode },
+        );
+        button.position.set((index - 1) * 0.4, -0.43, 0);
+        setModifierVisual(button, mutableState.keyborbMode === keyborbMode);
+        inputRoot.add(button);
+      }
+      const help = createLabelButton('Auto: Keyborb with hand tracking', 1.6, 0.07, {
+        inputAction: 'noop',
+      });
+      help.position.y = -0.56;
+      inputRoot.add(help);
     } else if (mode === 'world') {
       const backgroundSelect = createBackgroundSelect(mutableState.background, 'input');
       backgroundSelect.position.y = 0.25;
@@ -2651,18 +2685,25 @@ export function createWorkspaceScene(
     } else {
       const unit = 0.13;
       for (const key of keyboardKeys) {
-        const button = createLabelButton(
+        const label =
           key.key.length === 1 && key.key !== ' '
             ? terminalKeyLabel(key.key, Boolean(modifierState.active.shift))
-            : key.label,
-          key.width * unit - 0.014,
-          key.height * unit - 0.03,
-          { inputAction: 'key', key: key.key, modifier: key.modifier },
-        );
+            : key.label;
+        const button = mutableState.keyborbEnabled
+          ? createKeyborbKey(label, unit - 0.025)
+          : createLabelButton(label, key.width * unit - 0.014, key.height * unit - 0.03, {
+              key: key.key,
+            });
+        Object.assign(button.userData, {
+          inputAction: 'key',
+          key: key.key,
+          modifier: key.modifier,
+          helpText: getControlHelp({ inputAction: 'key', key: key.key, modifier: key.modifier }),
+        });
         button.position.set(
           (key.x + key.width / 2 - keyboardDimensions.width / 2) * unit,
           0.48 - (key.y + key.height / 2) * unit,
-          0,
+          mutableState.keyborbEnabled ? (unit - 0.025) / 2 + 0.003 : 0,
         );
         inputRoot.add(button);
       }
@@ -2732,6 +2773,22 @@ export function createWorkspaceScene(
     if (keyboardRadians) curveKeyboardContent(inputRoot, size.x + 0.12, keyboardRadians);
     scene.add(inputRoot);
     syncModifierVisuals();
+  };
+  const syncKeyborb = (): void => {
+    if (disposed) return;
+    const handTrackingActive = Boolean(
+      renderer?.xr.isPresenting &&
+        controllerRoots.some(
+          (root) => !disconnectedControllers.has(root) && root.userData.inputSourceHand,
+        ),
+    );
+    const enabled = keyborbEnabled(mutableState.keyborbMode, handTrackingActive);
+    if (enabled === mutableState.keyborbEnabled) return;
+    resetHandContacts(false);
+    mutableState.keyborbEnabled = enabled;
+    if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
+      refreshInputRoot(inputMode);
+    notify();
   };
   const createHud = (): void => {
     hudRoot = new THREE.Group();
@@ -2844,6 +2901,10 @@ export function createWorkspaceScene(
   };
   const handleInputTarget = (hit: THREE.Object3D): boolean => {
     const action = hit.userData.inputAction as string | undefined;
+    if (action === 'keyborbMode') {
+      setKeyborbMode(validateKeyborbMode(hit.userData.keyborbMode));
+      return true;
+    }
     if (action === 'backgroundSelect') {
       const options = hit.parent?.getObjectByName('background-options');
       const open = !options?.visible;
@@ -3512,6 +3573,7 @@ export function createWorkspaceScene(
         if (gamepad?.buttons[5]?.pressed) focusButtonDown.add(root);
         else focusButtonDown.delete(root);
         if (gamepad) controllerGamepads.set(root, gamepad);
+        syncKeyborb();
       };
       const onDisconnected = (): void => {
         resetHandContact(root);
@@ -3550,6 +3612,7 @@ export function createWorkspaceScene(
             );
         }
         root.userData.rayDistance = 0;
+        syncKeyborb();
       };
       const eventRoot = root as unknown as EventRoot;
       eventRoot.addEventListener('selectstart', onSelect);
@@ -4141,6 +4204,14 @@ export function createWorkspaceScene(
     mutableState.keyboardCurvature = next;
     if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
       refreshInputRoot(inputMode);
+    notify();
+  };
+  const setKeyborbMode = (mode: KeyborbMode): void => {
+    const next = validateKeyborbMode(mode);
+    if (next === mutableState.keyborbMode) return;
+    mutableState.keyborbMode = next;
+    syncKeyborb();
+    if (inputRoot && inputMode === 'settings') refreshInputRoot(inputMode);
     notify();
   };
   const setDictationState = (state: DictationState): void => {
@@ -4783,6 +4854,7 @@ export function createWorkspaceScene(
     setTerminalCurvature,
     setKeyboardBackgroundEnabled,
     setKeyboardCurvature,
+    setKeyborbMode,
     setDictationState,
     setAvailablePanes,
     setQuickCommands,

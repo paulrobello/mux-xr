@@ -23,6 +23,8 @@ import {
   validateHierarchyStyle,
 } from '../workspace/hierarchy-style';
 import { validateKeyboardCurvature } from '../workspace/keyboard-curvature';
+import type { KeyborbMode } from '../workspace/keyborb';
+import { validateKeyborbMode } from '../workspace/keyborb';
 import {
   DEFAULT_WINDOW_PREFERENCES,
   validateWindowPreferences,
@@ -79,6 +81,7 @@ export interface WorkspaceSettings {
   filtering: TerminalFiltering;
   windowPreferences: WindowPreferences;
   hierarchyStyle: HierarchyStyle;
+  keyborbMode: KeyborbMode;
 }
 
 export interface WorkspaceUI {
@@ -114,6 +117,7 @@ export interface WorkspaceUI {
   setTerminalFiltering(filtering: TerminalFiltering, persist?: boolean): void;
   setWindowPreferences(value: WindowPreferences, persist?: boolean): void;
   setHierarchyStyle(style: HierarchyStyle, persist?: boolean): void;
+  setKeyborbMode(mode: KeyborbMode, persist?: boolean): void;
   setFilteringCapabilities(maxAnisotropy: number): void;
   setDictationState(state: DictationState): void;
   setKeyboardCurvature(degrees: number, persist?: boolean): void;
@@ -138,6 +142,7 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   filtering: { ...DEFAULT_TERMINAL_FILTERING },
   windowPreferences: { ...DEFAULT_WINDOW_PREFERENCES },
   hierarchyStyle: DEFAULT_HIERARCHY_STYLE,
+  keyborbMode: 'auto',
 };
 
 export function workspaceScope(endpoint: string, workspaceId: string): string {
@@ -179,6 +184,7 @@ export function validateSettings(value: unknown): WorkspaceSettings {
     filtering: validateTerminalFiltering(candidate.filtering),
     windowPreferences: validateWindowPreferences(candidate.windowPreferences),
     hierarchyStyle: validateHierarchyStyle(candidate.hierarchyStyle),
+    keyborbMode: validateKeyborbMode(candidate.keyborbMode),
     arrangement:
       candidate.arrangement === 'row' ||
       candidate.arrangement === 'grid' ||
@@ -421,6 +427,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   let arrangementSelect: HTMLSelectElement | null = null;
   let arrangementApply: HTMLButtonElement | null = null;
   let hierarchyStyleSelect: HTMLSelectElement | null = null;
+  let keyborbModeSelect: HTMLSelectElement | null = null;
   let filteringMaxAnisotropy = 16;
   let updateWindowPreferenceControls = (): void => undefined;
   const updateArrangementAvailability = (): void => {
@@ -475,6 +482,16 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       saveSettings();
     });
     updateKeyboardCurvature();
+    const keyborb = document.createElement('label');
+    keyborb.innerHTML =
+      '<span>Keyborb</span><select data-keyborb-mode aria-label="Keyborb"><option value="off">Off</option><option value="on">On</option><option value="auto">Auto</option></select><small>Auto uses Keyborb with hand tracking.</small>';
+    settingsPanel.insertBefore(
+      keyborb,
+      settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
+    );
+    keyborbModeSelect = keyborb.querySelector('[data-keyborb-mode]');
+    if (!keyborbModeSelect) throw new Error('Keyborb control missing');
+    keyborbModeSelect.value = settings.keyborbMode;
     const filteringControls = document.createElement('div');
     filteringControls.innerHTML =
       '<label>Terminal filtering<select data-filter-mode aria-label="Terminal filtering"><option value="nearest">Nearest pixels</option><option value="linear">Linear (sharp)</option><option value="mipmap-nearest">Mipmap bilinear</option><option value="mipmap-linear">Mipmap trilinear (smooth)</option></select></label><label data-filter-anisotropy-row>Anisotropy (mipmap modes)<select data-filter-anisotropy aria-label="Terminal anisotropy"><option value="1">Off</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option><option value="16">16x</option></select><span>Anisotropy matters for oblique minification. 8x and 16x may look the same front-facing.</span></label><label class="check"><input type="checkbox" data-filter-gaze> Sharper gazed terminal <span>Use sharp linear sampling while looking at a terminal.</span></label><label data-filter-distance-row>Gaze max distance<input data-filter-distance type="number" min="0.25" max="20" step="0.25" aria-label="Gaze maximum distance in meters"><span>Sharper gaze ignores mipmaps within this distance.</span></label>';
@@ -1143,6 +1160,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   qs<HTMLInputElement>('#endpoint').value = settings.endpoint;
   qs<HTMLSelectElement>('[data-background]').value = settings.background;
   qs<HTMLSelectElement>('[data-hierarchy-style]').value = settings.hierarchyStyle;
+  qs<HTMLSelectElement>('[data-keyborb-mode]').value = settings.keyborbMode;
   qs<HTMLSelectElement>('[data-color-mode]').value = settings.colorMode;
   qs<HTMLInputElement>('[data-keyboard-background]').checked = settings.keyboardBackground;
   qs<HTMLInputElement>('[data-gaze-input]').checked = settings.gazeInput;
@@ -1163,6 +1181,13 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     settings = {
       ...settings,
       hierarchyStyle: validateHierarchyStyle((event.target as HTMLSelectElement).value),
+    };
+    saveSettings();
+  });
+  qs<HTMLSelectElement>('[data-keyborb-mode]').addEventListener('change', (event) => {
+    settings = {
+      ...settings,
+      keyborbMode: validateKeyborbMode((event.target as HTMLSelectElement).value),
     };
     saveSettings();
   });
@@ -1412,6 +1437,13 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       if (settings.hierarchyStyle === next) return;
       settings = { ...settings, hierarchyStyle: next };
       if (hierarchyStyleSelect) hierarchyStyleSelect.value = next;
+      if (persist) saveSettings();
+    },
+    setKeyborbMode(mode, persist = false) {
+      const next = validateKeyborbMode(mode);
+      if (settings.keyborbMode === next) return;
+      settings = { ...settings, keyborbMode: next };
+      if (keyborbModeSelect) keyborbModeSelect.value = next;
       if (persist) saveSettings();
     },
     setFilteringCapabilities(maxAnisotropy) {
