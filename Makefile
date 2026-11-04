@@ -37,6 +37,9 @@ window-preferences-check:
 	bun run scripts/window-preferences-check.ts
 clipboard-selection-check:
 	bun run scripts/clipboard-selection-check.ts
+.PHONY: placement-motion-check
+placement-motion-check:
+	bun run scripts/placement-motion-check.ts
 input-comfort-check:
 	bun run scripts/input-comfort-check.ts
 widgets-clarity-check:

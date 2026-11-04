@@ -200,6 +200,13 @@ function pressFocusButton(gamepad: Gamepad, time: number): void {
   (gamepad.buttons[5] as { pressed: boolean }).pressed = false;
   fakeXR.frame?.(time + 16);
 }
+let graphFrameTime = 0;
+function settleHierarchy(): void {
+  for (let frame = 0; frame < 40; frame++) {
+    graphFrameTime += 16;
+    fakeXR.frame?.(graphFrameTime);
+  }
+}
 
 function openRadialMenu(gamepad: Gamepad, time: number): void {
   (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
@@ -295,7 +302,7 @@ describe('native XR controller event routing', () => {
       return { ...value, controller, aimCell, start, drag, finish, writeText };
     };
 
-    it('copies curved-grid text on completed trigger release and clears only after success', async () => {
+    it('copies curved-grid text and clears immediately on completed trigger release', async () => {
       let resolveWrite: (() => void) | undefined;
       const write = vi.fn(
         () =>
@@ -312,13 +319,14 @@ describe('native XR controller event routing', () => {
       expect(write).not.toHaveBeenCalled();
       finish();
       expect(write).toHaveBeenCalledExactlyOnceWith('exact text\n界 😀');
-      expect(left.clearSelection).not.toHaveBeenCalled();
+      expect(left.clearSelection).toHaveBeenCalledTimes(1);
+      expect(workspace.state.toast).toContain('Copied');
       resolveWrite?.();
       await Promise.resolve();
       expect(left.clearSelection).toHaveBeenCalledTimes(1);
     });
 
-    it('retains the selection and reports clipboard rejection', async () => {
+    it('clears selection and keeps local paste available when system copy fails', async () => {
       const { workspace, left, start, drag, finish } = setupSelection(
         vi.fn(() => Promise.reject(new Error('denied'))),
       );
@@ -327,11 +335,14 @@ describe('native XR controller event routing', () => {
       finish();
       await Promise.resolve();
       await Promise.resolve();
-      expect(left.clearSelection).not.toHaveBeenCalled();
-      expect(workspace.state.notice).toContain('Clipboard copy failed');
+      expect(left.clearSelection).toHaveBeenCalledTimes(1);
+      expect(workspace.state.toast).toContain('Copied in Mux XR');
+      left.paste = vi.fn(() => true);
+      expect(await workspace.pasteClipboard('pane-a')).toBe(true);
+      expect(left.paste).toHaveBeenCalledWith('exact text\n界 😀');
     });
 
-    it('keeps a pending selection through grip and recenter until clipboard result', async () => {
+    it('keeps copied text available through grip and recenter while OS copy is pending', async () => {
       let rejectWrite: ((reason: Error) => void) | undefined;
       const { workspace, left, controller, start, drag, finish } = setupSelection(
         vi.fn(
@@ -347,12 +358,54 @@ describe('native XR controller event routing', () => {
       controller.dispatchEvent({ type: 'squeezestart' } as never);
       controller.dispatchEvent({ type: 'squeezeend' } as never);
       workspace.resetLayout();
-      expect(left.clearSelection).not.toHaveBeenCalled();
+      expect(left.clearSelection).toHaveBeenCalledTimes(1);
       rejectWrite?.(new Error('denied'));
       await Promise.resolve();
       await Promise.resolve();
-      expect(left.clearSelection).not.toHaveBeenCalled();
-      expect(workspace.state.notice).toContain('Clipboard copy failed');
+      expect(left.clearSelection).toHaveBeenCalledTimes(1);
+      expect(workspace.state.toast).toContain('Copied in Mux XR');
+    });
+
+    it('pastes only on a completed native Paste gesture and cancels on disconnect', async () => {
+      const { workspace, left, controller, start, drag, finish } = setupSelection();
+      start();
+      drag();
+      finish();
+      left.paste = vi.fn(() => true);
+      workspace.showInput('keyboard');
+      hit(workspace, { inputAction: 'pasteClipboard' });
+      expect(left.paste).not.toHaveBeenCalled();
+      finish();
+      await Promise.resolve();
+      expect(left.paste).toHaveBeenCalledExactlyOnceWith('exact text\n界 😀');
+      expect(workspace.state.toast).toBe('Pasted.');
+      hit(workspace, { inputAction: 'pasteClipboard' });
+      controller.dispatchEvent({ type: 'disconnected' } as never);
+      finish();
+      await Promise.resolve();
+      expect(left.paste).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not paste into a different pane while an external clipboard read is pending', async () => {
+      let resolveRead!: (text: string) => void;
+      const { workspace, left, right } = setupSelection();
+      left.paste = vi.fn(() => true);
+      right.paste = vi.fn(() => true);
+      vi.stubGlobal('navigator', {
+        clipboard: {
+          readText: () =>
+            new Promise<string>((resolve) => {
+              resolveRead = resolve;
+            }),
+        },
+      });
+      const pending = workspace.pasteClipboard('pane-a');
+      workspace.selectTerminal('pane-b');
+      resolveRead('external text');
+      expect(await pending).toBe(false);
+      expect(left.paste).not.toHaveBeenCalled();
+      expect(right.paste).not.toHaveBeenCalled();
+      expect(workspace.state.notice).toContain('paste target changed');
     });
 
     it('does not copy a click or a cancelled selectend', () => {
@@ -588,6 +641,13 @@ describe('native XR controller event routing', () => {
     fakeXR.frame?.(0);
     (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
     const expected = root.position.clone();
+    first.workspace.showInput('settings');
+    first.workspace.setKeyboardCurvature(40);
+    first.workspace.arrangeTerminals('grid');
+    first.workspace.camera.position.x += 0.3;
+    first.workspace.camera.updateMatrixWorld(true);
+    for (let frame = 1; frame < 40; frame++) fakeXR.frame?.(frame * 16);
+    expect(root.position.distanceTo(expected)).toBeLessThan(1e-6);
     first.workspace.dispose();
     first.container.remove();
     const second = fixture();
@@ -1545,14 +1605,49 @@ describe('native XR controller event routing', () => {
       workspace.setAvailablePanes([left.pane, right.pane, pane('pane-c', 'Other')]);
       workspace.showInput('panes');
       hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Workspace' });
+      settleHierarchy();
       hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Session' });
+      settleHierarchy();
       hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Window' });
+      settleHierarchy();
       hit(workspace, { inputAction: 'pane', paneId: 'pane-c' });
       expect(actions.selectPane).toHaveBeenLastCalledWith('pane-c');
       workspace.dispose();
       container.remove();
     },
   );
+
+  it('keeps restored and grown panels above the authored floor', () => {
+    const { workspace, left, container } = fixture();
+    workspace.setBackground('observatory');
+    workspace.restoreTerminalPose('pane-a', {
+      position: [0, -2, -1.5],
+      quaternion: [0, 0, 0, 1],
+      scale: 1,
+    });
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    if (!panel) throw new Error('Panel missing');
+    expect(new THREE.Box3().setFromObject(panel).min.y).toBeGreaterThanOrEqual(0.095 - 1e-6);
+    Object.defineProperty(left, 'rows', { value: 100, configurable: true });
+    workspace.setTerminalCurvature('pane-a', 100);
+    expect(new THREE.Box3().setFromObject(panel).min.y).toBeGreaterThanOrEqual(0.095 - 1e-6);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('keeps the graph root while children animate between levels', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('panes');
+    const root = workspace.scene.getObjectByName('hierarchy-navigator');
+    hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Session' });
+    expect(workspace.scene.getObjectByName('hierarchy-navigator')).toBe(root);
+    expect(root?.userData.transitioning).toBe(true);
+    settleHierarchy();
+    expect(root?.userData.transitioning).toBe(false);
+    expect(root?.userData.hierarchyPath).toHaveLength(2);
+    workspace.dispose();
+    container.remove();
+  });
 
   it('picks curved keyboard keys and keeps curvature separate from the PTY', () => {
     const { workspace, actions, right, container } = fixture();
@@ -2396,6 +2491,26 @@ describe('native XR controller event routing', () => {
     expect(workspace.state.warpTerminalId).toBeNull();
     expect(workspace.getTerminalCurvature('pane-a')).toBe(0);
     expect(actions.exitPreview).toHaveBeenCalledOnce();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('corrects a pending floor violation when a Warp preview is saved', () => {
+    const { workspace, container } = fixture();
+    const pad = connectController(1, [0, 0, 0, 0], 'right');
+    selectRadialAction(workspace, pad, 'warp', 0);
+    workspace.restoreTerminalPose('pane-a', {
+      position: [0, -2, -1.5],
+      quaternion: [0, 0, 0, 1],
+      scale: 1,
+    });
+    const root = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    if (!root) throw new Error('Warp panel missing');
+    expect(new THREE.Box3().setFromObject(root).min.y).toBeLessThan(0);
+    (pad.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(1400);
+    expect(workspace.state.warpTerminalId).toBeNull();
+    expect(new THREE.Box3().setFromObject(root).min.y).toBeGreaterThanOrEqual(0.095 - 1e-6);
     workspace.dispose();
     container.remove();
   });

@@ -392,6 +392,9 @@ ui = mountWorkspaceUI(app, {
   onClosePane: (pane) => closePane(pane.id),
   onTogglePaneConnection: (pane) => togglePaneConnection(pane.id),
   onSendText: sendText,
+  onPaste: (id) => {
+    void scene.pasteClipboard(id);
+  },
   onSendKey: sendKey,
   onRunCommand: runCommand,
   onResizeGrid: resizeGrid,
@@ -481,6 +484,7 @@ const stopPresentation = scene.subscribe((state) => {
       ui.setArrangement(state.arrangement);
   }
   ui.setNotice(state.notice);
+  ui.setToast(state.toast);
   if (state.layoutRevision !== lastLayoutRevision) {
     lastLayoutRevision = state.layoutRevision;
     persistOpenViews();

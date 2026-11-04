@@ -81,10 +81,8 @@ describe('volumetric hierarchy navigator', () => {
       expect(meshes.every((object) => Array.isArray(object.userData.hierarchyPath))).toBe(true);
       const sculptureNames: string[] = [];
       navigator.root.traverse((object) => sculptureNames.push(object.name));
-      expect(sculptureNames).toContain(
-        style === 'helix' ? 'helix-rail-primary' : 'spatial-docks-root',
-      );
-      expect(sculptureNames.some((name) => name.startsWith('hierarchy-connector-'))).toBe(true);
+      if (style === 'helix') expect(sculptureNames).toContain('helix-rail-primary');
+      if (style === 'spatial-docks') expect(sculptureNames).not.toContain('spatial-docks-root');
       navigator.dispose();
       expect(navigator.root.children).toHaveLength(0);
       navigator.dispose();
@@ -181,6 +179,30 @@ describe('volumetric hierarchy navigator', () => {
       .map((mesh) => mesh.geometry.type);
     expect(new Set(shapeTypes).size).toBeGreaterThanOrEqual(4);
     full.dispose();
+  });
+
+  it('keeps root identity while contracting outgoing nodes and expanding incoming children', () => {
+    const navigator = createHierarchyNavigator([pane('a'), pane('b', 'other')], 'helix', {
+      path: [],
+      page: 0,
+    });
+    const identity = navigator.root;
+    const workspace = hierarchyObjects(navigator).find((object) =>
+      object.name.includes('workspace-'),
+    );
+    const path = workspace?.userData.hierarchyPath as string[];
+    expect(path?.length).toBe(1);
+    navigator.navigate({ path, page: 0 });
+    expect(navigator.root).toBe(identity);
+    expect(navigator.transitioning).toBe(true);
+    navigator.update(0.1, new THREE.PerspectiveCamera());
+    expect(workspace?.scale.x).toBeLessThan(1);
+    navigator.update(0.48, new THREE.PerspectiveCamera());
+    expect(navigator.transitioning).toBe(false);
+    expect(hierarchyObjects(navigator).some((object) => object.name.includes('session-'))).toBe(
+      true,
+    );
+    navigator.dispose();
   });
 
   it('billboards labels in the parent local space under transformed roots', () => {

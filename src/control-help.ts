@@ -19,6 +19,8 @@ export function getKeyHelp(key: string): string | undefined {
 export function getControlHelp(data: Record<string, unknown>): string | undefined {
   if (typeof data.key === 'string') return getKeyHelp(data.key);
   switch (data.inputAction) {
+    case 'pasteClipboard':
+      return 'Paste copied text into the selected terminal without adding Enter';
     case 'keyboardCurvature':
       return 'Curve the keyboard without changing terminal size';
     case 'dictation':

@@ -17,9 +17,13 @@ export interface HierarchyNavigation {
 
 export interface HierarchyNavigator {
   root: THREE.Group;
+  readonly transitioning: boolean;
+  navigate(navigation: HierarchyNavigation): void;
   update(deltaSeconds: number, camera: THREE.Camera): void;
   dispose(): void;
 }
+
+type InternalNavigator = HierarchyNavigator & { disposeResources(): void };
 
 interface Node {
   key: string;
@@ -170,8 +174,20 @@ export function createHierarchyNavigator(
   const parentWorldQuaternion = new THREE.Quaternion();
   const localLabelQuaternion = new THREE.Quaternion();
   let disposed = false;
+  let resourcesDisposed = false;
   let phase = 0;
   const targetPhase = 1;
+  let transition: {
+    elapsed: number;
+    outgoing: Array<{ object: THREE.Object3D; position: THREE.Vector3; scale: THREE.Vector3 }>;
+    incoming: Array<{ object: THREE.Object3D; position: THREE.Vector3; scale: THREE.Vector3 }>;
+    stale: THREE.Object3D[];
+    previous: InternalNavigator;
+    next: InternalNavigator;
+  } | null = null;
+  let activeResources: InternalNavigator | undefined;
+  const transitionCenter = new THREE.Vector3();
+  const transitionZeroScale = new THREE.Vector3(0.01, 0.01, 0.01);
 
   const addGeometry = <T extends THREE.BufferGeometry>(geometry: T): T => {
     geometries.add(geometry);
@@ -372,7 +388,13 @@ export function createHierarchyNavigator(
     if (page < pageCount - 1) makePagingNode('Next', page + 1, 1);
   };
 
-  const addTube = (name: string, points: THREE.Vector3[], color: string, radius: number): void => {
+  const addTube = (
+    name: string,
+    points: THREE.Vector3[],
+    color: string,
+    radius: number,
+    childPath?: string[],
+  ): void => {
     const curve = new THREE.CatmullRomCurve3(points);
     const tube = new THREE.Mesh(
       addGeometry(new THREE.TubeGeometry(curve, Math.max(6, points.length * 4), radius, 8, false)),
@@ -380,6 +402,7 @@ export function createHierarchyNavigator(
     );
     tube.name = name;
     tube.userData.hierarchyConnector = true;
+    if (childPath) tube.userData.hierarchyChildPath = childPath.slice();
     tube.raycast = () => undefined;
     root.add(tube);
   };
@@ -398,16 +421,6 @@ export function createHierarchyNavigator(
       }
       addTube('helix-rail-primary', railPoints, TEAL, 0.025);
       addTube('helix-rail-secondary', secondRailPoints, MUTED_TEAL, 0.018);
-    } else {
-      const rootDisc = new THREE.Mesh(
-        sharedGeometry('dock-root', () => new THREE.CylinderGeometry(0.34, 0.42, 0.12, 20)),
-        sharedMaterial(TEAL, 0.92),
-      );
-      rootDisc.name = 'spatial-docks-root';
-      rootDisc.position.set(0, -0.75, -0.35);
-      rootDisc.userData.hierarchySculpture = true;
-      rootDisc.raycast = () => undefined;
-      root.add(rootDisc);
     }
   };
 
@@ -506,17 +519,133 @@ export function createHierarchyNavigator(
         [parent.object.position.clone(), item.object.position.clone()],
         item.node.key === normalized.path[item.path.length] ? AMBER : MUTED_TEAL,
         0.012,
+        [...item.path, item.node.key],
       );
     }
   }
 
   root.userData.hierarchyNodes = drawn;
-  return {
+  const isDynamicViewObject = (object: THREE.Object3D, path: string[]): boolean => {
+    if (object.name.startsWith('hierarchy-page-')) return true;
+    const nodePath = object.userData.hierarchyPath;
+    const childPath = object.userData.hierarchyChildPath;
+    return (
+      (Array.isArray(nodePath) && nodePath.length === path.length + 1) ||
+      (Array.isArray(childPath) && childPath.length === path.length + 1)
+    );
+  };
+  const isContextViewObject = (object: THREE.Object3D, path: string[]): boolean => {
+    const nodePath = object.userData.hierarchyPath;
+    const childPath = object.userData.hierarchyChildPath;
+    return (
+      (Array.isArray(nodePath) && nodePath.length <= path.length) ||
+      (Array.isArray(childPath) && childPath.length <= path.length)
+    );
+  };
+  const api = {
     root,
+    get transitioning(): boolean {
+      return transition !== null;
+    },
+    navigate(nextNavigation: HierarchyNavigation): void {
+      if (disposed || transition) return;
+      const next = createHierarchyNavigator(
+        panes,
+        style,
+        nextNavigation,
+        attachedPaneIds,
+      ) as InternalNavigator;
+      const outgoing = [...root.children];
+      const incoming = [...next.root.children];
+      const oldPath = Array.isArray(root.userData.hierarchyPath)
+        ? (root.userData.hierarchyPath as string[])
+        : [];
+      const incomingPath = Array.isArray(next.root.userData.hierarchyPath)
+        ? (next.root.userData.hierarchyPath as string[])
+        : [];
+      const outgoingDynamic = outgoing.filter((object) => isDynamicViewObject(object, oldPath));
+      const incomingDynamic = incoming.filter((object) =>
+        isDynamicViewObject(object, incomingPath),
+      );
+      const incomingContextKeys = new Set(
+        incoming
+          .map((object) => object.userData.hierarchyPath)
+          .filter((path): path is string[] => Array.isArray(path))
+          .map((path) => path.join('\u0000')),
+      );
+      const outgoingContext = outgoing.filter(
+        (object) =>
+          !outgoingDynamic.includes(object) &&
+          isContextViewObject(object, oldPath) &&
+          !incomingContextKeys.has(
+            (object.userData.hierarchyPath as string[] | undefined)?.join('\u0000') ?? '',
+          ),
+      );
+      root.clear();
+      for (const child of incoming) root.add(child);
+      root.userData.hierarchyPath = (next.root.userData.hierarchyPath as string[]).slice();
+      root.userData.hierarchyPage = next.root.userData.hierarchyPage;
+      root.userData.hierarchyNodes = next.root.userData.hierarchyNodes;
+      for (const object of incomingDynamic) {
+        const targetPosition = object.position.clone();
+        const targetScale = object.scale.clone();
+        object.position.copy(transitionCenter);
+        object.scale.setScalar(0.01);
+        object.userData.hierarchyTransitionTarget = targetPosition;
+        object.userData.hierarchyTransitionScale = targetScale;
+      }
+      transition = {
+        elapsed: 0,
+        outgoing: outgoingDynamic.map((object) => ({
+          object,
+          position: object.position.clone(),
+          scale: object.scale.clone(),
+        })),
+        incoming: incomingDynamic.map((object) => ({
+          object,
+          position: object.userData.hierarchyTransitionTarget.clone(),
+          scale: object.userData.hierarchyTransitionScale.clone(),
+        })),
+        stale: outgoingContext,
+        previous: activeResources as InternalNavigator,
+        next,
+      };
+      for (const object of outgoingDynamic) root.add(object);
+      for (const object of outgoingContext) root.add(object);
+      activeResources = next;
+    },
     update(deltaSeconds: number, camera: THREE.Camera): void {
       if (disposed) return;
       phase = Math.min(targetPhase, phase + Math.max(0, deltaSeconds) / 0.35);
       root.scale.setScalar(0.94 + phase * 0.06);
+      if (activeResources && activeResources !== api) activeResources.update(deltaSeconds, camera);
+      if (transition) {
+        transition.elapsed += Math.max(0, deltaSeconds);
+        const progress = Math.min(1, transition.elapsed / 0.45);
+        const contract = Math.min(1, progress / 0.4);
+        const expand = Math.max(0, (progress - 0.4) / 0.6);
+        const ease = (value: number): number => value * value * (3 - 2 * value);
+        const contractEase = ease(contract);
+        const expandEase = ease(expand);
+        for (const entry of transition.outgoing) {
+          entry.object.position.lerpVectors(entry.position, transitionCenter, contractEase);
+          entry.object.scale.lerpVectors(entry.scale, transitionZeroScale, contractEase);
+        }
+        for (const entry of transition.incoming) {
+          entry.object.position.lerpVectors(transitionCenter, entry.position, expandEase);
+          entry.object.scale.lerpVectors(transitionZeroScale, entry.scale, expandEase);
+        }
+        if (progress >= 1) {
+          for (const entry of transition.incoming) {
+            entry.object.position.copy(entry.position);
+            entry.object.scale.copy(entry.scale);
+          }
+          for (const entry of transition.outgoing) entry.object.removeFromParent();
+          for (const object of transition.stale) object.removeFromParent();
+          transition.previous.disposeResources();
+          transition = null;
+        }
+      }
       camera.getWorldQuaternion(cameraWorldQuaternion);
       for (const label of labels) {
         const parent = label.parent;
@@ -526,13 +655,25 @@ export function createHierarchyNavigator(
         label.quaternion.copy(localLabelQuaternion);
       }
     },
-    dispose(): void {
-      if (disposed) return;
-      disposed = true;
+    disposeResources(): void {
+      if (resourcesDisposed) return;
+      resourcesDisposed = true;
       for (const label of labels) disposeScalableLabel(label);
       for (const geometry of geometries) geometry.dispose();
       for (const value of materials) value.dispose();
+    },
+    dispose(): void {
+      if (disposed) return;
+      if (transition) {
+        transition.previous.disposeResources();
+        transition.next.disposeResources();
+      }
+      transition = null;
+      activeResources?.disposeResources();
+      disposed = true;
       root.clear();
     },
   };
+  activeResources = api;
+  return api;
 }

@@ -195,7 +195,10 @@ try {
         (window as unknown as FixtureWindow).__designScene.scene.getObjectByName(
           'hierarchy-navigator',
         )?.userData.hierarchyPath.length ===
-        length + 1,
+          length + 1 &&
+        (window as unknown as FixtureWindow).__designScene.scene.getObjectByName(
+          'hierarchy-navigator',
+        )?.userData.transitioning === false,
       branch.length,
     );
   }

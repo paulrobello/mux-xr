@@ -44,6 +44,7 @@ export interface UICallbacks {
   onClosePane?(pane: PaneDescriptor): void;
   onTogglePaneConnection?(pane: PaneDescriptor): void;
   onSendText?(paneId: string, text: string): void;
+  onPaste?(paneId?: string): void;
   onSendKey?(paneId: string, key: string, modifiers?: KeyModifiers): void;
   onRunCommand?(command: QuickCommand, paneId: string): void;
   onEnterXR?(): void;
@@ -108,6 +109,7 @@ export interface WorkspaceUI {
   getCommandsForPane(paneId: string): QuickCommand[];
   setUpdateAvailable(available: boolean): void;
   setNotice(message: string | null): void;
+  setToast(message: string | null): void;
   setArrangement(pattern: PanelArrangement, persist?: boolean): void;
   setTerminalFiltering(filtering: TerminalFiltering, persist?: boolean): void;
   setWindowPreferences(value: WindowPreferences, persist?: boolean): void;
@@ -346,12 +348,32 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       ),
     );
   const drawer = root.querySelector<HTMLElement>('[data-drawer]');
+  const toast = document.createElement('div');
+  toast.className = 'mux-clipboard-toast';
+  toast.dataset.clipboardToast = 'true';
+  toast.setAttribute('role', 'status');
+  toast.setAttribute('aria-live', 'polite');
+  toast.hidden = true;
+  root.append(toast);
+  root
+    .querySelector('style')
+    ?.append(
+      document.createTextNode(
+        '.mux-clipboard-toast{position:fixed;right:20px;bottom:20px;max-width:min(28rem,calc(100vw - 40px));z-index:100;pointer-events:none;padding:12px 16px;border:1px solid #3a5363;border-radius:8px;background:#17212d;color:#dce7ed;font-size:14px}',
+      ),
+    );
   const dictationControls = document.createElement('div');
   dictationControls.dataset.keyboardControls = 'true';
   dictationControls.className = 'dictation-controls';
   dictationControls.innerHTML =
     '<div class="dictation-actions"><button data-action="dictation-start" class="secondary">Dictate</button><button data-action="dictation-stop" class="secondary" hidden>Stop</button><button data-action="dictation-insert" class="send-btn" disabled>Insert text</button><button data-action="dictation-cancel" class="text-btn">Cancel</button></div><textarea data-dictation-draft rows="3" aria-label="Dictation transcript" placeholder="Dictation transcript appears here for review" disabled></textarea><small data-dictation-status>Speech input is idle.</small>';
   drawer?.append(dictationControls);
+  const paste = document.createElement('button');
+  paste.dataset.action = 'paste-clipboard';
+  paste.className = 'secondary';
+  paste.textContent = 'Paste';
+  paste.title = 'Paste clipboard text into the selected terminal';
+  dictationControls.querySelector('.dictation-actions')?.prepend(paste);
   const gazeInput = document.createElement('label');
   gazeInput.className = 'check';
   gazeInput.dataset.keyboardControls = 'true';
@@ -1008,6 +1030,9 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       case 'dictation-start':
         callbacks.onDictationAction?.('start');
         break;
+      case 'paste-clipboard':
+        callbacks.onPaste?.(capturedTarget ?? activePaneId);
+        break;
       case 'dictation-stop':
         callbacks.onDictationAction?.('stop');
         break;
@@ -1418,6 +1443,10 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     },
     setUpdateAvailable,
     setNotice,
+    setToast(message) {
+      toast.textContent = message ?? '';
+      toast.hidden = message === null;
+    },
     getSettings: () => ({ ...settings }),
     getCommands: () => [...commands],
     addCommand: writeCommand,

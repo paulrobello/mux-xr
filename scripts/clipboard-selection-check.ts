@@ -96,6 +96,7 @@ const normalScreen = '\x1b[2J\x1b[Halpha bravo charlie\r\ndelta echo foxtrot\r\n
 let useScrollback = false;
 const routes = new Map<string, WebSocketRoute>();
 const messages: string[] = [];
+const pastedInputs: string[] = [];
 const browser = await chromium.launch({
   channel: 'chromium',
   headless: true,
@@ -115,7 +116,12 @@ await page.routeWebSocket(/.*/, (socket) => {
     const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), 'binary');
     const message = fromBinary(ClientMessageSchema, new Uint8Array(bytes.subarray(1)));
     if (message.message.case === 'muxTreeRequest') socket.send(tree);
-    else messages.push(message.message.case ?? 'empty');
+    else {
+      messages.push(message.message.case ?? 'empty');
+      if (message.message.case === 'input')
+        pastedInputs.push(new TextDecoder().decode(message.message.value.data));
+      if (message.message.case === 'paste') pastedInputs.push(message.message.value.content);
+    }
   });
   if (!id) {
     socket.send(tree);
@@ -319,16 +325,47 @@ try {
     w.__questControllers[1].dispatchEvent({ type: 'squeezeend' } as never);
     w.__selectionScene.resetLayout();
   });
-  if ((await selectionText()) !== multiline)
-    throw new Error('Manipulation cleared the pending clipboard selection');
+  if (await selectionText()) throw new Error('Released selection did not clear immediately');
   await page.evaluate(() => (window as unknown as FixtureWindow).__rejectClipboard?.());
   await page.waitForFunction(() =>
-    (window as unknown as FixtureWindow).__selectionScene.state.notice?.includes(
-      'Clipboard copy failed',
-    ),
+    (window as unknown as FixtureWindow).__selectionScene.state.toast?.includes('Copied in Mux XR'),
   );
-  if ((await selectionText()) !== multiline)
-    throw new Error('Rejected clipboard write discarded selection');
+  if (await selectionText()) throw new Error('Rejected clipboard write restored the highlight');
+  if (messages.some((message) => ['input', 'paste', 'mouse', 'resize'].includes(message)))
+    throw new Error(`Local selection leaked terminal traffic: ${messages}`);
+  await page.evaluate(() => {
+    const w = window as unknown as FixtureWindow;
+    w.__selectionScene.showInput('keyboard');
+    w.__selectionScene.scene.updateMatrixWorld(true);
+    let paste: THREE.Object3D | undefined;
+    w.__selectionScene.scene.traverse((object) => {
+      if (!paste && object.userData.inputAction === 'pasteClipboard') paste = object;
+    });
+    if (!paste) throw new Error('Native Paste button missing');
+    const controller = w.__questControllers[0];
+    const rotation = paste.getWorldQuaternion(new w.__questThree.Quaternion());
+    controller.position
+      .copy(paste.getWorldPosition(new w.__questThree.Vector3()))
+      .add(new w.__questThree.Vector3(0, 0, 0.3).applyQuaternion(rotation));
+    controller.quaternion.copy(rotation);
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    controller.dispatchEvent({ type: 'select' } as never);
+    controller.dispatchEvent({ type: 'selectend' } as never);
+  });
+  await page.waitForFunction(
+    () => (window as unknown as FixtureWindow).__selectionScene.state.toast === 'Pasted.',
+  );
+  await page.waitForTimeout(50);
+  if (
+    pastedInputs.length !== 1 ||
+    pastedInputs[0] !== multiline ||
+    messages.filter((message) => message === 'paste').length !== 1 ||
+    messages.includes('input')
+  )
+    throw new Error(`Paste did not send exact text without Enter: ${JSON.stringify(pastedInputs)}`);
+  await page.screenshot({ path: join(root, 'clipboard-paste.png') });
+  await page.evaluate(() => (window as unknown as FixtureWindow).__selectionScene.hideInput());
+  messages.length = 0;
   await page.evaluate(() => {
     navigator.clipboard.writeText = (window as unknown as FixtureWindow).__clipboardWrite;
   });
@@ -350,7 +387,7 @@ try {
   if (await selectionText()) throw new Error('Grip failed to cancel selection');
   if ((await page.evaluate(() => navigator.clipboard.readText())) !== unicode)
     throw new Error('Grip copied text');
-  if (messages.some((message) => ['input', 'mouse', 'resize'].includes(message)))
+  if (messages.some((message) => ['input', 'paste', 'mouse', 'resize'].includes(message)))
     throw new Error(`Local selection leaked terminal traffic: ${messages}`);
 
   useScrollback = true;
@@ -418,7 +455,8 @@ try {
     highlightedPixel,
     clearedPixel,
     copiedAndCleared: true,
-    rejectionRetained: true,
+    rejectionCleared: true,
+    nativePasteExactWithoutEnter: true,
     cancellationSafe: true,
     gripSafe: true,
     tuiMousePreserved: true,

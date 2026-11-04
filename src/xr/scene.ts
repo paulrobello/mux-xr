@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createClipboardBridge } from '../clipboard';
 import type {
   BackgroundMode,
   KeyModifiers,
@@ -134,6 +135,7 @@ export interface WorkspaceSceneState {
   updateAvailable: boolean;
   arrangement: PanelArrangement | null;
   notice: string | null;
+  toast: string | null;
 }
 
 export interface WorkspaceScene {
@@ -169,6 +171,7 @@ export interface WorkspaceScene {
   exitXR(): Promise<void>;
   setUpdateAvailable(available: boolean): void;
   setNotice(message: string | null): void;
+  pasteClipboard(paneId?: string): Promise<boolean>;
   resetLayout(): void;
   arrangeTerminals(pattern: PanelArrangement): void;
   toggleFocusMode(id?: string): void;
@@ -523,6 +526,12 @@ export function createWorkspaceScene(
   const observatory = createObservatory(scene);
   const panels = new Map<string, TerminalPanel>();
   const widgets = new Map<WidgetKind, ClockWidget>();
+  const touchedWidgets = new Set<WidgetKind>();
+  const clipboard = createClipboardBridge();
+  const pendingPaste = new Map<THREE.Group, string | null>();
+  let clipboardGeneration = 0;
+  let floorCorrectionPending = false;
+  let toastDeadline = 0;
   const radialMenu = createRadialMenu();
   radialMenu.root.scale.setScalar(0.8);
   radialMenu.root.traverse((object) => {
@@ -575,6 +584,7 @@ export function createWorkspaceScene(
     updateAvailable: false,
     arrangement: null,
     notice: null,
+    toast: null,
   };
   let disposed = false;
   let frameHandle = 0;
@@ -623,6 +633,8 @@ export function createWorkspaceScene(
   let recenterSince: number | null = null;
   let recenterLatched = false;
   const captureGrab = (controller: THREE.Group, object: THREE.Group): void => {
+    const widgetKind = object.userData.widgetKind as WidgetKind | undefined;
+    if (widgetKind) touchedWidgets.add(widgetKind);
     controller.updateMatrixWorld(true);
     object.updateMatrixWorld(true);
     const rotation = controller.getWorldQuaternion(new THREE.Quaternion());
@@ -738,6 +750,7 @@ export function createWorkspaceScene(
   let updateNotice: THREE.Mesh | null = null;
   let statusNotice: THREE.Mesh | null = null;
   let statusDismiss: THREE.Mesh | null = null;
+  let toastLabel: THREE.Mesh | null = null;
   let xrStartPromise: Promise<void> | null = null;
   let activeSession: XrSessionLike | null = null;
   let inputMode: InputMode = 'commands';
@@ -928,25 +941,58 @@ export function createWorkspaceScene(
       return;
     }
     selection.phase = 'copying';
-    const failed = (): void => {
-      if (textSelection !== selection || disposed) return;
-      selection.phase = 'retained';
-      setNotice('Clipboard copy failed. Allow clipboard access, then select the text again.');
-    };
+    const generation = ++clipboardGeneration;
+    const copied = clipboard.copy(text);
+    cancelTextSelection();
+    showToast('Copied. Paste from Keyboard.');
+    void copied.then((systemCopied) => {
+      if (disposed || generation !== clipboardGeneration || systemCopied) return;
+      showToast('Copied in Mux XR. Paste from Keyboard.');
+    });
+  };
+  const showToast = (message: string | null): void => {
+    mutableState.toast = message;
+    toastDeadline = (previousRenderTime ?? performance.now()) + 2500;
+    if (toastLabel) {
+      updateLabel(toastLabel, message ?? '');
+      toastLabel.visible = Boolean(message);
+    }
+    notify();
+  };
+  const pasteClipboard = async (paneId?: string): Promise<boolean> => {
+    clipboardGeneration++;
+    const id = paneId ?? mutableState.inputTargetId ?? mutableState.selectedTerminalId;
+    const panel = id ? panels.get(id) : undefined;
+    if (
+      !id ||
+      !panel ||
+      panel.surface.status !== 'connected' ||
+      mutableState.selectedTerminalId !== id
+    ) {
+      setNotice('Select a connected terminal before pasting.');
+      return false;
+    }
+    const text = await clipboard.read();
+    if (disposed) return false;
+    if (
+      panels.get(id) !== panel ||
+      mutableState.selectedTerminalId !== id ||
+      panel.surface.status !== 'connected'
+    ) {
+      setNotice('The paste target changed. Select it and paste again.');
+      return false;
+    }
+    if (text === null || text === '') {
+      setNotice('Clipboard is empty or unavailable. Highlight text to copy it first.');
+      return false;
+    }
     try {
-      if (!navigator.clipboard?.writeText) {
-        failed();
-        return;
-      }
-      void navigator.clipboard
-        .writeText(text)
-        .then(() => {
-          if (textSelection !== selection || disposed) return;
-          cancelTextSelection();
-        })
-        .catch(failed);
+      if (!panel.surface.paste(text)) throw new Error('Paste rejected');
+      showToast('Pasted.');
+      return true;
     } catch {
-      failed();
+      setNotice('The terminal rejected the paste. Reconnect and try again.');
+      return false;
     }
   };
   const startMouse = (
@@ -1153,6 +1199,7 @@ export function createWorkspaceScene(
         ? 1 / 60
         : THREE.MathUtils.clamp((time - previousRenderTime) / 1000, 0, 0.05);
     previousRenderTime = time;
+    if (mutableState.toast && time >= toastDeadline) showToast(null);
     paneFocus.update(deltaSeconds);
     radialMenu.update(radialDelta);
     if (poseRestorePending && renderer?.xr.isPresenting) {
@@ -1169,9 +1216,11 @@ export function createWorkspaceScene(
         if (panel) applyUIPose(panel.root, renderer.xr.getCamera(), pose, [0.3, 1.8], 100);
       }
       poseRestorePending = false;
+      floorCorrectionPending = true;
     }
     if (widgetRestorePending) {
       for (const [kind, pose] of Object.entries(widgetPoseStore.read())) {
+        if (touchedWidgets.has(kind as WidgetKind)) continue;
         const widget = widgets.get(kind as WidgetKind) ?? addWidget(kind as WidgetKind);
         applyUIPose(
           widget.root,
@@ -1190,6 +1239,8 @@ export function createWorkspaceScene(
       deltaSeconds,
       renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera,
     );
+    if (hierarchyNavigator)
+      hierarchyNavigator.root.userData.transitioning = hierarchyNavigator.transitioning;
     (scene.userData.updateEnvironment as ((delta: number) => void) | undefined)?.(deltaSeconds);
     if (gripActive()) modifierPresses.clear();
     for (const press of modifierPresses.values()) {
@@ -1374,6 +1425,7 @@ export function createWorkspaceScene(
       drag.object.position.copy(finalPosition);
       drag.object.quaternion.copy(controllerQuaternion).multiply(drag.relativeRotation);
     }
+    correctTerminalFloor();
     if (renderer?.xr.isPresenting) {
       scene.updateMatrixWorld(true);
       const fidelityView = renderer.xr.getCamera();
@@ -1627,6 +1679,7 @@ export function createWorkspaceScene(
     notify();
   };
   const addWidget = (kind: WidgetKind): ClockWidget => {
+    touchedWidgets.add(kind);
     const widget = createClockWidget(kind);
     widget.root.traverse((object) => {
       if (!object.userData.inputAction) object.userData.inputAction = 'grabWidget';
@@ -1648,6 +1701,7 @@ export function createWorkspaceScene(
     notify();
   };
   const clearInputRoot = (): void => {
+    pendingPaste.clear();
     if (!inputRoot) return;
     for (const [controller, drag] of [...dragStates])
       if (drag.object === inputRoot) releaseGrab(controller);
@@ -1785,6 +1839,9 @@ export function createWorkspaceScene(
       );
       dictate.position.set(-0.42, 1.03, 0);
       inputRoot.add(dictate);
+      const paste = createLabelButton('Paste', 0.44, 0.1, { inputAction: 'pasteClipboard' });
+      paste.position.set(-1, 1.03, 0);
+      inputRoot.add(paste);
       if (dictation.transcript && dictation.status !== 'listening') {
         const insert = createLabelButton('Insert text', 0.5, 0.1, {
           inputAction: 'dictation',
@@ -2027,6 +2084,7 @@ export function createWorkspaceScene(
         page: hierarchyNavigator.root.userData.hierarchyPage as number,
       };
       inputRoot.add(hierarchyNavigator.root);
+      hierarchyNavigator.root.userData.transitioning = hierarchyNavigator.transitioning;
     } else if (mode === 'commands') {
       const commandStart = commandPage * 8;
       menuCommands.slice(commandStart, commandStart + 8).forEach((command, index) => {
@@ -2334,6 +2392,15 @@ export function createWorkspaceScene(
     const exit = createLabelButton('Exit', 0.27, 0.09, { inputAction: 'exit' });
     exit.position.x = 0.57;
     hudRoot.add(activePaneLabel, exit);
+    toastLabel = createLabelButton(mutableState.toast ?? '', 1.4, 0.09, {
+      inputAction: 'noop',
+      wrap: true,
+    });
+    toastLabel.name = 'xr-clipboard-toast';
+    toastLabel.raycast = () => undefined;
+    toastLabel.position.set(0, 0.45, 0);
+    toastLabel.visible = Boolean(mutableState.toast);
+    hudRoot.add(toastLabel);
     updateNotice = createLabelButton('Update: Reload', 0.42, 0.09, { inputAction: 'reloadUpdate' });
     updateNotice.position.set(0, 0.16, 0);
     updateNotice.visible = false;
@@ -2409,6 +2476,8 @@ export function createWorkspaceScene(
       }
       panel.root.scale.setScalar(low);
     }
+    floorCorrectionPending = true;
+    correctTerminalFloor();
     rememberTerminalPlacements();
   };
   const scaleSelectedPanel = (direction: number): void => {
@@ -2500,6 +2569,7 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'hierarchyNode') {
+      if (hierarchyNavigator?.transitioning) return true;
       hierarchyNavigation = {
         path: Array.isArray(hit.userData.hierarchyPath)
           ? hit.userData.hierarchyPath.filter(
@@ -2508,7 +2578,14 @@ export function createWorkspaceScene(
           : [],
         page: Number(hit.userData.hierarchyPage) || 0,
       };
-      refreshInputRoot('panes');
+      if (hierarchyNavigator) {
+        hierarchyNavigator.navigate(hierarchyNavigation);
+        hierarchyNavigator.root.userData.transitioning = hierarchyNavigator.transitioning;
+      } else refreshInputRoot('panes');
+      return true;
+    }
+    if (action === 'pasteClipboard') {
+      if (!renderer?.xr.isPresenting) void pasteClipboard();
       return true;
     }
     if (action === 'hierarchyStyle') {
@@ -2703,6 +2780,7 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'pane') {
+      if (hierarchyNavigator?.transitioning) return true;
       const paneId = hit.userData.paneId as string;
       if (availablePanes.some((pane) => pane.id === paneId)) {
         actions.selectPane(paneId);
@@ -2926,9 +3004,12 @@ export function createWorkspaceScene(
           disconnectedControllers.has(root)
         )
           return;
+        if (targetFromController(root)?.object?.userData.inputAction === 'pasteClipboard')
+          pendingPaste.set(root, mutableState.inputTargetId ?? mutableState.selectedTerminalId);
         onControllerSelect(root);
       };
       const onSelectEnd = (): void => {
+        pendingPaste.delete(root);
         modifierPresses.delete(root);
         if (mouseCaptures.has(root) && !gripActive()) {
           moveMouse(root, targetFromController(root));
@@ -2938,8 +3019,23 @@ export function createWorkspaceScene(
         if (textSelection?.source === root && textSelection.phase === 'dragging')
           cancelTextSelection();
       };
-      const onSelectComplete = (): void => copyTextSelection(root);
+      const onSelectComplete = (): void => {
+        if (pendingPaste.has(root)) {
+          const id = pendingPaste.get(root);
+          pendingPaste.delete(root);
+          if (
+            !gripActive() &&
+            !disconnectedControllers.has(root) &&
+            id &&
+            targetFromController(root)?.object?.userData.inputAction === 'pasteClipboard'
+          )
+            void pasteClipboard(id);
+          return;
+        }
+        copyTextSelection(root);
+      };
       const onSqueeze = (event: Event): void => {
+        pendingPaste.delete(root);
         if (heldControllers.has(root) || disconnectedControllers.has(root)) return;
         releaseAllMouse();
         modifierPresses.clear();
@@ -3016,6 +3112,7 @@ export function createWorkspaceScene(
         if (gamepad) controllerGamepads.set(root, gamepad);
       };
       const onDisconnected = (): void => {
+        pendingPaste.delete(root);
         if (textSelection?.source === root) cancelTextSelection(undefined, true);
         if (warpEdit?.controller === root) finishWarp(false);
         releaseMouse(root);
@@ -3109,6 +3206,7 @@ export function createWorkspaceScene(
     };
     followCurve(panel.connectionButton);
     followCurve(panel.closeButton);
+    floorCorrectionPending = true;
   };
   const addTerminal = (surface: TerminalSurface): void => {
     if (panels.has(surface.pane.id)) return;
@@ -3251,6 +3349,7 @@ export function createWorkspaceScene(
       }
     });
     panels.set(panel.id, panel);
+    floorCorrectionPending = true;
     terminalScreens.push(screen);
     scene.add(root);
     if (!mutableState.selectedTerminalId) {
@@ -3366,6 +3465,8 @@ export function createWorkspaceScene(
     terminalRestoredPoses.set(id, copyTerminalPose(pose));
     const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
     applyUIPose(panel.root, view, pose, [0.3, 1.8], 100);
+    floorCorrectionPending = true;
+    correctTerminalFloor();
   };
   const rememberTerminalPlacements = (): void => {
     for (const panel of panels.values()) {
@@ -3375,6 +3476,23 @@ export function createWorkspaceScene(
     }
     mutableState.layoutRevision++;
     notify();
+  };
+  const correctTerminalFloor = (): void => {
+    if (
+      !floorCorrectionPending ||
+      paneFocus.activeId ||
+      warpEdit ||
+      [...dragStates.values()].some((drag) => drag.object.userData.terminalId)
+    )
+      return;
+    floorCorrectionPending = false;
+    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    const offset = keepLayoutAboveFloor(
+      [...panels.values()].map((panel) => panel.root),
+      workspaceFloorY(mutableState.background, mutableState.xrMode),
+      view.getWorldPosition(new THREE.Vector3()),
+    );
+    if (offset > 0) rememberTerminalPlacements();
   };
   const captureWorkspaceState = (): void => {
     if (hudRoot) saveUIPose('hud', hudRoot);
@@ -3398,6 +3516,8 @@ export function createWorkspaceScene(
       if (panel && !warpStore.set(warpKey(panel.surface), panel.curvature))
         setNotice('Curvature could not be saved on this device');
     } else setTerminalCurvature(edit.id, edit.original, false);
+    floorCorrectionPending = true;
+    correctTerminalFloor();
     scrollDue.clear();
     gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
     notify();
@@ -3468,6 +3588,7 @@ export function createWorkspaceScene(
     if (!panel || !Number.isFinite(degrees)) return;
     panel.curvature = THREE.MathUtils.clamp(degrees, 0, 100);
     syncPanelGrid(panel);
+    correctTerminalFloor();
     if (persist && !warpStore.set(warpKey(panel.surface), panel.curvature))
       setNotice('Curvature could not be saved on this device');
     if (warpEdit?.id === id && warpReadout)
@@ -3495,6 +3616,7 @@ export function createWorkspaceScene(
     notify();
   };
   const setBackground = (mode: BackgroundMode): void => {
+    floorCorrectionPending = true;
     mutableState.background = mode;
     closeBackgroundMenus();
     for (const owner of [hudRoot, inputRoot]) {
@@ -3691,6 +3813,7 @@ export function createWorkspaceScene(
     activeSession = session;
     poseRestorePending = true;
     widgetRestorePending = true;
+    touchedWidgets.clear();
     keyboardPoseRestored = false;
     keyboardResume = null;
     hideInput();
@@ -3792,6 +3915,7 @@ export function createWorkspaceScene(
     }
     paneFocus.exit(immediate);
     mutableState.focusModeTerminalId = null;
+    floorCorrectionPending = true;
   };
   const focusPlacement = (
     panel: TerminalPanel,
@@ -3808,6 +3932,20 @@ export function createWorkspaceScene(
       .applyQuaternion(rotation)
       .add(eye)
       .sub(bounds.center.clone().multiply(panel.root.scale).applyQuaternion(rotation));
+    const originalPosition = panel.root.position.clone();
+    const originalQuaternion = panel.root.quaternion.clone();
+    panel.root.position.copy(position);
+    panel.root.quaternion.copy(rotation);
+    keepLayoutAboveFloor(
+      [panel.root],
+      workspaceFloorY(mutableState.background, mutableState.xrMode),
+      eye,
+    );
+    position.copy(panel.root.position);
+    rotation.copy(panel.root.quaternion);
+    panel.root.position.copy(originalPosition);
+    panel.root.quaternion.copy(originalQuaternion);
+    panel.root.updateMatrixWorld(true);
     if (panel.root.parent) {
       panel.root.parent.worldToLocal(position);
       rotation.premultiply(panel.root.parent.getWorldQuaternion(new THREE.Quaternion()).invert());
@@ -3852,6 +3990,7 @@ export function createWorkspaceScene(
     }
     const panel = panels.get(id ?? mutableState.selectedTerminalId ?? '');
     if (!panel) return;
+    correctTerminalFloor();
     selectTerminal(panel.id);
     panel.focusCurvature = mutableState.windowPreferences.focusCurvature;
     syncPanelGrid(panel);
@@ -4054,6 +4193,8 @@ export function createWorkspaceScene(
     if (disposed) return;
     finishWarp(false);
     disposed = true;
+    clipboard.dispose();
+    pendingPaste.clear();
     paneFocus.dispose();
     window.cancelAnimationFrame(frameHandle);
     window.removeEventListener('resize', resize);
@@ -4154,6 +4295,7 @@ export function createWorkspaceScene(
     exitXR,
     setUpdateAvailable,
     setNotice,
+    pasteClipboard,
     arrangeTerminals,
     toggleFocusMode,
     resetLayout,
