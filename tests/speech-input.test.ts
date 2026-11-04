@@ -196,6 +196,52 @@ describe('speech input', () => {
     expect(states.some((state) => state.status === 'review')).toBe(true);
   });
 
+  it('clears reviewed text without cancelling and keeps the original target for later insertion', () => {
+    const recognition = installRecognition();
+    let target: string | null = 'original';
+    const insert = vi.fn(() => true);
+    const input = createSpeechInput({
+      onState: () => undefined,
+      getTargetPaneId: () => target,
+      canInsert: () => true,
+      onInsert: insert,
+    });
+    input.dispatch('start');
+    recognition.onresult?.(result('first draft', true));
+    input.dispatch('clear');
+    expect(input.getState()).toMatchObject({ status: 'listening', transcript: 'first draft' });
+    expect(recognition.stop).not.toHaveBeenCalled();
+    expect(recognition.abort).not.toHaveBeenCalled();
+    recognition.onend?.();
+    expect(input.getState().status).toBe('review');
+    input.dispatch('clear');
+    expect(input.getState()).toMatchObject({ status: 'review', transcript: '' });
+    input.editDraft('replacement text');
+    target = 'other';
+    input.dispatch('insert');
+    expect(insert).not.toHaveBeenCalled();
+    target = 'original';
+    input.dispatch('insert');
+    expect(insert).toHaveBeenCalledExactlyOnceWith('original', 'replacement text');
+  });
+
+  it('ignores clear while transcribing', () => {
+    const recognition = installRecognition() as unknown as SpeechRecognitionLike;
+    const input = createSpeechInput({
+      recognitionFactory: () => recognition,
+      onState: () => undefined,
+      getTargetPaneId: () => 'p',
+      canInsert: () => true,
+      onInsert: () => true,
+    });
+    input.dispatch('start');
+    recognition.onprocessing?.();
+    input.dispatch('clear');
+    expect(input.getState().status).toBe('transcribing');
+    expect(recognition.stop).not.toHaveBeenCalled();
+    expect(recognition.abort).not.toHaveBeenCalled();
+  });
+
   it('invalidates stale callbacks on cancel and rejects retargeted insertion', () => {
     const recognition = installRecognition();
     let target: string | null = 'p';

@@ -366,7 +366,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   dictationControls.dataset.keyboardControls = 'true';
   dictationControls.className = 'dictation-controls';
   dictationControls.innerHTML =
-    '<div class="dictation-actions"><button data-action="dictation-start" class="secondary">Dictate</button><button data-action="dictation-stop" class="secondary" hidden>Stop</button><button data-action="dictation-insert" class="send-btn" disabled>Insert text</button><button data-action="dictation-cancel" class="text-btn">Cancel</button></div><textarea data-dictation-draft rows="3" aria-label="Dictation transcript" placeholder="Dictation transcript appears here for review" disabled></textarea><small data-dictation-status>Speech input is idle.</small>';
+    '<div class="dictation-actions"><button data-action="dictation-start" class="secondary">Dictate</button><button data-action="dictation-stop" class="secondary" hidden>Stop</button><button data-action="dictation-insert" class="send-btn" disabled>Insert text</button><button data-action="dictation-clear" class="text-btn" hidden title="Clear the reviewed dictation text">Clear</button><button data-action="dictation-cancel" class="text-btn">Cancel</button></div><textarea data-dictation-draft rows="3" aria-label="Dictation transcript" placeholder="Dictation transcript appears here for review" disabled></textarea><small data-dictation-status>Speech input is idle.</small>';
   drawer?.append(dictationControls);
   const paste = document.createElement('button');
   paste.dataset.action = 'paste-clipboard';
@@ -852,12 +852,14 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     const start = qs<HTMLButtonElement>('[data-action="dictation-start"]');
     const stop = qs<HTMLButtonElement>('[data-action="dictation-stop"]');
     const insert = qs<HTMLButtonElement>('[data-action="dictation-insert"]');
+    const clear = qs<HTMLButtonElement>('[data-action="dictation-clear"]');
     const draft = qs<HTMLTextAreaElement>('[data-dictation-draft]');
     const status = qs<HTMLElement>('[data-dictation-status]');
     start.disabled = !state.supported || ['listening', 'transcribing'].includes(state.status);
     start.textContent = state.status === 'transcribing' ? 'Transcribing…' : 'Dictate';
     stop.hidden = state.status !== 'listening';
     insert.disabled = !['review', 'error'].includes(state.status) || !state.transcript.trim();
+    clear.hidden = !['review', 'error'].includes(state.status) || !state.transcript.trim();
     draft.disabled =
       state.status === 'idle' ||
       state.status === 'listening' ||
@@ -1040,6 +1042,9 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         break;
       case 'dictation-insert':
         callbacks.onDictationAction?.('insert');
+        break;
+      case 'dictation-clear':
+        callbacks.onDictationAction?.('clear');
         break;
       case 'dictation-cancel':
         callbacks.onDictationAction?.('cancel');

@@ -1,5 +1,5 @@
 export type DictationStatus = 'idle' | 'listening' | 'transcribing' | 'review' | 'error';
-export type DictationAction = 'start' | 'stop' | 'cancel' | 'insert';
+export type DictationAction = 'start' | 'stop' | 'cancel' | 'clear' | 'insert';
 
 export interface DictationState {
   supported: boolean;
@@ -259,6 +259,11 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
     targetPaneId = null;
     publish({ status: 'idle', transcript: '', error: null });
   };
+  const clear = (): void => {
+    if (state.status !== 'review' && !(state.status === 'error' && state.transcript.trim())) return;
+    committedTranscript = '';
+    publish({ status: 'review', transcript: '', error: null });
+  };
   const insert = (): void => {
     if (!['review', 'error'].includes(state.status) || !state.transcript.trim()) return;
     const target = targetPaneId;
@@ -285,6 +290,7 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
     if (action === 'start') start();
     else if (action === 'stop') stop();
     else if (action === 'cancel') cancel();
+    else if (action === 'clear') clear();
     else insert();
   };
   options.onState({ ...state });

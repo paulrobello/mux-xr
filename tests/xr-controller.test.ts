@@ -1717,6 +1717,12 @@ describe('native XR controller event routing', () => {
     expect(actions.sendKey).not.toHaveBeenCalled();
     hit(workspace, { inputAction: 'key', key: 'Enter' });
     expect(actions.dictationAction).toHaveBeenCalledWith('insert');
+    hit(workspace, { inputAction: 'dictation', dictationAction: 'clear' });
+    expect(actions.dictationAction).toHaveBeenCalledWith('clear');
+    workspace.setDictationState({ supported: true, status: 'review', transcript: '', error: null });
+    expect(() =>
+      objectWithData(workspace, { inputAction: 'dictation', dictationAction: 'clear' }),
+    ).toThrow();
     expect(actions.sendKey).not.toHaveBeenCalled();
     workspace.dispose();
     container.remove();

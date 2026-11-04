@@ -20,7 +20,7 @@ import {
   keyboardDimensions,
   keyboardKeys,
 } from '../keyboard';
-import type { DictationState } from '../speech-input';
+import type { DictationAction, DictationState } from '../speech-input';
 import {
   DEFAULT_TERMINAL_FILTERING,
   type TerminalFiltering,
@@ -1866,6 +1866,14 @@ export function createWorkspaceScene(
         insert.position.set(0.25, 1.03, 0);
         inputRoot.add(insert);
       }
+      if (['review', 'error'].includes(dictation.status) && dictation.transcript.trim()) {
+        const clear = createLabelButton('Clear', 0.38, 0.1, {
+          inputAction: 'dictation',
+          dictationAction: 'clear',
+        });
+        clear.position.set(1.17, 1.03, 0);
+        inputRoot.add(clear);
+      }
       if (dictation.status !== 'idle') {
         const cancel = createLabelButton('Cancel', 0.35, 0.1, {
           inputAction: 'dictation',
@@ -2613,9 +2621,7 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'dictation') {
-      actions.dictationAction?.(
-        hit.userData.dictationAction as 'start' | 'stop' | 'cancel' | 'insert',
-      );
+      actions.dictationAction?.(hit.userData.dictationAction as DictationAction);
       return true;
     }
     if (radialMenu.root.visible && !radialMenu.interactive) return true;

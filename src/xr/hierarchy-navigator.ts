@@ -173,6 +173,8 @@ export function createHierarchyNavigator(
   const cameraWorldQuaternion = new THREE.Quaternion();
   const parentWorldQuaternion = new THREE.Quaternion();
   const localLabelQuaternion = new THREE.Quaternion();
+  const rotatingBodies: THREE.Object3D[] = [];
+  const rotatingRings: THREE.Object3D[] = [];
   let disposed = false;
   let resourcesDisposed = false;
   let phase = 0;
@@ -212,6 +214,23 @@ export function createHierarchyNavigator(
     const existing = sharedMaterials.get(key);
     if (existing) return existing;
     const value = addMaterial(material(color, opacity));
+    sharedMaterials.set(key, value);
+    return value;
+  };
+  const navigationHitMaterial = (): THREE.MeshBasicMaterial => {
+    const key = 'navigation-control-hit';
+    const existing = sharedMaterials.get(key);
+    if (existing) return existing;
+    const value = addMaterial(
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        colorWrite: false,
+        depthWrite: false,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+      }),
+    );
     sharedMaterials.set(key, value);
     return value;
   };
@@ -281,6 +300,7 @@ export function createHierarchyNavigator(
       ...(node.pane ? { paneId: node.pane.id } : {}),
     });
     object.add(mesh);
+    if (nextPath.length === normalized.path.length + 1) rotatingBodies.push(mesh);
     const label = createScalableLabel(
       node.title,
       node.kind === 'workspace' ? 0.62 : 0.48,
@@ -331,6 +351,7 @@ export function createHierarchyNavigator(
       ring.rotation.x = Math.PI / 2;
       ring.raycast = () => undefined;
       object.add(ring);
+      rotatingRings.push(ring);
       object.userData.attachedRing = true;
     }
     object.userData.hierarchyNode = node.key;
@@ -353,6 +374,19 @@ export function createHierarchyNavigator(
       };
       const object = new THREE.Group();
       object.name = `hierarchy-page-${nextPage}`;
+      const hitDisc = new THREE.Mesh(
+        sharedGeometry('navigation-control-hit', () => new THREE.CircleGeometry(0.118, 24)),
+        navigationHitMaterial(),
+      );
+      hitDisc.position.z = -0.001;
+      setAction(hitDisc, {
+        inputAction: 'hierarchyNode',
+        hierarchyPath: path.slice(),
+        hierarchyPage: nextPage,
+        helpText: 'Change page',
+        originalTitle: title,
+      });
+      object.add(hitDisc);
       const mesh = new THREE.Mesh(
         addGeometry(new THREE.TorusGeometry(0.13, 0.025, 8, 20)),
         addMaterial(material(AMBER, 0.92)),
@@ -427,6 +461,19 @@ export function createHierarchyNavigator(
   const addNavigationControl = (title: string, path: string[], position: THREE.Vector3): void => {
     const control = new THREE.Group();
     control.name = `hierarchy-control-${title.toLowerCase()}`;
+    const hitDisc = new THREE.Mesh(
+      sharedGeometry('navigation-control-hit', () => new THREE.CircleGeometry(0.118, 24)),
+      navigationHitMaterial(),
+    );
+    hitDisc.position.z = -0.001;
+    setAction(hitDisc, {
+      inputAction: 'hierarchyNode',
+      hierarchyPath: path.slice(),
+      hierarchyPage: 0,
+      helpText: title,
+      originalTitle: title,
+    });
+    control.add(hitDisc);
     const mesh = new THREE.Mesh(
       sharedGeometry('navigation-control', () => new THREE.TorusGeometry(0.1, 0.018, 8, 20)),
       sharedMaterial(AMBER, 0.9),
@@ -616,11 +663,14 @@ export function createHierarchyNavigator(
     },
     update(deltaSeconds: number, camera: THREE.Camera): void {
       if (disposed) return;
-      phase = Math.min(targetPhase, phase + Math.max(0, deltaSeconds) / 0.35);
+      const delta = Math.max(0, deltaSeconds);
+      phase = Math.min(targetPhase, phase + delta / 0.35);
       root.scale.setScalar(0.94 + phase * 0.06);
+      for (const body of rotatingBodies) body.rotation.y += delta * 0.09;
+      for (const ring of rotatingRings) ring.rotation.y += delta * 0.11;
       if (activeResources && activeResources !== api) activeResources.update(deltaSeconds, camera);
       if (transition) {
-        transition.elapsed += Math.max(0, deltaSeconds);
+        transition.elapsed += delta;
         const progress = Math.min(1, transition.elapsed / 0.45);
         const contract = Math.min(1, progress / 0.4);
         const expand = Math.max(0, (progress - 0.4) / 0.6);

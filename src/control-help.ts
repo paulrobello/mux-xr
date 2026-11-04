@@ -26,11 +26,13 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
     case 'dictation':
       return data.dictationAction === 'insert'
         ? 'Insert the reviewed transcript without pressing Enter'
-        : data.dictationAction === 'stop'
-          ? 'Stop listening and review the transcript'
-          : data.dictationAction === 'cancel'
-            ? 'Discard the transcript and stop listening'
-            : 'Use browser speech recognition, then review before inserting';
+        : data.dictationAction === 'clear'
+          ? 'Clear the reviewed dictation text without stopping or cancelling dictation'
+          : data.dictationAction === 'stop'
+            ? 'Stop listening and review the transcript'
+            : data.dictationAction === 'cancel'
+              ? 'Discard the transcript and stop listening'
+              : 'Use browser speech recognition, then review before inserting';
     case 'hierarchyStyle':
       return 'Switch the mux tree between Helix Navigator and Spatial Docks';
     case 'hierarchyNode':

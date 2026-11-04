@@ -224,4 +224,95 @@ describe('volumetric hierarchy navigator', () => {
     expect(label?.quaternion.angleTo(expected)).toBeLessThan(0.0001);
     navigator.dispose();
   });
+
+  it.each(['helix', 'spatial-docks'] as const)(
+    'hits navigation and paging controls through their torus holes in %s',
+    (style) => {
+      const navigator = createHierarchyNavigator(
+        Array.from({ length: 7 }, (_, index) => pane(`p${index}`, `workspace-${index}`)),
+        style,
+        { path: ['workspace:workspace-0'], page: 0 },
+      );
+      navigator.root.updateMatrixWorld(true);
+      const raycaster = new THREE.Raycaster();
+      const hitTitleAt = (name: string, y: number): string | undefined => {
+        const control = navigator.root.getObjectByName(name);
+        if (!control) throw new Error(`Missing control ${name}`);
+        const origin = control.localToWorld(new THREE.Vector3(0, y, 1));
+        const target = control.localToWorld(new THREE.Vector3(0, y, 0));
+        raycaster.set(origin, target.sub(origin).normalize());
+        return raycaster.intersectObject(control, true)[0]?.object.userData.originalTitle as
+          | string
+          | undefined;
+      };
+      expect(hitTitleAt('hierarchy-control-home', 0.07)).toBe('Home');
+      expect(hitTitleAt('hierarchy-control-up', 0.07)).toBe('Up');
+
+      const paging = createHierarchyNavigator(
+        Array.from({ length: 7 }, (_, index) => pane(`p${index}`, `workspace-${index}`)),
+        style,
+        { path: [], page: 0 },
+      );
+      paging.root.updateMatrixWorld(true);
+      const next = paging.root.getObjectByName('hierarchy-page-1');
+      if (!next) throw new Error('Missing next page control');
+      const origin = next.localToWorld(new THREE.Vector3(0, 0.07, 1));
+      const target = next.localToWorld(new THREE.Vector3(0, 0.07, 0));
+      raycaster.set(origin, target.sub(origin).normalize());
+      expect(raycaster.intersectObject(next, true)[0]?.object.userData.originalTitle).toBe('Next');
+      const reverseOrigin = next.localToWorld(new THREE.Vector3(0, 0.07, -1));
+      const reverseTarget = next.localToWorld(new THREE.Vector3(0, 0.07, 0));
+      raycaster.set(reverseOrigin, reverseTarget.sub(reverseOrigin).normalize());
+      expect(raycaster.intersectObject(next, true)[0]?.object.userData.originalTitle).toBe('Next');
+      navigator.dispose();
+      paging.dispose();
+    },
+  );
+
+  it.each(['helix', 'spatial-docks'] as const)(
+    'rotates node bodies and attached rings in %s',
+    (style) => {
+      const navigator = createHierarchyNavigator(
+        [pane('a')],
+        style,
+        {
+          path: ['workspace:ws', 'session:ws/session', 'window:ws/session/window'],
+          page: 0,
+        },
+        new Set(['a']),
+      );
+      const childObject = navigator.root.children.find(
+        (object) => (object.userData.hierarchyPath as string[] | undefined)?.length === 4,
+      );
+      const childBody = childObject?.children.find(
+        (object) => object instanceof THREE.Mesh && object.geometry.type !== 'PlaneGeometry',
+      );
+      const currentObject = navigator.root.children.find(
+        (object) => (object.userData.hierarchyPath as string[] | undefined)?.length === 3,
+      );
+      const currentBody = currentObject?.children.find(
+        (object) => object instanceof THREE.Mesh && object.geometry.type !== 'PlaneGeometry',
+      );
+      const ring = navigator.root.children
+        .find((object) => object.userData.attachedRing)
+        ?.children.at(-1);
+      expect(childBody).toBeInstanceOf(THREE.Mesh);
+      expect(currentBody).toBeInstanceOf(THREE.Mesh);
+      expect(ring).toBeInstanceOf(THREE.Mesh);
+      const label = navigator.root.children
+        .flatMap((object) => object.children)
+        .find((object) => object.userData.labelText);
+      if (!childBody || !currentBody || !ring || !label) throw new Error('Missing node components');
+      const labelPosition = label.position.clone();
+      const bodyRotation = childBody.rotation.y;
+      const currentRotation = currentBody.rotation.y;
+      const ringRotation = ring.rotation.y;
+      navigator.update(1, new THREE.PerspectiveCamera());
+      expect(childBody.rotation.y).toBeCloseTo(bodyRotation + 0.09);
+      expect(currentBody.rotation.y).toBe(currentRotation);
+      expect(ring.rotation.y).toBeCloseTo(ringRotation + 0.11);
+      expect(label.position.equals(labelPosition)).toBe(true);
+      navigator.dispose();
+    },
+  );
 });

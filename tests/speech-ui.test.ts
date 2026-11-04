@@ -44,6 +44,27 @@ describe('keyboard dictation review', () => {
     ui.destroy();
   });
 
+  it('routes Clear and hides it while dictation is busy or idle', () => {
+    const root = document.createElement('div');
+    const onDictationAction = vi.fn();
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined, onDictationAction });
+    ui.openInput('keyboard');
+    const clear = root.querySelector<HTMLButtonElement>('[data-action="dictation-clear"]');
+    if (!clear) throw new Error('Clear button missing');
+    expect(clear.hidden).toBe(true);
+    ui.setDictationState({ supported: true, status: 'listening', transcript: '', error: null });
+    expect(clear.hidden).toBe(true);
+    ui.setDictationState({ supported: true, status: 'transcribing', transcript: '', error: null });
+    expect(clear.hidden).toBe(true);
+    ui.setDictationState({ supported: true, status: 'review', transcript: 'draft', error: null });
+    expect(clear.hidden).toBe(false);
+    clear.click();
+    expect(onDictationAction).toHaveBeenCalledWith('clear');
+    ui.setDictationState({ supported: true, status: 'review', transcript: '', error: null });
+    expect(clear.hidden).toBe(true);
+    ui.destroy();
+  });
+
   it('validates and persists keyboard curvature through browser controls', () => {
     expect(validateSettings({ keyboardCurvature: 500 }).keyboardCurvature).toBe(100);
     expect(validateSettings({ keyboardCurvature: '90' }).keyboardCurvature).toBe(0);
