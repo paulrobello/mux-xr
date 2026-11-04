@@ -222,7 +222,7 @@ Expose four terminal sampling choices and bounded anisotropy in browser/native s
 
 ## XR panel ownership and direct Warp
 
-The A radial has seven direct items: Keyboard, Commands, Panes, Layout, Warp, Widgets and Settings. Panels do not repeat global navigation, gaze targeting or world controls. Settings groups Display, World and Selected terminal. The HUD is status/notice/update/Exit only. A VR/passthrough change ends the session and prepares a fresh named browser entry action, rather than requesting a second session after an asynchronous shutdown.
+The A radial has seven direct items: Keyboard, Commands, Panes, Layout, Warp, Widgets and Settings. Panels do not repeat global navigation, gaze targeting or world controls. Settings groups Display, World and Selected terminal. The HUD provides status, notices, updates, Exit and a Menu action for controller-free hand access. The Menu control uses the existing compact label-button style. Tracked joints use restrained cyan feedback, with the same ray/contact and hover language as controllers. Index-to-thumb pinch selects, while middle-to-thumb pinch manipulates from the wrist pose. A VR/passthrough change ends the session and prepares a fresh named browser entry action, rather than requesting a second session after an asynchronous shutdown.
 
 Warp captures the aimed pane when A opens the radial, falling back to the active pane. Right-stick X previews curvature, A commits once, and B restores the initial curvature instead of invoking Focus. Preview changes are not persisted until commit. Grips retain manipulation and pause editing. Gaze retargeting, terminal trigger input and scrolling are suppressed. Removing the target, controller disconnect, recovery, disposal or XR exit cancels safely.
 

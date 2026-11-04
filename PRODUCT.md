@@ -12,7 +12,7 @@ TypeScript, Vite and Three.js, following par-dots' direct WebXR runtime and webx
 
 ## Users
 
-Paul uses Meta Quest 3 to monitor terminals running on his computer, with occasional commands. Controllers come first. Hand tracking is on the roadmap. A physical keyboard is not part of the workflow.
+Paul uses Meta Quest 3 to monitor terminals running on his computer, with occasional commands. Controllers and optional WebXR hand input share the same actions. Physical Quest hand acceptance remains pending. A physical keyboard is not part of the workflow.
 
 ## Product Purpose
 
@@ -32,7 +32,7 @@ LAN-only. No published hosting or tunnels. The daemon hierarchy is workspace, se
 - Selection highlighting belongs only to the active input pane. Manual input targeting is the default. The optional Gaze input toggle on Keyboard lets a short head-gaze dwell select the keyboard target and retains the last target while looking at the keyboard.
 - Passthrough, pure black, gradient and a quiet sci-fi observatory. No ambient sound.
 - Benchmark actual panel capacity on Quest 3. Two readable panes is the acceptance target, not an invented maximum.
-- The seven-item tinted radial menu provides Keyboard, Commands, Panes, Layout, Warp, Widgets and Settings. Direct Warp uses right-stick X, A to save and B to cancel. Named saved 3D layouts, window choreography, whole-window splits and hand tracking remain roadmap work.
+- The seven-item tinted radial menu provides Keyboard, Commands, Panes, Layout, Warp, Widgets and Settings. A HUD Menu control gives hands access to the menu. Index-to-thumb pinch selects and types; middle-to-thumb pinch grabs using the tracked wrist, including two-hand manipulation. Tracking loss cancels in-flight actions and requires neutral pinches before resuming. Direct Warp uses right-stick X, A to save and B to cancel. Named saved 3D layouts, window choreography and whole-window splits remain roadmap work.
 
 ## Brand Commitments
 

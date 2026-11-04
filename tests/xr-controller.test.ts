@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fakeXR = vi.hoisted(() => ({
   controllers: [] as unknown[],
+  hands: [] as unknown[],
   presenting: false,
   camera: null as unknown,
   frame: null as ((time: number) => void) | null,
@@ -12,6 +13,7 @@ const fakeXR = vi.hoisted(() => ({
 vi.mock('three', async (importOriginal) => {
   const actual = await importOriginal<typeof import('three')>();
   fakeXR.controllers = [new actual.Group(), new actual.Group()];
+  fakeXR.hands = [new actual.Group(), new actual.Group()];
   class FakeRenderer {
     xr = {
       enabled: false,
@@ -19,6 +21,7 @@ vi.mock('three', async (importOriginal) => {
         return fakeXR.presenting;
       },
       getController: (index: number) => fakeXR.controllers[index],
+      getHand: (index: number) => fakeXR.hands[index],
       getCamera: () => fakeXR.camera,
       setReferenceSpaceType: vi.fn(),
       setSession: vi.fn(async () => undefined),
@@ -246,6 +249,195 @@ describe('native XR controller event routing', () => {
       object.position.set(0, 0, 0);
       object.visible = true;
       object.rotation.set(0, 0, 0);
+      delete object.userData.inputSourceHand;
+    });
+    fakeXR.hands.forEach((hand) => {
+      const object = hand as THREE.Group & { joints: Record<string, THREE.Group> };
+      object.clear();
+      object.joints = {};
+      object.visible = false;
+      object.position.set(0, 0, 0);
+      object.quaternion.identity();
+    });
+  });
+
+  describe('tracked hand sources', () => {
+    type Hand = THREE.Group & { joints: Record<string, THREE.Group> };
+    const cleanups: Array<() => void> = [];
+    afterEach(() => {
+      for (const cleanup of cleanups.splice(0)) cleanup();
+      vi.unstubAllGlobals();
+    });
+    const setup = () => {
+      const value = fixture();
+      cleanups.push(() => {
+        value.workspace.dispose();
+        value.container.remove();
+      });
+      value.workspace.selectTerminal('pane-a');
+      return value;
+    };
+    const connectHand = (index = 0): Hand => {
+      const hand = fakeXR.hands[index] as Hand;
+      hand.visible = true;
+      for (const name of ['wrist', 'thumb-tip', 'index-finger-tip', 'middle-finger-tip']) {
+        const joint = new THREE.Group();
+        joint.position.set(index ? -0.2 : 0.2, 1.2, -0.4);
+        hand.joints[name] = joint;
+        hand.add(joint);
+      }
+      hand.joints['index-finger-tip'].position.x += 0.08;
+      hand.joints['middle-finger-tip'].position.y += 0.08;
+      const data = {
+        hand: new Map(Object.keys(hand.joints).map((jointName) => [jointName, { jointName }])),
+        handedness: index ? 'left' : 'right',
+      };
+      (fakeXR.controllers[index] as THREE.Group).dispatchEvent({
+        type: 'connected',
+        data,
+      } as never);
+      hand.dispatchEvent({ type: 'connected', data } as never);
+      fakeXR.frame?.(1);
+      return hand;
+    };
+    const nativeEvent = (index: number, type: string): void => {
+      (fakeXR.controllers[index] as THREE.Group).dispatchEvent({ type } as never);
+      (fakeXR.hands[index] as Hand).dispatchEvent({ type } as never);
+    };
+    const pinch = (hand: Hand, held: boolean): void => {
+      hand.joints['middle-finger-tip'].position.copy(hand.joints['thumb-tip'].position);
+      if (!held) hand.joints['middle-finger-tip'].position.y += 0.08;
+    };
+
+    it.each(['vr', 'ar'] as const)(
+      'requests optional hand tracking in %s sessions',
+      async (mode) => {
+        const { workspace } = setup();
+        const requestSession = vi.fn(async () => ({
+          addEventListener: vi.fn(),
+          end: vi.fn(async () => undefined),
+        }));
+        vi.stubGlobal('navigator', { xr: { requestSession } });
+        await workspace.enterXR(mode);
+        expect(requestSession).toHaveBeenLastCalledWith(
+          mode === 'ar' ? 'immersive-ar' : 'immersive-vr',
+          {
+            optionalFeatures:
+              mode === 'ar'
+                ? ['local-floor', 'dom-overlay', 'hand-tracking']
+                : ['local-floor', 'hand-tracking'],
+          },
+        );
+      },
+    );
+
+    it('uses the target-ray identity once and keeps controllers working with getHand available', () => {
+      const { workspace, actions } = setup();
+      workspace.showInput('keyboard');
+      connectHand();
+      hit(workspace, { key: 'a' });
+      (fakeXR.hands[0] as Hand).dispatchEvent({ type: 'selectstart' } as never);
+      expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
+      nativeEvent(0, 'selectend');
+      connectController(0);
+      hit(workspace, { key: 'b' });
+      expect(actions.sendKey).toHaveBeenLastCalledWith('b', undefined);
+      expect(actions.sendKey).toHaveBeenCalledTimes(2);
+    });
+
+    it('opens the radial and keyboard through the hand-accessible HUD Menu', () => {
+      const { workspace } = setup();
+      connectHand();
+      hit(workspace, { inputAction: 'toggleRadial' });
+      fakeXR.frame?.(1000);
+      expect(workspace.state.radialOpen).toBe(true);
+      hit(workspace, { inputAction: 'radialAction', radialAction: 'keyboard' });
+      expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeDefined();
+    });
+
+    it('offers hand-selectable Warp presets without entering a stick-only mode', () => {
+      const { workspace, left } = setup();
+      connectHand();
+      hit(workspace, { inputAction: 'toggleRadial' });
+      fakeXR.frame?.(1000);
+      hit(workspace, { inputAction: 'radialAction', radialAction: 'warp' });
+      fakeXR.frame?.(1200);
+      expect(workspace.state.warpTerminalId).toBeNull();
+      expect(workspace.scene.getObjectByName('xr-warp-controls')).toBeDefined();
+      hit(workspace, { inputAction: 'curvature', degrees: 30 });
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(30);
+      expect(left.resizeGrid).not.toHaveBeenCalled();
+    });
+
+    it.each(['wrist', 'thumb-tip', 'index-finger-tip', 'middle-finger-tip'])(
+      'cancels %s tracking loss before a render callback and rearms only after neutral release',
+      (joint) => {
+        const { workspace, actions } = setup();
+        workspace.showInput('keyboard');
+        const hand = connectHand();
+        hand.joints[joint].visible = false;
+        hit(workspace, { key: 'a' });
+        expect(actions.sendKey).not.toHaveBeenCalled();
+        hand.joints[joint].visible = true;
+        hand.joints['index-finger-tip'].position.copy(hand.joints['thumb-tip'].position);
+        hit(workspace, { key: 'a' });
+        expect(actions.sendKey).not.toHaveBeenCalled();
+        hand.joints['index-finger-tip'].position.x += 0.08;
+        fakeXR.frame?.(30);
+        hit(workspace, { key: 'a' });
+        expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
+      },
+    );
+
+    it('moves the grabbed panel from the wrist and suppresses simultaneous index selection', () => {
+      const { workspace, actions } = setup();
+      const hand = connectHand();
+      const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+      const title = objectWithData(workspace, { terminalTitle: true, terminalId: 'pane-a' });
+      const root = fakeXR.controllers[0] as THREE.Group;
+      aimController(root, title);
+      workspace.scene.updateMatrixWorld(true);
+      pinch(hand, true);
+      nativeEvent(0, 'selectstart');
+      fakeXR.frame?.(20);
+      const before = panel.position.clone();
+      hand.joints.wrist.position.x += 0.2;
+      fakeXR.frame?.(40);
+      expect(panel.position.x - before.x).toBeCloseTo(0.2);
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      pinch(hand, false);
+      fakeXR.frame?.(60);
+      const released = panel.position.clone();
+      hand.joints.wrist.position.x += 0.1;
+      fakeXR.frame?.(80);
+      expect(panel.position.distanceTo(released)).toBeLessThan(0.00001);
+    });
+
+    it('scales using two wrist poses and rebases when one hand releases or loses tracking', () => {
+      const { workspace } = setup();
+      const right = connectHand(0);
+      const left = connectHand(1);
+      const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+      const title = objectWithData(workspace, { terminalTitle: true, terminalId: 'pane-a' });
+      aimController(fakeXR.controllers[0] as THREE.Group, title);
+      aimController(fakeXR.controllers[1] as THREE.Group, title);
+      workspace.scene.updateMatrixWorld(true);
+      pinch(right, true);
+      fakeXR.frame?.(20);
+      pinch(left, true);
+      fakeXR.frame?.(40);
+      const scale = panel.scale.x;
+      right.joints.wrist.position.x += 0.1;
+      left.joints.wrist.position.x -= 0.1;
+      fakeXR.frame?.(60);
+      expect(panel.scale.x).toBeGreaterThan(scale);
+      const position = panel.position.clone();
+      left.joints.wrist.visible = false;
+      fakeXR.frame?.(80);
+      expect(panel.position.distanceTo(position)).toBeLessThan(0.00001);
+      right.joints.wrist.position.x += 0.1;
+      fakeXR.frame?.(100);
+      expect(panel.position.x - position.x).toBeCloseTo(0.1);
     });
   });
 

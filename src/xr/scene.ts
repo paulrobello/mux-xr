@@ -48,6 +48,7 @@ import {
 } from './command-editor';
 import { keepLayoutAboveFloor, workspaceFloorY } from './floor-layout';
 import { createFrameCounter } from './fps';
+import { type HandInputState, updateHandInput } from './hand-input';
 import {
   createHierarchyNavigator,
   type HierarchyNavigation,
@@ -597,6 +598,12 @@ export function createWorkspaceScene(
   const fidelityPosition = new THREE.Vector3();
   const fidelityScale = new THREE.Vector3();
   const controllerRoots: THREE.Group[] = [];
+  const handRoots = new Map<THREE.Group, THREE.Group>();
+  const handInputStates = new Map<THREE.Group, HandInputState>();
+  const handTrackingLost = new Set<THREE.Group>();
+  const handGrabActions = new Map<THREE.Group, { grab(): void; release(): void }>();
+  const activeHand = (root: THREE.Group): THREE.Group | undefined =>
+    root.userData.inputSourceHand ? handRoots.get(root) : undefined;
   const controllerListeners: Array<{
     root: THREE.Group;
     onSelect: (event: Event) => void;
@@ -632,17 +639,25 @@ export function createWorkspaceScene(
   >();
   let recenterSince: number | null = null;
   let recenterLatched = false;
+  const manipulationSpace = (controller: THREE.Group): THREE.Object3D => {
+    const hand = activeHand(controller);
+    const joints = hand
+      ? (hand as THREE.Group & { joints?: Record<string, THREE.Object3D> }).joints
+      : undefined;
+    return joints?.wrist ?? controller;
+  };
   const captureGrab = (controller: THREE.Group, object: THREE.Group): void => {
     const widgetKind = object.userData.widgetKind as WidgetKind | undefined;
     if (widgetKind) touchedWidgets.add(widgetKind);
-    controller.updateMatrixWorld(true);
+    const space = manipulationSpace(controller);
+    space.updateMatrixWorld(true);
     object.updateMatrixWorld(true);
-    const rotation = controller.getWorldQuaternion(new THREE.Quaternion());
+    const rotation = space.getWorldQuaternion(new THREE.Quaternion());
     dragStates.set(controller, {
       object,
       localOffset: object
         .getWorldPosition(new THREE.Vector3())
-        .sub(controller.getWorldPosition(new THREE.Vector3()))
+        .sub(space.getWorldPosition(new THREE.Vector3()))
         .applyQuaternion(rotation.clone().invert()),
       relativeRotation: rotation
         .clone()
@@ -662,10 +677,12 @@ export function createWorkspaceScene(
       if (remaining !== controller && dragStates.has(remaining)) captureGrab(remaining, object);
   };
   const beginPairGrab = (object: THREE.Group, first: THREE.Group, second: THREE.Group): void => {
-    first.updateMatrixWorld(true);
-    second.updateMatrixWorld(true);
-    const a = first.getWorldPosition(new THREE.Vector3());
-    const b = second.getWorldPosition(new THREE.Vector3());
+    const firstSpace = manipulationSpace(first);
+    const secondSpace = manipulationSpace(second);
+    firstSpace.updateMatrixWorld(true);
+    secondSpace.updateMatrixWorld(true);
+    const a = firstSpace.getWorldPosition(new THREE.Vector3());
+    const b = secondSpace.getWorldPosition(new THREE.Vector3());
     const direction = b.clone().sub(a);
     const distance = direction.length();
     if (distance < 0.05) {
@@ -1200,6 +1217,41 @@ export function createWorkspaceScene(
     }
     renderer?.setSize(width, height, false);
   };
+  const sampleHand = (root: THREE.Group): ReturnType<typeof updateHandInput> | null => {
+    const hand = activeHand(root);
+    const state = handInputStates.get(root);
+    if (!hand || !state) return null;
+    const gesture = updateHandInput(hand, state, root.visible);
+    if (!gesture.tracked) {
+      if (!handTrackingLost.has(root)) {
+        handTrackingLost.add(root);
+        pendingPaste.delete(root);
+        modifierPresses.delete(root);
+        handGrabActions.get(root)?.release();
+        releaseMouse(root);
+        if (textSelection?.source === root) cancelTextSelection(undefined, true);
+        const previous = hoveredByController.get(root);
+        hoveredByController.delete(root);
+        if (previous && ![...hoveredByController.values()].includes(previous)) {
+          const material = (previous as THREE.Mesh).material as THREE.MeshBasicMaterial;
+          if (material?.color)
+            material.color.setHex(previous.userData.activeState ? ACCENT : 0xffffff);
+        }
+        showHover(null);
+      }
+    } else handTrackingLost.delete(root);
+    const ray = root.children.find((child) => child instanceof THREE.Line);
+    const contact = root.children.find((child) => child instanceof THREE.Mesh);
+    if (ray) ray.visible = gesture.tracked;
+    if (contact && !gesture.tracked) contact.visible = false;
+    if (!gesture.tracked) root.userData.rayDistance = 0;
+    return gesture;
+  };
+  const handSelectionAllowed = (root: THREE.Group): boolean => {
+    if (!activeHand(root)) return true;
+    const gesture = sampleHand(root);
+    return Boolean(gesture?.tracked && !gesture.pinching && handInputStates.get(root)?.neutral);
+  };
   const render = (time = 0): void => {
     if (disposed) return;
     const radialDelta =
@@ -1252,6 +1304,25 @@ export function createWorkspaceScene(
     if (hierarchyNavigator)
       hierarchyNavigator.root.userData.transitioning = hierarchyNavigator.transitioning;
     (scene.userData.updateEnvironment as ((delta: number) => void) | undefined)?.(deltaSeconds);
+    if (renderer?.xr.isPresenting) {
+      for (const [controller, hand] of handRoots) {
+        const gesture = sampleHand(controller);
+        const visual = hand.getObjectByName('hand-joint-visual');
+        if (visual) visual.visible = Boolean(gesture?.tracked);
+        if (!gesture?.tracked) continue;
+        const joints = (hand as THREE.Group & { joints: Record<string, THREE.Object3D> }).joints;
+        if (visual)
+          for (const marker of visual.children) {
+            const joint = joints[marker.userData.jointName as string];
+            marker.visible = Boolean(joint?.visible);
+            if (joint) marker.position.copy(joint.position);
+          }
+        if (gesture.pinching && !heldControllers.has(controller))
+          handGrabActions.get(controller)?.grab();
+        else if (!gesture.pinching && heldControllers.has(controller))
+          handGrabActions.get(controller)?.release();
+      }
+    }
     if (gripActive()) modifierPresses.clear();
     for (const press of modifierPresses.values()) {
       if (press.since === null) press.since = time;
@@ -1381,10 +1452,12 @@ export function createWorkspaceScene(
     }
     for (const [object, pair] of pairGrabs) {
       const [first, second] = pair.controllers;
-      first.updateMatrixWorld(true);
-      second.updateMatrixWorld(true);
-      const a = first.getWorldPosition(new THREE.Vector3());
-      const b = second.getWorldPosition(new THREE.Vector3());
+      const firstSpace = manipulationSpace(first);
+      const secondSpace = manipulationSpace(second);
+      firstSpace.updateMatrixWorld(true);
+      secondSpace.updateMatrixWorld(true);
+      const a = firstSpace.getWorldPosition(new THREE.Vector3());
+      const b = secondSpace.getWorldPosition(new THREE.Vector3());
       const direction = b.clone().sub(a);
       const distance = direction.length();
       if (distance < 0.05) continue;
@@ -1401,9 +1474,10 @@ export function createWorkspaceScene(
     }
     for (const [controller, drag] of dragStates) {
       if (pairGrabs.has(drag.object)) continue;
-      controller.updateMatrixWorld(true);
-      const controllerPosition = new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
-      const controllerQuaternion = controller.getWorldQuaternion(new THREE.Quaternion());
+      const space = manipulationSpace(controller);
+      space.updateMatrixWorld(true);
+      const controllerPosition = new THREE.Vector3().setFromMatrixPosition(space.matrixWorld);
+      const controllerQuaternion = space.getWorldQuaternion(new THREE.Quaternion());
       const gamepad = drag.gamepad;
       if (gamepad) {
         const axes = gamepad.axes;
@@ -1550,7 +1624,12 @@ export function createWorkspaceScene(
       const nextHovered = new Map<THREE.Group, THREE.Object3D>();
       let radialHoverAction: RadialMenuAction | null = null;
       for (const controller of controllerRoots) {
-        if (!controller.visible || disconnectedControllers.has(controller)) continue;
+        if (
+          !controller.visible ||
+          disconnectedControllers.has(controller) ||
+          handTrackingLost.has(controller)
+        )
+          continue;
         controller.updateMatrixWorld(true);
         const target = targetFromController(controller, false);
         moveMouse(controller, target);
@@ -2415,7 +2494,10 @@ export function createWorkspaceScene(
     activePaneLabel.position.x = -0.2;
     const exit = createLabelButton('Exit', 0.27, 0.09, { inputAction: 'exit' });
     exit.position.x = 0.57;
-    hudRoot.add(activePaneLabel, exit);
+    const menu = createLabelButton('Menu', 0.27, 0.09, { inputAction: 'toggleRadial' });
+    menu.name = 'xr-hand-menu';
+    menu.position.set(-0.6, 0.13, 0);
+    hudRoot.add(activePaneLabel, exit, menu);
     toastLabel = createLabelButton(mutableState.toast ?? '', 1.4, 0.09, {
       inputAction: 'noop',
       wrap: true,
@@ -2535,6 +2617,10 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'grabInput') return true;
+    if (action === 'toggleRadial') {
+      toggleRadialMenu();
+      return true;
+    }
     if (action === 'newCommand') {
       commandDraft = createCommandDraft(crypto.randomUUID());
       commandWorkspaceId = availablePanes.find(
@@ -2630,8 +2716,10 @@ export function createWorkspaceScene(
       radialMenu.close();
       mutableState.radialOpen = false;
       if (choice === 'keyboard') toggleKeyboard();
-      else if (choice === 'warp') startWarp(radialTargetId, radialController);
-      else if (choice !== 'cancel') showInput(choice === 'layout' ? 'arrange' : choice);
+      else if (choice === 'warp') {
+        if (radialController && activeHand(radialController)) showInput('warp', radialController);
+        else startWarp(radialTargetId, radialController);
+      } else if (choice !== 'cancel') showInput(choice === 'layout' ? 'arrange' : choice);
       notify();
       return true;
     }
@@ -2960,8 +3048,9 @@ export function createWorkspaceScene(
   };
   const activateTarget = (target: InputTarget | null): void => {
     if (warpEdit) {
-      if (target?.object?.userData.inputAction !== 'exit') return;
-      finishWarp(false);
+      const action = target?.object?.userData.inputAction;
+      if (action !== 'exit' && action !== 'toggleRadial') return;
+      if (action === 'exit') finishWarp(false);
     }
     if (target?.object?.userData.inputAction !== 'backgroundSelect') closeBackgroundMenus();
     if (!target) return;
@@ -2991,6 +3080,10 @@ export function createWorkspaceScene(
   };
   const onControllerSelect = (controller: THREE.Group): void => {
     const target = targetFromController(controller);
+    if (target?.object?.userData.inputAction === 'toggleRadial') {
+      toggleRadialMenu(controller);
+      return;
+    }
     if (warpEdit) {
       activateTarget(target);
       return;
@@ -3023,6 +3116,7 @@ export function createWorkspaceScene(
       contact.visible = false;
       root.add(rayLine, contact);
       const onSelect = (): void => {
+        if (!handSelectionAllowed(root)) return;
         if (
           heldControllers.has(root) ||
           controllerGamepads.get(root)?.buttons[1]?.pressed ||
@@ -3034,6 +3128,7 @@ export function createWorkspaceScene(
         onControllerSelect(root);
       };
       const onSelectEnd = (): void => {
+        if (activeHand(root) && !sampleHand(root)?.tracked) return;
         pendingPaste.delete(root);
         modifierPresses.delete(root);
         if (mouseCaptures.has(root) && !gripActive()) {
@@ -3045,6 +3140,7 @@ export function createWorkspaceScene(
           cancelTextSelection();
       };
       const onSelectComplete = (): void => {
+        if (!handSelectionAllowed(root)) return;
         if (pendingPaste.has(root)) {
           const id = pendingPaste.get(root);
           pendingPaste.delete(root);
@@ -3060,6 +3156,7 @@ export function createWorkspaceScene(
         copyTextSelection(root);
       };
       const onSqueeze = (event: Event): void => {
+        if (activeHand(root) && !sampleHand(root)?.pinching) return;
         pendingPaste.delete(root);
         if (heldControllers.has(root) || disconnectedControllers.has(root)) return;
         releaseAllMouse();
@@ -3125,10 +3222,16 @@ export function createWorkspaceScene(
         }
       };
       const onConnected = (event: Event): void => {
+        onDisconnected();
+        handTrackingLost.delete(root);
+        handInputStates.set(root, { pinching: false, neutral: false, tracked: false });
         disconnectedControllers.delete(root);
         rayLine.visible = true;
-        const data = (event as Event & { data?: { gamepad?: Gamepad; handedness?: string } }).data;
-        const gamepad = data?.gamepad;
+        const data = (
+          event as Event & { data?: { gamepad?: Gamepad; handedness?: string; hand?: unknown } }
+        ).data;
+        const gamepad = data?.hand ? undefined : data?.gamepad;
+        root.userData.inputSourceHand = data?.hand;
         controllerHandedness.set(root, data?.handedness ?? 'none');
         if (gamepad?.buttons[4]?.pressed) radialButtonDown.add(root);
         else radialButtonDown.delete(root);
@@ -3137,6 +3240,9 @@ export function createWorkspaceScene(
         if (gamepad) controllerGamepads.set(root, gamepad);
       };
       const onDisconnected = (): void => {
+        delete root.userData.inputSourceHand;
+        handTrackingLost.delete(root);
+        handInputStates.set(root, { pinching: false, neutral: false, tracked: false });
         pendingPaste.delete(root);
         if (textSelection?.source === root) cancelTextSelection(undefined, true);
         if (warpEdit?.controller === root) finishWarp(false);
@@ -3171,7 +3277,11 @@ export function createWorkspaceScene(
       eventRoot.addEventListener('selectend', onSelectEnd);
       eventRoot.addEventListener('select', onSelectComplete);
       eventRoot.addEventListener('squeezestart', onSqueeze);
-      eventRoot.addEventListener('squeezeend', onSqueezeEnd);
+      const onNativeSqueezeEnd = (): void => {
+        if (activeHand(root) && sampleHand(root)?.pinching) return;
+        onSqueezeEnd();
+      };
+      eventRoot.addEventListener('squeezeend', onNativeSqueezeEnd);
       eventRoot.addEventListener('connected', onConnected);
       eventRoot.addEventListener('disconnected', onDisconnected);
       controllerRoots.push(root);
@@ -3181,11 +3291,36 @@ export function createWorkspaceScene(
         onSelectEnd,
         onSelectComplete,
         onSqueeze,
-        onSqueezeEnd,
+        onSqueezeEnd: onNativeSqueezeEnd,
         onConnected,
         onDisconnected,
       });
       scene.add(root);
+      handGrabActions.set(root, {
+        grab: () => onSqueeze(new Event('squeezestart')),
+        release: onSqueezeEnd,
+      });
+      if (typeof renderer.xr.getHand === 'function') {
+        const hand = renderer.xr.getHand(i);
+        const visual = new THREE.Group();
+        visual.name = 'hand-joint-visual';
+        const geometry = new THREE.SphereGeometry(0.006, 6, 4);
+        const material = new THREE.MeshBasicMaterial({
+          color: ACCENT,
+          transparent: true,
+          opacity: 0.45,
+        });
+        for (const name of ['wrist', 'thumb-tip', 'index-finger-tip', 'middle-finger-tip']) {
+          const marker = new THREE.Mesh(geometry, material);
+          marker.userData.jointName = name;
+          marker.raycast = () => undefined;
+          visual.add(marker);
+        }
+        hand.add(visual);
+        handRoots.set(root, hand);
+        handInputStates.set(root, { pinching: false, neutral: false, tracked: false });
+        scene.add(hand);
+      }
     }
   };
   setupControllers();
@@ -3752,8 +3887,8 @@ export function createWorkspaceScene(
   const setQuickCommands = (commands: QuickCommand[]): void => {
     quickCommands = commands.map((command) => ({ ...command }));
   };
-  const showInput = (mode: InputMode): void => {
-    if (mode === 'warp' && renderer?.xr.isPresenting) {
+  const showInput = (mode: InputMode, source?: THREE.Group | null): void => {
+    if (mode === 'warp' && renderer?.xr.isPresenting && !(source && activeHand(source))) {
       startWarp(mutableState.selectedTerminalId, null);
       return;
     }
@@ -3835,8 +3970,8 @@ export function createWorkspaceScene(
     const session = await xr.requestSession(
       sessionMode,
       mode === 'ar'
-        ? { optionalFeatures: ['local-floor', 'dom-overlay'] }
-        : { optionalFeatures: ['local-floor'] },
+        ? { optionalFeatures: ['local-floor', 'dom-overlay', 'hand-tracking'] }
+        : { optionalFeatures: ['local-floor', 'hand-tracking'] },
     );
     activeSession = session;
     poseRestorePending = true;
@@ -3891,6 +4026,12 @@ export function createWorkspaceScene(
       recenterSince = null;
       recenterLatched = false;
       heldControllers.clear();
+      handTrackingLost.clear();
+      handInputStates.forEach((state) => {
+        state.pinching = false;
+        state.neutral = false;
+        state.tracked = false;
+      });
       scrollDue.clear();
       controllerGamepads.clear();
       controllerHandedness.clear();
@@ -4269,6 +4410,18 @@ export function createWorkspaceScene(
     modifierPresses.clear();
     disconnectedControllers.clear();
     heldControllers.clear();
+    for (const hand of handRoots.values()) {
+      const visual = hand.getObjectByName('hand-joint-visual');
+      if (visual) {
+        hand.remove(visual);
+        disposeObject(visual);
+      }
+      scene.remove(hand);
+    }
+    handRoots.clear();
+    handGrabActions.clear();
+    handTrackingLost.clear();
+    handInputStates.clear();
     clearInputRoot();
     if (hudRoot) {
       scene.remove(hudRoot);

@@ -19,6 +19,8 @@ export function getKeyHelp(key: string): string | undefined {
 export function getControlHelp(data: Record<string, unknown>): string | undefined {
   if (typeof data.key === 'string') return getKeyHelp(data.key);
   switch (data.inputAction) {
+    case 'toggleRadial':
+      return 'Open or close the action menu; point and pinch to choose an item';
     case 'pasteClipboard':
       return 'Paste copied text into the selected terminal without adding Enter';
     case 'keyboardCurvature':
@@ -47,7 +49,7 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
       return 'Adjust the dark terminal background opacity';
     case 'radialAction':
       return data.radialAction === 'warp'
-        ? 'Adjust the aimed terminal curvature with the right stick; A saves and B cancels'
+        ? 'Adjust terminal curvature: controllers use the right stick; hands use on-panel choices'
         : data.radialAction === 'layout'
           ? 'Arrange terminals and adjust layout distance'
           : data.radialAction === 'cancel'

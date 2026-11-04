@@ -4,7 +4,7 @@ A LAN-only Quest 3 workspace for monitoring par-mux panes and issuing occasional
 
 The desktop opens with sharp, flat terminal canvases at their natural text size. Use **3D preview** to inspect the spatial scene, or **Enter XR** on Quest.
 
-The MVP candidate includes individual terminal panels, controller manipulation, global/workspace quick commands, a virtual keyboard, headset-local preferences, passthrough and silent black/gradient/observatory VR backgrounds. Animated radial navigation is implemented. Named 3D layouts, whole-window split views and hands remain roadmap work.
+The MVP candidate includes individual terminal panels, controller and hand input, global/workspace quick commands, a virtual keyboard, headset-local preferences, passthrough and silent black/gradient/observatory VR backgrounds. Animated radial navigation is implemented. Named 3D layouts and whole-window split views remain roadmap work. Hand input still requires physical Quest acceptance.
 
 ## Development
 
@@ -38,7 +38,7 @@ WebXR needs a secure context. Desktop localhost is suitable for development. Dai
 
 The prepared preview serves the built app and WebSockets at **[https://192.0.2.10:4240](https://192.0.2.10:4240)**, also available at `https://localhost:4240`. The full app passed from test-mac over LAN HTTPS/WSS with two private real shell panes and targeted command input. The current dedicated streamer mirrors the existing default par-mux daemon. Delivery preserves that daemon and pardeck services.
 
-The existing IWSDK development PEM was reused. It is self-signed and covers localhost rather than the LAN IP, so the Quest browser needs an explicit certificate exception. Paul approved the exact preview binary's incoming-connection rule, which was applied and verified. Existing certificates, trust stores and credentials were preserved. Paul confirmed Quest Browser access and immersive XR entry on November 1, 2026. The refined controls still require a headset recheck.
+The existing IWSDK development PEM was reused. It is self-signed and covers localhost rather than the LAN IP, so the Quest browser needs an explicit certificate exception. Paul approved the exact preview binary's incoming-connection rule, which was applied and verified. Existing certificates, trust stores and credentials were preserved. On November 3, 2026, Paul confirmed that he has been testing on Quest 3 and the current controller build works well. New hand gestures require their own headset check.
 
 To serve an already running compatible daemon, run the streamer in a par-mux pane with these arguments (supply your actual binary, socket and existing PEM paths):
 
@@ -67,6 +67,18 @@ Mouse clicks in 3D preview and controller triggers in VR use the same actions, w
 | Warp | Direct right-thumbstick curvature editing. A saves, B cancels. |
 | Widgets | Add/show/hide digital and analog clocks. |
 | Settings | Display, World and Selected terminal pages. |
+
+### Hand input
+
+VR and passthrough request optional WebXR hand tracking. On a supporting headset, put the controllers down and enable the headset's hand tracking. Controllers remain available when hand tracking is unavailable.
+
+Point the hand ray and pinch **index finger to thumb** to select controls, type keys, run a saved command or select a pane. Use the HUD **Menu** button to open the same radial menu available through controller A. Keyboard modifiers retain their tap-once and hold-to-lock behavior, and explicit pane selection retargets the keyboard and commands.
+
+Pinch **middle finger to thumb** while aiming at a surface to grab it. Move or rotate your hand to manipulate the whole pane, keyboard, command panel, hierarchy, HUD or clock. Grab the same surface with both hands and change their separation to resize, or move their midpoint to translate. Releasing one hand continues with the other without a jump. Grabbing suppresses typing and terminal mouse input.
+
+Hands open curvature presets and Curve less / Curve more through **Menu → Warp**. Controllers retain direct thumbstick Warp editing.
+
+Tracking loss releases manipulation and cancels in-flight input. Open both pinches after tracking returns before starting another gesture. The displayed joints, ray contact and hover state show the tracked hand and target. Desktop/browser hand fixtures verify software behavior only. Gesture comfort, occlusion recovery and typing precision still need real Quest 3 hand testing.
 
 ### Mux hierarchy navigation
 

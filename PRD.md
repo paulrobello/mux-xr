@@ -5,8 +5,8 @@
 | Product | Mux XR |
 | Repo | /Users/localuser/Repos/mux-xr |
 | Owner | Paul Robello |
-| Status | Owner confirmed XR entry; revised controller/input build ready for headset recheck |
-| Date | November 2, 2026, Etc/GMT+8 |
+| Status | Owner reports the controller build works well on Quest 3; hand input requires separate headset acceptance |
+| Date | November 3, 2026, Etc/GMT+8 |
 
 ## Overview
 
@@ -24,7 +24,7 @@ A LAN-only Quest 3 workspace for monitoring par-mux terminals and issuing occasi
 
 ## Non-Goals
 
-Public hosting/tunnels, physical keyboard dependency, ambient sound, arbitrary remote shell services, synchronized preferences, and automatic process creation/termination. Whole-window split composition, named saved layouts, elaborate radial menus/flyouts and hand tracking are roadmap scope.
+Public hosting/tunnels, physical keyboard dependency, ambient sound, arbitrary remote shell services, synchronized preferences, and automatic process creation/termination. Whole-window split composition, named saved layouts and window choreography remain roadmap scope. The radial menu is implemented, and P3 hand input has separate physical headset acceptance.
 
 ## Reference Projects
 
@@ -74,7 +74,7 @@ Plans: [P0](plans/phase-0-live-terminal.md), [P1](plans/phase-1-controller-mvp.m
 
 `make checkall` covers formatting/lint, TypeScript, meaningful unit tests and production build. `make checkall-ci` adds CI-equivalent packaging/secret/dependency checks. Browser suites remain local and use actual GPU rendering. `make e2e` is part of the local done gate. Test a real isolated mux daemon/streamer, two pane streams, commands with and without Enter, disconnect/reconnect, pane closure and held-pane lifecycle when available. Synthetic demo mode is explicitly labeled and never counts as streaming acceptance.
 
-Actual Quest 3 acceptance checks controller targeting, both readable panels, passthrough/VR transitions, virtual keyboard and text clarity. Paul explicitly requested a tested build first and will perform these hardware checks afterward. Software readiness and owner headset acceptance are separate records. Capacity runs record panel count, grids, workload (idle, scrolling logs, busy agent TUI), background, session refresh rate, frame pacing, input response and host load. No maximum is claimed before measurement. Unavailable headset evidence stays pending on its own owner acceptance card.
+Actual Quest 3 acceptance checks controller targeting, both readable panels, passthrough/VR transitions, virtual keyboard and text clarity. On November 3, Paul reported that his testing has been on Quest 3 and the current controller build works well, and selected hand tracking next. This general confirmation does not establish acceptance of new hand gestures or an itemized retest of every historical criterion. Software readiness and owner headset acceptance are separate records. Capacity runs record panel count, grids, workload (idle, scrolling logs, busy agent TUI), background, session refresh rate, frame pacing, input response and host load. No maximum is claimed before measurement. Unavailable headset evidence stays pending on its own owner acceptance card.
 
 ## Risks
 

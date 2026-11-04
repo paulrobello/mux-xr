@@ -42,6 +42,9 @@ placement-motion-check:
 	bun run scripts/placement-motion-check.ts
 input-comfort-check:
 	bun run scripts/input-comfort-check.ts
+.PHONY: hand-input-check
+hand-input-check:
+	bun run scripts/hand-input-check.ts
 widgets-clarity-check:
 	bun run scripts/widgets-clarity-check.ts
 terminal-shimmer-check:

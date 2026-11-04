@@ -24,6 +24,28 @@ function threeShimSource(): string {
   return `import * as RealThree from ${JSON.stringify(threePath)};
 export * from ${JSON.stringify(threePath)};
 const controllers = [new RealThree.Group(), new RealThree.Group()];
+const hands = controllers.map((controller) => {
+  const hand = new RealThree.Group();
+  hand.joints = {};
+  hand.inputState = { pinching: false };
+  hand.visible = false;
+  controller.addEventListener('connected', (event) => {
+    hand.visible = Boolean(event.data?.hand);
+    for (const joint of event.data?.hand?.values() ?? []) {
+      const node = new RealThree.Group();
+      node.jointRadius = 0.008;
+      node.visible = false;
+      hand.joints[joint.jointName] = node;
+      hand.add(node);
+    }
+    hand.dispatchEvent({ type: event.type, data: event.data });
+  });
+  controller.addEventListener('disconnected', (event) => {
+    hand.visible = false;
+    hand.dispatchEvent({ type: event.type, data: event.data });
+  });
+  return hand;
+});
 const headCamera = new RealThree.PerspectiveCamera(58, 1, 0.01, 100);
 headCamera.position.set(0, 1.6, 0.1);
 headCamera.lookAt(0, 1.5, -1.5);
@@ -37,6 +59,7 @@ const session = {
 };
 Object.defineProperty(navigator, 'xr', { configurable: true, value: { requestSession: async () => session } });
 window.__questThree = RealThree;
+window.__questHands = hands;
 const OriginalRenderer = RealThree.WebGLRenderer;
 export class WebGLRenderer extends OriginalRenderer {
   constructor(parameters) {
@@ -52,6 +75,7 @@ export class WebGLRenderer extends OriginalRenderer {
       isPresenting: false,
       getCamera: () => headCamera,
       getController: (index) => controllers[index] ?? controllers[0],
+      getHand: (index) => hands[index],
       setReferenceSpaceType: (...args) => originalXR.setReferenceSpaceType(...args),
       setSession: async (nextSession) => { activeXR = fakeXR; fakeXR.isPresenting = true; await nextSession.requestReferenceSpace?.('local-floor'); },
     };
