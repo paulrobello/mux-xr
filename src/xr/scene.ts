@@ -49,6 +49,7 @@ import {
 } from './command-editor';
 import { keepLayoutAboveFloor, workspaceFloorY } from './floor-layout';
 import { createFrameCounter } from './fps';
+import { createHandContact, type HandContact, type HandContactSample } from './hand-contact';
 import { type HandInputState, updateHandInput } from './hand-input';
 import {
   createHierarchyNavigator,
@@ -603,6 +604,14 @@ export function createWorkspaceScene(
   const controllerRoots: THREE.Group[] = [];
   const handRoots = new Map<THREE.Group, THREE.Group>();
   const handVisuals = new Map<THREE.Group, CartoonHand>();
+  const handContacts = new Map<THREE.Group, HandContact>();
+  const contactSamples = new Map<THREE.Group, HandContactSample>();
+  const contactGripArmed = new Set<THREE.Group>();
+  const pokeSources = new Set<THREE.Group>();
+  const pendingPokes = new Map<
+    THREE.Group,
+    { object: THREE.Mesh; target: string | null; mode: InputMode }
+  >();
   const controllerGrips = new Map<THREE.Group, THREE.Group>();
   const wristMenuButton = createLabelButton('Menu', 0.052, 0.035, { inputAction: 'wristMenu' });
   const wristWatch = createWristMenuWatch(wristMenuButton);
@@ -610,7 +619,10 @@ export function createWorkspaceScene(
   scene.add(wristWatch.root);
   const handInputStates = new Map<THREE.Group, HandInputState>();
   const handTrackingLost = new Set<THREE.Group>();
-  const handGrabActions = new Map<THREE.Group, { grab(): void; release(): void }>();
+  const handGrabActions = new Map<
+    THREE.Group,
+    { grab(object?: THREE.Group): void; release(): void }
+  >();
   const activeHand = (root: THREE.Group): THREE.Group | undefined =>
     root.userData.inputSourceHand ? handRoots.get(root) : undefined;
   const controllerListeners: Array<{
@@ -857,14 +869,27 @@ export function createWorkspaceScene(
     const modifier = target?.object?.userData.modifier as KeyboardModifier | undefined;
     if (modifier) modifierPresses.set(source, { modifier, since: null, locked: false, before });
   };
-  const cancelModifierPress = (source: number): void => {
+  const cancelModifierPress = (source: THREE.Group | number, refresh = true): void => {
     const press = modifierPresses.get(source);
     modifierPresses.delete(source);
     if (!press?.before) return;
     modifierState.restore(press.modifier, press.before.active, press.before.locked);
     syncModifierVisuals();
-    if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
+    if (refresh && inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
       refreshInputRoot(inputMode);
+  };
+  const resetHandContact = (source: THREE.Group, refresh = true, preserveNear = false): void => {
+    handContacts.get(source)?.reset(preserveNear);
+    contactSamples.delete(source);
+    pendingPokes.delete(source);
+    if (pokeSources.delete(source)) cancelModifierPress(source, refresh);
+    if (!preserveNear) {
+      source.userData.nearKeyboard = false;
+      contactGripArmed.delete(source);
+    }
+  };
+  const resetHandContacts = (refresh = false): void => {
+    for (const source of handContacts.keys()) resetHandContact(source, refresh);
   };
   const releaseMouse = (source: THREE.Group | number): void => {
     const capture = mouseCaptures.get(source);
@@ -1234,6 +1259,8 @@ export function createWorkspaceScene(
     if (!gesture.tracked) {
       if (!handTrackingLost.has(root)) {
         handTrackingLost.add(root);
+        resetHandContact(root);
+        contactGripArmed.delete(root);
         pendingPaste.delete(root);
         modifierPresses.delete(root);
         handGrabActions.get(root)?.release();
@@ -1261,8 +1288,91 @@ export function createWorkspaceScene(
     const gesture = sampleHand(root);
     return Boolean(gesture?.tracked && !gesture.pinching && handInputStates.get(root)?.neutral);
   };
+  const contactKeyboard = (): THREE.Group | null =>
+    inputRoot &&
+    (inputMode === 'keyboard' || inputMode === 'command-editor') &&
+    !radialMenu.root.visible &&
+    !warpEdit
+      ? inputRoot
+      : null;
+  const contactVisual = (source: THREE.Group, refresh = false): CartoonHand | undefined => {
+    const visual = handVisuals.get(source);
+    const side = controllerHandedness.get(source);
+    if (
+      !visual ||
+      !source.visible ||
+      disconnectedControllers.has(source) ||
+      (side !== 'left' && side !== 'right')
+    )
+      return undefined;
+    if (refresh && renderer) {
+      const hand = activeHand(source);
+      if (hand) {
+        if (!sampleHand(source)?.tracked) return undefined;
+        visual.update(hand, renderer.xr.getCamera(), side, 0);
+      } else {
+        const grip = controllerGrips.get(source);
+        visual.updateController(
+          grip?.visible ? grip : source,
+          renderer.xr.getCamera(),
+          side,
+          controllerGamepads.get(source),
+          0,
+        );
+      }
+    }
+    return visual.root.visible ? visual : undefined;
+  };
+  const keyboardNear = (source: THREE.Group): boolean => {
+    const visual = contactVisual(source, true);
+    return Boolean(
+      visual &&
+        handContacts
+          .get(source)
+          ?.near(
+            visual.root.userData.indexTip as THREE.Vector3,
+            visual.root.userData.palmPosition as THREE.Vector3,
+            contactKeyboard(),
+          ),
+    );
+  };
+  const contactGripTarget = (source: THREE.Group): THREE.Group | null => {
+    const visual = contactVisual(source, true);
+    const query = handContacts.get(source);
+    if (!visual || !query) return null;
+    let roots: THREE.Group[];
+    if (radialMenu.root.visible) roots = radialMenu.interactive ? [radialMenu.root] : [];
+    else
+      roots = [...panels.values()]
+        .filter((panel) => panel.root.visible && !panel.root.userData.focusHidden)
+        .map((panel) => panel.root)
+        .concat(
+          inputRoot ? [inputRoot] : [],
+          hudRoot ? [hudRoot] : [],
+          [...widgets.values()].map((widget) => widget.root),
+        );
+    return query.grip(
+      [
+        { point: visual.root.userData.palmPosition as THREE.Vector3, radius: 0.045 },
+        { point: visual.root.userData.indexTip as THREE.Vector3, radius: 0.022 },
+        { point: visual.root.userData.thumbTip as THREE.Vector3, radius: 0.024 },
+        { point: visual.root.userData.middleTip as THREE.Vector3, radius: 0.022 },
+        { point: visual.root.userData.outerTip as THREE.Vector3, radius: 0.024 },
+        { point: visual.root.userData.wristPosition as THREE.Vector3, radius: 0.03 },
+      ],
+      roots,
+    );
+  };
+  const nativeSelectBlocked = (source: THREE.Group): boolean => {
+    if (!keyboardNear(source)) return false;
+    const action = targetFromController(source)?.object?.userData.inputAction;
+    return !['wristMenu', 'toggleRadial', 'exit', 'reloadUpdate', 'dismissNotice'].includes(
+      String(action),
+    );
+  };
   const render = (time = 0): void => {
     if (disposed) return;
+    pendingPokes.clear();
     const radialDelta =
       previousRenderTime === null ? 0 : Math.max(0, (time - previousRenderTime) / 1000);
     const deltaSeconds =
@@ -1373,6 +1483,46 @@ export function createWorkspaceScene(
       for (const visual of handVisuals.values()) visual.hide();
       wristWatch.setVisible(false);
     }
+    if (renderer?.xr.isPresenting) {
+      for (const controller of controllerRoots) {
+        const visual = contactVisual(controller);
+        const query = handContacts.get(controller);
+        if (!visual || !query) {
+          resetHandContact(controller);
+          if (
+            !controller.visible ||
+            disconnectedControllers.has(controller) ||
+            handTrackingLost.has(controller)
+          ) {
+            contactGripArmed.delete(controller);
+            if (heldControllers.has(controller)) handGrabActions.get(controller)?.release();
+          }
+          continue;
+        }
+        const wasNear = Boolean(contactSamples.get(controller)?.nearKeyboard);
+        const sample = query.sample(
+          visual.root.userData.indexTip as THREE.Vector3,
+          visual.root.userData.palmPosition as THREE.Vector3,
+          contactKeyboard(),
+          !gripActive(),
+        );
+        contactSamples.set(controller, sample);
+        controller.userData.nearKeyboard = sample.nearKeyboard;
+        if (sample.nearKeyboard && !wasNear) {
+          releaseMouse(controller);
+          pendingPaste.delete(controller);
+          if (textSelection?.source === controller && textSelection.phase === 'dragging')
+            cancelTextSelection();
+        }
+        if (sample.released && pokeSources.delete(controller)) modifierPresses.delete(controller);
+        if (sample.pressed)
+          pendingPokes.set(controller, {
+            object: sample.pressed,
+            target: mutableState.inputTargetId,
+            mode: inputMode,
+          });
+      }
+    } else resetHandContacts();
     if (gripActive()) modifierPresses.clear();
     for (const press of modifierPresses.values()) {
       if (press.since === null) press.since = time;
@@ -1500,6 +1650,41 @@ export function createWorkspaceScene(
         recenterLatched = true;
       }
     }
+    for (const controller of contactGripArmed) {
+      if (!heldControllers.has(controller) || dragStates.has(controller)) continue;
+      const object = contactGripTarget(controller);
+      if (object) handGrabActions.get(controller)?.grab(object);
+    }
+    for (const [controller, press] of pendingPokes) {
+      if (
+        gripActive() ||
+        !contactKeyboard() ||
+        inputMode !== press.mode ||
+        mutableState.inputTargetId !== press.target
+      ) {
+        resetHandContact(controller, false);
+        continue;
+      }
+      const modifier = press.object.userData.modifier as KeyboardModifier | undefined;
+      const before = modifier
+        ? {
+            active: Boolean(modifierState.active[modifier]),
+            locked: Boolean(modifierState.locked[modifier]),
+          }
+        : undefined;
+      const target: InputTarget = {
+        kind: 'keyboard',
+        terminalId: press.target ?? '',
+        object: press.object,
+      };
+      if (press.object.userData.inputAction === 'pasteClipboard') {
+        if (press.target) void pasteClipboard(press.target);
+      } else activateTarget(target);
+      beginModifierPress(controller, target, before);
+      pokeSources.add(controller);
+      showHover(null);
+    }
+    if (pokeSources.size) gazeInputState = { candidateId: null, emphasizedId: null, since: time };
     for (const [object, pair] of pairGrabs) {
       const [first, second] = pair.controllers;
       const firstSpace = manipulationSpace(first);
@@ -1649,6 +1834,7 @@ export function createWorkspaceScene(
         mutableState.xrMode !== 'desktop' &&
         inputMode !== 'command-editor' &&
         dragStates.size === 0 &&
+        pokeSources.size === 0 &&
         mouseCaptures.size === 0 &&
         textSelection?.phase !== 'dragging' &&
         textSelection?.phase !== 'copying'
@@ -1681,7 +1867,17 @@ export function createWorkspaceScene(
         )
           continue;
         controller.updateMatrixWorld(true);
-        const target = targetFromController(controller, false);
+        const sample = contactSamples.get(controller);
+        const nearKeyboard = Boolean(sample?.nearKeyboard && contactKeyboard());
+        const target: InputTarget | null = nearKeyboard
+          ? sample?.hovered
+            ? {
+                kind: 'keyboard',
+                terminalId: mutableState.inputTargetId ?? '',
+                object: sample.hovered,
+              }
+            : null
+          : targetFromController(controller, false);
         moveMouse(controller, target);
         moveTextSelection(controller, target);
         const distance =
@@ -1689,13 +1885,16 @@ export function createWorkspaceScene(
         const line = controller.children.find((child) => child instanceof THREE.Line) as
           | THREE.Line
           | undefined;
-        if (line) line.scale.z = distance / CONTROLLER_RAY_LENGTH;
+        if (line) {
+          line.visible = !nearKeyboard;
+          line.scale.z = distance / CONTROLLER_RAY_LENGTH;
+        }
         const contact = controller.children.find((child) => child instanceof THREE.Mesh) as
           | THREE.Mesh
           | undefined;
         if (contact) {
           contact.position.set(0, 0, -distance);
-          contact.visible = Boolean(target?.object);
+          contact.visible = !nearKeyboard && Boolean(target?.object);
         }
         const object = target?.object;
         if (radialMenu.interactive && object?.userData.radialAction)
@@ -1839,7 +2038,8 @@ export function createWorkspaceScene(
     hideInput();
     notify();
   };
-  const clearInputRoot = (): void => {
+  const clearInputRoot = (preserveContact = false): void => {
+    if (!preserveContact) resetHandContacts(false);
     pendingPaste.clear();
     if (!inputRoot) return;
     for (const [controller, drag] of [...dragStates])
@@ -1881,6 +2081,7 @@ export function createWorkspaceScene(
     inputRoot.scale.setScalar(0.38);
   };
   const refreshInputRoot = (mode: InputMode): void => {
+    if (mode !== inputMode) resetHandContacts(false);
     inputMode = mode;
     if (
       mode !== 'keyboard' &&
@@ -1903,7 +2104,7 @@ export function createWorkspaceScene(
         scale: inputRoot.scale.x,
       };
     }
-    clearInputRoot();
+    clearInputRoot(true);
     inputRoot = new THREE.Group();
     inputRoot.name = `xr-${mode}-controls`;
     inputRoot.userData.scaleLimits = [0.18, 0.9];
@@ -3172,6 +3373,7 @@ export function createWorkspaceScene(
       root.add(rayLine, contact);
       const onSelect = (): void => {
         if (!handSelectionAllowed(root)) return;
+        if (!root.visible || nativeSelectBlocked(root)) return;
         if (
           heldControllers.has(root) ||
           controllerGamepads.get(root)?.buttons[1]?.pressed ||
@@ -3185,7 +3387,7 @@ export function createWorkspaceScene(
       const onSelectEnd = (): void => {
         if (activeHand(root) && !sampleHand(root)?.tracked) return;
         pendingPaste.delete(root);
-        modifierPresses.delete(root);
+        if (!pokeSources.has(root)) modifierPresses.delete(root);
         if (mouseCaptures.has(root) && !gripActive()) {
           moveMouse(root, targetFromController(root));
         }
@@ -3196,6 +3398,7 @@ export function createWorkspaceScene(
       };
       const onSelectComplete = (): void => {
         if (!handSelectionAllowed(root)) return;
+        if (!root.visible || nativeSelectBlocked(root)) return;
         if (pendingPaste.has(root)) {
           const id = pendingPaste.get(root);
           pendingPaste.delete(root);
@@ -3210,38 +3413,53 @@ export function createWorkspaceScene(
         }
         copyTextSelection(root);
       };
-      const onSqueeze = (event: Event): void => {
+      const onSqueeze = (event: Event, contactObject?: THREE.Group): void => {
         if (activeHand(root) && !sampleHand(root)?.pinching) return;
+        if (
+          !root.visible ||
+          disconnectedControllers.has(root) ||
+          (heldControllers.has(root) && !contactGripArmed.has(root))
+        )
+          return;
+        const wasNearKeyboard = keyboardNear(root);
+        const oldInputRoot = inputRoot;
+        resetHandContact(root, true, true);
+        if (contactObject && contactObject === oldInputRoot) contactObject = inputRoot ?? undefined;
+        contactObject ??= contactGripTarget(root) ?? undefined;
         pendingPaste.delete(root);
-        if (heldControllers.has(root) || disconnectedControllers.has(root)) return;
         releaseAllMouse();
         modifierPresses.clear();
         heldControllers.add(root);
         if (radialMenu.root.visible && !radialMenu.interactive) return;
-        const target = targetFromController(root);
-        if (!target) return;
-        let object: THREE.Group | null = null;
+        const target = contactObject || wasNearKeyboard ? null : targetFromController(root);
+        let object: THREE.Group | null = contactObject ?? null;
         if (
+          !object &&
+          target &&
           target.kind === 'keyboard' &&
           inputRoot &&
           target.object &&
           inputRoot.getObjectById(target.object.id)
         )
           object = inputRoot;
-        else if (target.object && radialMenu.root.getObjectById(target.object.id))
+        else if (!object && target?.object && radialMenu.root.getObjectById(target.object.id))
           object = radialMenu.root;
-        else if (hudRoot && target.object && hudRoot.getObjectById(target.object.id))
+        else if (!object && hudRoot && target?.object && hudRoot.getObjectById(target.object.id))
           object = hudRoot;
-        else if (target.object?.userData.widgetId) {
+        else if (!object && target?.object?.userData.widgetId) {
           object =
             [...widgets.values()].find(
               (widget) => widget.root.userData.widgetId === target.object?.userData.widgetId,
             )?.root ?? null;
-        } else if (target.terminalId && target.object) {
+        } else if (!object && target?.terminalId && target.object) {
           const panel = panels.get(target.terminalId);
           if (panel?.root.getObjectById(target.object.id)) object = panel.root;
         }
-        if (!object) return;
+        if (!object) {
+          contactGripArmed.add(root);
+          return;
+        }
+        contactGripArmed.delete(root);
         paneFocus.cancelMotion(object);
         if (object.userData.terminalId) selectTerminal(object.userData.terminalId as string);
         const other = [...dragStates.entries()].find(
@@ -3258,6 +3476,7 @@ export function createWorkspaceScene(
         }
       };
       const onSqueezeEnd = (): void => {
+        contactGripArmed.delete(root);
         const object = dragStates.get(root)?.object;
         heldControllers.delete(root);
         releaseGrab(root);
@@ -3295,6 +3514,8 @@ export function createWorkspaceScene(
         if (gamepad) controllerGamepads.set(root, gamepad);
       };
       const onDisconnected = (): void => {
+        resetHandContact(root);
+        contactGripArmed.delete(root);
         if (controllerHandedness.get(root) === 'right') wristWatch.setVisible(false);
         wristWatch.updateTouch(null);
         handVisuals.get(root)?.hide();
@@ -3355,9 +3576,10 @@ export function createWorkspaceScene(
       });
       scene.add(root);
       handGrabActions.set(root, {
-        grab: () => onSqueeze(new Event('squeezestart')),
+        grab: (object) => onSqueeze(new Event('squeezestart'), object),
         release: onSqueezeEnd,
       });
+      handContacts.set(root, createHandContact());
       const visual = createCartoonHand();
       handVisuals.set(root, visual);
       scene.add(visual.root);
@@ -3628,6 +3850,7 @@ export function createWorkspaceScene(
     if (paneFocus.activeId && nextId !== paneFocus.activeId) endFocusMode(true);
     if (nextId === mutableState.selectedTerminalId && mutableState.focusedTerminalId === nextId)
       return;
+    resetHandContacts(false);
     if (!gazeRetargeting) gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
     keyboardResume = null;
     clearArmedModifiers();
@@ -4106,6 +4329,8 @@ export function createWorkspaceScene(
       recenterSince = null;
       recenterLatched = false;
       heldControllers.clear();
+      resetHandContacts(false);
+      contactGripArmed.clear();
       for (const visual of handVisuals.values()) visual.hide();
       wristWatch.setVisible(false);
       handTrackingLost.clear();
@@ -4349,6 +4574,8 @@ export function createWorkspaceScene(
     rememberTerminalPlacements();
   };
   const resetLayout = (): void => {
+    resetHandContacts(false);
+    contactGripArmed.clear();
     cancelTextSelection(undefined, true);
     finishWarp(false);
     radialMenu.close();
@@ -4442,6 +4669,12 @@ export function createWorkspaceScene(
   };
   const dispose = (): void => {
     if (disposed) return;
+    resetHandContacts(false);
+    handContacts.clear();
+    contactSamples.clear();
+    contactGripArmed.clear();
+    pokeSources.clear();
+    pendingPokes.clear();
     finishWarp(false);
     disposed = true;
     clipboard.dispose();

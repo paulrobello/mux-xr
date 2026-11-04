@@ -39,11 +39,11 @@ const JOINT_NAMES = FINGERS.map((finger, index) =>
 const LITTLE_JOINTS = PARTS.map((part) => `pinky-finger-${part}`);
 const REST = [
   [
-    [0.02, 0.015],
-    [0.04, 0.025],
-    [0.06, 0.045],
-    [0.075, 0.06],
-    [0.085, 0.075],
+    [0.03, 0.04],
+    [0.055, 0.045],
+    [0.08, 0.05],
+    [0.1, 0.052],
+    [0.11, 0.055],
   ],
   [
     [0.025, 0.025],
@@ -156,6 +156,10 @@ export function createCartoonHand(): CartoonHand {
   root.userData.palmForward = forward;
   root.userData.wristBackNormal = backNormal;
   root.userData.indexTip = controls[1][4];
+  root.userData.middleTip = controls[2][4];
+  root.userData.outerTip = controls[3][4];
+  root.userData.palmPosition = center;
+  root.userData.thumbTip = controls[0][4];
   let disposed = false;
 
   const write = (vertex: number, point: THREE.Vector3, n: THREE.Vector3): void => {
@@ -241,7 +245,12 @@ export function createCartoonHand(): CartoonHand {
           if (finger === 3 && joint(source, LITTLE_JOINTS[part], temp))
             points[part].lerp(temp, 0.42);
         }
-        points[0].lerp(center, 0.45);
+        if (finger === 0)
+          points[0]
+            .copy(center)
+            .addScaledVector(across, width * 0.9)
+            .addScaledVector(forward, -length * 0.08);
+        else points[0].lerp(center, 0.45);
         const curve = curves[finger];
         for (let ring = 0; ring <= SECTIONS; ring++) curve.getPoint(ring / SECTIONS, samples[ring]);
         radial.copy(normal);
@@ -318,11 +327,10 @@ export function createCartoonHand(): CartoonHand {
         for (let part = 0; part < 5; part++) {
           const name = names[part];
           if (!name) continue;
-          let x = REST[digit][part][0];
+          const x = REST[digit][part][0];
           if (digit === 0) {
-            x *= 1 - 0.62 * curl[2];
-            y = REST[digit][part][1] * (1 - 0.25 * curl[2]);
-            z = (0.02 * curl[2] * part) / 4;
+            y = REST[digit][part][1] * (1 - 0.12 * curl[2]);
+            z = (-0.006 * curl[2] * part) / 4;
           } else if (part < 2) {
             y = REST[digit][part][1];
           } else {

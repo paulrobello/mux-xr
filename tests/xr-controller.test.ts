@@ -308,6 +308,216 @@ describe('native XR controller event routing', () => {
       hand.joints['middle-finger-tip'].position.copy(hand.joints['thumb-tip'].position);
       if (!held) hand.joints['middle-finger-tip'].position.y += 0.08;
     };
+    const contactKey = (
+      workspace: ReturnType<typeof createWorkspaceScene>,
+      hand: Hand,
+      key: string,
+      depth: number,
+      time: number,
+    ): void => {
+      const button = objectWithData(workspace, { inputAction: 'key', key });
+      const point = button.getWorldPosition(new THREE.Vector3());
+      const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
+        button.getWorldQuaternion(new THREE.Quaternion()),
+      );
+      hand.joints.wrist.position
+        .copy(point)
+        .add(new THREE.Vector3(0, -0.12, 0))
+        .addScaledVector(normal, 0.08);
+      hand.joints['thumb-tip'].position
+        .copy(hand.joints.wrist.position)
+        .add(new THREE.Vector3(-0.06, 0.04, 0));
+      hand.joints['middle-finger-tip'].position
+        .copy(hand.joints.wrist.position)
+        .add(new THREE.Vector3(0, 0.17, 0));
+      hand.joints['index-finger-tip'].position.copy(point).addScaledVector(normal, depth);
+      fakeXR.frame?.(time);
+    };
+
+    it('hides only the near hand ray and types once per index poke without ray selection', () => {
+      const { workspace, actions } = setup();
+      workspace.showInput('keyboard');
+      const hand = connectHand(0);
+      connectHand(1);
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      controller.position.set(5, 5, 0);
+      contactKey(workspace, hand, 'a', 0.06, 20);
+      const ray = controller.children.find((node) => node instanceof THREE.Line);
+      expect(ray?.visible).toBe(false);
+      expect(
+        (fakeXR.controllers[1] as THREE.Group).children.find((node) => node instanceof THREE.Line)
+          ?.visible,
+      ).toBe(true);
+      controller.dispatchEvent({ type: 'selectstart' } as never);
+      controller.dispatchEvent({ type: 'selectend' } as never);
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      contactKey(workspace, hand, 'a', 0.004, 40);
+      fakeXR.frame?.(60);
+      expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
+      contactKey(workspace, hand, 'a', 0.06, 80);
+      contactKey(workspace, hand, 'a', 0.004, 100);
+      expect(actions.sendKey).toHaveBeenCalledTimes(2);
+      for (const joint of Object.values(hand.joints)) joint.position.z += 1;
+      fakeXR.frame?.(120);
+      expect(ray?.visible).toBe(true);
+    });
+
+    it('keeps poke modifier holds through rebuilds and cancels held contact when retargeting', () => {
+      const { workspace, actions } = setup();
+      workspace.showInput('keyboard');
+      const hand = connectHand();
+      contactKey(workspace, hand, 'Shift', 0.06, 20);
+      contactKey(workspace, hand, 'Shift', 0.004, 40);
+      fakeXR.frame?.(60);
+      fakeXR.frame?.(660);
+      contactKey(workspace, hand, 'Shift', 0.06, 680);
+      contactKey(workspace, hand, 'b', 0.06, 700);
+      contactKey(workspace, hand, 'b', 0.004, 720);
+      expect(actions.sendKey).toHaveBeenLastCalledWith('b', { shift: true });
+      const count = vi.mocked(actions.sendKey).mock.calls.length;
+      workspace.selectTerminal('pane-b');
+      fakeXR.frame?.(740);
+      expect(actions.sendKey).toHaveBeenCalledTimes(count);
+      contactKey(workspace, hand, 'c', 0.06, 760);
+      contactKey(workspace, hand, 'c', 0.004, 780);
+      expect(actions.sendKey).toHaveBeenLastCalledWith('c', undefined);
+      expect(workspace.state.inputTargetId).toBe('pane-b');
+    });
+
+    it('grips a contacted keyboard with its ray elsewhere and never pokes while gripping', () => {
+      const { workspace, actions, left } = setup();
+      workspace.showInput('keyboard');
+      const hand = connectHand();
+      (fakeXR.controllers[0] as THREE.Group).position.set(5, 5, 0);
+      contactKey(workspace, hand, 'a', 0.015, 20);
+      const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls') as THREE.Group;
+      const before = keyboard.position.clone();
+      hand.joints['index-finger-tip'].position.z -= 0.011;
+      pinch(hand, true);
+      fakeXR.frame?.(40);
+      const movement = new THREE.Vector3(0.1, 0.03, 0);
+      for (const joint of Object.values(hand.joints)) joint.position.add(movement);
+      fakeXR.frame?.(60);
+      expect(keyboard.position.clone().sub(before).distanceTo(movement)).toBeLessThan(1e-5);
+      pinch(hand, false);
+      fakeXR.frame?.(80);
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      expect(left.resizeGrid).not.toHaveBeenCalled();
+    });
+
+    it.each(['retarget', 'mode'] as const)(
+      'cancels an empty held contact grip on %s change',
+      (change) => {
+        const { workspace } = setup();
+        workspace.showInput('keyboard');
+        const hand = connectHand();
+        (fakeXR.controllers[0] as THREE.Group).position.set(5, 5, 0);
+        for (const joint of Object.values(hand.joints)) joint.position.addScalar(5);
+        fakeXR.frame?.(20);
+        pinch(hand, true);
+        fakeXR.frame?.(40);
+        if (change === 'retarget') workspace.selectTerminal('pane-b');
+        else {
+          workspace.showInput('commands');
+          workspace.showInput('keyboard');
+        }
+        const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls') as THREE.Group;
+        const key = objectWithData(workspace, { inputAction: 'key', key: 'a' });
+        const point = key.getWorldPosition(new THREE.Vector3());
+        const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
+          key.getWorldQuaternion(new THREE.Quaternion()),
+        );
+        const movement = point.addScaledVector(normal, 0.015).sub(hand.joints.wrist.position);
+        for (const joint of Object.values(hand.joints)) joint.position.add(movement);
+        fakeXR.frame?.(60);
+        const before = keyboard.position.clone();
+        for (const joint of Object.values(hand.joints)) joint.position.x += 0.1;
+        fakeXR.frame?.(80);
+        expect(keyboard.position.distanceTo(before)).toBeLessThan(1e-5);
+      },
+    );
+
+    it.each(['panel', 'hud', 'widget'] as const)(
+      'contact-grips the actual %s owner rather than the focused pane',
+      (kind) => {
+        const { workspace, actions } = setup();
+        workspace.selectTerminal('pane-b');
+        if (kind === 'widget') {
+          workspace.showInput('widgets');
+          hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'digital-clock' });
+          workspace.hideInput();
+        }
+        const hand = connectHand();
+        const object = (
+          kind === 'widget'
+            ? objectWithData(workspace, { inputAction: 'grabWidget', widgetKind: 'digital-clock' })
+            : workspace.scene.getObjectByName(
+                kind === 'panel' ? 'terminal-panel-pane-a' : 'xr-workspace-hud',
+              )
+        ) as THREE.Group;
+        const point = object.getWorldPosition(new THREE.Vector3());
+        const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
+          object.getWorldQuaternion(new THREE.Quaternion()),
+        );
+        hand.joints.wrist.position
+          .copy(point)
+          .add(new THREE.Vector3(0, -0.047, 0))
+          .addScaledVector(normal, 0.02);
+        hand.joints['thumb-tip'].position
+          .copy(hand.joints.wrist.position)
+          .add(new THREE.Vector3(-0.06, 0.04, 0));
+        hand.joints['middle-finger-tip'].position
+          .copy(hand.joints.wrist.position)
+          .add(new THREE.Vector3(0, 0.17, 0));
+        hand.joints['index-finger-tip'].position
+          .copy(hand.joints.wrist.position)
+          .add(new THREE.Vector3(0, 0.12, 0));
+        (fakeXR.controllers[0] as THREE.Group).position.set(5, 5, 0);
+        fakeXR.frame?.(20);
+        const before = object.position.clone();
+        const other = workspace.scene.getObjectByName('terminal-panel-pane-b') as THREE.Group;
+        const otherBefore = other.position.clone();
+        pinch(hand, true);
+        fakeXR.frame?.(40);
+        for (const joint of Object.values(hand.joints)) joint.position.x += 0.1;
+        fakeXR.frame?.(60);
+        expect(object.position.x - before.x).toBeCloseTo(0.1);
+        expect(other.position.distanceTo(otherBefore)).toBeLessThan(1e-5);
+        expect(actions.sendKey).not.toHaveBeenCalled();
+      },
+    );
+
+    it('contact-grabs with both hands and rebases when one loses tracking', () => {
+      const { workspace, actions } = setup();
+      const right = connectHand(0);
+      const left = connectHand(1);
+      const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+      const point = panel.getWorldPosition(new THREE.Vector3());
+      for (const [i, hand] of [right, left].entries()) {
+        const wrist = point.clone().add(new THREE.Vector3(i ? -0.12 : 0.12, -0.047, 0.02));
+        const movement = wrist.sub(hand.joints.wrist.position);
+        for (const joint of Object.values(hand.joints)) joint.position.add(movement);
+        (fakeXR.controllers[i] as THREE.Group).position.set(5, 5, 0);
+      }
+      fakeXR.frame?.(20);
+      pinch(right, true);
+      fakeXR.frame?.(40);
+      pinch(left, true);
+      fakeXR.frame?.(60);
+      const scale = panel.scale.x;
+      for (const joint of Object.values(right.joints)) joint.position.x += 0.1;
+      for (const joint of Object.values(left.joints)) joint.position.x -= 0.1;
+      fakeXR.frame?.(80);
+      expect(panel.scale.x).toBeGreaterThan(scale);
+      const position = panel.position.clone();
+      left.joints.wrist.visible = false;
+      fakeXR.frame?.(100);
+      expect(panel.position.distanceTo(position)).toBeLessThan(1e-5);
+      for (const joint of Object.values(right.joints)) joint.position.x += 0.1;
+      fakeXR.frame?.(120);
+      expect(panel.position.x - position.x).toBeCloseTo(0.1);
+      expect(actions.sendKey).not.toHaveBeenCalled();
+    });
 
     it.each(['vr', 'ar'] as const)(
       'requests optional hand tracking in %s sessions',

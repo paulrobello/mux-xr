@@ -138,4 +138,38 @@ describe('cartoon tracked hands', () => {
     visual.update(hand, new THREE.PerspectiveCamera(), 'right', 0.016);
     expect(visual.root.visible).toBe(false);
   });
+
+  it('keeps neutral thumbs on the lower palm side and mirrors the placement', () => {
+    const camera = new THREE.PerspectiveCamera();
+    const left = createCartoonHand();
+    const right = createCartoonHand();
+    left.update(trackedHand('left'), camera, 'left', 0.016);
+    right.update(trackedHand('right'), camera, 'right', 0.016);
+    const leftPalm = left.root.userData.palmPosition as THREE.Vector3;
+    const rightPalm = right.root.userData.palmPosition as THREE.Vector3;
+    const leftThumb = left.root.userData.thumbTip as THREE.Vector3;
+    const rightThumb = right.root.userData.thumbTip as THREE.Vector3;
+    expect(Math.abs(leftThumb.y - leftPalm.y)).toBeLessThan(0.08);
+    expect(Math.abs(rightThumb.y - rightPalm.y)).toBeLessThan(0.08);
+    expect(Math.abs(leftThumb.z - leftPalm.z)).toBeLessThan(0.01);
+    expect(Math.abs(rightThumb.z - rightPalm.z)).toBeLessThan(0.01);
+    expect(leftThumb.x + rightThumb.x).toBeCloseTo(0, 3);
+    left.dispose();
+    right.dispose();
+  });
+
+  it('preserves actual XR thumb tips while controller grip maps the lower digit', () => {
+    const hand = trackedHand('right');
+    const visual = createCartoonHand();
+    const camera = new THREE.PerspectiveCamera();
+    visual.update(hand, camera, 'right', 0.016);
+    const thumb = hand.joints['thumb-tip'].getWorldPosition(new THREE.Vector3());
+    expect((visual.root.userData.thumbTip as THREE.Vector3).distanceTo(thumb)).toBeLessThan(1e-6);
+    const pose = new THREE.Group();
+    const buttons = Array.from({ length: 6 }, () => ({ pressed: false, value: 0 }));
+    buttons[1].pressed = true;
+    visual.updateController(pose, camera, 'right', { buttons } as unknown as Gamepad, 1);
+    expect((visual.root.userData.indexTip as THREE.Vector3).y).toBeGreaterThan(0);
+    visual.dispose();
+  });
 });
