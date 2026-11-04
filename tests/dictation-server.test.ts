@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import { attachDictationServer } from '../src/server/dictation-server';
 
@@ -7,12 +7,14 @@ const servers: Array<{ server: Server; close: () => Promise<void> }> = [];
 const start = async (
   transcribe: Parameters<typeof attachDictationServer>[1]['transcribe'],
   timeoutMs?: number,
+  telemetry?: Parameters<typeof attachDictationServer>[1]['telemetry'],
 ) => {
   const server = createServer();
   const attached = attachDictationServer(server, {
     allowedOrigins: ['https://allowed.test'],
     transcribe,
     timeoutMs,
+    telemetry,
   });
   servers.push({ server, close: attached.close });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -41,6 +43,60 @@ afterEach(async () => {
 });
 
 describe('local dictation server', () => {
+  it.each(['success', 'error', 'timeout', 'cancelled'] as const)(
+    'records %s without exposing text to telemetry',
+    async (outcome) => {
+      let started!: () => void, ended!: (value: string) => void;
+      const begin = new Promise<void>((done) => {
+        started = done;
+      });
+      const end = new Promise<string>((done) => {
+        ended = done;
+      });
+      const finish = vi.fn((value: string) => ended(value));
+      const telemetry = {
+        connected: vi.fn(),
+        disconnected: vi.fn(),
+        rejected: vi.fn(),
+        beginTranscription: vi.fn((_bytes: number) => finish),
+      };
+      const url = await start(
+        async (_bytes, signal) => {
+          started();
+          if (outcome === 'success') return 'private transcript';
+          if (outcome === 'error') throw new Error('private error details');
+          return new Promise<string>((_resolve, reject) =>
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true }),
+          );
+        },
+        20,
+        telemetry,
+      );
+      const socket = await connect(url, 'https://allowed.test');
+      socket.send(Buffer.from('audio'));
+      await begin;
+      if (outcome === 'cancelled') socket.close();
+      await expect(end).resolves.toBe(outcome);
+      expect(telemetry.beginTranscription).toHaveBeenCalledExactlyOnceWith(5);
+      expect(finish).toHaveBeenCalledExactlyOnceWith(outcome);
+    },
+  );
+
+  it('continues dictation when telemetry hooks throw', async () => {
+    const failed = (): never => {
+      throw new Error('observer unavailable');
+    };
+    const url = await start(async () => 'still works', undefined, {
+      connected: failed,
+      disconnected: failed,
+      rejected: failed,
+      beginTranscription: failed,
+    });
+    const socket = await connect(url, 'https://allowed.test');
+    const message = nextMessage(socket);
+    socket.send(Buffer.from('audio'));
+    await expect(message).resolves.toMatchObject({ type: 'transcript', text: 'still works' });
+  });
   it('transcribes one allowed binary clip', async () => {
     const url = await start(async (bytes) => `heard ${bytes.length}`);
     const socket = await connect(url, 'https://allowed.test');

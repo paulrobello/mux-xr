@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
+import type { DictationTelemetry, TranscriptionOutcome } from './dictation-telemetry';
 
 const execFile = promisify(execFileCallback);
 const MAX_PAYLOAD = 8 * 1024 * 1024;
@@ -21,6 +22,10 @@ export type DictationServerOptions = {
   ffmpegPath?: string;
   whisperPath?: string;
   timeoutMs?: number;
+  telemetry?: Pick<
+    DictationTelemetry,
+    'connected' | 'disconnected' | 'rejected' | 'beginTranscription'
+  >;
 };
 
 type ActiveJob = { controller: AbortController; socket: WebSocket };
@@ -91,6 +96,13 @@ export const attachDictationServer = (
   options: DictationServerOptions,
 ): AttachedDictationServer => {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const observe = (record: () => void): void => {
+    try {
+      record();
+    } catch {
+      /* Observability must not interrupt dictation. */
+    }
+  };
   const transcribe =
     options.transcribe ??
     createLocalTranscriber({
@@ -112,6 +124,7 @@ export const attachDictationServer = (
     try {
       requestUrl = new URL(request.url ?? '/', 'http://localhost');
     } catch {
+      observe(() => options.telemetry?.rejected('path'));
       socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
@@ -123,6 +136,11 @@ export const attachDictationServer = (
       typeof origin !== 'string' ||
       !options.allowedOrigins.includes(origin)
     ) {
+      observe(() =>
+        options.telemetry?.rejected(
+          requestUrl.pathname !== '/dictate' || requestUrl.search ? 'path' : 'origin',
+        ),
+      );
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
@@ -133,6 +151,7 @@ export const attachDictationServer = (
 
   wss.on('connection', (socket) => {
     sockets.add(socket);
+    observe(() => options.telemetry?.connected());
     let idleTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(
       () => socket.close(1000, 'idle timeout'),
       IDLE_TIMEOUT_MS,
@@ -144,24 +163,31 @@ export const attachDictationServer = (
     socket.on('message', async (rawData, isBinary) => {
       clearIdleTimer();
       if (!isBinary) {
+        observe(() => options.telemetry?.rejected('invalid_payload'));
         sendJson(socket, { type: 'error', message: 'Expected one binary audio clip.' });
         socket.close(1003, 'binary audio required');
         return;
       }
       const bytes = rawDataToBuffer(rawData);
       if (bytes.length > MAX_PAYLOAD) {
+        observe(() => options.telemetry?.rejected('invalid_payload'));
         sendJson(socket, { type: 'error', message: 'Audio clip exceeds the 8 MiB limit.' });
         socket.close(1009, 'payload too large');
         return;
       }
       if (activeJob) {
+        observe(() => options.telemetry?.rejected('busy'));
         sendJson(socket, { type: 'error', message: 'Another dictation is already in progress.' });
         socket.close(1013, 'dictation busy');
         return;
       }
       const controller = new AbortController();
       activeJob = { controller, socket };
-      const transcription = transcribe(bytes, controller.signal);
+      let finishTelemetry: (outcome: TranscriptionOutcome) => void = () => undefined;
+      observe(() => {
+        finishTelemetry = options.telemetry?.beginTranscription(bytes.length) ?? finishTelemetry;
+      });
+      const transcription = Promise.resolve().then(() => transcribe(bytes, controller.signal));
       let timedOut = false;
       let timeoutReject!: (error: Error) => void;
       const timeoutSignal = new Promise<never>((_resolve, reject) => {
@@ -176,9 +202,15 @@ export const attachDictationServer = (
       task = (async () => {
         try {
           const text = await Promise.race([transcription, timeoutSignal]);
+          observe(() => finishTelemetry('success'));
           sendJson(socket, { type: 'transcript', text });
           socket.close(1000, 'complete');
         } catch {
+          observe(() =>
+            finishTelemetry(
+              timedOut ? 'timeout' : controller.signal.aborted ? 'cancelled' : 'error',
+            ),
+          );
           if (socket.readyState === WebSocket.OPEN && (!controller.signal.aborted || timedOut)) {
             sendJson(socket, {
               type: 'error',
@@ -202,10 +234,14 @@ export const attachDictationServer = (
     socket.on('close', () => {
       clearIdleTimer();
       sockets.delete(socket);
+      observe(() => options.telemetry?.disconnected());
       if (activeJob?.socket === socket)
         activeJob.controller.abort(new Error('Client disconnected.'));
     });
-    socket.on('error', () => undefined);
+    socket.on('error', (error) => {
+      if ((error as Error & { code?: string }).code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH')
+        observe(() => options.telemetry?.rejected('invalid_payload'));
+    });
   });
 
   return {

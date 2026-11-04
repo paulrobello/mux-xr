@@ -1,6 +1,8 @@
 import { accessSync, constants, readFileSync } from 'node:fs';
 import { createServer } from 'node:https';
+import { resolve } from 'node:path';
 import { attachDictationServer } from '../src/server/dictation-server';
+import { createDictationTelemetry } from '../src/server/dictation-telemetry';
 
 const required = (args: Map<string, string>, name: string): string => {
   const value = args.get(name);
@@ -29,9 +31,20 @@ if (!Number.isInteger(port) || port < 1 || port > 65535)
   throw new Error('Port must be between 1 and 65535.');
 
 accessSync(model, constants.R_OK);
+const telemetry = createDictationTelemetry({
+  envFile: parsed.get('--otel-env-file') ?? resolve('.local/whisper-otel.env'),
+});
 const server = createServer(
   { cert: readFileSync(cert), key: readFileSync(key) },
   (request, response) => {
+    try {
+      telemetry.httpRequest(
+        request.url === '/health' ? '/health' : 'other',
+        request.url === '/health' ? 200 : 404,
+      );
+    } catch {
+      /* The health path must remain independent of telemetry. */
+    }
     response.setHeader('content-type', 'application/json');
     response.writeHead(request.url === '/health' ? 200 : 404);
     response.end(
@@ -44,10 +57,15 @@ const server = createServer(
 const attached = attachDictationServer(server, {
   allowedOrigins: origins,
   model,
+  telemetry,
   ffmpegPath: parsed.get('--ffmpeg') ?? '/opt/homebrew/bin/ffmpeg',
   whisperPath: parsed.get('--whisper') ?? '/opt/homebrew/bin/whisper-cli',
 });
-server.listen(port, host, () => console.log(`Local dictation server listening on ${host}:${port}`));
+server.listen(port, host, () => {
+  telemetry.started();
+  void telemetry.forceFlush();
+  console.log(`Local dictation server listening on ${host}:${port}`);
+});
 
 let stopping = false;
 const stop = async () => {
@@ -55,6 +73,7 @@ const stop = async () => {
   stopping = true;
   await attached.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  await telemetry.shutdown();
 };
 process.once('SIGINT', () => void stop());
 process.once('SIGTERM', () => void stop());
