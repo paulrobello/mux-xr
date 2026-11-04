@@ -732,10 +732,20 @@ export function createWorkspaceScene(
   const dictationCaption = (): string => {
     const draft = mutableState.dictation;
     if (draft.error) return draft.error;
+    if (draft.status === 'transcribing') return 'Transcribing…';
     if (draft.status === 'review') {
-      const characters = Array.from(draft.transcript);
+      const characters = Array.from(draft.transcript, (character) =>
+        character === '\n' || character === '\r' ? ' ' : character,
+      );
       characters.splice(dictationCursor, 0, '|');
-      return characters.join('');
+      const start = Math.max(0, Math.min(dictationCursor - 54, characters.length - 108));
+      const visible = characters.slice(start, start + 108);
+      if (start > 0) visible[0] = '…';
+      if (start + 108 < characters.length) visible[visible.length - 1] = '…';
+      return [0, 36, 72]
+        .map((offset) => visible.slice(offset, offset + 36).join(''))
+        .filter(Boolean)
+        .join('\n');
     }
     return draft.transcript || 'Listening…';
   };
@@ -1743,7 +1753,10 @@ export function createWorkspaceScene(
   };
   const refreshInputRoot = (mode: InputMode): void => {
     inputMode = mode;
-    if (mode !== 'keyboard' && mutableState.dictation.status === 'listening')
+    if (
+      mode !== 'keyboard' &&
+      ['listening', 'transcribing'].includes(mutableState.dictation.status)
+    )
       actions.dictationAction?.('cancel');
     const previousRoot = inputRoot;
     const previousPair = previousRoot ? pairGrabs.get(previousRoot) : undefined;
@@ -1825,15 +1838,18 @@ export function createWorkspaceScene(
       }
       const dictation = mutableState.dictation;
       const dictate = createLabelButton(
-        dictation.status === 'listening'
-          ? 'Stop dictation'
-          : dictation.supported
-            ? 'Dictate'
-            : 'Speech unavailable',
+        dictation.status === 'transcribing'
+          ? 'Transcribing…'
+          : dictation.status === 'listening'
+            ? 'Stop dictation'
+            : dictation.supported
+              ? 'Dictate'
+              : 'Speech unavailable',
         0.7,
         0.1,
         {
-          inputAction: dictation.supported ? 'dictation' : 'noop',
+          inputAction:
+            dictation.supported && dictation.status !== 'transcribing' ? 'dictation' : 'noop',
           dictationAction: dictation.status === 'listening' ? 'stop' : 'start',
         },
       );
@@ -1857,12 +1873,12 @@ export function createWorkspaceScene(
         });
         cancel.position.set(0.73, 1.03, 0);
         inputRoot.add(cancel);
-        const transcript = createLabelButton(dictationCaption(), 1.85, 0.14, {
+        const transcript = createLabelButton(dictationCaption(), 1.85, 0.34, {
           inputAction: 'noop',
           wrap: true,
         });
         transcript.name = 'xr-dictation-transcript';
-        transcript.position.set(0, 1.22, 0);
+        transcript.position.set(0, 1.33, 0);
         inputRoot.add(transcript);
       }
     }
@@ -2826,6 +2842,9 @@ export function createWorkspaceScene(
         if (key === 'ArrowLeft') dictationCursor = Math.max(0, dictationCursor - 1);
         else if (key === 'ArrowRight')
           dictationCursor = Math.min(characters.length, dictationCursor + 1);
+        else if (key === 'ArrowUp') dictationCursor = Math.max(0, dictationCursor - 36);
+        else if (key === 'ArrowDown')
+          dictationCursor = Math.min(characters.length, dictationCursor + 36);
         else if (key === 'Home') dictationCursor = 0;
         else if (key === 'End') dictationCursor = characters.length;
         else if (key === 'Backspace' && dictationCursor > 0)
@@ -2846,7 +2865,7 @@ export function createWorkspaceScene(
     if (
       action === 'key' &&
       inputMode === 'keyboard' &&
-      mutableState.dictation.status === 'listening'
+      ['listening', 'transcribing'].includes(mutableState.dictation.status)
     )
       return true;
     const paneId = mutableState.inputTargetId;
@@ -3789,7 +3808,10 @@ export function createWorkspaceScene(
       if (drag.object === inputRoot) releaseGrab(controller);
     });
     clearInputRoot();
-    if (inputMode === 'keyboard' && mutableState.dictation.status === 'listening')
+    if (
+      inputMode === 'keyboard' &&
+      ['listening', 'transcribing'].includes(mutableState.dictation.status)
+    )
       actions.dictationAction?.('cancel');
     clearInputCapture();
     notify();

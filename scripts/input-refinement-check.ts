@@ -108,6 +108,7 @@ await page.addInitScript(() => {
     }
   }
   Object.assign(window, {
+    MediaRecorder: undefined,
     SpeechRecognition: FakeRecognition,
     webkitSpeechRecognition: FakeRecognition,
     __FakeRecognition: FakeRecognition,

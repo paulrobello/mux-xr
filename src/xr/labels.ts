@@ -109,11 +109,13 @@ function configureText(
   textMesh.text = Array.from(fitted.text)
     .map((character) => arrows[character] ?? character)
     .map((character) =>
-      isSupportedLabelCodePoint(character.codePointAt(0) ?? 0) ? character : '?',
+      character === '\n' || isSupportedLabelCodePoint(character.codePointAt(0) ?? 0)
+        ? character
+        : '?',
     )
     .join('');
   const needsSymbolFont = Array.from(textMesh.text).some(
-    (character) => !isMainLabelCodePoint(character.codePointAt(0) ?? 0),
+    (character) => character !== '\n' && !isMainLabelCodePoint(character.codePointAt(0) ?? 0),
   );
   textMesh.font = needsSymbolFont ? LABEL_SYMBOL_FONT_URL : LABEL_FONT_URL;
   textMesh.fontSize = fitted.fontSize;

@@ -11,6 +11,7 @@ import type {
 import { createDemoSurface, demoSnapshot } from './demo';
 import { createDesktopPanels, type DesktopPanels } from './desktop/panels';
 import { loadObservatory } from './environment';
+import { createLocalSpeechRecognition, isLocalSpeechSupported } from './local-speech';
 import { reloadAfterXR } from './reload';
 import {
   createSpeechInput,
@@ -431,6 +432,14 @@ ui = mountWorkspaceUI(app, {
 });
 scene = createWorkspaceScene(ui.sceneHost, actions);
 speechInput = createSpeechInput({
+  recognitionFactory: isLocalSpeechSupported()
+    ? () => {
+        const url = new URL('/dictate', window.location.href);
+        url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        url.port = '4242';
+        return createLocalSpeechRecognition(url.href);
+      }
+    : undefined,
   getTargetPaneId: () => selectedId,
   canInsert: (target) => selectedId === target && surfaces.get(target)?.status === 'connected',
   onInsert: (target, text) => surfaces.get(target)?.sendText(text) ?? false,

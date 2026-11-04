@@ -19,13 +19,15 @@
     "@xterm/xterm": "6.0.0",
     "pako": "3.0.3",
     "three": "0.186.1",
-    "troika-three-text": "0.52.5"
+    "troika-three-text": "0.52.5",
+    "ws": "8.22.1"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "@types/node": "26.6.4",
     "@types/three": "0.186.0",
     "@types/webxr": "0.5.24",
+    "@types/ws": "8.18.2",
     "happy-dom": "21.0.4",
     "playwright": "1.63.0",
     "typescript": "7.0.2",

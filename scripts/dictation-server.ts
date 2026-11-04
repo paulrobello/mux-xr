@@ -1,0 +1,60 @@
+import { accessSync, constants, readFileSync } from 'node:fs';
+import { createServer } from 'node:https';
+import { attachDictationServer } from '../src/server/dictation-server';
+
+const required = (args: Map<string, string>, name: string): string => {
+  const value = args.get(name);
+  if (!value) throw new Error(`Missing required argument ${name}.`);
+  return value;
+};
+
+const parsed = new Map<string, string>();
+const origins: string[] = [];
+for (let index = 2; index < process.argv.length; index += 2) {
+  const name = process.argv[index];
+  const value = process.argv[index + 1];
+  if (!name?.startsWith('--') || !value || value.startsWith('--'))
+    throw new Error('Arguments must be --name value pairs.');
+  if (name === '--origin') origins.push(value);
+  else parsed.set(name, value);
+}
+
+const host = required(parsed, '--host');
+const port = Number(required(parsed, '--port'));
+if (origins.length === 0) throw new Error('Missing required argument --origin.');
+const cert = required(parsed, '--cert');
+const key = required(parsed, '--key');
+const model = required(parsed, '--model');
+if (!Number.isInteger(port) || port < 1 || port > 65535)
+  throw new Error('Port must be between 1 and 65535.');
+
+accessSync(model, constants.R_OK);
+const server = createServer(
+  { cert: readFileSync(cert), key: readFileSync(key) },
+  (request, response) => {
+    response.setHeader('content-type', 'application/json');
+    response.writeHead(request.url === '/health' ? 200 : 404);
+    response.end(
+      JSON.stringify(
+        request.url === '/health' ? { ready: true, engine: 'whisper.cpp' } : { error: 'Not found' },
+      ),
+    );
+  },
+);
+const attached = attachDictationServer(server, {
+  allowedOrigins: origins,
+  model,
+  ffmpegPath: parsed.get('--ffmpeg') ?? '/opt/homebrew/bin/ffmpeg',
+  whisperPath: parsed.get('--whisper') ?? '/opt/homebrew/bin/whisper-cli',
+});
+server.listen(port, host, () => console.log(`Local dictation server listening on ${host}:${port}`));
+
+let stopping = false;
+const stop = async () => {
+  if (stopping) return;
+  stopping = true;
+  await attached.close();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+};
+process.once('SIGINT', () => void stop());
+process.once('SIGTERM', () => void stop());

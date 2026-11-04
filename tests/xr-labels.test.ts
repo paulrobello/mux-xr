@@ -61,6 +61,18 @@ import {
 describe('scalable XR labels', () => {
   beforeEach(() => vi.restoreAllMocks());
 
+  it('preserves multiline text without replacing line breaks or switching to the symbol font', async () => {
+    const root = createScalableLabel('First line\nSecond line\nThird line', 1.85, 0.34, {
+      wrap: true,
+    });
+    await waitForLabelSync(root);
+    const text = root.userData.labelTextObject as MockTextLike;
+    expect(text.text).toBe('First line\nSecond line\nThird line');
+    expect(text.font).toBe(LABEL_FONT_URL);
+    expect(text.whiteSpace).toBe('normal');
+    disposeScalableLabel(root);
+  });
+
   it('creates a tintable plane with glyph-free background and local SDF text', async () => {
     expect(configuration.current).toMatchObject({
       defaultFontURL: LABEL_FONT_URL,

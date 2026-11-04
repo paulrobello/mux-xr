@@ -1,4 +1,4 @@
-export type DictationStatus = 'idle' | 'listening' | 'review' | 'error';
+export type DictationStatus = 'idle' | 'listening' | 'transcribing' | 'review' | 'error';
 export type DictationAction = 'start' | 'stop' | 'cancel' | 'insert';
 
 export interface DictationState {
@@ -8,22 +8,23 @@ export interface DictationState {
   error: string | null;
 }
 
-interface SpeechRecognitionResultLike {
+export interface SpeechRecognitionResultLike {
   readonly isFinal: boolean;
   readonly length: number;
   [index: number]: { readonly transcript: string };
 }
 
-interface SpeechRecognitionEventLike extends Event {
+export interface SpeechRecognitionEventLike extends Event {
   readonly resultIndex: number;
   readonly results: { readonly length: number; [index: number]: SpeechRecognitionResultLike };
 }
 
-interface SpeechRecognitionErrorEventLike extends Event {
+export interface SpeechRecognitionErrorEventLike extends Event {
   readonly error: string;
+  readonly message?: string;
 }
 
-interface SpeechRecognitionLike {
+export interface SpeechRecognitionLike {
   lang: string;
   interimResults: boolean;
   continuous: boolean;
@@ -32,6 +33,8 @@ interface SpeechRecognitionLike {
   onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
   onend: (() => void) | null;
   onstart: (() => void) | null;
+  onprocessing?: (() => void) | null;
+  readonly responseTimeoutMs?: number;
   start(): void;
   stop(): void;
   abort(): void;
@@ -47,6 +50,7 @@ export interface SpeechInputOptions {
   canInsert(targetPaneId: string): boolean;
   onInsert(targetPaneId: string, text: string): boolean;
   timeoutMs?: number;
+  recognitionFactory?: () => SpeechRecognitionLike;
 }
 
 export interface SpeechInput {
@@ -83,11 +87,13 @@ function errorMessage(code: string): string {
 
 export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
   const Constructor = recognitionConstructor();
+  const createRecognition =
+    options.recognitionFactory ?? (Constructor ? () => new Constructor() : undefined);
   let state: DictationState = {
-    supported: Boolean(Constructor),
+    supported: Boolean(createRecognition),
     status: 'idle',
     transcript: '',
-    error: Constructor ? null : 'Speech recognition is not supported in this browser.',
+    error: createRecognition ? null : 'Speech recognition is not supported in this browser.',
   };
   let recognition: SpeechRecognitionLike | undefined;
   let targetPaneId: string | null = null;
@@ -118,6 +124,7 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
     instance.onerror = null;
     instance.onend = null;
     instance.onstart = null;
+    instance.onprocessing = null;
   };
   const stopRecognition = (abort: boolean): void => {
     const instance = recognition;
@@ -132,7 +139,8 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
     }
   };
   const start = (): void => {
-    if (!Constructor || disposed || state.status === 'listening') return;
+    if (!createRecognition || disposed || ['listening', 'transcribing'].includes(state.status))
+      return;
     const currentGeneration = invalidate();
     targetPaneId = options.getTargetPaneId();
     if (!targetPaneId || !options.canInsert(targetPaneId)) {
@@ -145,7 +153,7 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
     }
     let instance: SpeechRecognitionLike;
     try {
-      instance = new Constructor();
+      instance = createRecognition();
     } catch {
       publish({ status: 'error', transcript: '', error: 'Speech recognition could not start.' });
       return;
@@ -160,6 +168,10 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
     instance.maxAlternatives = 1;
     instance.onstart = () => {
       if (currentGeneration !== generation || disposed) return;
+    };
+    instance.onprocessing = () => {
+      if (currentGeneration !== generation || disposed) return;
+      publish({ status: 'transcribing' });
     };
     instance.onresult = (event) => {
       if (currentGeneration !== generation || disposed) return;
@@ -188,7 +200,7 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
       if (currentGeneration !== generation || disposed) return;
       invalidate();
       stopRecognition(true);
-      publish({ status: 'error', error: errorMessage(event.error) });
+      publish({ status: 'error', error: event.message || errorMessage(event.error) });
     };
     instance.onend = () => {
       if (currentGeneration !== generation || disposed) return;
@@ -222,6 +234,7 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
     }
     try {
       instance.stop();
+      if (recognition !== instance) return;
       stopTimeout = setTimeout(() => {
         if (recognition !== instance) return;
         invalidate();
@@ -230,7 +243,7 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
           status: state.transcript ? 'review' : 'error',
           error: state.transcript ? null : 'Speech recognition stopped without a transcript.',
         });
-      }, 1_000);
+      }, instance.responseTimeoutMs ?? 1_000);
     } catch {
       invalidate();
       stopRecognition(true);

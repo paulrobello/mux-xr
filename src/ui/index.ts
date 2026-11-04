@@ -854,12 +854,14 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     const insert = qs<HTMLButtonElement>('[data-action="dictation-insert"]');
     const draft = qs<HTMLTextAreaElement>('[data-dictation-draft]');
     const status = qs<HTMLElement>('[data-dictation-status]');
-    start.disabled = !state.supported || state.status === 'listening';
+    start.disabled = !state.supported || ['listening', 'transcribing'].includes(state.status);
+    start.textContent = state.status === 'transcribing' ? 'Transcribing…' : 'Dictate';
     stop.hidden = state.status !== 'listening';
     insert.disabled = !['review', 'error'].includes(state.status) || !state.transcript.trim();
     draft.disabled =
       state.status === 'idle' ||
       state.status === 'listening' ||
+      state.status === 'transcribing' ||
       (state.status === 'error' && !state.transcript.trim());
     if (draft.value !== state.transcript) draft.value = state.transcript;
     status.textContent = state.error ?? `Speech input is ${state.status}.`;
@@ -948,7 +950,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         syncModifierVisuals();
         return;
       }
-      if (dictationState?.status === 'listening') return;
+      if (['listening', 'transcribing'].includes(dictationState?.status ?? '')) return;
       if (
         dictationState?.status === 'review' ||
         (dictationState?.status === 'error' && dictationState.transcript)

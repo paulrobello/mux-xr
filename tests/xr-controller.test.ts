@@ -249,6 +249,25 @@ describe('native XR controller event routing', () => {
     });
   });
 
+  it('shows a readable three-line dictation excerpt and scrolls without changing its text', () => {
+    const { workspace, actions, container } = fixture();
+    const transcript = Array.from({ length: 60 }, (_, index) => `word${index}`).join('\n');
+    const draft = { supported: true, status: 'review' as const, transcript, error: null };
+    actions.editDictation = (text) => workspace.setDictationState({ ...draft, transcript: text });
+    workspace.setDictationState(draft);
+    workspace.showInput('keyboard');
+    const label = workspace.scene.getObjectByName('xr-dictation-transcript');
+    const caption = String(label?.userData.labelText);
+    expect(caption.split('\n')).toHaveLength(3);
+    expect(caption.split('\n').every((line) => Array.from(line).length <= 36)).toBe(true);
+    expect(workspace.state.dictation.transcript).toBe(transcript);
+    hit(workspace, { inputAction: 'key', key: 'ArrowUp' });
+    expect(label?.userData.labelText).not.toBe(caption);
+    expect(workspace.state.dictation.transcript).toBe(transcript);
+    workspace.dispose();
+    container.remove();
+  });
+
   describe('trigger text selection', () => {
     const cleanups: Array<() => void> = [];
     afterEach(() => {

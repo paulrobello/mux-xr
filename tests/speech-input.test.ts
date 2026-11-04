@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createSpeechInput, type DictationState } from '../src/speech-input';
+import {
+  createSpeechInput,
+  type DictationState,
+  type SpeechRecognitionLike,
+} from '../src/speech-input';
 
 type FakeRecognition = {
   onresult: ((event: unknown) => void) | null;
@@ -41,6 +45,65 @@ const result = (text: string, isFinal: boolean, index = 0): unknown => ({
 });
 
 describe('speech input', () => {
+  it('prefers an explicitly configured recognizer over the browser speech service', () => {
+    const native = installRecognition();
+    const local: SpeechRecognitionLike = {
+      ...native,
+      lang: 'en-US',
+      interimResults: true,
+      continuous: true,
+      maxAlternatives: 1,
+      start: vi.fn(),
+      stop: vi.fn(),
+      abort: vi.fn(),
+    };
+    const input = createSpeechInput({
+      recognitionFactory: () => local,
+      onState: () => undefined,
+      getTargetPaneId: () => 'pane',
+      canInsert: () => true,
+      onInsert: () => true,
+    });
+    input.dispatch('start');
+    expect(local.start).toHaveBeenCalledOnce();
+    expect(native.start).not.toHaveBeenCalled();
+    input.dispose();
+  });
+  it('keeps local transcription pending beyond the browser recognizer stop timeout', () => {
+    vi.useFakeTimers();
+    const recognition = installRecognition() as unknown as SpeechRecognitionLike;
+    const scope = globalThis as typeof globalThis & {
+      SpeechRecognition?: unknown;
+      webkitSpeechRecognition?: unknown;
+    };
+    delete scope.SpeechRecognition;
+    delete scope.webkitSpeechRecognition;
+    Object.defineProperty(recognition, 'responseTimeoutMs', { value: 90_000 });
+    const insert = vi.fn(() => true);
+    const input = createSpeechInput({
+      recognitionFactory: () => recognition,
+      onState: () => undefined,
+      getTargetPaneId: () => 'pane',
+      canInsert: () => true,
+      onInsert: insert,
+    });
+    try {
+      input.dispatch('start');
+      input.dispatch('stop');
+      recognition.onprocessing?.();
+      vi.advanceTimersByTime(1_500);
+      expect(input.getState().status).toBe('transcribing');
+      expect(insert).not.toHaveBeenCalled();
+      recognition.onresult?.(result('local text', true) as never);
+      recognition.onend?.();
+      expect(input.getState().status).toBe('review');
+      input.dispatch('insert');
+      expect(insert).toHaveBeenCalledExactlyOnceWith('pane', 'local text');
+    } finally {
+      input.dispose();
+      vi.useRealTimers();
+    }
+  });
   it('preserves a startup error against callbacks from the failed recognizer', () => {
     const recognition = installRecognition();
     const stale = {
