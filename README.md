@@ -18,6 +18,8 @@ make dev
 
 Open [the local app](http://localhost:4240). Use Demo for synthetic preview content. Demo does not connect to or execute commands on your computer.
 
+Browser checks need the Chromium revision pinned by Playwright. Install it with `bunx playwright install chromium --no-shell --no-remove`; this keeps other projects' browser versions in the shared cache.
+
 `make dev-stop` stops only this checkout's listener on 4240 and waits for the port to clear. `make dev-restart` stops and starts it. Run long-lived development/streamer processes in a par-mux pane. Local verification uses reserved port 4241.
 
 ## Connect Real Panes
@@ -78,7 +80,11 @@ Pinch **middle finger to thumb** while aiming at a surface to grab it. Move or r
 
 Hands open curvature presets and Curve less / Curve more through **Menu → Warp**. Controllers retain direct thumbstick Warp editing.
 
-Tracking loss releases manipulation and cancels in-flight input. Open both pinches after tracking returns before starting another gesture. The displayed joints, ray contact and hover state show the tracked hand and target. Desktop/browser hand fixtures verify software behavior only. Gesture comfort, occlusion recovery and typing precision still need real Quest 3 hand testing.
+Tracked hands have soft orange palms, three rounded fingers and a thumb, following the supplied cartoon reference. Elastic arms curve from the wrists to separate anchors 20 cm left/right, 18 cm below and 4 cm forward of the camera. They stretch with the tracked wrists and sag slightly, with a small amount of smoothing in the middle of the curve. Finger poses and input targets continue to use the tracked joints. The hands and arms do not catch rays or send input.
+
+Controllers show the same hands. Trigger pressure curls the index finger, grip pressure curls the lower two fingers, and the face buttons animate the thumb. The right wrist carries a **Menu watch**: tap its face with the left index finger, or point at it and press the left controller trigger. Hold contact to keep a single press; withdraw before tapping again. Controller A and the HUD Menu remain available.
+
+Tracking loss hides the hand and arm, releases manipulation and cancels in-flight input. Open both pinches after tracking returns before starting another gesture. Desktop/browser hand fixtures verify software behavior only. Gesture comfort, occlusion recovery and typing precision still need real Quest 3 hand testing.
 
 ### Mux hierarchy navigation
 

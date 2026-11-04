@@ -19,6 +19,8 @@ export function getKeyHelp(key: string): string | undefined {
 export function getControlHelp(data: Record<string, unknown>): string | undefined {
   if (typeof data.key === 'string') return getKeyHelp(data.key);
   switch (data.inputAction) {
+    case 'wristMenu':
+      return 'Open the action menu: tap this watch with your left index finger or point and press with the left controller';
     case 'toggleRadial':
       return 'Open or close the action menu; point and pinch to choose an item';
     case 'pasteClipboard':

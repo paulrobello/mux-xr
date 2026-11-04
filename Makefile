@@ -45,6 +45,9 @@ input-comfort-check:
 .PHONY: hand-input-check
 hand-input-check:
 	bun run scripts/hand-input-check.ts
+.PHONY: hand-visual-check
+hand-visual-check:
+	bun run scripts/hand-visual-check.ts
 widgets-clarity-check:
 	bun run scripts/widgets-clarity-check.ts
 terminal-shimmer-check:

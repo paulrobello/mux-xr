@@ -369,6 +369,30 @@ describe('native XR controller event routing', () => {
       expect(left.resizeGrid).not.toHaveBeenCalled();
     });
 
+    it('opens the wrist watch by left index contact once and rearms after withdrawal', () => {
+      const { workspace, actions } = setup();
+      connectHand(0);
+      const leftHand = connectHand(1);
+      const face = objectWithData(workspace, { inputAction: 'wristMenu' });
+      const point = face.getWorldPosition(new THREE.Vector3());
+      const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
+        face.getWorldQuaternion(new THREE.Quaternion()),
+      );
+      leftHand.joints['index-finger-tip'].position.copy(point).addScaledVector(normal, 0.08);
+      fakeXR.frame?.(20);
+      leftHand.joints['index-finger-tip'].position.copy(point).addScaledVector(normal, 0.005);
+      fakeXR.frame?.(40);
+      expect(workspace.state.radialOpen).toBe(true);
+      fakeXR.frame?.(100);
+      expect(workspace.state.radialOpen).toBe(true);
+      leftHand.joints['index-finger-tip'].position.copy(point).addScaledVector(normal, 0.08);
+      fakeXR.frame?.(400);
+      leftHand.joints['index-finger-tip'].position.copy(point).addScaledVector(normal, 0.005);
+      fakeXR.frame?.(450);
+      expect(workspace.state.radialOpen).toBe(false);
+      expect(actions.sendKey).not.toHaveBeenCalled();
+    });
+
     it.each(['wrist', 'thumb-tip', 'index-finger-tip', 'middle-finger-tip'])(
       'cancels %s tracking loss before a render callback and rearms only after neutral release',
       (joint) => {
@@ -439,6 +463,26 @@ describe('native XR controller event routing', () => {
       fakeXR.frame?.(100);
       expect(panel.position.x - position.x).toBeCloseTo(0.1);
     });
+  });
+
+  it('lets the left controller press the right wrist Menu watch and rejects its right controller', () => {
+    const { workspace, actions, container } = fixture();
+    connectController(0, [0, 0, 0, 0], 'right');
+    connectController(1, [0, 0, 0, 0], 'left');
+    fakeXR.frame?.(20);
+    hit(workspace, { inputAction: 'wristMenu' });
+    expect(workspace.state.radialOpen).toBe(false);
+    const face = objectWithData(workspace, { inputAction: 'wristMenu' });
+    const leftController = fakeXR.controllers[1] as THREE.Group;
+    aimController(leftController, face);
+    workspace.scene.updateMatrixWorld(true);
+    leftController.dispatchEvent({ type: 'selectstart' } as never);
+    expect(workspace.state.radialOpen).toBe(true);
+    fakeXR.frame?.(40);
+    expect(workspace.state.radialOpen).toBe(true);
+    expect(actions.sendKey).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
   });
 
   it('shows a readable three-line dictation excerpt and scrolls without changing its text', () => {

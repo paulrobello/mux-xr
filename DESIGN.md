@@ -21,6 +21,11 @@ colors:
   selected-text-cyan: "#a7eeef"
   terminal-black: "#05070b"
   observatory-deep: "#050a10"
+  cartoon-hand-orange: "#ff672f"
+  cartoon-hand-emissive: "#ff4f1f"
+  wrist-watch-case: "#0b1725"
+  wrist-watch-strap: "#17293a"
+  pending-bell-background: "#302718"
 rounded:
   sm: "4px"
   md: "8px"
@@ -222,10 +227,12 @@ Expose four terminal sampling choices and bounded anisotropy in browser/native s
 
 ## XR panel ownership and direct Warp
 
-The A radial has seven direct items: Keyboard, Commands, Panes, Layout, Warp, Widgets and Settings. Panels do not repeat global navigation, gaze targeting or world controls. Settings groups Display, World and Selected terminal. The HUD provides status, notices, updates, Exit and a Menu action for controller-free hand access. The Menu control uses the existing compact label-button style. Tracked joints use restrained cyan feedback, with the same ray/contact and hover language as controllers. Index-to-thumb pinch selects, while middle-to-thumb pinch manipulates from the wrist pose. A VR/passthrough change ends the session and prepares a fresh named browser entry action, rather than requesting a second session after an asynchronous shutdown.
+The A radial has seven direct items: Keyboard, Commands, Panes, Layout, Warp, Widgets and Settings. Panels do not repeat global navigation, gaze targeting or world controls. Settings groups Display, World and Selected terminal. The HUD provides status, notices, updates, Exit and a Menu action for controller-free hand access. The Menu control uses the existing compact label-button style. Hands use the owner's rounded orange reference: a padded palm, three long fingers and a thumb, without nails or outlines. Ring and little-finger joints share the outer cartoon digit. Smooth matching arms stretch to camera-relative anchors 20 cm to either side, 18 cm below and 4 cm forward, with modest gravity sag and bounded curve lag. Wrist/finger tracking remains immediate. The visual meshes never intercept picking and hide/reset on tracking loss, source replacement or XR exit. Ray/contact and hover retain the controller interaction language. Index-to-thumb pinch selects, while middle-to-thumb pinch manipulates from the wrist pose. A VR/passthrough change ends the session and prepares a fresh named browser entry action, rather than requesting a second session after an asynchronous shutdown.
 
 Warp captures the aimed pane when A opens the radial, falling back to the active pane. Right-stick X previews curvature, A commits once, and B restores the initial curvature instead of invoking Focus. Preview changes are not persisted until commit. Grips retain manipulation and pause editing. Gaze retargeting, terminal trigger input and scrolling are suppressed. Removing the target, controller disconnect, recovery, disposal or XR exit cancels safely.
 
 Display also owns new-window glass opacity and Focus distance/warp. The new-view opacity default never overwrites a live pane or a saved pane override. Focus defaults to 1.5 m and flat curvature, applies settings live, and keeps its temporary curve separate from the saved per-pane warp. Exiting restores the original transform and curvature. Starting direct Warp first exits Focus. The screen and hollow rim use the same horizontal subdivision samples so their curved top/bottom edges meet continuously without opaque geometry behind text.
 
 Radial glyphs have no rectangular backplate, retain full interaction targets and sit in front of sector glass. The terminal bezel uses a surface-aligned rim, keeping opaque interior/back faces out of transparent text columns.
+
+The orange hands also present controller input: trigger pressure curls only index, grip curls the lower two digits, and face buttons move the thumb. A compact navy Menu watch sits on the right wrist, with a band and readable face above the skin. The left index can tap it directly, or the left controller can point and trigger. Touch requires a front approach and withdrawal before a second press; pointer and contact activation share a short debounce. Watch activation preserves the selected pane. Its face is the sole interactive avatar surface, with controller A and HUD Menu retained as alternatives.

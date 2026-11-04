@@ -40,6 +40,7 @@ import {
   type WindowPreferences,
 } from '../workspace/window-preferences';
 import { calculateArrangement } from './arrangements';
+import { type CartoonHand, createCartoonHand } from './cartoon-hand';
 import {
   type CommandDraft,
   commandFromDraft,
@@ -83,6 +84,7 @@ import {
 } from './ui-poses';
 import { createWidgetPoseStore } from './widget-poses';
 import { type ClockWidget, createClockWidget, type WidgetKind } from './widgets';
+import { createWristMenuWatch } from './wrist-menu-watch';
 
 type InputMode =
   | 'commands'
@@ -600,6 +602,12 @@ export function createWorkspaceScene(
   const fidelityScale = new THREE.Vector3();
   const controllerRoots: THREE.Group[] = [];
   const handRoots = new Map<THREE.Group, THREE.Group>();
+  const handVisuals = new Map<THREE.Group, CartoonHand>();
+  const controllerGrips = new Map<THREE.Group, THREE.Group>();
+  const wristMenuButton = createLabelButton('Menu', 0.052, 0.035, { inputAction: 'wristMenu' });
+  const wristWatch = createWristMenuWatch(wristMenuButton);
+  let wristMenuLastPressed = Number.NEGATIVE_INFINITY;
+  scene.add(wristWatch.root);
   const handInputStates = new Map<THREE.Group, HandInputState>();
   const handTrackingLost = new Set<THREE.Group>();
   const handGrabActions = new Map<THREE.Group, { grab(): void; release(): void }>();
@@ -1306,23 +1314,64 @@ export function createWorkspaceScene(
       hierarchyNavigator.root.userData.transitioning = hierarchyNavigator.transitioning;
     (scene.userData.updateEnvironment as ((delta: number) => void) | undefined)?.(deltaSeconds);
     if (renderer?.xr.isPresenting) {
-      for (const [controller, hand] of handRoots) {
-        const gesture = sampleHand(controller);
-        const visual = hand.getObjectByName('hand-joint-visual');
-        if (visual) visual.visible = Boolean(gesture?.tracked);
-        if (!gesture?.tracked) continue;
-        const joints = (hand as THREE.Group & { joints: Record<string, THREE.Object3D> }).joints;
-        if (visual)
-          for (const marker of visual.children) {
-            const joint = joints[marker.userData.jointName as string];
-            marker.visible = Boolean(joint?.visible);
-            if (joint) marker.position.copy(joint.position);
+      let leftController: THREE.Group | null = null;
+      let leftVisual: CartoonHand | undefined;
+      let rightVisual: CartoonHand | undefined;
+      for (const controller of controllerRoots) {
+        const visual = handVisuals.get(controller);
+        const side = controllerHandedness.get(controller);
+        if (
+          !controller.visible ||
+          disconnectedControllers.has(controller) ||
+          (side !== 'left' && side !== 'right')
+        ) {
+          visual?.hide();
+          continue;
+        }
+        const hand = activeHand(controller);
+        if (hand) {
+          const gesture = sampleHand(controller);
+          if (!gesture?.tracked) {
+            visual?.hide();
+            continue;
           }
-        if (gesture.pinching && !heldControllers.has(controller))
-          handGrabActions.get(controller)?.grab();
-        else if (!gesture.pinching && heldControllers.has(controller))
-          handGrabActions.get(controller)?.release();
+          visual?.update(hand, renderer.xr.getCamera(), side, deltaSeconds);
+          if (gesture.pinching && !heldControllers.has(controller))
+            handGrabActions.get(controller)?.grab();
+          else if (!gesture.pinching && heldControllers.has(controller))
+            handGrabActions.get(controller)?.release();
+        } else {
+          const grip = controllerGrips.get(controller);
+          visual?.updateController(
+            grip?.visible ? grip : controller,
+            renderer.xr.getCamera(),
+            side,
+            controllerGamepads.get(controller),
+            deltaSeconds,
+          );
+        }
+        if (side === 'left') {
+          leftController = controller;
+          leftVisual = visual;
+        } else rightVisual = visual;
       }
+      wristWatch.setVisible(Boolean(rightVisual?.root.visible));
+      if (rightVisual?.root.visible)
+        wristWatch.update(
+          rightVisual.root.userData.wristPosition as THREE.Vector3,
+          rightVisual.root.userData.palmForward as THREE.Vector3,
+          rightVisual.root.userData.wristBackNormal as THREE.Vector3,
+        );
+      if (
+        wristWatch.updateTouch(
+          leftVisual?.root.visible ? (leftVisual.root.userData.indexTip as THREE.Vector3) : null,
+        ) &&
+        leftController
+      )
+        toggleWristMenu(leftController);
+    } else {
+      for (const visual of handVisuals.values()) visual.hide();
+      wristWatch.setVisible(false);
     }
     if (gripActive()) modifierPresses.clear();
     for (const press of modifierPresses.values()) {
@@ -3019,6 +3068,7 @@ export function createWorkspaceScene(
       targets.length = 0;
       targets.push(radialMenu.root);
     }
+    if (wristWatch.root.visible) targets.push(wristWatch.root);
     const hits = raycaster.intersectObjects(targets, true);
     const intersection = hits.find((entry) => isControlVisible(entry.object));
     const hit = intersection?.object;
@@ -3081,6 +3131,10 @@ export function createWorkspaceScene(
   };
   const onControllerSelect = (controller: THREE.Group): void => {
     const target = targetFromController(controller);
+    if (target?.object?.userData.inputAction === 'wristMenu') {
+      if (controllerHandedness.get(controller) === 'left') toggleWristMenu(controller);
+      return;
+    }
     if (target?.object?.userData.inputAction === 'toggleRadial') {
       toggleRadialMenu(controller);
       return;
@@ -3241,6 +3295,9 @@ export function createWorkspaceScene(
         if (gamepad) controllerGamepads.set(root, gamepad);
       };
       const onDisconnected = (): void => {
+        if (controllerHandedness.get(root) === 'right') wristWatch.setVisible(false);
+        wristWatch.updateTouch(null);
+        handVisuals.get(root)?.hide();
         delete root.userData.inputSourceHand;
         handTrackingLost.delete(root);
         handInputStates.set(root, { pinching: false, neutral: false, tracked: false });
@@ -3301,23 +3358,16 @@ export function createWorkspaceScene(
         grab: () => onSqueeze(new Event('squeezestart')),
         release: onSqueezeEnd,
       });
+      const visual = createCartoonHand();
+      handVisuals.set(root, visual);
+      scene.add(visual.root);
+      if (typeof renderer.xr.getControllerGrip === 'function') {
+        const grip = renderer.xr.getControllerGrip(i);
+        controllerGrips.set(root, grip);
+        scene.add(grip);
+      }
       if (typeof renderer.xr.getHand === 'function') {
         const hand = renderer.xr.getHand(i);
-        const visual = new THREE.Group();
-        visual.name = 'hand-joint-visual';
-        const geometry = new THREE.SphereGeometry(0.006, 6, 4);
-        const material = new THREE.MeshBasicMaterial({
-          color: ACCENT,
-          transparent: true,
-          opacity: 0.45,
-        });
-        for (const name of ['wrist', 'thumb-tip', 'index-finger-tip', 'middle-finger-tip']) {
-          const marker = new THREE.Mesh(geometry, material);
-          marker.userData.jointName = name;
-          marker.raycast = () => undefined;
-          visual.add(marker);
-        }
-        hand.add(visual);
         handRoots.set(root, hand);
         handInputStates.set(root, { pinching: false, neutral: false, tracked: false });
         scene.add(hand);
@@ -3760,6 +3810,18 @@ export function createWorkspaceScene(
     mutableState.radialOpen = true;
     notify();
   };
+  const toggleWristMenu = (source: THREE.Group): void => {
+    if (controllerHandedness.get(source) !== 'left') return;
+    const stamp = previousRenderTime ?? performance.now();
+    if (stamp - wristMenuLastPressed < 250) return;
+    wristMenuLastPressed = stamp;
+    wristWatch.updateTouch(null);
+    const owner =
+      controllerRoots.find((root) => controllerHandedness.get(root) === 'right') ?? source;
+    const wasOpen = radialMenu.isOpen;
+    toggleRadialMenu(owner);
+    if (!wasOpen && radialMenu.isOpen) radialTargetId = mutableState.selectedTerminalId;
+  };
   const getTerminalCurvature = (id: string): number => panels.get(id)?.curvature ?? 0;
   const setTerminalCurvature = (id: string, degrees: number, persist = true): void => {
     const panel = panels.get(id);
@@ -4044,6 +4106,8 @@ export function createWorkspaceScene(
       recenterSince = null;
       recenterLatched = false;
       heldControllers.clear();
+      for (const visual of handVisuals.values()) visual.hide();
+      wristWatch.setVisible(false);
       handTrackingLost.clear();
       handInputStates.forEach((state) => {
         state.pinching = false;
@@ -4429,13 +4493,14 @@ export function createWorkspaceScene(
     disconnectedControllers.clear();
     heldControllers.clear();
     for (const hand of handRoots.values()) {
-      const visual = hand.getObjectByName('hand-joint-visual');
-      if (visual) {
-        hand.remove(visual);
-        disposeObject(visual);
-      }
       scene.remove(hand);
     }
+    for (const visual of handVisuals.values()) visual.dispose();
+    wristWatch.dispose();
+    disposeObject(wristMenuButton);
+    for (const grip of controllerGrips.values()) scene.remove(grip);
+    controllerGrips.clear();
+    handVisuals.clear();
     handRoots.clear();
     handGrabActions.clear();
     handTrackingLost.clear();
