@@ -300,6 +300,7 @@ interface TerminalPanel {
   unsubscribe: () => void;
   defaultPosition: THREE.Vector3;
   titleLabel: THREE.Mesh;
+  bellLabel: THREE.Mesh;
   connectionButton: THREE.Mesh;
   closeButton: THREE.Mesh;
   width: number;
@@ -3355,6 +3356,7 @@ export function createWorkspaceScene(
         })
       : selectionGeometry(width, height);
     panel.titleLabel.position.y = height / 2 + 0.07;
+    panel.bellLabel.position.set(0.58, height / 2 + 0.07, 0.02);
     panel.connectionButton.position.set(0.24, -(height / 2 + 0.24), 0.02);
     panel.closeButton.position.set(-0.24, -(height / 2 + 0.24), 0.02);
     const followCurve = (object: THREE.Object3D): void => {
@@ -3421,6 +3423,19 @@ export function createWorkspaceScene(
     );
     titleLabel.userData.helpText = surface.error ?? titleLabel.userData.helpText;
     titleLabel.position.set(0, 0.47, 0.02);
+    const bellLabel = createScalableLabel('BELL', 0.18, 0.08, {
+      background: '#302718',
+      border: '#e4a84a',
+    });
+    Object.assign(bellLabel.userData, {
+      terminalId: surface.pane.id,
+      terminalTitle: true,
+      helpText: 'Bell pending. Select this pane to clear it.',
+    });
+    bellLabel.name = 'terminal-bell-indicator';
+    bellLabel.userData.helpText = 'Bell pending. Select this pane to clear it.';
+    bellLabel.position.set(0.58, 0.47, 0.02);
+    bellLabel.visible = Boolean(surface.bellPending);
     const connectionButton = createLabelButton(
       ['connected', 'connecting'].includes(String(surface.status)) ? 'Disconnect' : 'Reconnect',
       0.46,
@@ -3435,7 +3450,7 @@ export function createWorkspaceScene(
       inputAction: 'closePane',
       terminalId: surface.pane.id,
     });
-    root.add(selection, titleLabel, connectionButton, closeButton);
+    root.add(selection, titleLabel, bellLabel, connectionButton, closeButton);
     const panel: TerminalPanel = {
       id: surface.pane.id,
       surface,
@@ -3448,6 +3463,7 @@ export function createWorkspaceScene(
       unsubscribe: () => undefined,
       defaultPosition,
       titleLabel,
+      bellLabel,
       connectionButton,
       closeButton,
       width: PANEL_WIDTH,
@@ -3485,6 +3501,7 @@ export function createWorkspaceScene(
       const status = String(surface.status);
       const statusChanged = status !== panel.status;
       const errorChanged = surface.error !== panel.error;
+      panel.bellLabel.visible = Boolean(surface.bellPending);
       if (statusChanged) {
         panel.status = status;
         panel.connectionButton.userData.status = status;
@@ -3555,6 +3572,7 @@ export function createWorkspaceScene(
   };
   const selectTerminal = (id: string | null): void => {
     const nextId = id && panels.has(id) ? id : null;
+    if (nextId) panels.get(nextId)?.surface.acknowledgeBell?.();
     if (textSelection && nextId !== textSelection.id) cancelTextSelection(undefined, true);
     if (warpEdit && nextId !== warpEdit.id && !gripActive()) finishWarp(false);
     if (paneFocus.activeId && nextId !== paneFocus.activeId) endFocusMode(true);

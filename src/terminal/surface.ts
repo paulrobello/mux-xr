@@ -140,6 +140,11 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   let readonly = false;
   let colorMode: TerminalColorMode = 'comfort';
   let generation = 0;
+  let bellPending = false;
+  let bellAckEpoch = 0;
+  type WriteContext = { generation: number; ackEpoch: number; liveOutput: boolean };
+  const writeContexts: WriteContext[] = [];
+  let parsingContext: WriteContext | null = null;
   let paused = false;
   let mouseTrackingFallback: TerminalMouseTrackingMode = 'none';
   let mouseTrackingDisabled = false;
@@ -152,6 +157,41 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   const listeners = new Set<() => void>();
   const notify = (): void => {
     for (const listener of listeners) listener();
+  };
+  const acknowledgeBell = (): void => {
+    bellAckEpoch += 1;
+    if (bellPending) {
+      bellPending = false;
+      notify();
+    }
+  };
+  const markBell = (token?: number, explicit = false): void => {
+    if (disposed || paused || !ready) return;
+    const context = parsingContext ?? writeContexts[0];
+    if (
+      !explicit &&
+      (!context?.liveOutput ||
+        context.generation !== generation ||
+        context.ackEpoch !== bellAckEpoch)
+    )
+      return;
+    if (token !== undefined && token !== generation) return;
+    if (!bellPending) {
+      bellPending = true;
+      notify();
+    }
+  };
+  const writeTerminal = (data: Uint8Array, token: number, liveOutput: boolean): void => {
+    const context: WriteContext = { generation: token, ackEpoch: bellAckEpoch, liveOutput };
+    writeContexts.push(context);
+    parsingContext = context;
+    terminal.write(data, () => {
+      const index = writeContexts.indexOf(context);
+      if (index >= 0) writeContexts.splice(index, 1);
+      if (parsingContext === context) parsingContext = null;
+      queuePaint(() => token === generation);
+    });
+    if (parsingContext === context) parsingContext = null;
   };
   const painter = createTerminalPainter(canvas, terminal);
   const paint = (emit = true): void => {
@@ -253,6 +293,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       selectionMarker = undefined;
     } else if (selectionMarker?.line === -1) invalidateSelection();
   });
+  const bellSubscription = terminal.onBell?.(() => markBell());
   const failProtocol = (message: string): void => {
     error = message.slice(0, 256);
     ready = false;
@@ -332,13 +373,16 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             invalidateSelection();
             const current = (): boolean => token === generation;
             if (connected.initialScreen?.length)
-              terminal.write(connected.initialScreen, () => queuePaint(current));
+              writeTerminal(connected.initialScreen, token, false);
             else queuePaint(current);
             setStatus('connected');
             break;
           }
           case 'output':
-            terminal.write(msg.message.value.data, () => queuePaint(() => token === generation));
+            writeTerminal(msg.message.value.data, token, true);
+            break;
+          case 'bell':
+            markBell(token, true);
             break;
           case 'resize':
             if (!validGrid(msg.message.value.cols, msg.message.value.rows)) break;
@@ -428,6 +472,10 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     get error() {
       return error;
     },
+    get bellPending() {
+      return bellPending;
+    },
+    acknowledgeBell,
     get canResizeGrid() {
       return ready && socket?.readyState === WebSocket.OPEN && !readonly && !disposed;
     },
@@ -574,6 +622,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     },
     paste: (text) => send(createPasteMessage(text)),
     focus: (focused) => {
+      if (focused) acknowledgeBell();
       if (focused) terminal.focus();
       else terminal.blur();
       return send(createFocusMessage(focused));
@@ -605,6 +654,10 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       socket = null;
       current?.close();
       terminal.dispose();
+      writeContexts.length = 0;
+      parsingContext = null;
+      bellPending = false;
+      bellSubscription?.dispose();
       selectionMarker?.dispose();
       selectionMarker = undefined;
       selectionAnchor = null;

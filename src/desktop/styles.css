@@ -34,19 +34,39 @@
 .desktop-terminal-panel.active {
   border-color: #66d5e7;
 }
-.desktop-terminal-heading {
-  display: block;
-  width: 100%;
-  padding: 10px 12px;
-  border: 0;
+.desktop-terminal-header {
+  display: flex;
+  align-items: stretch;
   border-bottom: 1px solid #293746;
   background: #111b25;
+}
+.desktop-terminal-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
   color: #edf4f8;
   text-align: left;
   font:
     600 13px ui-sans-serif,
     system-ui,
     sans-serif;
+}
+.desktop-terminal-bell {
+  flex: 0 0 auto;
+  align-self: center;
+  margin: 0 10px 0 6px;
+  padding: 3px 5px;
+  border: 1px solid #e4a84a;
+  border-radius: 4px;
+  background: #302718;
+  color: #e4a84a;
+  font:
+    600 10px ui-sans-serif,
+    system-ui,
+    sans-serif;
+  letter-spacing: 0.04em;
 }
 .desktop-terminal-heading[aria-pressed="true"] {
   color: #a7eeef;

@@ -155,6 +155,7 @@ function selectPane(id: string): void {
     ui.setPaneStatus?.(id, surface.status);
     ui.setAttachedPaneIds([...surfaces.keys()]);
   }
+  surfaces.get(id)?.acknowledgeBell?.();
   if (selectedId === id) return;
   selectedId = id;
   speechInput?.dispatch('cancel');

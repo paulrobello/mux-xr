@@ -105,6 +105,8 @@ export function createDesktopPanels(
     const panel = document.createElement('article');
     panel.dataset.paneId = surface.pane.id;
     panel.className = 'desktop-terminal-panel';
+    const header = document.createElement('div');
+    header.className = 'desktop-terminal-header';
     const heading = document.createElement('button');
     heading.type = 'button';
     const updateHeading = (): void => {
@@ -117,6 +119,18 @@ export function createDesktopPanels(
     updateHeading();
     heading.className = 'desktop-terminal-heading';
     heading.addEventListener('click', () => onSelect(surface.pane.id));
+    const bell = document.createElement('span');
+    bell.className = 'desktop-terminal-bell';
+    bell.textContent = 'BELL';
+    bell.setAttribute('role', 'status');
+    bell.setAttribute('aria-label', 'Unread terminal bell');
+    const updateBell = (): void => {
+      const pending = Boolean(surface.bellPending);
+      bell.hidden = !pending;
+      bell.setAttribute('aria-hidden', String(!pending));
+    };
+    updateBell();
+    header.append(heading, bell);
     const controls = document.createElement('div');
     controls.className = 'desktop-terminal-controls';
     const connection = document.createElement('button');
@@ -150,7 +164,7 @@ export function createDesktopPanels(
     surface.canvas.setAttribute('aria-label', `${surface.pane.title} terminal output`);
     updateSize(surface, surface.canvas);
     body.append(surface.canvas);
-    panel.append(heading, controls, body);
+    panel.append(header, controls, body);
     grid.append(panel);
     let drag:
       | {
@@ -267,6 +281,7 @@ export function createDesktopPanels(
     const cancelMouse = (): void => release();
     const unsubscribe = surface.subscribe(() => {
       updateHeading();
+      updateBell();
       updateSize(surface, surface.canvas);
       updateActions();
     });

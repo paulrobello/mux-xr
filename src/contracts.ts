@@ -58,6 +58,8 @@ export interface TerminalSurface {
   readonly rows: number;
   readonly status: TerminalStatus;
   readonly error: string | null;
+  readonly bellPending?: boolean;
+  acknowledgeBell?(): void;
   readonly canResizeGrid: boolean;
   readonly renderQuality?: TerminalRenderQuality;
   setRenderQuality?(quality: TerminalRenderQuality): void;
