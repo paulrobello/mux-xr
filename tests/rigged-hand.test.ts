@@ -1,8 +1,9 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { type GLTF, GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { describe, expect, it } from 'vitest';
-import { createRiggedHand } from '../src/xr/rigged-hand';
+import { createRiggedHand, RIGGED_HAND_ASSET_URL } from '../src/xr/rigged-hand';
 
 const NAMES = [
   'wrist',
@@ -89,6 +90,9 @@ describe('authored rigged hand', () => {
     mixer.uncacheRoot(asset.scene);
   });
   it('parses the staged GLB, validates its skin, and isolates clones', async () => {
+    expect(new URL(RIGGED_HAND_ASSET_URL, 'https://localhost').searchParams.get('v')).toBe(
+      createHash('sha256').update(new Uint8Array(assetBytes)).digest('hex').slice(0, 12),
+    );
     const first = createRiggedHand({ loader: parsedLoader() });
     const second = createRiggedHand({ loader: parsedLoader() });
     expect(await first.assetReady).toBe(true);

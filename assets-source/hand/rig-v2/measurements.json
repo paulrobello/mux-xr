@@ -1,0 +1,206 @@
+{
+  "axes": "+X thumb, +Y fingers, +Z depth in glTF",
+  "units": "metres",
+  "vertices": 2850,
+  "triangles": 5696,
+  "bones": {
+    "wrist": {
+      "head_blender": [
+        0.0,
+        0.0,
+        -0.0
+      ],
+      "tail_blender": [
+        2.2351742678949904e-09,
+        0.0,
+        0.0869249776005745
+      ],
+      "parent": null
+    },
+    "thumb_01": {
+      "head_blender": [
+        0.0706700012087822,
+        0.0,
+        0.08640000224113464
+      ],
+      "tail_blender": [
+        0.09000000357627869,
+        0.001500000013038516,
+        0.08730000257492065
+      ],
+      "parent": "wrist"
+    },
+    "thumb_02": {
+      "head_blender": [
+        0.09000000357627869,
+        0.001500000013038516,
+        0.08730000257492065
+      ],
+      "tail_blender": [
+        0.10999999940395355,
+        0.0019000000320374966,
+        0.0892999991774559
+      ],
+      "parent": "thumb_01"
+    },
+    "thumb_03": {
+      "head_blender": [
+        0.10999999940395355,
+        0.0019000000320374966,
+        0.0892999991774559
+      ],
+      "tail_blender": [
+        0.12999999523162842,
+        0.0019000000320374966,
+        0.09000000357627869
+      ],
+      "parent": "thumb_02"
+    },
+    "index_01": {
+      "head_blender": [
+        0.04899999871850014,
+        0.0,
+        0.1274999976158142
+      ],
+      "tail_blender": [
+        0.054999999701976776,
+        0.0,
+        0.15299999713897705
+      ],
+      "parent": "wrist"
+    },
+    "index_02": {
+      "head_blender": [
+        0.054999999701976776,
+        0.0,
+        0.15299999713897705
+      ],
+      "tail_blender": [
+        0.05849999934434891,
+        0.0,
+        0.17599999904632568
+      ],
+      "parent": "index_01"
+    },
+    "index_03": {
+      "head_blender": [
+        0.05849999934434891,
+        0.0,
+        0.17599999904632568
+      ],
+      "tail_blender": [
+        0.05999999865889549,
+        0.0,
+        0.19599999487400055
+      ],
+      "parent": "index_02"
+    },
+    "middle_01": {
+      "head_blender": [
+        -0.0015999999595806003,
+        0.0,
+        0.1354999989271164
+      ],
+      "tail_blender": [
+        -0.0010999999940395355,
+        0.0,
+        0.1589999943971634
+      ],
+      "parent": "wrist"
+    },
+    "middle_02": {
+      "head_blender": [
+        -0.0010999999940395355,
+        0.0,
+        0.1589999943971634
+      ],
+      "tail_blender": [
+        -0.000699999975040555,
+        0.0,
+        0.18299999833106995
+      ],
+      "parent": "middle_01"
+    },
+    "middle_03": {
+      "head_blender": [
+        -0.000699999975040555,
+        0.0,
+        0.18299999833106995
+      ],
+      "tail_blender": [
+        -0.0006500000017695129,
+        0.0,
+        0.2078000009059906
+      ],
+      "parent": "middle_02"
+    },
+    "outer_01": {
+      "head_blender": [
+        -0.05299999937415123,
+        0.0,
+        0.1274999976158142
+      ],
+      "tail_blender": [
+        -0.05900000035762787,
+        0.0,
+        0.15299999713897705
+      ],
+      "parent": "wrist"
+    },
+    "outer_02": {
+      "head_blender": [
+        -0.05900000035762787,
+        0.0,
+        0.15299999713897705
+      ],
+      "tail_blender": [
+        -0.06350000202655792,
+        0.0,
+        0.17599999904632568
+      ],
+      "parent": "outer_01"
+    },
+    "outer_03": {
+      "head_blender": [
+        -0.06350000202655792,
+        0.0,
+        0.17599999904632568
+      ],
+      "tail_blender": [
+        -0.06300000101327896,
+        0.0,
+        0.19599999487400055
+      ],
+      "parent": "outer_02"
+    }
+  },
+  "actions": [
+    "Open",
+    "Fist",
+    "Pointing",
+    "Thumbs Up"
+  ],
+  "weight_influences_min": 1,
+  "weight_influences_max": 4,
+  "weight_sum_min": 0.999999959836714,
+  "weight_sum_max": 1.00000003981404,
+  "invariants_before": {
+    "coordinates": "83e2b9d456431a060983a25d039e8484a809b6323c831e630f09f92d1c8e3380",
+    "topology": "ee6a3971ccb34001ddc94510e73614b58e017164488fcb5bb4624bb5b1305b86",
+    "edit_groups": "0a8f48fb78bf3e22a46abb1edf15868761a158a5ddc530f6f6bce227edfde50e",
+    "objects": "791817f836480a579f78838ecf8aafe9521525df49ddf9fed8229e2cf3357349",
+    "materials": "817100b7ee6ad498a84a5ec2a2d7e0c78fb0588c68afd58b771e3ae485de698b"
+  },
+  "invariants_after": {
+    "coordinates": "83e2b9d456431a060983a25d039e8484a809b6323c831e630f09f92d1c8e3380",
+    "topology": "ee6a3971ccb34001ddc94510e73614b58e017164488fcb5bb4624bb5b1305b86",
+    "edit_groups": "0a8f48fb78bf3e22a46abb1edf15868761a158a5ddc530f6f6bce227edfde50e",
+    "objects": "791817f836480a579f78838ecf8aafe9521525df49ddf9fed8229e2cf3357349",
+    "materials": "817100b7ee6ad498a84a5ec2a2d7e0c78fb0588c68afd58b771e3ae485de698b"
+  },
+  "mesh_validation": {
+    "open_edges": 0,
+    "nonmanifold_edges": 0,
+    "zero_area_faces": 0
+  }
+}

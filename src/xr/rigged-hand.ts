@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { type CartoonHand, createCartoonHand } from './cartoon-hand';
 import type { HandContactProbe } from './hand-contact';
 
-export const RIGGED_HAND_ASSET_URL = '/assets/hand.glb';
+export const RIGGED_HAND_ASSET_URL = '/assets/hand.glb?v=ec70d4886396';
 const DIGITS = ['thumb', 'index', 'middle', 'outer'] as const;
 const JOINTS = [
   ['thumb-metacarpal', 'thumb-phalanx-proximal', 'thumb-phalanx-distal', 'thumb-tip'],

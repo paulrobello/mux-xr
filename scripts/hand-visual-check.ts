@@ -21,6 +21,7 @@ if (!BASE_URL || !TEST_ROOT || process.env.MUX_XR_PRIVATE_TEST !== '1')
   throw new Error('Set MUX_XR_PRIVATE_TEST=1, MUX_XR_BASE_URL, and MUX_XR_TEST_ROOT');
 const baseUrl = BASE_URL as string;
 const testRoot = TEST_ROOT as string;
+const xrMode = process.env.MUX_XR_MODE === 'ar' ? 'ar' : 'vr';
 if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(baseUrl).hostname))
   throw new Error('Loopback only');
 
@@ -164,18 +165,46 @@ async function main(): Promise<void> {
         ),
       'Panes did not attach',
     );
-    await page.locator('[data-action="xr"]').click();
+    await page.evaluate(() => {
+      const xr = navigator.xr;
+      if (!xr) throw new Error('XR fixture unavailable');
+      const request = xr.requestSession.bind(xr);
+      xr.requestSession = (mode, options) => {
+        Object.assign(window, { __handXRRequest: mode });
+        return request(mode, options);
+      };
+    });
+    if (xrMode === 'ar') {
+      await page.locator('[data-action="settings"]').click();
+      await page.locator('[data-action="passthrough"]').click();
+      await page.locator('[data-action="close-settings"]').click();
+    } else await page.locator('[data-action="xr"]').click();
     await wait(
       page,
       async () =>
         page.evaluate(
-          () =>
+          (mode) =>
             (
               window as unknown as { __muxXR?: { getState(): { scene: { xrMode: string } } } }
-            ).__muxXR?.getState().scene.xrMode === 'vr',
+            ).__muxXR?.getState().scene.xrMode === mode,
+          xrMode,
         ),
       'XR did not start',
     );
+    report.xr = await page.evaluate(() => {
+      const w = window as unknown as FixtureWindow & { __handXRRequest: string };
+      return {
+        requested: w.__handXRRequest,
+        transparent: w.__questScene.background === null,
+        clearAlpha: w.__questRenderer.getClearAlpha(),
+      };
+    });
+    const xr = report.xr as { requested: string; transparent: boolean; clearAlpha: number };
+    if (
+      xr.requested !== (xrMode === 'ar' ? 'immersive-ar' : 'immersive-vr') ||
+      (xrMode === 'ar' && (!xr.transparent || xr.clearAlpha !== 0))
+    )
+      throw new Error(`XR presentation failed: ${JSON.stringify(xr)}`);
     await wait(
       page,
       async () =>

@@ -1,0 +1,7 @@
+{
+  "thumb_curl_factor": 0.98,
+  "index_curl_factor": 1.24,
+  "tip_triangle_intersections": 0,
+  "minimum_thumb_vertex_to_index_surface_m": 0.0002561338769737631,
+  "scope": "Only triangles wholly inside the Edit Thumb Tip and Edit Index Tip groups were tested."
+}
