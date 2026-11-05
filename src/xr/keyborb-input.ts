@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 const PINCH_CLOSE = 0.045;
-const PINCH_OPEN = 0.065;
+const PINCH_OPEN = 0.05;
 const NEAR_ENTER = 0.08;
 const NEAR_EXIT = 0.11;
 
@@ -22,6 +22,9 @@ export interface KeyborbPinchSample {
 interface HandState {
   armed: boolean;
   pinching: boolean;
+  activated: boolean;
+  nativeHeld: boolean;
+  enabled: boolean;
   nearby: Orb | null;
   result: KeyborbPinchSample;
 }
@@ -37,6 +40,8 @@ export function createKeyborbInput(): {
   ): KeyborbPinchSample;
   near(source: THREE.Object3D): boolean;
   hovered(source: THREE.Object3D): THREE.Mesh | null;
+  nativePress(source: THREE.Object3D, rayKey: THREE.Mesh | null): THREE.Mesh | null;
+  nativeRelease(source: THREE.Object3D): boolean;
   animate(deltaSeconds: number): void;
   reset(source?: THREE.Object3D): void;
 } {
@@ -101,6 +106,9 @@ export function createKeyborbInput(): {
         state = {
           armed: false,
           pinching: false,
+          activated: false,
+          nativeHeld: false,
+          enabled: false,
           nearby: null,
           result: { hovered: null, pressed: null, released: false },
         };
@@ -112,6 +120,7 @@ export function createKeyborbInput(): {
       if (!keyboard || !index || !thumb) {
         result.released = state.pinching;
         state.pinching = state.armed = false;
+        state.activated = state.nativeHeld = state.enabled = false;
         state.nearby = null;
         return result;
       }
@@ -138,13 +147,16 @@ export function createKeyborbInput(): {
       state.nearby = nearest;
       result.hovered = nearest?.mesh ?? null;
       const separation = index.distanceTo(thumb);
-      if (separation >= PINCH_OPEN) {
+      state.enabled = enabled;
+      if (separation >= PINCH_OPEN && !state.nativeHeld) {
         result.released = state.pinching;
         state.pinching = false;
+        state.activated = false;
         state.armed = enabled;
       } else if (separation <= PINCH_CLOSE && !state.pinching) {
         state.pinching = true;
         if (state.armed && enabled) result.pressed = nearest?.mesh ?? rayKey;
+        state.activated = Boolean(result.pressed);
         state.armed = false;
       }
       if (!enabled) state.armed = false;
@@ -155,6 +167,24 @@ export function createKeyborbInput(): {
     },
     hovered(source) {
       return hands.get(source)?.nearby?.mesh ?? null;
+    },
+    nativePress(source, rayKey) {
+      const state = hands.get(source);
+      if (!keyboard || !state?.enabled || state.nativeHeld) return null;
+      state.nativeHeld = true;
+      if (state.activated) return null;
+      const key = state.nearby?.mesh ?? rayKey;
+      if (!key) return null;
+      state.pinching = state.activated = true;
+      state.armed = false;
+      return key;
+    },
+    nativeRelease(source) {
+      const state = hands.get(source);
+      if (!state?.nativeHeld) return false;
+      state.nativeHeld = state.activated = state.armed = false;
+      state.pinching = true;
+      return true;
     },
     animate(deltaSeconds) {
       const alpha = 1 - Math.exp(-24 * Math.max(0, deltaSeconds));

@@ -54,7 +54,7 @@ export function updateHandInput(
       state.pinching = false;
       state.neutral = indexDistance >= OPEN_DISTANCE;
     }
-  } else if (state.neutral && middleDistance <= CLOSE_DISTANCE) {
+  } else if (state.neutral && indexDistance >= OPEN_DISTANCE && middleDistance <= CLOSE_DISTANCE) {
     state.pinching = true;
     state.neutral = false;
   }

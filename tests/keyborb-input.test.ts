@@ -70,8 +70,8 @@ describe('Keyborb fingertip interaction', () => {
     expect(input.sample(source, index, thumb, null, true).pressed).toBe(keys[0]);
     for (let frame = 0; frame < 30; frame++)
       expect(input.sample(source, index, thumb, null, true).pressed).toBeNull();
-    index.x = 0.025;
-    thumb.x = -0.025;
+    index.x = 0.024;
+    thumb.x = -0.024;
     expect(input.sample(source, index, thumb, null, true).released).toBe(false);
     index.x = 0.04;
     thumb.x = -0.04;
@@ -97,6 +97,41 @@ describe('Keyborb fingertip interaction', () => {
     input.sample(source, index, thumb, null, false);
     index.x = 0.02;
     expect(input.sample(source, index, thumb, null, true).pressed).toBeNull();
+  });
+
+  it('accepts native pinch fallback without requiring the wider raw opening', () => {
+    const { keys, source, input } = fixture();
+    const index = new THREE.Vector3(0, 0, 0.06);
+    const thumb = new THREE.Vector3(-0.048, 0, 0.06);
+    input.sample(source, index, thumb, null, true);
+    thumb.x = -0.02;
+    expect(input.sample(source, index, thumb, null, true).pressed).toBeNull();
+    expect(input.nativePress(source, null)).toBe(keys[0]);
+    expect(input.nativePress(source, null)).toBeNull();
+    expect(input.nativeRelease(source)).toBe(true);
+    expect(input.sample(source, index, thumb, null, true).pressed).toBeNull();
+    expect(input.nativePress(source, null)).toBe(keys[0]);
+  });
+
+  it('deduplicates native-first and raw-first pinches despite delayed joint poses', () => {
+    const { keys, source, input } = fixture();
+    const index = new THREE.Vector3(0, 0, 0.06);
+    const thumb = new THREE.Vector3(-0.08, 0, 0.06);
+    input.sample(source, index, thumb, null, true);
+    expect(input.nativePress(source, null)).toBe(keys[0]);
+    input.sample(source, index, thumb, null, true);
+    thumb.x = -0.02;
+    expect(input.sample(source, index, thumb, null, true).pressed).toBeNull();
+    input.nativeRelease(source);
+    thumb.x = -0.08;
+    input.sample(source, index, thumb, null, true);
+    thumb.x = -0.04;
+    expect(input.sample(source, index, thumb, null, true).pressed).toBe(keys[0]);
+    expect(input.nativePress(source, null)).toBeNull();
+    expect(input.nativeRelease(source)).toBe(true);
+    expect(input.sample(source, index, thumb, null, true).pressed).toBeNull();
+    input.reset(source);
+    expect(input.nativePress(source, keys[0])).toBeNull();
   });
 
   it('supports a far ray target and resets lifts when the keyboard is hidden or tracking is lost', () => {

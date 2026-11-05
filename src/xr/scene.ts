@@ -619,6 +619,7 @@ export function createWorkspaceScene(
   const handRoots = new Map<THREE.Group, THREE.Group>();
   const handVisuals = new Map<THREE.Group, CartoonHand>();
   const handContacts = new Map<THREE.Group, HandContact>();
+  const keyboardProximity = new Map<THREE.Group, HandContact>();
   const keyborbInput = createKeyborbInput();
   const priorityHandActions = new Set([
     'wristMenu',
@@ -902,6 +903,7 @@ export function createWorkspaceScene(
   };
   const resetHandContact = (source: THREE.Group, refresh = true, preserveNear = false): void => {
     keyborbInput.reset(source);
+    keyboardProximity.get(source)?.reset();
     handContacts.get(source)?.reset(preserveNear);
     contactSamples.delete(source);
     pendingPokes.delete(source);
@@ -1302,9 +1304,7 @@ export function createWorkspaceScene(
     } else handTrackingLost.delete(root);
     const ray = root.children.find((child) => child instanceof THREE.Line);
     const contact = root.children.find((child) => child instanceof THREE.Mesh);
-    if (ray)
-      ray.visible =
-        gesture.tracked && !keyborbInput.near(root) && !contactSamples.get(root)?.nearKeyboard;
+    if (ray) ray.visible = gesture.tracked && !keyboardRaysBlocked;
     if (contact && !gesture.tracked) contact.visible = false;
     if (!gesture.tracked) root.userData.rayDistance = 0;
     return gesture;
@@ -1314,14 +1314,16 @@ export function createWorkspaceScene(
     const gesture = sampleHand(root);
     return Boolean(gesture?.tracked && !gesture.pinching && handInputStates.get(root)?.neutral);
   };
-  const contactKeyboard = (): THREE.Group | null =>
+  let keyboardRaysBlocked = false;
+  const keyboardSurface = (): THREE.Group | null =>
     inputRoot &&
-    !mutableState.keyborbEnabled &&
     (inputMode === 'keyboard' || inputMode === 'command-editor') &&
     !radialMenu.root.visible &&
     !warpEdit
       ? inputRoot
       : null;
+  const contactKeyboard = (): THREE.Group | null =>
+    mutableState.keyborbEnabled ? null : keyboardSurface();
   const contactVisual = (source: THREE.Group, refresh = false): CartoonHand | undefined => {
     const visual = handVisuals.get(source);
     const side = controllerHandedness.get(source);
@@ -1354,14 +1356,49 @@ export function createWorkspaceScene(
     const visual = contactVisual(source, true);
     return Boolean(
       visual &&
-        handContacts
+        keyboardProximity
           .get(source)
           ?.near(
             visual.root.userData.indexTip as THREE.Vector3,
             visual.root.userData.palmPosition as THREE.Vector3,
-            contactKeyboard(),
+            keyboardSurface(),
           ),
     );
+  };
+  const suppressKeyboardRays = (): boolean => {
+    const blocked = Boolean(
+      renderer?.xr.isPresenting &&
+        controllerRoots.some(
+          (source) =>
+            keyboardNear(source) ||
+            keyborbInput.near(source) ||
+            (contactKeyboard() && contactSamples.get(source)?.nearKeyboard),
+        ),
+    );
+    if (blocked && !keyboardRaysBlocked) {
+      releaseAllMouse();
+      if (textSelection?.phase === 'dragging') cancelTextSelection();
+    }
+    keyboardRaysBlocked = blocked;
+    return blocked;
+  };
+  const pressKeyborb = (controller: THREE.Group, key: THREE.Mesh, pinch = true): void => {
+    const modifier = key.userData.modifier as KeyboardModifier | undefined;
+    const before = modifier
+      ? {
+          active: Boolean(modifierState.active[modifier]),
+          locked: Boolean(modifierState.locked[modifier]),
+        }
+      : undefined;
+    const target: InputTarget = {
+      kind: 'keyboard',
+      terminalId: mutableState.inputTargetId ?? '',
+      object: key,
+    };
+    activateTarget(target);
+    beginModifierPress(controller, target, before);
+    if (pinch) pokeSources.add(controller);
+    showHover(null);
   };
   const updateKeyborbInput = (deltaSeconds: number): void => {
     const mode = inputMode;
@@ -1379,21 +1416,21 @@ export function createWorkspaceScene(
     keyborbInput.begin(keyboard);
     for (const controller of controllerRoots) {
       const hand = activeHand(controller);
-      const visual = hand ? contactVisual(controller) : undefined;
+      const visual = contactVisual(controller);
       const gesture = hand ? sampleHand(controller) : null;
-      const ray = keyboard && hand ? targetFromController(controller) : null;
+      const ray =
+        keyboard && hand && !keyboardRaysBlocked ? targetFromController(controller) : null;
       const rayKey = ray?.object?.userData.keyborb ? (ray.object as THREE.Mesh) : null;
       const sample = keyborbInput.sample(
         controller,
-        visual && gesture?.tracked ? (visual.root.userData.indexTip as THREE.Vector3) : null,
-        visual && gesture?.tracked ? (visual.root.userData.thumbTip as THREE.Vector3) : null,
+        visual ? (visual.root.userData.indexTip as THREE.Vector3) : null,
+        visual ? (visual.root.userData.thumbTip as THREE.Vector3) : null,
         rayKey,
         Boolean(
           keyboard &&
             gesture?.tracked &&
             !gesture.pinching &&
-            !priorityHandActions.has(String(ray?.object?.userData.inputAction)) &&
-            handInputStates.get(controller)?.neutral,
+            !priorityHandActions.has(String(ray?.object?.userData.inputAction)),
         ),
       );
       if (sample.released && pokeSources.delete(controller)) modifierPresses.delete(controller);
@@ -1405,22 +1442,7 @@ export function createWorkspaceScene(
         mutableState.inputTargetId !== targetId
       )
         continue;
-      const modifier = sample.pressed.userData.modifier as KeyboardModifier | undefined;
-      const before = modifier
-        ? {
-            active: Boolean(modifierState.active[modifier]),
-            locked: Boolean(modifierState.locked[modifier]),
-          }
-        : undefined;
-      const target: InputTarget = {
-        kind: 'keyboard',
-        terminalId: mutableState.inputTargetId ?? '',
-        object: sample.pressed,
-      };
-      activateTarget(target);
-      beginModifierPress(controller, target, before);
-      pokeSources.add(controller);
-      showHover(null);
+      pressKeyborb(controller, sample.pressed);
     }
     keyborbInput.animate(deltaSeconds);
   };
@@ -1450,11 +1472,6 @@ export function createWorkspaceScene(
       ],
       roots,
     );
-  };
-  const nativeSelectBlocked = (source: THREE.Group): boolean => {
-    if (!keyboardNear(source)) return false;
-    const action = targetFromController(source)?.object?.userData.inputAction;
-    return !priorityHandActions.has(String(action));
   };
   const render = (time = 0): void => {
     if (disposed) return;
@@ -1570,6 +1587,7 @@ export function createWorkspaceScene(
       for (const visual of handVisuals.values()) visual.hide();
       wristWatch.setVisible(false);
     }
+    suppressKeyboardRays();
     updateKeyborbInput(deltaSeconds);
     if (renderer?.xr.isPresenting) {
       for (const controller of controllerRoots) {
@@ -1611,6 +1629,7 @@ export function createWorkspaceScene(
           });
       }
     } else resetHandContacts();
+    suppressKeyboardRays();
     if (gripActive()) modifierPresses.clear();
     for (const press of modifierPresses.values()) {
       if (press.since === null) press.since = time;
@@ -1967,7 +1986,9 @@ export function createWorkspaceScene(
                 object: nearControl,
               }
             : null
-          : targetFromController(controller, false);
+          : keyboardRaysBlocked
+            ? null
+            : targetFromController(controller, false);
         moveMouse(controller, target);
         moveTextSelection(controller, target);
         const distance =
@@ -1976,7 +1997,7 @@ export function createWorkspaceScene(
           | THREE.Line
           | undefined;
         if (line) {
-          line.visible = !nearKeyboard;
+          line.visible = !keyboardRaysBlocked;
           line.scale.z = distance / CONTROLLER_RAY_LENGTH;
         }
         const contact = controller.children.find((child) => child instanceof THREE.Mesh) as
@@ -1984,7 +2005,7 @@ export function createWorkspaceScene(
           | undefined;
         if (contact) {
           contact.position.set(0, 0, -distance);
-          contact.visible = !nearKeyboard && Boolean(target?.object);
+          contact.visible = !keyboardRaysBlocked && Boolean(target?.object);
         }
         const object = target?.object;
         if (radialMenu.interactive && object?.userData.radialAction)
@@ -3426,6 +3447,10 @@ export function createWorkspaceScene(
     return { terminalId, kind: key ? 'key' : 'terminal', object: hit, uv: intersection?.uv };
   };
   const targetFromController = (root: THREE.Group, updateWorld = true): InputTarget | null => {
+    if (keyboardRaysBlocked) {
+      root.userData.rayDistance = 0;
+      return null;
+    }
     if (updateWorld) scene.updateMatrixWorld(true);
     tempMatrix.identity().extractRotation(root.matrixWorld);
     raycaster.ray.origin.setFromMatrixPosition(root.matrixWorld);
@@ -3508,18 +3533,34 @@ export function createWorkspaceScene(
       contact.visible = false;
       root.add(rayLine, contact);
       const onSelect = (): void => {
+        if (!root.visible || disconnectedControllers.has(root) || gripActive()) return;
         if (activeHand(root) && mutableState.keyborbEnabled) {
-          const target = targetFromController(root);
+          if (!sampleHand(root)?.tracked) return;
+          const blocked = suppressKeyboardRays();
+          const target = blocked ? null : targetFromController(root);
           if (
             !priorityHandActions.has(String(target?.object?.userData.inputAction)) &&
-            (target?.object?.userData.keyborb || keyborbInput.near(root))
+            (target?.object?.userData.keyborb || keyborbInput.near(root) || blocked)
           ) {
+            const mode = inputMode;
+            const targetId = mutableState.inputTargetId;
             updateKeyborbInput(0);
+            if (mode !== inputMode || targetId !== mutableState.inputTargetId) return;
+            const key = keyborbInput.nativePress(
+              root,
+              target?.object?.userData.keyborb ? (target.object as THREE.Mesh) : null,
+            );
+            if (key) pressKeyborb(root, key);
             return;
           }
         }
+        if (!activeHand(root) && suppressKeyboardRays()) {
+          const key = keyborbInput.hovered(root);
+          if (key) pressKeyborb(root, key, false);
+          return;
+        }
         if (!handSelectionAllowed(root)) return;
-        if (!root.visible || nativeSelectBlocked(root)) return;
+        if (!root.visible || suppressKeyboardRays()) return;
         if (
           heldControllers.has(root) ||
           controllerGamepads.get(root)?.buttons[1]?.pressed ||
@@ -3532,6 +3573,10 @@ export function createWorkspaceScene(
       };
       const onSelectEnd = (): void => {
         if (activeHand(root) && !sampleHand(root)?.tracked) return;
+        if (keyborbInput.nativeRelease(root)) {
+          pokeSources.delete(root);
+          modifierPresses.delete(root);
+        }
         pendingPaste.delete(root);
         if (!pokeSources.has(root)) modifierPresses.delete(root);
         if (mouseCaptures.has(root) && !gripActive()) {
@@ -3544,7 +3589,7 @@ export function createWorkspaceScene(
       };
       const onSelectComplete = (): void => {
         if (!handSelectionAllowed(root)) return;
-        if (!root.visible || nativeSelectBlocked(root)) return;
+        if (!root.visible || suppressKeyboardRays()) return;
         if (pendingPaste.has(root)) {
           const id = pendingPaste.get(root);
           pendingPaste.delete(root);
@@ -3567,7 +3612,7 @@ export function createWorkspaceScene(
           (heldControllers.has(root) && !contactGripArmed.has(root))
         )
           return;
-        const wasNearKeyboard = keyboardNear(root);
+        const wasNearKeyboard = suppressKeyboardRays();
         const oldInputRoot = inputRoot;
         resetHandContact(root, true, true);
         if (contactObject && contactObject === oldInputRoot) contactObject = inputRoot ?? undefined;
@@ -3728,6 +3773,7 @@ export function createWorkspaceScene(
         release: onSqueezeEnd,
       });
       handContacts.set(root, createHandContact());
+      keyboardProximity.set(root, createHandContact());
       const visual = createCartoonHand();
       handVisuals.set(root, visual);
       scene.add(visual.root);
@@ -4827,6 +4873,7 @@ export function createWorkspaceScene(
     if (disposed) return;
     resetHandContacts(false);
     handContacts.clear();
+    keyboardProximity.clear();
     contactSamples.clear();
     contactGripArmed.clear();
     pokeSources.clear();

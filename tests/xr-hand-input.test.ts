@@ -28,6 +28,10 @@ function middlePinch(hand: HandFixture): void {
   hand.joints['middle-finger-tip'].position.set(0.01, 0, 0);
 }
 
+function indexPinch(hand: HandFixture): void {
+  hand.joints['index-finger-tip'].position.set(0.01, 0, 0);
+}
+
 function state(): HandInputState {
   return { pinching: false, neutral: false, tracked: false };
 }
@@ -71,5 +75,30 @@ describe('hand input gesture lifecycle', () => {
     expect(pinch.pinching).toBe(true);
     hand.joints['index-finger-tip'].visible = false;
     expect(updateHandInput(hand, input).tracked).toBe(false);
+  });
+
+  it('does not start a middle grab while index-thumb selection is pinched', () => {
+    const hand = handFixture();
+    const input = state();
+    updateHandInput(hand, input);
+    indexPinch(hand);
+    middlePinch(hand);
+    const result = updateHandInput(hand, input);
+    expect(result.started).toBe(false);
+    expect(result.pinching).toBe(false);
+    expect(input.neutral).toBe(true);
+  });
+
+  it('keeps an existing middle grab active when index-thumb selection closes', () => {
+    const hand = handFixture();
+    const input = state();
+    updateHandInput(hand, input);
+    middlePinch(hand);
+    expect(updateHandInput(hand, input).started).toBe(true);
+    indexPinch(hand);
+    const result = updateHandInput(hand, input);
+    expect(result.pinching).toBe(true);
+    expect(result.started).toBe(false);
+    expect(result.ended).toBe(false);
   });
 });

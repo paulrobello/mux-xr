@@ -440,6 +440,72 @@ describe('native XR controller event routing', () => {
       expect(workspace.state.keyborbEnabled).toBe(false);
     });
 
+    it('accepts native Keyborb pinches after a natural opening with other fingers relaxed', () => {
+      const { workspace, actions } = setup('auto');
+      workspace.showInput('keyboard');
+      const hand = connectHand();
+      const point = objectWithData(workspace, { inputAction: 'key', key: 'a' }).getWorldPosition(
+        new THREE.Vector3(),
+      );
+      hand.joints['index-finger-tip'].position.copy(point);
+      hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(-0.048, 0, 0));
+      hand.joints['middle-finger-tip'].position
+        .copy(hand.joints['thumb-tip'].position)
+        .add(new THREE.Vector3(0, 0.03, 0));
+      hand.joints.wrist.visible = false;
+      fakeXR.frame?.(10);
+      hand.joints.wrist.visible = true;
+      fakeXR.frame?.(20);
+      hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(-0.02, 0, 0));
+      fakeXR.frame?.(40);
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      hit(workspace, { inputAction: 'key', key: 'a' });
+      expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
+      hit(workspace, { inputAction: 'key', key: 'a' });
+      fakeXR.frame?.(60);
+      expect(actions.sendKey).toHaveBeenCalledTimes(1);
+      nativeEvent(0, 'selectend');
+    });
+
+    it.each(['off', 'on'] as const)(
+      'suppresses both distant rays when either hand is near the %s keyboard',
+      (mode) => {
+        const { workspace, actions } = setup(mode);
+        workspace.showInput('keyboard');
+        const near = connectHand(0);
+        const far = connectHand(1);
+        const other = fakeXR.controllers[1] as THREE.Group;
+        const panel = objectWithData(workspace, { terminalId: 'pane-b' });
+        aimController(other, panel);
+        contactKey(workspace, near, 'a', 0.06, 20);
+        for (const controller of fakeXR.controllers as THREE.Group[])
+          expect(controller.children.find((child) => child instanceof THREE.Line)?.visible).toBe(
+            false,
+          );
+        vi.mocked(actions.selectPane).mockClear();
+        nativeEvent(1, 'selectstart');
+        expect(workspace.state.selectedTerminalId).toBe('pane-a');
+        expect(actions.selectPane).not.toHaveBeenCalledWith('pane-b');
+        const position = panel.position.clone();
+        pinch(far, true);
+        fakeXR.frame?.(40);
+        for (const joint of Object.values(far.joints)) joint.position.x += 0.1;
+        fakeXR.frame?.(60);
+        expect(panel.position.distanceTo(position)).toBeLessThan(1e-8);
+        pinch(far, false);
+        for (const hand of [near, far])
+          for (const joint of Object.values(hand.joints)) joint.position.z += 2;
+        fakeXR.frame?.(80);
+        for (const controller of fakeXR.controllers as THREE.Group[])
+          expect(controller.children.find((child) => child instanceof THREE.Line)?.visible).toBe(
+            true,
+          );
+        aimController(other, panel);
+        nativeEvent(1, 'selectstart');
+        expect(workspace.state.selectedTerminalId).toBe('pane-b');
+      },
+    );
+
     it('keeps forgiving pinch modifier holds and cancels held pinches when retargeting', () => {
       const { workspace, actions } = setup('on');
       workspace.showInput('keyboard');
@@ -505,7 +571,7 @@ describe('native XR controller event routing', () => {
       expect(actions.sendKey).toHaveBeenCalledTimes(2);
     });
 
-    it('hides only the near hand ray and types once per index poke without ray selection', () => {
+    it('hides both hand rays and types once per index poke without ray selection', () => {
       const { workspace, actions } = setup();
       workspace.showInput('keyboard');
       const hand = connectHand(0);
@@ -518,7 +584,7 @@ describe('native XR controller event routing', () => {
       expect(
         (fakeXR.controllers[1] as THREE.Group).children.find((node) => node instanceof THREE.Line)
           ?.visible,
-      ).toBe(true);
+      ).toBe(false);
       controller.dispatchEvent({ type: 'selectstart' } as never);
       controller.dispatchEvent({ type: 'selectend' } as never);
       expect(actions.sendKey).not.toHaveBeenCalled();

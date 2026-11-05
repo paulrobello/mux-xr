@@ -379,6 +379,71 @@ async function main(): Promise<void> {
     });
     await frames(page, 5);
     report.releasedInputs = [...inputs];
+    const recoveryBaseline = inputs.length;
+    await page.evaluate((point) => {
+      const w = window as unknown as FixtureWindow;
+      const hand = w.__questHands[0];
+      const index = hand.joints['index-finger-tip'];
+      index.position.fromArray(point as [number, number, number]);
+      hand.joints.wrist.visible = false;
+      hand.joints['thumb-tip'].position.copy(index.position).x -= 0.048;
+      hand.joints['middle-finger-tip'].position.copy(hand.joints['thumb-tip'].position).y += 0.03;
+    }, orb.point);
+    await frames(page, 5);
+    await page.evaluate(() => {
+      const hand = (window as unknown as FixtureWindow).__questHands[0];
+      hand.joints.wrist.visible = true;
+    });
+    await frames(page, 5);
+    await page.evaluate(() => {
+      const hand = (window as unknown as FixtureWindow).__questHands[0];
+      const index = hand.joints['index-finger-tip'];
+      hand.joints['thumb-tip'].position.copy(index.position).x -= 0.02;
+    });
+    await frames(page, 8);
+    report.recoveryBeforeNative = inputs.slice(recoveryBaseline);
+    await targetSelectHold(page, { inputAction: 'key', key: 'a' });
+    report.recoveryAfterNative = inputs.slice(recoveryBaseline);
+    await page.evaluate(() => {
+      const hand = (window as unknown as FixtureWindow).__questHands[0];
+      const index = hand.joints['index-finger-tip'];
+      hand.joints['thumb-tip'].position.copy(index.position).x -= 0.08;
+    });
+    await frames(page, 5);
+    report.recoveryAfterRelease = inputs.slice(recoveryBaseline);
+    await page.evaluate(() => {
+      const w = window as unknown as FixtureWindow;
+      const names = ['wrist', 'thumb-tip', 'middle-finger-tip', 'index-finger-tip'];
+      const controller = w.__questControllers[1];
+      controller.dispatchEvent({
+        type: 'connected',
+        data: {
+          handedness: 'left',
+          hand: new Map(names.map((name) => [name, { jointName: name }])),
+        },
+      } as never);
+      const hand = w.__questHands[1];
+      hand.visible = true;
+      hand.joints.wrist.position.set(-2, 2, -1);
+      hand.joints['thumb-tip'].position.set(-2, 2, -1);
+      hand.joints['index-finger-tip'].position.set(-1.9, 2, -1);
+      hand.joints['middle-finger-tip'].position.set(-1.9, 2.02, -1);
+      for (const joint of Object.values(hand.joints)) joint.visible = true;
+    });
+    await frames(page, 10);
+    report.bothRaysBlocked = await page.evaluate(() => {
+      const w = window as unknown as FixtureWindow;
+      return w.__questControllers.map((controller) => ({
+        rayVisible:
+          controller.children.find((child) => child instanceof w.__questThree.Line)?.visible ??
+          false,
+      }));
+    });
+    await page.screenshot({
+      path: join(checkedTestRoot, 'keyborb-both-rays-off.png'),
+      fullPage: true,
+    });
+    (report.screenshots as string[]).push('keyborb-both-rays-off.png');
     await page.screenshot({ path: join(checkedTestRoot, 'keyborb-xr-hands.png'), fullPage: true });
     (report.screenshots as string[]).push('keyborb-xr-hands.png');
     await page.locator('[data-action="settings"]').click();
@@ -390,6 +455,9 @@ async function main(): Promise<void> {
     report.offHands = await keyReport(page);
     await page.evaluate(() => {
       const w = window as unknown as FixtureWindow;
+      const hand = w.__questHands[0];
+      for (const joint of Object.values(hand.joints)) joint.position.set(5, 5, 5);
+      w.__questControllers[1].dispatchEvent({ type: 'disconnected' } as never);
       w.__questControllers[0].dispatchEvent({ type: 'disconnected' } as never);
       w.__questControllers[0].dispatchEvent({
         type: 'connected',
@@ -478,6 +546,13 @@ async function main(): Promise<void> {
       JSON.stringify(report.pinchInputs) === JSON.stringify(['a']) &&
       JSON.stringify(report.nativePinchInputs) === JSON.stringify(['a']) &&
       JSON.stringify(report.releasedInputs) === JSON.stringify(['a']) &&
+      JSON.stringify(report.recoveryBeforeNative) === JSON.stringify([]) &&
+      JSON.stringify(report.recoveryAfterNative) === JSON.stringify(['a']) &&
+      JSON.stringify(report.recoveryAfterRelease) === JSON.stringify(['a']) &&
+      Array.isArray(report.bothRaysBlocked) &&
+      (report.bothRaysBlocked as Array<{ rayVisible: boolean }>).every(
+        (item) => item.rayVisible === false,
+      ) &&
       Math.abs(
         Number((report.keyborbLift as { idle: number }).idle) -
           Number((report.keyborbLift as { expected: number }).expected),
