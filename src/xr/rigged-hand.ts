@@ -75,7 +75,6 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
   let controllerMode = false;
   let wristOffset = 0;
   let palmLength = 1;
-  let palmWidth = 1;
   const curls = [0, 0, 0, 0];
   const drivers: JointDriver[] = [];
   const probes: HandContactProbe[] = [];
@@ -137,10 +136,7 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
       }
       authored.updateMatrixWorld(true);
       const middleBase = candidate.skeleton.getBoneByName('middle_01') as THREE.Bone;
-      const indexBase = candidate.skeleton.getBoneByName('index_01') as THREE.Bone;
-      const outerBase = candidate.skeleton.getBoneByName('outer_01') as THREE.Bone;
       palmLength = middleBase.getWorldPosition(position).y - wristOffset;
-      palmWidth = indexBase.getWorldPosition(position).x - outerBase.getWorldPosition(target).x;
       for (const [digit, name] of DIGITS.entries()) {
         for (let part = 0; part < 3; part++) {
           const bone = candidate.skeleton.bones.find(
@@ -201,22 +197,12 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
     authored.scale.set(1, 1, 1);
     if (!controllerMode) {
       const middle = tracked.joints?.['middle-finger-phalanx-proximal'];
-      const index = tracked.joints?.['index-finger-phalanx-proximal'];
-      const outer = tracked.joints?.['ring-finger-phalanx-proximal'];
       if (middle?.visible) {
         middle.getWorldPosition(position).sub(fallback.root.userData.wristPosition);
-        authored.scale.y = THREE.MathUtils.clamp(position.dot(forward) / palmLength, 0.5, 1.25);
-      }
-      if (index?.visible && outer?.visible) {
-        index.getWorldPosition(position);
-        outer.getWorldPosition(target);
-        authored.scale.x = THREE.MathUtils.clamp(
-          position.sub(target).dot(across) / palmWidth,
-          0.5,
-          1.25,
+        authored.scale.setScalar(
+          THREE.MathUtils.clamp(position.dot(forward) / palmLength, 0.5, 1.25),
         );
       }
-      authored.scale.z = 0.85;
     }
     authored.position
       .copy(fallback.root.userData.wristPosition as THREE.Vector3)
@@ -247,7 +233,7 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
             parentRotation.copy(authored.quaternion).multiply(driver.worldRest);
             referenceDirection.set(0, 1, 0).applyQuaternion(parentRotation);
             rotation.setFromUnitVectors(referenceDirection, direction).multiply(parentRotation);
-            segmentScale.set(1, length / driver.length, 1);
+            segmentScale.set(authored.scale.x, length / driver.length, authored.scale.z);
             inverseParent.copy(bone.parent.matrixWorld).invert();
             // World-space fitting avoids inheriting a parent's nonuniform stretch.
             bone.matrix.compose(position, rotation, segmentScale).premultiply(inverseParent);

@@ -375,6 +375,13 @@ async function main(): Promise<void> {
               );
               const anchor = root.userData.armAnchor as import('three').Vector3;
               const wrist = root.userData.wristPosition as import('three').Vector3;
+              const model = root.getObjectByName('authored-hand-root');
+              if (
+                !model ||
+                Math.abs(model.scale.x - model.scale.y) > 1e-6 ||
+                Math.abs(model.scale.z - model.scale.y) > 1e-6
+              )
+                throw new Error('Tracked hand proportions are scaled unevenly');
               const skin = root.getObjectByName(
                 'authored-hand-skin',
               ) as import('three').SkinnedMesh;
@@ -397,6 +404,7 @@ async function main(): Promise<void> {
                 sag: (anchor.y + wrist.y) / 2 - middle.y,
                 indexError: indexEnd.distanceTo(root.userData.indexTip),
                 thumbError: thumbEnd.distanceTo(root.userData.thumbTip),
+                modelScale: model.scale.toArray(),
               };
             });
         });

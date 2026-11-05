@@ -87,6 +87,9 @@ describe('authored rigged hand', () => {
       const originalPositions = mesh.skeleton.bones.map((bone) => bone.position.clone());
       const source = trackedSource(side);
       hand.update(source, new THREE.PerspectiveCamera(), side, 1 / 60);
+      const authored = hand.root.getObjectByName('authored-hand-root') as THREE.Group;
+      expect(authored.scale.x).toBeCloseTo(authored.scale.y);
+      expect(authored.scale.z).toBeCloseTo(authored.scale.y);
       for (const [digit, jointName] of [
         ['thumb', 'thumb-tip'],
         ['index', 'index-finger-tip'],
@@ -95,6 +98,10 @@ describe('authored rigged hand', () => {
       ] as const) {
         const bone = mesh.skeleton.getBoneByName(`${digit}_03`) as THREE.Bone;
         const tip = bone.localToWorld(new THREE.Vector3(0, bone.userData.restLength, 0));
+        for (const axis of [0, 2])
+          expect(
+            new THREE.Vector3().setFromMatrixColumn(bone.matrixWorld, axis).length(),
+          ).toBeCloseTo(authored.scale.y);
         const joint = source.joints[jointName];
         expect(tip.distanceTo(joint.getWorldPosition(new THREE.Vector3()))).toBeLessThan(1e-5);
       }
