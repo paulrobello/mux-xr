@@ -327,8 +327,21 @@ async function main(): Promise<void> {
           hand.joints[name].position.fromArray(point);
           hand.joints[name].visible = true;
         }
-        if (kind === 'index-pinch')
-          hand.joints['index-finger-tip'].position.copy(hand.joints['thumb-tip'].position);
+        if (kind === 'index-pinch') {
+          const wrist = hand.joints.wrist.position;
+          const pinch: Record<string, [number, number, number]> = {
+            'thumb-metacarpal': [0.035, 0.018, 0],
+            'thumb-phalanx-proximal': [0.055, 0.04, 0.008],
+            'thumb-phalanx-distal': [0.075, 0.075, 0.022],
+            'thumb-tip': [0.075, 0.1, 0.03],
+            'index-finger-phalanx-proximal': [0.03, 0.075, 0],
+            'index-finger-phalanx-intermediate': [0.04, 0.108, 0.02],
+            'index-finger-phalanx-distal': [0.055, 0.124, 0.03],
+            'index-finger-tip': [0.065, 0.112, 0.03],
+          };
+          for (const [name, [x, y, z]] of Object.entries(pinch))
+            hand.joints[name].position.copy(wrist).add(new T.Vector3(-x, y, -z));
+        }
         if (kind === 'upturned') {
           const wrist = hand.joints.wrist.position.clone();
           const rotation = new T.Quaternion().setFromAxisAngle(new T.Vector3(1, 0, 0), Math.PI / 6);
@@ -362,6 +375,17 @@ async function main(): Promise<void> {
               );
               const anchor = root.userData.armAnchor as import('three').Vector3;
               const wrist = root.userData.wristPosition as import('three').Vector3;
+              const skin = root.getObjectByName(
+                'authored-hand-skin',
+              ) as import('three').SkinnedMesh;
+              const index = skin.skeleton.getBoneByName('index_03') as import('three').Bone;
+              const thumb = skin.skeleton.getBoneByName('thumb_03') as import('three').Bone;
+              const indexEnd = index.localToWorld(
+                new w.__questThree.Vector3(0, index.userData.restLength, 0),
+              );
+              const thumbEnd = thumb.localToWorld(
+                new w.__questThree.Vector3(0, thumb.userData.restLength, 0),
+              );
               const middle = new w.__questThree.Vector3();
               for (let i = 0; i < 10; i++)
                 middle.add(new w.__questThree.Vector3().fromBufferAttribute(points, 120 + i));
@@ -371,13 +395,28 @@ async function main(): Promise<void> {
                 visible: root.visible,
                 endpointError: endpoint.distanceTo(wrist),
                 sag: (anchor.y + wrist.y) / 2 - middle.y,
+                indexError: indexEnd.distanceTo(root.userData.indexTip),
+                thumbError: thumbEnd.distanceTo(root.userData.thumbTip),
               };
             });
         });
-        const open = report.open as Array<{ visible: boolean; endpointError: number; sag: number }>;
+        const open = report.open as Array<{
+          visible: boolean;
+          endpointError: number;
+          sag: number;
+          indexError: number;
+          thumbError: number;
+        }>;
         if (
           open.length !== 2 ||
-          open.some((hand) => !hand.visible || hand.endpointError > 1e-5 || hand.sag <= 0)
+          open.some(
+            (hand) =>
+              !hand.visible ||
+              hand.endpointError > 1e-5 ||
+              hand.sag <= 0 ||
+              hand.indexError > 1e-5 ||
+              hand.thumbError > 1e-5,
+          )
         )
           throw new Error(`Open hand geometry failed: ${JSON.stringify(open)}`);
       }
@@ -489,6 +528,19 @@ async function main(): Promise<void> {
     )
       throw new Error(`Controller finger isolation failed: ${JSON.stringify(controllerTips)}`);
     report.controllerTips = controllerTips;
+    report.watchTime = await page.evaluate(() => {
+      const w = window as unknown as FixtureWindow;
+      const face = w.__questScene
+        .getObjectByName('xr-wrist-menu-watch')
+        ?.children.find((node) => node.userData.inputAction === 'wristMenu');
+      const expected = [Date.now(), Date.now() - 1000].map((stamp) => {
+        const date = new Date(stamp);
+        return `${date.getHours() % 12 || 12}:${String(date.getMinutes()).padStart(2, '0')}\n${date.getHours() >= 12 ? 'PM' : 'AM'}`;
+      });
+      const actual = String(face?.userData.labelText);
+      if (!expected.includes(actual)) throw new Error(`Watch time mismatch: ${actual}`);
+      return actual;
+    });
     report.controllerRigs = controllerRigs;
     for (const side of ['left', 'right']) {
       const neutral = controllerRigs.open.find((hand) => hand.side === side);

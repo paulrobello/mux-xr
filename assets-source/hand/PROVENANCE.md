@@ -1,8 +1,16 @@
 # Authored hand source and rig
 
-The current runtime hand is the refitted version in `rig-v2`. It includes the longer, slimmer fingers and a palm side depth of 0.046822 m, about 1.0785 times the thumb-tip depth. The shoulder correction and base shaping are preserved in `join-review` and `base-review`. `rig-v2/pre-rig.blend` retains the corrected editing groups and final shape before reweighting.
+The active runtime hand is the precision-v3 candidate, with approximately 23–27 mm digit cross sections and a 30 mm source palm depth. Index and outer chains are straight, with the outer root moved inward to x=-42 mm. The active staged GLB, public hand.glb, and rig metadata are copies of precision-v3. GLB SHA-256 is `95714f02a92e58eba41a26ebf1e8197369c336da9844ce36d15bad147af51e0d`.
 
-The active `authored-hand.staged.glb`, `public/assets/hand.glb`, and `rig-metadata.json` are promoted copies of the rig-v2 outputs. GLB SHA-256 is `ec70d488639657fc3663506d5e97508cd064098d635d0c59e9573e7d26b90fd1`. The runtime requests a content-versioned URL to avoid stale mesh caching. Regeneration and pose checks are documented in `rig-v2/README.md`. Independent Astra review scored the refined shape and rig 87/100 after inspecting front/side poses, pinch, and application captures. A localized webbing crease remains visible in the fully closed grip.
+Every bone exports restLength in metres. Controller motion retains the authored dimensions. Tracked input fits the palm and finger segments to the measured joints, using independent world-space bone transforms to prevent inherited stretch. The source mesh and corrected Edit selections remain editable in the saved owner file. Independent Astra review scored the source and runtime result 87/100 after inspecting the straight chains, slim silhouette and tracked pinch. Exact tracked endpoint correspondence and controller restoration passed both-handed unit tests.
+
+The VR, passthrough and Keyborb browser checks passed on Apple M4 Max Metal, including local 12-hour watch time and one character per pinch. Evidence is retained in `.local/evidence/precision-watch-1105` in the primary checkout. Physical Quest typing comfort remains owner acceptance.
+
+## Refitted rig history
+
+The previous runtime hand was the refitted version in `rig-v2`. It includes the longer, slimmer fingers and a palm side depth of 0.046822 m, about 1.0785 times the thumb-tip depth. The shoulder correction and base shaping are preserved in `join-review` and `base-review`. `rig-v2/pre-rig.blend` retains the corrected editing groups and final shape before reweighting.
+
+The rig-v2 outputs were promoted at commit c9acafb. GLB SHA-256 is `ec70d488639657fc3663506d5e97508cd064098d635d0c59e9573e7d26b90fd1`. The runtime requests a content-versioned URL to avoid stale mesh caching. Regeneration and pose checks are documented in `rig-v2/README.md`. Independent Astra review scored the refined shape and rig 87/100 after inspecting front/side poses, pinch, and application captures. A localized webbing crease remains visible in the fully closed grip.
 
 Both native Metal browser fixtures passed with the new rig, including VR, transparent passthrough, controller finger isolation, watch reload, and Keyborb pinch deduplication. Physical Quest comfort remains owner testing. Evidence is retained in `.local/evidence/hand-v2-1105` in the primary checkout.
 

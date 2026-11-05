@@ -1581,6 +1581,7 @@ export function createWorkspaceScene(
           leftVisual = visual;
         } else rightVisual = visual;
       }
+      wristWatch.updateTime(Date.now());
       wristWatch.setVisible(Boolean(rightVisual?.root.visible));
       if (rightVisual?.root.visible)
         wristWatch.update(

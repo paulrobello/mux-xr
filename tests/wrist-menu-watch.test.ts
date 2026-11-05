@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('../src/xr/labels', () => import('./helpers/labels'));
+
 import type { HandContactProbe } from '../src/xr/hand-contact';
+import { createScalableLabel } from '../src/xr/labels';
 import { createWristMenuWatch } from '../src/xr/wrist-menu-watch';
 
 function makeWatch(): ReturnType<typeof createWristMenuWatch> {
-  return createWristMenuWatch(
-    new THREE.Mesh(new THREE.PlaneGeometry(0.04, 0.03), new THREE.MeshBasicMaterial()),
-  );
+  return createWristMenuWatch(createScalableLabel('Menu', 0.052, 0.035));
 }
 
 function probe(
@@ -74,6 +76,23 @@ describe('wrist menu watch', () => {
     expect(forward).toEqual(new THREE.Vector3(0, 1, 0));
     expect(normal).toEqual(new THREE.Vector3(0, 0, 1));
     expect(watch.root.position.distanceTo(new THREE.Vector3(1, 2.012, 3.03))).toBeLessThan(1e-6);
+    watch.dispose();
+  });
+
+  it('shows local 12-hour time and updates only when the minute changes', () => {
+    const watch = makeWatch();
+    const button = watch.root.children.find((child) => child.userData.inputAction === 'wristMenu');
+    expect(button).toBeDefined();
+    const noon = new Date(2026, 0, 2, 12, 0, 5, 0).getTime();
+    watch.updateTime(noon);
+    expect(button?.userData.labelText).toBe('12:00\nPM');
+    watch.updateTime(noon + 30_000);
+    expect(button?.userData.labelText).toBe('12:00\nPM');
+    watch.updateTime(noon + 60_000);
+    expect(button?.userData.labelText).toBe('12:01\nPM');
+    const midnight = new Date(2026, 0, 3, 0, 0, 1, 0).getTime();
+    watch.updateTime(midnight);
+    expect(button?.userData.labelText).toBe('12:00\nAM');
     watch.dispose();
   });
 

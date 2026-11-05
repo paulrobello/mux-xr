@@ -38,7 +38,74 @@ function authoredMeshes(root: THREE.Object3D): THREE.SkinnedMesh[] {
   return meshes;
 }
 
+function trackedSource(
+  side: 'left' | 'right',
+): THREE.Group & { joints: Record<string, THREE.Group> } {
+  const source = new THREE.Group() as THREE.Group & { joints: Record<string, THREE.Group> };
+  source.joints = {};
+  const points: Record<string, number[]> = {
+    wrist: [0, 0, 0],
+    'thumb-metacarpal': [0.035, 0.018, 0],
+    'thumb-phalanx-proximal': [0.055, 0.03, 0],
+    'thumb-phalanx-distal': [0.075, 0.045, 0],
+    'thumb-tip': [0.09, 0.06, 0],
+  };
+  for (const [finger, x, length] of [
+    ['index-finger', 0.03, 0.16],
+    ['middle-finger', 0, 0.18],
+    ['ring-finger', -0.028, 0.16],
+    ['pinky-finger', -0.052, 0.13],
+  ] as const) {
+    for (const [part, fraction] of [
+      ['phalanx-proximal', 0.47],
+      ['phalanx-intermediate', 0.67],
+      ['phalanx-distal', 0.85],
+      ['tip', 1],
+    ] as const)
+      points[`${finger}-${part}`] = [x, length * fraction, 0];
+  }
+  const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.2, -0.4, 0.3));
+  for (const [name, point] of Object.entries(points)) {
+    const joint = new THREE.Group();
+    joint.position.fromArray(point);
+    joint.position.x *= side === 'left' ? 1 : -1;
+    joint.position.applyQuaternion(rotation).add(new THREE.Vector3(0.2, 1.2, -0.6));
+    joint.quaternion.copy(rotation);
+    source.joints[name] = joint;
+    source.add(joint);
+  }
+  return source;
+}
+
 describe('authored rigged hand', () => {
+  it.each(['left', 'right'] as const)(
+    'aligns %s tracked fingertips and restores controller poses',
+    async (side) => {
+      const hand = createRiggedHand({ loader: parsedLoader() });
+      await hand.assetReady;
+      const mesh = authoredMeshes(hand.root)[0];
+      const originalPositions = mesh.skeleton.bones.map((bone) => bone.position.clone());
+      const source = trackedSource(side);
+      hand.update(source, new THREE.PerspectiveCamera(), side, 1 / 60);
+      for (const [digit, jointName] of [
+        ['thumb', 'thumb-tip'],
+        ['index', 'index-finger-tip'],
+        ['middle', 'middle-finger-tip'],
+        ['outer', 'ring-finger-tip'],
+      ] as const) {
+        const bone = mesh.skeleton.getBoneByName(`${digit}_03`) as THREE.Bone;
+        const tip = bone.localToWorld(new THREE.Vector3(0, bone.userData.restLength, 0));
+        const joint = source.joints[jointName];
+        expect(tip.distanceTo(joint.getWorldPosition(new THREE.Vector3()))).toBeLessThan(1e-5);
+      }
+      hand.updateController(new THREE.Group(), new THREE.PerspectiveCamera(), side, undefined, 1);
+      for (const [index, bone] of mesh.skeleton.bones.entries()) {
+        expect(bone.position.distanceTo(originalPositions[index])).toBeLessThan(1e-6);
+        expect(bone.matrixAutoUpdate).toBe(true);
+      }
+      hand.dispose();
+    },
+  );
   it('keeps rendered contact probes attached through controller rotation and translation', async () => {
     const hand = createRiggedHand({ loader: parsedLoader() });
     await hand.assetReady;
@@ -47,7 +114,7 @@ describe('authored rigged hand', () => {
     hand.updateController(pose, camera, 'left', undefined, 1 / 60);
     const wristJoint = hand.root.getObjectByName('authored-hand-wrist') as THREE.Mesh;
     const wrist = hand.root.userData.wristPosition as THREE.Vector3;
-    expect(wristJoint.position.distanceTo(wrist)).toBeCloseTo(0.006);
+    expect(wristJoint.position.distanceTo(wrist)).toBeCloseTo(0.003);
     expect((wristJoint.geometry as THREE.SphereGeometry).parameters.radius).toBeGreaterThan(
       wristJoint.position.distanceTo(wrist) + 0.014,
     );

@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { type CartoonHand, createCartoonHand } from './cartoon-hand';
 import type { HandContactProbe } from './hand-contact';
 
-export const RIGGED_HAND_ASSET_URL = '/assets/hand.glb?v=ec70d4886396';
+export const RIGGED_HAND_ASSET_URL = '/assets/hand.glb?v=95714f02a92e';
 const DIGITS = ['thumb', 'index', 'middle', 'outer'] as const;
 const JOINTS = [
   ['thumb-metacarpal', 'thumb-phalanx-proximal', 'thumb-phalanx-distal', 'thumb-tip'],
@@ -37,7 +37,10 @@ export interface RiggedHand extends CartoonHand {
 interface JointDriver {
   bone: THREE.Bone;
   rest: THREE.Quaternion;
-  direction: THREE.Vector3;
+  restPosition: THREE.Vector3;
+  restScale: THREE.Vector3;
+  worldRest: THREE.Quaternion;
+  length: number;
   curlAxis: THREE.Vector3;
   digit: number;
   part: number;
@@ -59,7 +62,7 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
   const originalController = fallback.updateController.bind(fallback);
   const skin = fallback.root.getObjectByName('cartoon-hand-skin');
   const wristJoint = new THREE.Mesh(
-    new THREE.SphereGeometry(0.023, 16, 12),
+    new THREE.SphereGeometry(0.019, 16, 12),
     (skin as THREE.Mesh).material,
   );
   wristJoint.name = 'authored-hand-wrist';
@@ -71,6 +74,8 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
   let disposed = false;
   let controllerMode = false;
   let wristOffset = 0;
+  let palmLength = 1;
+  let palmWidth = 1;
   const curls = [0, 0, 0, 0];
   const drivers: JointDriver[] = [];
   const probes: HandContactProbe[] = [];
@@ -84,6 +89,9 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
   const basis = new THREE.Matrix4();
   const rotation = new THREE.Quaternion();
   const parentRotation = new THREE.Quaternion();
+  const referenceDirection = new THREE.Vector3();
+  const segmentScale = new THREE.Vector3();
+  const inverseParent = new THREE.Matrix4();
   const assetReady = (options.loader ?? new GLTFLoader())
     .loadAsync(options.assetUrl ?? RIGGED_HAND_ASSET_URL)
     .then((gltf) => {
@@ -103,7 +111,10 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
       if (
         meshes.length !== 1 ||
         candidate.skeleton.bones.length !== names.length ||
-        names.some((name) => !candidate.skeleton.bones.some((bone) => bone.name === name))
+        names.some((name) => !candidate.skeleton.bones.some((bone) => bone.name === name)) ||
+        candidate.skeleton.bones.some(
+          (bone) => !Number.isFinite(bone.userData.restLength) || bone.userData.restLength <= 0,
+        )
       ) {
         disposeAsset(gltf.scene);
         fallback.root.userData.handAsset = 'fallback';
@@ -125,6 +136,11 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
         armMaterial.copy(material);
       }
       authored.updateMatrixWorld(true);
+      const middleBase = candidate.skeleton.getBoneByName('middle_01') as THREE.Bone;
+      const indexBase = candidate.skeleton.getBoneByName('index_01') as THREE.Bone;
+      const outerBase = candidate.skeleton.getBoneByName('outer_01') as THREE.Bone;
+      palmLength = middleBase.getWorldPosition(position).y - wristOffset;
+      palmWidth = indexBase.getWorldPosition(position).x - outerBase.getWorldPosition(target).x;
       for (const [digit, name] of DIGITS.entries()) {
         for (let part = 0; part < 3; part++) {
           const bone = candidate.skeleton.bones.find(
@@ -136,11 +152,14 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
           const curlAxis = new THREE.Vector3()
             .crossVectors(restDirection, new THREE.Vector3(0, 0, 1))
             .normalize();
-          curlAxis.applyQuaternion(worldRotation.invert());
+          curlAxis.applyQuaternion(parentRotation.copy(worldRotation).invert());
           drivers.push({
             bone,
             rest,
-            direction: new THREE.Vector3(0, 1, 0).applyQuaternion(rest),
+            restPosition: bone.position.clone(),
+            restScale: bone.scale.clone(),
+            worldRest: worldRotation,
+            length: bone.userData.restLength as number,
             curlAxis,
             digit,
             part,
@@ -157,7 +176,7 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
         probeVertices.push(index);
         probes.push({ point: new THREE.Vector3(), radius: 0.012 });
       }
-      probes.push({ point: wristJoint.position, radius: 0.023 });
+      probes.push({ point: wristJoint.position, radius: 0.019 });
       fallback.root.add(authored);
       if (skin) skin.visible = false;
       fallback.root.userData.handAsset = 'loaded';
@@ -172,20 +191,43 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
     originalUpdate(source, camera, side, deltaSeconds);
     wristJoint.position
       .copy(fallback.root.userData.wristPosition as THREE.Vector3)
-      .addScaledVector(fallback.root.userData.palmForward as THREE.Vector3, 0.006);
+      .addScaledVector(fallback.root.userData.palmForward as THREE.Vector3, 0.003);
     if (!authored || !mesh || !fallback.root.visible) return;
     forward.copy(fallback.root.userData.palmForward as THREE.Vector3);
     normal.copy(fallback.root.userData.wristBackNormal as THREE.Vector3).negate();
     across.crossVectors(forward, normal).normalize();
     basis.makeBasis(across, forward, normal);
+    const tracked = source as TrackedHand;
+    authored.scale.set(1, 1, 1);
+    if (!controllerMode) {
+      const middle = tracked.joints?.['middle-finger-phalanx-proximal'];
+      const index = tracked.joints?.['index-finger-phalanx-proximal'];
+      const outer = tracked.joints?.['ring-finger-phalanx-proximal'];
+      if (middle?.visible) {
+        middle.getWorldPosition(position).sub(fallback.root.userData.wristPosition);
+        authored.scale.y = THREE.MathUtils.clamp(position.dot(forward) / palmLength, 0.5, 1.25);
+      }
+      if (index?.visible && outer?.visible) {
+        index.getWorldPosition(position);
+        outer.getWorldPosition(target);
+        authored.scale.x = THREE.MathUtils.clamp(
+          position.sub(target).dot(across) / palmWidth,
+          0.5,
+          1.25,
+        );
+      }
+      authored.scale.z = 0.85;
+    }
     authored.position
       .copy(fallback.root.userData.wristPosition as THREE.Vector3)
-      .addScaledVector(forward, -wristOffset);
+      .addScaledVector(forward, -wristOffset * authored.scale.y);
     authored.quaternion.setFromRotationMatrix(basis);
     authored.updateMatrixWorld(true);
-    const tracked = source as TrackedHand;
     for (const driver of drivers) {
       const { bone, rest, digit, part } = driver;
+      bone.matrixAutoUpdate = true;
+      bone.position.copy(driver.restPosition);
+      bone.scale.copy(driver.restScale);
       bone.quaternion.copy(rest);
       if (controllerMode) {
         const angle =
@@ -199,11 +241,18 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
           start.getWorldPosition(position);
           end.getWorldPosition(target);
           direction.copy(target).sub(position);
-          if (direction.lengthSq() > 1e-8) {
-            bone.parent.getWorldQuaternion(parentRotation).invert();
-            direction.normalize().applyQuaternion(parentRotation);
-            rotation.setFromUnitVectors(driver.direction, direction);
-            bone.quaternion.copy(rotation).multiply(rest);
+          const length = direction.length();
+          if (length > 1e-4) {
+            direction.divideScalar(length);
+            parentRotation.copy(authored.quaternion).multiply(driver.worldRest);
+            referenceDirection.set(0, 1, 0).applyQuaternion(parentRotation);
+            rotation.setFromUnitVectors(referenceDirection, direction).multiply(parentRotation);
+            segmentScale.set(1, length / driver.length, 1);
+            inverseParent.copy(bone.parent.matrixWorld).invert();
+            // World-space fitting avoids inheriting a parent's nonuniform stretch.
+            bone.matrix.compose(position, rotation, segmentScale).premultiply(inverseParent);
+            bone.matrixAutoUpdate = false;
+            bone.matrixWorldNeedsUpdate = true;
           }
         }
       }

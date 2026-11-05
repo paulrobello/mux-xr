@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import type { HandContactProbe } from './hand-contact';
+import { updateScalableLabel } from './labels';
 
 export interface WristMenuWatch {
   root: THREE.Group;
   update(wrist: THREE.Vector3, forward: THREE.Vector3, backNormal: THREE.Vector3): void;
+  updateTime(nowMs: number): void;
   setVisible(visible: boolean): void;
   updateTouch(probes: readonly HandContactProbe[] | null): boolean;
   readonly near: boolean;
@@ -39,6 +41,20 @@ export function createWristMenuWatch(button: THREE.Mesh): WristMenuWatch {
   let near = false;
   let armed = false;
   let disposed = false;
+  const date = new Date();
+  let lastMinute = Number.NaN;
+
+  const updateTime = (nowMs: number): void => {
+    if (disposed || !Number.isFinite(nowMs)) return;
+    const minute = Math.floor(nowMs / 60000);
+    if (minute === lastMinute) return;
+    lastMinute = minute;
+    date.setTime(nowMs);
+    const hours = date.getHours();
+    const hour = hours % 12 || 12;
+    const suffix = hours >= 12 ? 'PM' : 'AM';
+    updateScalableLabel(button, `${hour}:${String(date.getMinutes()).padStart(2, '0')}\n${suffix}`);
+  };
 
   const update = (
     wrist: THREE.Vector3,
@@ -121,6 +137,7 @@ export function createWristMenuWatch(button: THREE.Mesh): WristMenuWatch {
   return {
     root,
     update,
+    updateTime,
     setVisible,
     updateTouch,
     get near() {
