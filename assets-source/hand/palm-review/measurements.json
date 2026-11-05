@@ -1,0 +1,32 @@
+{
+  "palm_thickness_before": 0.07211199775338173,
+  "palm_thickness_after": 0.0620163194835186,
+  "reduction_percent": 13.999998036928174,
+  "palm_vertices": 766,
+  "fixed_non_palm_vertices": 2084,
+  "finger_vertices_unchanged": 2052,
+  "transition_distance": 0.035,
+  "invariants_before": {
+    "groups_weights": "bee9ce0ed3e6988c4fab39fb5206d7a747fc4c4e8192cfcaa3109610979599ff",
+    "topology": "ee6a3971ccb34001ddc94510e73614b58e017164488fcb5bb4624bb5b1305b86",
+    "non_palm_coordinates": "d11a609df035b7d242bca627212c155a7002a0766310630e58834b8d54cbb23d",
+    "finger_coordinates": "f5326aa387e9f8551c0da23462df091ca39413e39be70a67626724768bf01a29",
+    "all_xz": "5a45498b8badf88a3410b6edec5546e51f213dc9c7d44ee2f03e40d4b3070e9d",
+    "action_names_and_ranges": "c54ab7e3b91892d39ea9889055958c4e12d47fabdd69e022305fe033f03225d4",
+    "bone_rest_positions": "6f1eb73c40356f1f6e302b568a113ed20c0f65df1e8a2e9af8931c03e3e2012c"
+  },
+  "invariants_after": {
+    "groups_weights": "bee9ce0ed3e6988c4fab39fb5206d7a747fc4c4e8192cfcaa3109610979599ff",
+    "topology": "ee6a3971ccb34001ddc94510e73614b58e017164488fcb5bb4624bb5b1305b86",
+    "non_palm_coordinates": "d11a609df035b7d242bca627212c155a7002a0766310630e58834b8d54cbb23d",
+    "finger_coordinates": "f5326aa387e9f8551c0da23462df091ca39413e39be70a67626724768bf01a29",
+    "all_xz": "5a45498b8badf88a3410b6edec5546e51f213dc9c7d44ee2f03e40d4b3070e9d",
+    "action_names_and_ranges": "c54ab7e3b91892d39ea9889055958c4e12d47fabdd69e022305fe033f03225d4",
+    "bone_rest_positions": "6f1eb73c40356f1f6e302b568a113ed20c0f65df1e8a2e9af8931c03e3e2012c"
+  },
+  "mesh_validation": {
+    "open_edges": 0,
+    "nonmanifold_edges": 0,
+    "zero_area_faces": 0
+  }
+}
