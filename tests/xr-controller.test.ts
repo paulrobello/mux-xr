@@ -397,8 +397,15 @@ describe('native XR controller event routing', () => {
       contactKey(workspace, hand, 'a', 0.004, 40);
       fakeXR.frame?.(60);
       expect(actions.sendKey).not.toHaveBeenCalled();
-      hand.joints['index-finger-tip'].position.copy(hand.joints['thumb-tip'].position);
+      const orb = objectWithData(workspace, { inputAction: 'key', key: 'a' });
+      const point = orb.getWorldPosition(new THREE.Vector3());
+      hand.joints['index-finger-tip'].position.copy(point).add(new THREE.Vector3(0.04, 0, 0));
+      hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(-0.04, 0, 0));
       fakeXR.frame?.(80);
+      hand.joints['index-finger-tip'].position.copy(point).add(new THREE.Vector3(0.02, 0, 0));
+      hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(-0.02, 0, 0));
+      fakeXR.frame?.(90);
+      expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
       hit(workspace, { key: 'a' });
       for (let frame = 0; frame < 20; frame++) fakeXR.frame?.(100 + frame * 16);
       expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
@@ -410,7 +417,7 @@ describe('native XR controller event routing', () => {
       expect(
         (fakeXR.controllers[0] as THREE.Group).children.find((child) => child instanceof THREE.Line)
           ?.visible,
-      ).toBe(true);
+      ).toBe(false);
       workspace.setKeyborbMode('off');
       expect(workspace.state.keyborbEnabled).toBe(false);
       workspace.setKeyborbMode('on');
@@ -431,6 +438,71 @@ describe('native XR controller event routing', () => {
       expect(workspace.state.keyborbEnabled).toBe(true);
       nativeEvent(0, 'disconnected');
       expect(workspace.state.keyborbEnabled).toBe(false);
+    });
+
+    it('keeps forgiving pinch modifier holds and cancels held pinches when retargeting', () => {
+      const { workspace, actions } = setup('on');
+      workspace.showInput('keyboard');
+      const hand = connectHand();
+      const pose = (key: string, gap: number, time: number): void => {
+        const button = objectWithData(workspace, { inputAction: 'key', key });
+        const point = button.getWorldPosition(new THREE.Vector3());
+        hand.joints['index-finger-tip'].position.copy(point);
+        hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(gap, 0, 0));
+        hand.joints['middle-finger-tip'].position
+          .copy(hand.joints['thumb-tip'].position)
+          .add(new THREE.Vector3(0, 0.12, 0));
+        fakeXR.frame?.(time);
+      };
+      pose('Shift', 0.08, 100);
+      pose('Shift', 0.04, 120);
+      expect(objectWithData(workspace, { key: 'Shift' }).userData.activeState).toBe(true);
+      nativeEvent(0, 'selectend');
+      fakeXR.frame?.(800);
+      const shift = objectWithData(workspace, { key: 'Shift' });
+      expect(shift.userData.locked).toBe(true);
+      expect(shift.userData.keyborbLabel.userData.labelText).toBe('Shift\nlock');
+      pose('Shift', 0.08, 900);
+      pose('b', 0.04, 920);
+      expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('b', { shift: true });
+      workspace.selectTerminal('pane-b');
+      fakeXR.frame?.(940);
+      expect(actions.sendKey).toHaveBeenCalledTimes(1);
+      pose('b', 0.08, 960);
+      pose('b', 0.04, 980);
+      expect(actions.sendKey).toHaveBeenLastCalledWith('b', undefined);
+      expect(actions.sendKey).toHaveBeenCalledTimes(2);
+      expect(workspace.state.inputTargetId).toBe('pane-b');
+    });
+
+    it('accepts both hands pinching separate orbs in the same frame', () => {
+      const { workspace, actions } = setup('on');
+      workspace.showInput('keyboard');
+      const hands = [connectHand(0), connectHand(1)];
+      const points = ['a', 'b'].map((key) =>
+        objectWithData(workspace, { inputAction: 'key', key }).getWorldPosition(
+          new THREE.Vector3(),
+        ),
+      );
+      const pose = (gap: number): void => {
+        for (const [index, hand] of hands.entries()) {
+          hand.joints['index-finger-tip'].position.copy(points[index]);
+          hand.joints['thumb-tip'].position.copy(points[index]).add(new THREE.Vector3(gap, 0, 0));
+          hand.joints['middle-finger-tip'].position
+            .copy(hand.joints['thumb-tip'].position)
+            .add(new THREE.Vector3(0, 0.12, 0));
+        }
+      };
+      pose(0.08);
+      fakeXR.frame?.(100);
+      pose(0.04);
+      fakeXR.frame?.(120);
+      expect(vi.mocked(actions.sendKey).mock.calls).toEqual([
+        ['a', undefined],
+        ['b', undefined],
+      ]);
+      fakeXR.frame?.(140);
+      expect(actions.sendKey).toHaveBeenCalledTimes(2);
     });
 
     it('hides only the near hand ray and types once per index poke without ray selection', () => {

@@ -66,6 +66,60 @@ describe('cartoon tracked hands', () => {
     expect(Array.from(positions.array)).not.toEqual(open);
     visual.dispose();
   });
+  it('curls controller fingers toward the palm for both handednesses and poses', () => {
+    const camera = new THREE.PerspectiveCamera();
+    const left = createCartoonHand();
+    const right = createCartoonHand();
+    const leftPose = new THREE.Group();
+    const rightPose = new THREE.Group();
+    leftPose.position.set(-0.2, 1.2, -0.5);
+    rightPose.position.set(0.2, 1.2, -0.5);
+    const poseRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.35, -0.4, 0.2));
+    leftPose.quaternion.copy(poseRotation);
+    rightPose.quaternion.copy(poseRotation);
+    const leftButtons = Array.from({ length: 6 }, () => ({ pressed: false, value: 0 }));
+    const rightButtons = Array.from({ length: 6 }, () => ({ pressed: false, value: 0 }));
+    left.updateController(
+      leftPose,
+      camera,
+      'left',
+      { buttons: leftButtons } as unknown as Gamepad,
+      1,
+    );
+    right.updateController(
+      rightPose,
+      camera,
+      'right',
+      { buttons: rightButtons } as unknown as Gamepad,
+      1,
+    );
+    const leftOpen = (left.root.userData.indexTip as THREE.Vector3).clone();
+    const rightOpen = (right.root.userData.indexTip as THREE.Vector3).clone();
+    leftButtons[0].value = 1;
+    rightButtons[0].value = 1;
+    left.updateController(
+      leftPose,
+      camera,
+      'left',
+      { buttons: leftButtons } as unknown as Gamepad,
+      1,
+    );
+    right.updateController(
+      rightPose,
+      camera,
+      'right',
+      { buttons: rightButtons } as unknown as Gamepad,
+      1,
+    );
+    const leftDelta = (left.root.userData.indexTip as THREE.Vector3).clone().sub(leftOpen);
+    const rightDelta = (right.root.userData.indexTip as THREE.Vector3).clone().sub(rightOpen);
+    const leftBack = left.root.userData.wristBackNormal as THREE.Vector3;
+    const rightBack = right.root.userData.wristBackNormal as THREE.Vector3;
+    expect(leftDelta.dot(leftBack.clone().negate())).toBeGreaterThan(0.03);
+    expect(rightDelta.dot(rightBack.clone().negate())).toBeGreaterThan(0.03);
+    left.dispose();
+    right.dispose();
+  });
   it('uses rounded opaque orange skin and a continuous arm without any picking surfaces', () => {
     const visual = createCartoonHand();
     visual.update(trackedHand('right'), new THREE.PerspectiveCamera(), 'right', 1 / 90);

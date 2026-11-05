@@ -161,6 +161,8 @@ The form language is compact and gently softened. Desktop containers use an 8px 
 
 ## Components
 
+Keyborb proximity feedback lifts the nearest orb to each hand's index or thumb by 0.75 of its diameter along the key's surface normal. Use resting centers for nearest-key selection so the lift cannot switch its own target. Ease the lift and restore it on departure, tracking loss, retargeting, mode changes or manipulation. Hide only that hand's ray while an orb is near. Index-thumb selection closes at 4.5 cm and rearms after opening to 6.5 cm. A held pinch and later native select events cannot repeat the key. Grabs retain their separate middle-thumb gesture. Controller fingers curl toward the palm normal, opposite the wrist-watch face, for both hands and all controller orientations.
+
 ### Buttons
 - **Shape:** Tight rectangular corners (4px), 34px minimum height for desktop controls.
 - **Primary:** Control navy fill, cool text, and 7px 10px padding.

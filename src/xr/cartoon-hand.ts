@@ -309,7 +309,7 @@ export function createCartoonHand(): CartoonHand {
       pose.getWorldQuaternion(controllerRotation);
       controllerAcross.set(side === 'left' ? 1 : -1, 0, 0).applyQuaternion(controllerRotation);
       controllerForward.set(0, 1, 0).applyQuaternion(controllerRotation);
-      controllerBend.set(0, 0, 1).applyQuaternion(controllerRotation);
+      controllerBend.crossVectors(controllerAcross, controllerForward).normalize();
       controllerPosition.addScaledVector(controllerForward, -0.045);
       const pressure = (index: number): number => {
         const button = gamepad?.buttons[index];

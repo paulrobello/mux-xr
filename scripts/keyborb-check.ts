@@ -130,6 +130,37 @@ async function targetSelect(page: Page, data: Record<string, unknown>): Promise<
   }, data);
   await frames(page);
 }
+async function targetSelectHold(
+  page: Page,
+  data: Record<string, unknown>,
+  holdFrames = 20,
+): Promise<void> {
+  await page.evaluate((data) => {
+    const w = window as unknown as FixtureWindow;
+    let target: import('three').Object3D | undefined;
+    w.__questScene.traverse((object) => {
+      if (!target && Object.entries(data).every(([key, value]) => object.userData[key] === value))
+        target = object;
+    });
+    if (!target) throw new Error(`XR target missing: ${JSON.stringify(data)}`);
+    const controller = w.__questControllers[0];
+    const q = target.getWorldQuaternion(new w.__questThree.Quaternion());
+    controller.position
+      .copy(target.getWorldPosition(new w.__questThree.Vector3()))
+      .add(new w.__questThree.Vector3(0, 0, 0.3).applyQuaternion(q));
+    controller.quaternion.copy(q);
+    w.__questScene.updateMatrixWorld(true);
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+  }, data);
+  await frames(page, holdFrames);
+  await page.evaluate(() => {
+    const w = window as unknown as FixtureWindow;
+    const controller = w.__questControllers[0];
+    controller.dispatchEvent({ type: 'select' } as never);
+    controller.dispatchEvent({ type: 'selectend' } as never);
+  });
+  await frames(page);
+}
 async function openKeyboard(page: Page): Promise<void> {
   await targetSelect(page, { inputAction: 'toggleRadial' });
   await waitFor(
@@ -277,7 +308,7 @@ async function main(): Promise<void> {
     await frames(page, 5);
     await openKeyboard(page);
     report.autoHands = await keyReport(page);
-    await page.evaluate(() => {
+    const orb = await page.evaluate(() => {
       const w = window as unknown as FixtureWindow;
       let key: import('three').Object3D | undefined;
       w.__questScene.traverse((object) => {
@@ -285,23 +316,69 @@ async function main(): Promise<void> {
       });
       if (!key) throw new Error('Pinch fixture key missing');
       const point = key.getWorldPosition(new w.__questThree.Vector3());
-      w.__questHands[0].joints['index-finger-tip'].position.copy(point);
+      return {
+        point: point.toArray(),
+        diameter: Number(key.userData.labelWidth),
+        base: key.position.toArray(),
+      };
+    });
+    await page.evaluate((point) => {
+      const w = window as unknown as FixtureWindow;
+      const index = w.__questHands[0].joints['index-finger-tip'];
+      index.position.fromArray(point as [number, number, number]);
+      w.__questHands[0].joints.wrist.position
+        .copy(index.position)
+        .add(new w.__questThree.Vector3(0.03, -0.12, 0.04));
+      w.__questHands[0].joints['middle-finger-tip'].position
+        .copy(index.position)
+        .add(new w.__questThree.Vector3(0.03, 0.04, 0.02));
+      w.__questHands[0].joints['thumb-tip'].position.copy(index.position).x -= 0.08;
+    }, orb.point);
+    await frames(page, 60);
+    report.contactInputs = inputs.length;
+    await page.screenshot({
+      path: join(checkedTestRoot, 'keyborb-keyboard-hover-a.png'),
+      fullPage: true,
+    });
+    (report.screenshots as string[]).push('keyborb-keyboard-hover-a.png');
+    const idleLift = await page.evaluate(() => {
+      const w = window as unknown as FixtureWindow;
+      let key: import('three').Object3D | undefined;
+      w.__questScene.traverse((object) => {
+        if (object.userData.inputAction === 'key' && object.userData.key === 'a') key = object;
+      });
+      return Number(key?.userData.keyborbLift ?? 0);
+    });
+    await page.evaluate(() => {
+      const w = window as unknown as FixtureWindow;
+      const index = w.__questHands[0].joints['index-finger-tip'];
+      w.__questHands[0].joints['thumb-tip'].position.copy(index.position).x -= 0.04;
+    });
+    await frames(page, 60);
+    report.pinchInputs = [...inputs];
+    const raisedLift = await page.evaluate(() => {
+      const w = window as unknown as FixtureWindow;
+      let key: import('three').Object3D | undefined;
+      w.__questScene.traverse((object) => {
+        if (object.userData.inputAction === 'key' && object.userData.key === 'a') key = object;
+      });
+      return Number(key?.userData.keyborbLift ?? 0);
+    });
+    report.keyborbLift = { idle: idleLift, raised: raisedLift, expected: orb.diameter * 0.75 };
+    await page.screenshot({
+      path: join(checkedTestRoot, 'keyborb-keyboard-raised-a.png'),
+      fullPage: true,
+    });
+    (report.screenshots as string[]).push('keyborb-keyboard-raised-a.png');
+    await targetSelectHold(page, { inputAction: 'key', key: 'a' });
+    report.nativePinchInputs = [...inputs];
+    await page.evaluate(() => {
+      const w = window as unknown as FixtureWindow;
+      const index = w.__questHands[0].joints['index-finger-tip'];
+      w.__questHands[0].joints['thumb-tip'].position.copy(index.position).x -= 0.08;
     });
     await frames(page, 5);
-    report.contactInputs = inputs.length;
-    await page.evaluate(() => {
-      const hand = (window as unknown as FixtureWindow).__questHands[0];
-      hand.joints['index-finger-tip'].position.copy(hand.joints['thumb-tip'].position);
-    });
-    await frames(page, 3);
-    await targetSelect(page, { inputAction: 'key', key: 'a' });
-    await frames(page, 20);
-    report.pinchInputs = [...inputs];
-    await page.evaluate(() => {
-      const hand = (window as unknown as FixtureWindow).__questHands[0];
-      hand.joints['index-finger-tip'].position.x += 0.08;
-    });
-    await frames(page);
+    report.releasedInputs = [...inputs];
     await page.screenshot({ path: join(checkedTestRoot, 'keyborb-xr-hands.png'), fullPage: true });
     (report.screenshots as string[]).push('keyborb-xr-hands.png');
     await page.locator('[data-action="settings"]').click();
@@ -325,7 +402,36 @@ async function main(): Promise<void> {
     await select.selectOption('on');
     await frames(page);
     report.onControllers = await keyReport(page);
+    report.controllerTriggerPoses = await page.evaluate(() => {
+      const w = window as unknown as FixtureWindow;
+      const pads = [0, 1].map(() => ({
+        axes: [0, 0, 0, 0],
+        buttons: Array.from({ length: 6 }, (_, index) => ({
+          pressed: index === 0,
+          value: index === 0 ? 1 : 0,
+        })),
+      }));
+      for (let i = 0; i < 2; i += 1) {
+        const controller = w.__questControllers[i];
+        controller.position.set(i === 0 ? 0.22 : -0.22, 1.3, -0.45);
+        controller.quaternion.setFromEuler(new w.__questThree.Euler(0.2, i ? -0.3 : 0.3, 0));
+        controller.dispatchEvent({
+          type: 'connected',
+          data: { handedness: i === 0 ? 'right' : 'left', gamepad: pads[i] },
+        } as never);
+      }
+      return w.__questControllers.map((controller) => ({
+        position: controller.position.toArray(),
+        quaternion: controller.quaternion.toArray(),
+      }));
+    });
+    await frames(page, 20);
     await page.locator('[data-action="close-settings"]').click();
+    await page.screenshot({
+      path: join(checkedTestRoot, 'controller-hands-trigger.png'),
+      fullPage: true,
+    });
+    (report.screenshots as string[]).push('controller-hands-trigger.png');
     await targetSelect(page, { inputAction: 'toggleRadial' });
     await waitFor(
       page,
@@ -370,6 +476,16 @@ async function main(): Promise<void> {
       persisted.join(',') === 'off,on,auto' &&
       report.contactInputs === 0 &&
       JSON.stringify(report.pinchInputs) === JSON.stringify(['a']) &&
+      JSON.stringify(report.nativePinchInputs) === JSON.stringify(['a']) &&
+      JSON.stringify(report.releasedInputs) === JSON.stringify(['a']) &&
+      Math.abs(
+        Number((report.keyborbLift as { idle: number }).idle) -
+          Number((report.keyborbLift as { expected: number }).expected),
+      ) < 0.001 &&
+      Math.abs(
+        Number((report.keyborbLift as { raised: number }).raised) -
+          Number((report.keyborbLift as { expected: number }).expected),
+      ) < 0.001 &&
       JSON.stringify(report.autoHands) === JSON.stringify({ total: 62, spherical: 62, flat: 0 }) &&
       JSON.stringify(report.onHands) === JSON.stringify({ total: 62, spherical: 62, flat: 0 }) &&
       JSON.stringify(report.offHands) === JSON.stringify({ total: 62, spherical: 0, flat: 62 }) &&
@@ -377,6 +493,8 @@ async function main(): Promise<void> {
         JSON.stringify({ total: 62, spherical: 0, flat: 62 }) &&
       JSON.stringify(report.onControllers) ===
         JSON.stringify({ total: 62, spherical: 62, flat: 0 }) &&
+      Array.isArray(report.controllerTriggerPoses) &&
+      (report.controllerTriggerPoses as unknown[]).length === 2 &&
       report.nativeMode === 'auto' &&
       /Apple.*M4|Metal/i.test(renderer) &&
       !/SwiftShader/i.test(renderer) &&

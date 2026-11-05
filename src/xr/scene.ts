@@ -59,6 +59,7 @@ import {
 } from './hierarchy-navigator';
 import { curveKeyboardContent } from './keyboard-surface';
 import { createKeyborbKey } from './keyborb';
+import { createKeyborbInput } from './keyborb-input';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
@@ -618,6 +619,14 @@ export function createWorkspaceScene(
   const handRoots = new Map<THREE.Group, THREE.Group>();
   const handVisuals = new Map<THREE.Group, CartoonHand>();
   const handContacts = new Map<THREE.Group, HandContact>();
+  const keyborbInput = createKeyborbInput();
+  const priorityHandActions = new Set([
+    'wristMenu',
+    'toggleRadial',
+    'exit',
+    'reloadUpdate',
+    'dismissNotice',
+  ]);
   const contactSamples = new Map<THREE.Group, HandContactSample>();
   const contactGripArmed = new Set<THREE.Group>();
   const pokeSources = new Set<THREE.Group>();
@@ -892,6 +901,7 @@ export function createWorkspaceScene(
       refreshInputRoot(inputMode);
   };
   const resetHandContact = (source: THREE.Group, refresh = true, preserveNear = false): void => {
+    keyborbInput.reset(source);
     handContacts.get(source)?.reset(preserveNear);
     contactSamples.delete(source);
     pendingPokes.delete(source);
@@ -903,6 +913,7 @@ export function createWorkspaceScene(
   };
   const resetHandContacts = (refresh = false): void => {
     for (const source of handContacts.keys()) resetHandContact(source, refresh);
+    keyborbInput.reset();
   };
   const releaseMouse = (source: THREE.Group | number): void => {
     const capture = mouseCaptures.get(source);
@@ -1291,7 +1302,9 @@ export function createWorkspaceScene(
     } else handTrackingLost.delete(root);
     const ray = root.children.find((child) => child instanceof THREE.Line);
     const contact = root.children.find((child) => child instanceof THREE.Mesh);
-    if (ray) ray.visible = gesture.tracked;
+    if (ray)
+      ray.visible =
+        gesture.tracked && !keyborbInput.near(root) && !contactSamples.get(root)?.nearKeyboard;
     if (contact && !gesture.tracked) contact.visible = false;
     if (!gesture.tracked) root.userData.rayDistance = 0;
     return gesture;
@@ -1350,6 +1363,67 @@ export function createWorkspaceScene(
           ),
     );
   };
+  const updateKeyborbInput = (deltaSeconds: number): void => {
+    const mode = inputMode;
+    const targetId = mutableState.inputTargetId;
+    const keyboard =
+      renderer?.xr.isPresenting &&
+      mutableState.keyborbEnabled &&
+      inputRoot?.visible &&
+      (inputMode === 'keyboard' || inputMode === 'command-editor') &&
+      !radialMenu.root.visible &&
+      !warpEdit &&
+      !gripActive()
+        ? inputRoot
+        : null;
+    keyborbInput.begin(keyboard);
+    for (const controller of controllerRoots) {
+      const hand = activeHand(controller);
+      const visual = hand ? contactVisual(controller) : undefined;
+      const gesture = hand ? sampleHand(controller) : null;
+      const ray = keyboard && hand ? targetFromController(controller) : null;
+      const rayKey = ray?.object?.userData.keyborb ? (ray.object as THREE.Mesh) : null;
+      const sample = keyborbInput.sample(
+        controller,
+        visual && gesture?.tracked ? (visual.root.userData.indexTip as THREE.Vector3) : null,
+        visual && gesture?.tracked ? (visual.root.userData.thumbTip as THREE.Vector3) : null,
+        rayKey,
+        Boolean(
+          keyboard &&
+            gesture?.tracked &&
+            !gesture.pinching &&
+            !priorityHandActions.has(String(ray?.object?.userData.inputAction)) &&
+            handInputStates.get(controller)?.neutral,
+        ),
+      );
+      if (sample.released && pokeSources.delete(controller)) modifierPresses.delete(controller);
+      if (
+        !sample.pressed ||
+        !keyboard ||
+        !inputRoot ||
+        inputMode !== mode ||
+        mutableState.inputTargetId !== targetId
+      )
+        continue;
+      const modifier = sample.pressed.userData.modifier as KeyboardModifier | undefined;
+      const before = modifier
+        ? {
+            active: Boolean(modifierState.active[modifier]),
+            locked: Boolean(modifierState.locked[modifier]),
+          }
+        : undefined;
+      const target: InputTarget = {
+        kind: 'keyboard',
+        terminalId: mutableState.inputTargetId ?? '',
+        object: sample.pressed,
+      };
+      activateTarget(target);
+      beginModifierPress(controller, target, before);
+      pokeSources.add(controller);
+      showHover(null);
+    }
+    keyborbInput.animate(deltaSeconds);
+  };
   const contactGripTarget = (source: THREE.Group): THREE.Group | null => {
     const visual = contactVisual(source, true);
     const query = handContacts.get(source);
@@ -1380,9 +1454,7 @@ export function createWorkspaceScene(
   const nativeSelectBlocked = (source: THREE.Group): boolean => {
     if (!keyboardNear(source)) return false;
     const action = targetFromController(source)?.object?.userData.inputAction;
-    return !['wristMenu', 'toggleRadial', 'exit', 'reloadUpdate', 'dismissNotice'].includes(
-      String(action),
-    );
+    return !priorityHandActions.has(String(action));
   };
   const render = (time = 0): void => {
     if (disposed) return;
@@ -1498,6 +1570,7 @@ export function createWorkspaceScene(
       for (const visual of handVisuals.values()) visual.hide();
       wristWatch.setVisible(false);
     }
+    updateKeyborbInput(deltaSeconds);
     if (renderer?.xr.isPresenting) {
       for (const controller of controllerRoots) {
         const visual = contactVisual(controller);
@@ -1883,13 +1956,15 @@ export function createWorkspaceScene(
           continue;
         controller.updateMatrixWorld(true);
         const sample = contactSamples.get(controller);
-        const nearKeyboard = Boolean(sample?.nearKeyboard && contactKeyboard());
+        const nearOrb = keyborbInput.hovered(controller);
+        const nearKeyboard = Boolean(nearOrb || (sample?.nearKeyboard && contactKeyboard()));
+        const nearControl = nearOrb ?? sample?.hovered;
         const target: InputTarget | null = nearKeyboard
-          ? sample?.hovered
+          ? nearControl
             ? {
                 kind: 'keyboard',
                 terminalId: mutableState.inputTargetId ?? '',
-                object: sample.hovered,
+                object: nearControl,
               }
             : null
           : targetFromController(controller, false);
@@ -3433,6 +3508,16 @@ export function createWorkspaceScene(
       contact.visible = false;
       root.add(rayLine, contact);
       const onSelect = (): void => {
+        if (activeHand(root) && mutableState.keyborbEnabled) {
+          const target = targetFromController(root);
+          if (
+            !priorityHandActions.has(String(target?.object?.userData.inputAction)) &&
+            (target?.object?.userData.keyborb || keyborbInput.near(root))
+          ) {
+            updateKeyborbInput(0);
+            return;
+          }
+        }
         if (!handSelectionAllowed(root)) return;
         if (!root.visible || nativeSelectBlocked(root)) return;
         if (
