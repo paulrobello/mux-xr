@@ -1,0 +1,124 @@
+{
+  "mesh": "AuthoredHandMesh",
+  "vertices": 2850,
+  "edges": 5696,
+  "faces": 2848,
+  "topology_sha256": "a32f5a4def7faa6ab94a3ba23e3f190e8d2a41acbc686ee29adc7d033bd3a9d0",
+  "groups_sha256": "d424894783f46fec708dc0b345026899b767cf4b34e435bc30640f1c5e61a578",
+  "topology_and_groups_unchanged": true,
+  "finite_coordinates": true,
+  "actions": [
+    "Fist",
+    "Open",
+    "Pointing",
+    "Thumbs Up"
+  ],
+  "fingers": {
+    "Index": {
+      "base": 0.13844013214111328,
+      "length_before": 0.05450655519962311,
+      "length_after": 0.06268253922462463,
+      "extension_percent": 15.000001366914596,
+      "transverse_axes": [
+        0,
+        1
+      ],
+      "tip_width_before": [
+        0.04635987803339958,
+        0.04764166288077831
+      ],
+      "tip_width_after": [
+        0.039582520723342896,
+        0.04061449505388737
+      ],
+      "tip_width_change_percent": [
+        -14.619014539197007,
+        -14.750047336668748
+      ],
+      "boundary_vertices_fixed": 32,
+      "vertices": 529
+    },
+    "Middle": {
+      "base": 0.141250342130661,
+      "length_before": 0.06258560717105865,
+      "length_after": 0.07197344303131104,
+      "extension_percent": 14.99999166676389,
+      "transverse_axes": [
+        0,
+        1
+      ],
+      "tip_width_before": [
+        0.04733604937791824,
+        0.04739750921726227
+      ],
+      "tip_width_after": [
+        0.03992198035120964,
+        0.03997381590306759
+      ],
+      "tip_width_change_percent": [
+        -15.662627372040872,
+        -15.66262328293605
+      ],
+      "boundary_vertices_fixed": 32,
+      "vertices": 529
+    },
+    "Outer": {
+      "base": 0.14063961803913116,
+      "length_before": 0.05346190929412842,
+      "length_after": 0.06148119270801544,
+      "extension_percent": 14.999994425503548,
+      "transverse_axes": [
+        0,
+        1
+      ],
+      "tip_width_before": [
+        0.04755856469273567,
+        0.04902397096157074
+      ],
+      "tip_width_after": [
+        0.04058230295777321,
+        0.04159332811832428
+      ],
+      "tip_width_change_percent": [
+        -14.668781070316971,
+        -15.15716229734071
+      ],
+      "boundary_vertices_fixed": 32,
+      "vertices": 529
+    },
+    "Thumb": {
+      "base": 0.07860660552978516,
+      "length_before": 0.05313369631767273,
+      "length_after": 0.05685305595397949,
+      "extension_percent": 7.000001682679224,
+      "transverse_axes": [
+        1,
+        2
+      ],
+      "tip_width_before": [
+        0.049826694652438164,
+        0.049497827887535095
+      ],
+      "tip_width_after": [
+        0.043414629995822906,
+        0.04318930208683014
+      ],
+      "tip_width_change_percent": [
+        -12.86873372063322,
+        -12.745055833639151
+      ],
+      "boundary_vertices_fixed": 32,
+      "vertices": 465
+    }
+  },
+  "geometry_before": {
+    "boundary_edges": 0,
+    "nonmanifold_edges": 0,
+    "zero_area_faces": 0
+  },
+  "geometry_after": {
+    "boundary_edges": 0,
+    "nonmanifold_edges": 0,
+    "zero_area_faces": 0
+  }
+}
