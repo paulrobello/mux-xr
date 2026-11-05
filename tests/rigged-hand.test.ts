@@ -23,6 +23,9 @@ const NAMES = [
 const assetBytes = new Uint8Array(
   readFileSync('assets-source/hand/authored-hand.staged.glb'),
 ).slice().buffer;
+const questPoses = JSON.parse(readFileSync('tests/fixtures/quest-hand-poses.json', 'utf8')) as {
+  hands: Array<{ side: 'left' | 'right'; joints: Record<string, { matrix: number[] }> }>;
+};
 
 async function parsedAsset(): Promise<GLTF> {
   return new GLTFLoader().parseAsync(assetBytes, '');
@@ -40,6 +43,7 @@ function authoredMeshes(root: THREE.Object3D): THREE.SkinnedMesh[] {
 
 function trackedSource(
   side: 'left' | 'right',
+  roll = 0,
 ): THREE.Group & { joints: Record<string, THREE.Group> } {
   const source = new THREE.Group() as THREE.Group & { joints: Record<string, THREE.Group> };
   source.joints = {};
@@ -64,13 +68,16 @@ function trackedSource(
     ] as const)
       points[`${finger}-${part}`] = [x, length * fraction, 0];
   }
-  const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.2, -0.4, 0.3));
+  const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.2, -0.4, 0.3 + roll));
   for (const [name, point] of Object.entries(points)) {
     const joint = new THREE.Group();
     joint.position.fromArray(point);
     joint.position.x *= side === 'left' ? 1 : -1;
     joint.position.applyQuaternion(rotation).add(new THREE.Vector3(0.2, 1.2, -0.6));
     joint.quaternion.copy(rotation);
+    joint.updateMatrix();
+    joint.matrixAutoUpdate = false;
+    joint.matrixWorldNeedsUpdate = true;
     source.joints[name] = joint;
     source.add(joint);
   }
@@ -78,32 +85,58 @@ function trackedSource(
 }
 
 describe('authored rigged hand', () => {
+  it.each(questPoses.hands)(
+    'preserves bone dimensions with recorded Quest $side joints',
+    async (pose) => {
+      const hand = createRiggedHand({ loader: parsedLoader() });
+      await hand.assetReady;
+      const source = new THREE.Group() as THREE.Group & { joints: Record<string, THREE.Group> };
+      source.joints = {};
+      for (const [name, captured] of Object.entries(pose.joints)) {
+        const joint = new THREE.Group();
+        joint.matrix.fromArray(captured.matrix);
+        joint.matrix.decompose(joint.position, joint.quaternion, joint.scale);
+        joint.matrixAutoUpdate = false;
+        joint.matrixWorldNeedsUpdate = true;
+        source.joints[name] = joint;
+        source.add(joint);
+      }
+      hand.update(source, new THREE.PerspectiveCamera(), pose.side, 1 / 60);
+      for (const bone of authoredMeshes(hand.root)[0].skeleton.bones)
+        for (const axis of [0, 1, 2])
+          expect(
+            new THREE.Vector3().setFromMatrixColumn(bone.matrixWorld, axis).length(),
+          ).toBeCloseTo(1, 5);
+      hand.dispose();
+    },
+  );
   it.each(['left', 'right'] as const)(
-    'aligns %s tracked fingertips and restores controller poses',
+    'preserves %s authored bone dimensions through wrist rolls and controller changes',
     async (side) => {
       const hand = createRiggedHand({ loader: parsedLoader() });
       await hand.assetReady;
       const mesh = authoredMeshes(hand.root)[0];
       const originalPositions = mesh.skeleton.bones.map((bone) => bone.position.clone());
-      const source = trackedSource(side);
-      hand.update(source, new THREE.PerspectiveCamera(), side, 1 / 60);
-      const authored = hand.root.getObjectByName('authored-hand-root') as THREE.Group;
-      expect(authored.scale.x).toBeCloseTo(authored.scale.y);
-      expect(authored.scale.z).toBeCloseTo(authored.scale.y);
-      for (const [digit, jointName] of [
-        ['thumb', 'thumb-tip'],
-        ['index', 'index-finger-tip'],
-        ['middle', 'middle-finger-tip'],
-        ['outer', 'ring-finger-tip'],
-      ] as const) {
-        const bone = mesh.skeleton.getBoneByName(`${digit}_03`) as THREE.Bone;
-        const tip = bone.localToWorld(new THREE.Vector3(0, bone.userData.restLength, 0));
-        for (const axis of [0, 2])
-          expect(
+      for (const roll of [0, Math.PI / 2, Math.PI]) {
+        const source = trackedSource(side, roll);
+        hand.update(source, new THREE.PerspectiveCamera(), side, 1 / 60);
+        for (const [index, bone] of mesh.skeleton.bones.entries()) {
+          const scales = [0, 1, 2].map((axis) =>
             new THREE.Vector3().setFromMatrixColumn(bone.matrixWorld, axis).length(),
-          ).toBeCloseTo(authored.scale.y);
-        const joint = source.joints[jointName];
-        expect(tip.distanceTo(joint.getWorldPosition(new THREE.Vector3()))).toBeLessThan(1e-5);
+          );
+          expect(Math.max(...scales) - Math.min(...scales)).toBeLessThan(1e-5);
+          const localPosition = new THREE.Vector3().setFromMatrixPosition(bone.matrix);
+          expect(localPosition.distanceTo(originalPositions[index])).toBeLessThan(1e-6);
+        }
+        expect(hand.root.getObjectByName('authored-hand-root')?.scale.toArray()).toEqual([1, 1, 1]);
+        for (const digit of ['thumb', 'index'] as const) {
+          const joint = source.joints[digit === 'thumb' ? 'thumb-tip' : 'index-finger-tip'];
+          expect(
+            (hand.root.userData[`${digit}Tip`] as THREE.Vector3).distanceTo(
+              joint.getWorldPosition(new THREE.Vector3()),
+            ),
+          ).toBeLessThan(1e-6);
+        }
       }
       hand.updateController(new THREE.Group(), new THREE.PerspectiveCamera(), side, undefined, 1);
       for (const [index, bone] of mesh.skeleton.bones.entries()) {

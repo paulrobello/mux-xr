@@ -126,6 +126,13 @@ async function main(): Promise<void> {
     args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
   });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const capturedHands = JSON.parse(
+    await readFile(new URL('../tests/fixtures/quest-hand-poses.json', import.meta.url), 'utf8'),
+  );
+  await page.addInitScript(
+    (capture) => Object.assign(window, { __recordedHandPoses: capture }),
+    capturedHands,
+  );
   await page.route('**/version.json', (route) =>
     route.fulfill({ json: { buildId: servedBuild, version: 'test' } }),
   );
@@ -315,6 +322,8 @@ async function main(): Promise<void> {
       ['open', 'open'],
       ['index-pinch', 'index-pinch'],
       ['upturned', 'upturned'],
+      ['side-on', 'side-on'],
+      ['quest-pose', 'quest-pose'],
       ['tracking-loss', 'tracking-loss'],
     ] as const) {
       await page.evaluate((kind) => {
@@ -326,6 +335,7 @@ async function main(): Promise<void> {
         for (const [name, point] of Object.entries(rest)) {
           hand.joints[name].position.fromArray(point);
           hand.joints[name].visible = true;
+          hand.joints[name].quaternion.identity();
         }
         if (kind === 'index-pinch') {
           const wrist = hand.joints.wrist.position;
@@ -342,17 +352,63 @@ async function main(): Promise<void> {
           for (const [name, [x, y, z]] of Object.entries(pinch))
             hand.joints[name].position.copy(wrist).add(new T.Vector3(-x, y, -z));
         }
-        if (kind === 'upturned') {
+        if (kind === 'upturned' || kind === 'side-on') {
           const wrist = hand.joints.wrist.position.clone();
-          const rotation = new T.Quaternion().setFromAxisAngle(new T.Vector3(1, 0, 0), Math.PI / 6);
-          for (const joint of Object.values(hand.joints))
+          const rotation = new T.Quaternion().setFromAxisAngle(
+            kind === 'side-on' ? new T.Vector3(0, 1, 0) : new T.Vector3(1, 0, 0),
+            kind === 'side-on' ? Math.PI / 2 : Math.PI / 6,
+          );
+          for (const joint of Object.values(hand.joints)) {
             joint.position
               .sub(wrist)
               .applyQuaternion(rotation)
               .add(wrist)
               .add(new T.Vector3(0.1, 0.05, -0.15));
+            joint.quaternion.copy(rotation);
+          }
         }
         if (kind === 'tracking-loss') hand.joints['middle-finger-tip'].visible = false;
+        if (kind === 'quest-pose') {
+          const captured = (
+            window as unknown as {
+              __recordedHandPoses: {
+                hands: Array<{ side: string; joints: Record<string, { matrix: number[] }> }>;
+              };
+            }
+          ).__recordedHandPoses;
+          for (const pose of captured.hands) {
+            const right = pose.side === 'right';
+            const source = w.__questHands[right ? 0 : 1];
+            const point = (name: string) =>
+              new T.Vector3().setFromMatrixPosition(
+                new T.Matrix4().fromArray(pose.joints[name].matrix),
+              );
+            const forward = point('middle-finger-phalanx-proximal').normalize();
+            const across = point('index-finger-phalanx-proximal').sub(
+              point('pinky-finger-phalanx-proximal'),
+            );
+            across.addScaledVector(forward, -across.dot(forward)).normalize();
+            const normal = new T.Vector3().crossVectors(across, forward).normalize();
+            const sourceBasis = new T.Matrix4().makeBasis(across, forward, normal);
+            const placement = new T.Matrix4()
+              .makeBasis(
+                new T.Vector3(right ? -1 : 1, 0, 0),
+                new T.Vector3(0, 1, 0),
+                new T.Vector3(0, 0, right ? -1 : 1),
+              )
+              .multiply(sourceBasis.invert());
+            placement.setPosition(right ? 0.24 : -0.24, 1.38, -0.55);
+            for (const [name, capturedJoint] of Object.entries(pose.joints)) {
+              const joint = source.joints[name];
+              joint.matrix.multiplyMatrices(
+                placement,
+                new T.Matrix4().fromArray(capturedJoint.matrix),
+              );
+              joint.matrix.decompose(joint.position, joint.quaternion, joint.scale);
+              joint.visible = true;
+            }
+          }
+        }
         w.__questScene.updateMatrixWorld(true);
       }, action);
       await page.evaluate(
@@ -361,6 +417,24 @@ async function main(): Promise<void> {
             requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
           ),
       );
+      const rigid = await page.evaluate(() => {
+        const w = window as unknown as FixtureWindow;
+        let maxStretch = 0;
+        for (const root of w.__questScene.children) {
+          if (root.name !== 'xr-cartoon-hand' || !root.visible) continue;
+          const skin = root.getObjectByName('authored-hand-skin') as import('three').SkinnedMesh;
+          for (const bone of skin.skeleton.bones) {
+            for (const axis of [0, 1, 2]) {
+              const size = new w.__questThree.Vector3()
+                .setFromMatrixColumn(bone.matrixWorld, axis)
+                .length();
+              maxStretch = Math.max(maxStretch, Math.abs(size - 1));
+            }
+          }
+        }
+        return maxStretch;
+      });
+      if (rigid > 1e-5) throw new Error(`Hand bone stretched in ${name}: ${rigid}`);
       if (name === 'open') {
         report.open = await page.evaluate(() => {
           const w = window as unknown as FixtureWindow;
@@ -417,14 +491,7 @@ async function main(): Promise<void> {
         }>;
         if (
           open.length !== 2 ||
-          open.some(
-            (hand) =>
-              !hand.visible ||
-              hand.endpointError > 1e-5 ||
-              hand.sag <= 0 ||
-              hand.indexError > 1e-5 ||
-              hand.thumbError > 1e-5,
-          )
+          open.some((hand) => !hand.visible || hand.endpointError > 1e-5 || hand.sag <= 0)
         )
           throw new Error(`Open hand geometry failed: ${JSON.stringify(open)}`);
       }
