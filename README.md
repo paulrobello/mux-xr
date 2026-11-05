@@ -26,9 +26,9 @@ Browser checks need the Chromium revision pinned by Playwright. Install it with 
 
 The computer must run a compatible mux-enabled par-term-streamer against the desired par-mux socket. Configure the streamer endpoint in the sidebar. This app reuses core protobuf/zlib streaming and does not create or kill pane processes. Physical panel size and local zoom do not change terminal rows/columns.
 
-Full hierarchy browsing requires `mux_tree_request` / `mux_tree_snapshot` and `/ws?metadata=1`. Use the mux-enabled streamer and daemon from [core 0.76.0](https://github.com/paulrobello/par-term-emu-core-rust/releases/tag/v0.76.0) or a verified compatible build. Both official macOS ARM64 release binaries passed the real-app check. The plain streamer build lacks mux support, and a `0.75` version string alone does not establish hierarchy support.
+Full hierarchy browsing requires `mux_tree_request` / `mux_tree_snapshot` and `/ws?metadata=1`. Use the mux-enabled streamer and daemon from [core 0.78.1](https://github.com/paulrobello/par-term-emu-core-rust/releases/tag/v0.78.1) or a verified compatible build. Both official macOS ARM64 release binaries passed the real-app check. The plain streamer build lacks mux support, and a version string alone does not establish hierarchy support.
 
-The prepared preview uses the official 0.77.0 streamer attached to the existing par-mux daemon and prefers its default workspace. Tests use separate private sockets. Exact binaries and historical verification are recorded in [the verification report](docs/verification.md). The vendored hierarchy schema was tested against 0.76.0. Core 0.76.0 ships [held-pane lifecycle metadata](https://board.example.test/board?card=01a1957a2aa8739abc2c5cb116818793); viewer exit-state badges remain a separate enhancement. A connected stream does not establish whether a held pane's process is still running.
+The dedicated preview uses the official 0.78.1 streamer against the existing 0.77.0 default par-mux daemon. The matched 0.78.1 streamer/daemon pairing was also qualified privately. The shared default daemon is not restarted as part of this pin. Tests use separate private sockets. Exact binaries, digests and qualification evidence are recorded in [the core 0.78.1 review](docs/core-0.78-review.md) and [historical verification](docs/verification.md). A connected stream does not establish whether a held pane's process is still running.
 
 Select a pane to attach it, then explicitly select its panel to target input. Commands and Keyboard follow explicit pane selections, including while the drawer is open. The target caption identifies the pane receiving input. Only the active input pane is highlighted. Enable **Gaze input** to let a short dwell choose the keyboard target. It is off by default and keeps the last target while you look at the keyboard.
 
@@ -179,7 +179,7 @@ Browser tests use hardware Chromium headless on supported hosts. Book the host b
 
 The observatory's editable high/low sources, deterministic generator, hashes and technical reports are in `assets-source/observatory` and `scripts/assets`. The runtime GLB is 2,528,120 bytes with 22,712 triangles and ten draw calls. Creative owner approval and Quest checks remain explicit.
 
-See [the verification report](docs/verification.md), [DESIGN.md](DESIGN.md), [PRD.md](PRD.md) and the [phase plans](plans/phase-0-live-terminal.md) for scope and dependencies.
+See [historical verification](docs/verification.md), [DESIGN.md](DESIGN.md), [PRD.md](PRD.md) and the [phase plans](plans/phase-0-live-terminal.md) for scope and dependencies.
 
 The streamer's strict policy blocks blob workers, so Troika typesetting runs on the main thread. Label visibility is checked against the actual served build. Comfort colors replace blue-dominant terminal foregrounds with lighter, low-chroma teal; Original keeps source colors and Monochrome uses neutral foregrounds/backgrounds. Physical color-depth perception still needs a headset check.
 
@@ -205,7 +205,7 @@ Filtering shows anisotropy only for mipmap modes and hides values beyond the dev
 
 Choose radial **Warp** to edit the pane aimed at when A opened the menu, falling back to the active pane. Right-stick left/right previews curvature from flat to 100°. A saves and exits, while B cancels and restores the original curve. Grip pauses editing and retains normal manipulation. Gaze routing, scrolling and trigger input pause during Warp. The next separate A press opens the radial again. Browser Workspace Settings has the same selected-pane slider. Curvature is saved per server/pane, preserves the remote grid and mouse UV mapping, and is included in layout spacing/floor checks. Point at a terminal and use either controller's stick up/down to scroll. Both grips must be released, the radial must be closed, and other panels must be closed except Keyboard. No trigger is needed. Ordinary shells use local scrollback. Mouse-aware TUIs receive raw SGR wheel reports. Browser wheel scrolling works in both flat terminals and the 3D preview.
 
-The [radial design notes](design/radial-menus.md) and [rendered comparison](https://artifacts.example.test/a/01a19e0a856b745388c896d401016f04) compare five-action menus and glass treatment using the actual scene. The tinted ring is now the live A-button menu. The [core 0.77 review](docs/core-0.77-review.md) records relevant release additions and opt-in boundaries.
+The [radial design notes](design/radial-menus.md) and [rendered comparison](https://artifacts.example.test/a/01a19e0a856b745388c896d401016f04) compare five-action menus and glass treatment using the actual scene. The tinted ring is now the live A-button menu. The [core 0.78.1 review](docs/core-0.78-review.md) records release benefits, qualification evidence and the shared-daemon boundary.
 
 ## Animated menu, glass and restart restore
 

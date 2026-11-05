@@ -1,6 +1,6 @@
 # Terminal protocol provenance
 
-`terminal_pb.ts` is the generated `protoc-gen-es` 2.16.0 schema from Paul Robello's MIT-licensed `par-term-emu-core-rust` web frontend. It is copied from the v0.77.0 tag at pinned core commit `f1059d42cbaa8c744ffdf53794f4ec7a8ce6ae14`. This revision includes the published damage metadata and pane-create protocol messages while preserving the existing generated message APIs.
+`terminal_pb.ts` is the generated `protoc-gen-es` 2.16.0 schema from Paul Robello's MIT-licensed `par-term-emu-core-rust` web frontend. It is pinned to the v0.78.1 tag at core commit `b52c58bf7686645f7ae541b7385b82883205a60e`. The published file is byte-identical to v0.77.0, so no regeneration or generated code changes are needed. It includes the damage metadata and pane-create protocol messages while preserving the existing generated message APIs. Runtime release and Apple Silicon artifact hashes are pinned in the project-root `core-release.json`.
 
 SHA-256: `74568289834b31bf654307ce151f5928472f1b33a9a92f5b1b8c4fd0dba894fe`.
 

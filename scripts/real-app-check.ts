@@ -136,6 +136,7 @@ async function main(): Promise<void> {
   let metadataProbeReady = false;
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('websocket', (socket) => {
+    socket.on('socketerror', (error) => errors.push(String(error)));
     const url = new URL(socket.url());
     const session = url.searchParams.get('session');
     const paneId = session?.replace(/^pane-/, '%') ?? 'metadata';
@@ -194,6 +195,12 @@ async function main(): Promise<void> {
   });
   try {
     const sessionsBefore = await sessionCount(page);
+    // Chromium needs the real localhost document to classify local WebSocket access correctly.
+    await page.route('**/*', (route) =>
+      route.request().resourceType() === 'script'
+        ? route.fulfill({ contentType: 'application/javascript', body: '' })
+        : route.continue(),
+    );
     await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 15_000 });
     const metadataRequest = encodeClientMessage(
       create(ClientMessageSchema, {
@@ -220,11 +227,13 @@ async function main(): Promise<void> {
     await page.evaluate(() =>
       (window as unknown as { __muxXRMetadataProbe?: WebSocket }).__muxXRMetadataProbe?.close(),
     );
-    const sessionsAfterProbe = await sessionCount(page);
-    assert(
-      sessionsAfterProbe === sessionsBefore,
-      `metadata probe changed session count: ${sessionsBefore} to ${sessionsAfterProbe}`,
+    const sessionsAfterProbe = await waitFor(
+      () => sessionCount(page),
+      (count) => count === sessionsBefore,
+      'metadata probe session count did not return to its pre-probe value',
     );
+    await page.unroute('**/*');
+    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 15_000 });
     await page.locator('#endpoint').fill(BASE_URL);
     await page.locator('[data-action="connect"]').click();
     await page.locator('[data-pane]').nth(1).waitFor({ state: 'visible', timeout: 15_000 });
@@ -431,6 +440,7 @@ async function main(): Promise<void> {
     const failurePath = join(REVIEW_DIR, 'real-app-failure.png');
     await page.screenshot({ path: failurePath, fullPage: true }).catch(() => undefined);
     errors.push(error instanceof Error ? error.message : String(error));
+    console.error(JSON.stringify({ errors }));
     throw error;
   } finally {
     await context.close();
