@@ -282,6 +282,17 @@ async function main(): Promise<void> {
         ),
       'XR did not start',
     );
+    await waitFor(
+      page,
+      async () =>
+        page.evaluate(() => {
+          const hands = (window as unknown as FixtureWindow).__questScene.children.filter(
+            (root) => root.name === 'xr-cartoon-hand',
+          );
+          return hands.length === 2 && hands.every((root) => root.userData.handAsset === 'loaded');
+        }),
+      'Authored hand rigs did not load',
+    );
     const renderer = await page.evaluate(() => {
       const gl = (window as unknown as FixtureWindow).__questRenderer.getContext();
       const ext = gl.getExtension('WEBGL_debug_renderer_info');

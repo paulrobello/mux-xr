@@ -41,7 +41,7 @@ import {
   type WindowPreferences,
 } from '../workspace/window-preferences';
 import { calculateArrangement } from './arrangements';
-import { type CartoonHand, createCartoonHand } from './cartoon-hand';
+import type { CartoonHand } from './cartoon-hand';
 import {
   type CommandDraft,
   commandFromDraft,
@@ -64,6 +64,7 @@ import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from '
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
 import { createRadialMenu, type RadialMenuAction } from './radial-menu';
+import { createRiggedHand } from './rigged-hand';
 import { terminalQualityAtDistance } from './terminal-lod';
 import {
   createTerminalMaterial,
@@ -3807,7 +3808,7 @@ export function createWorkspaceScene(
       });
       handContacts.set(root, createHandContact());
       keyboardProximity.set(root, createHandContact());
-      const visual = createCartoonHand();
+      const visual = createRiggedHand();
       handVisuals.set(root, visual);
       scene.add(visual.root);
       if (typeof renderer.xr.getControllerGrip === 'function') {

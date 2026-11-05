@@ -1,4 +1,7 @@
 vi.mock('../src/xr/labels', () => import('./helpers/labels'));
+vi.mock('../src/xr/rigged-hand', async () => ({
+  createRiggedHand: (await import('../src/xr/cartoon-hand')).createCartoonHand,
+}));
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 

@@ -86,7 +86,7 @@ Touch a surface and grip the controller, or pinch **middle finger to thumb** wit
 
 Hands open curvature presets and Curve less / Curve more through **Menu → Warp**. Controllers retain direct thumbstick Warp editing.
 
-Tracked hands have soft orange palms, three rounded fingers and a thumb extending from the side in the same plane, following the supplied cartoon reference. Elastic arms curve from the wrists to separate anchors 20 cm left/right, 18 cm below and 4 cm forward of the camera. They stretch with the tracked wrists and sag slightly, with a small amount of smoothing in the middle of the curve. Finger poses and input targets continue to use the tracked joints. The hands and arms do not catch rays or send input.
+Tracked hands use Paul's orange Blender hand, with a 13-bone rig for its palm, three fingers and thumb. The editable source, rig and pose actions live in `assets-source/hand`. A procedural hand remains available while the asset loads or if loading fails. Elastic arms curve from the wrists to separate anchors 20 cm left/right, 18 cm below and 4 cm forward of the camera. They stretch with the tracked wrists and sag slightly, with a small amount of smoothing in the middle of the curve. Input targets continue to use the tracked joints. The hands and arms do not catch rays or send input.
 
 Controllers show the same hands. Trigger pressure curls the index finger, grip pressure curls the lower two fingers, and the face buttons animate the thumb. The right wrist carries a **Menu watch**: touch its case or band with any part of the left hand, or point at it from farther away and press the left controller trigger. The left ray turns off near the watch. Withdraw the hand before touching again. Controller A and the HUD Menu remain available.
 

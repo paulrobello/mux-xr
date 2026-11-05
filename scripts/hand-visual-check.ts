@@ -162,6 +162,17 @@ async function main(): Promise<void> {
         ),
       'XR did not start',
     );
+    await wait(
+      page,
+      async () =>
+        page.evaluate(() => {
+          const hands = (window as unknown as FixtureWindow).__questScene.children.filter(
+            (root) => root.name === 'xr-cartoon-hand',
+          );
+          return hands.length === 2 && hands.every((root) => root.userData.handAsset === 'loaded');
+        }),
+      'Authored hand rigs did not load',
+    );
     report.renderer = await page.evaluate(() => {
       const gl = (window as unknown as FixtureWindow).__questRenderer.getContext();
       const ext = gl.getExtension('WEBGL_debug_renderer_info');
@@ -338,7 +349,9 @@ async function main(): Promise<void> {
         visibility: roots.map((root) => root.visible),
         details: roots.map((root) => ({
           handedness: root.userData.handedness,
-          meshes: root.children.filter((o) => o instanceof w.__questThree.Mesh).length,
+          authored: root.userData.handAsset,
+          bones: (root.getObjectByName('authored-hand-skin') as import('three').SkinnedMesh)
+            .skeleton.bones.length,
           finite: root.children.every((child) => {
             const g = (child as import('three').Mesh).geometry;
             const p = g?.getAttribute?.('position');
@@ -364,6 +377,10 @@ async function main(): Promise<void> {
       Object.assign(window, { __cartoonPads: pads });
     });
     const controllerTips: Record<string, number[]> = {};
+    const controllerRigs: Record<
+      string,
+      Array<{ side: string; index: number[]; bounds: number[] }>
+    > = {};
     for (const [pose, button] of [
       ['open', -1],
       ['trigger', 0],
@@ -395,6 +412,29 @@ async function main(): Promise<void> {
         if (!root) throw new Error('Right controller hand missing');
         return (root.userData.indexTip as import('three').Vector3).toArray();
       });
+      controllerRigs[pose] = await page.evaluate(() => {
+        const w = window as unknown as FixtureWindow;
+        return w.__questScene.children
+          .filter((root) => root.name === 'xr-cartoon-hand')
+          .map((root) => {
+            const skin = root.getObjectByName('authored-hand-skin') as import('three').SkinnedMesh;
+            const index = skin.skeleton.bones.find((bone) => bone.name === 'index_01');
+            if (!index) throw new Error('Authored index bone missing');
+            const box = new w.__questThree.Box3();
+            const point = new w.__questThree.Vector3();
+            for (let vertex = 0; vertex < skin.geometry.getAttribute('position').count; vertex++) {
+              skin.getVertexPosition(vertex, point);
+              if (!point.toArray().every(Number.isFinite))
+                throw new Error('Non-finite deformed hand vertex');
+              box.expandByPoint(point);
+            }
+            return {
+              side: String(root.userData.handedness),
+              index: index.quaternion.toArray(),
+              bounds: box.getSize(point).toArray(),
+            };
+          });
+      });
       await page.screenshot({ path: join(testRoot, `controller-${pose}.png`) });
     }
     const distance = (a: number[], b: number[]): number =>
@@ -406,6 +446,17 @@ async function main(): Promise<void> {
     )
       throw new Error(`Controller finger isolation failed: ${JSON.stringify(controllerTips)}`);
     report.controllerTips = controllerTips;
+    report.controllerRigs = controllerRigs;
+    for (const side of ['left', 'right']) {
+      const neutral = controllerRigs.open.find((hand) => hand.side === side);
+      const trigger = controllerRigs.trigger.find((hand) => hand.side === side);
+      if (!neutral || !trigger) throw new Error('Authored controller hand missing');
+      const changed = distance(neutral.index, trigger.index);
+      if (side === 'right' ? changed < 0.05 : changed > 0.001)
+        throw new Error(`Authored index deformation failed on ${side}: ${changed}`);
+      if (neutral.bounds.some((size) => size < 0.01 || size > 0.3))
+        throw new Error(`Authored hand bounds invalid: ${neutral.bounds}`);
+    }
     report.watch = await page.evaluate(async () => {
       const w = window as unknown as FixtureWindow;
       const state = window as unknown as {
@@ -456,7 +507,7 @@ async function main(): Promise<void> {
     const meshReport = report.meshes as {
       count: number;
       visibility: boolean[];
-      details: Array<{ meshes: number; finite: boolean }>;
+      details: Array<{ authored: string; bones: number; finite: boolean }>;
     };
     report.ok =
       errors.length === 0 &&
@@ -465,7 +516,9 @@ async function main(): Promise<void> {
       meshReport.count === 2 &&
       meshReport.visibility[0] === false &&
       meshReport.visibility[1] === true &&
-      meshReport.details.every((item) => item.meshes === 2 && item.finite) &&
+      meshReport.details.every(
+        (item) => item.authored === 'loaded' && item.bones === 13 && item.finite,
+      ) &&
       /Apple.*M4|Metal/i.test(String(report.renderer)) &&
       !/SwiftShader/i.test(String(report.renderer));
     if (!report.ok) throw new Error(`Hand visual assertions failed: ${JSON.stringify(report)}`);
