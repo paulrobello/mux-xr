@@ -23,7 +23,21 @@ function fixture(): {
 }
 
 describe('Keyborb fingertip interaction', () => {
-  it('raises only the nearest orb by three quarters of its diameter and returns it on leave', () => {
+  it('selects the orb nearest the midpoint rather than either fingertip', () => {
+    const { keys, source, input } = fixture();
+    const result = input.sample(
+      source,
+      new THREE.Vector3(0, 0, 0.06),
+      new THREE.Vector3(0.14, 0, 0.06),
+      null,
+      true,
+    );
+    expect(result.hovered).toBe(keys[1]);
+    input.animate(1);
+    expect(keys[0].position.z).toBe(0);
+    expect(keys[1].position.z).toBeCloseTo(0.105, 6);
+  });
+  it('raises only the nearest orb by its full diameter and returns it on leave', () => {
     const { keys, source, input } = fixture();
     const index = new THREE.Vector3(0.005, 0, 0.09);
     const thumb = new THREE.Vector3(-0.08, 0, 0.09);
@@ -31,7 +45,7 @@ describe('Keyborb fingertip interaction', () => {
       expect(input.sample(source, index, thumb, null, true).pressed).toBeNull();
       input.animate(1 / 90);
     }
-    expect(keys[0].position.z).toBeCloseTo(0.105 * 0.75, 6);
+    expect(keys[0].position.z).toBeCloseTo(0.105, 6);
     expect(keys[1].position.z).toBe(0);
     expect(input.near(source)).toBe(true);
     index.z = thumb.z = 1;
@@ -56,7 +70,7 @@ describe('Keyborb fingertip interaction', () => {
     input.sample(source, index, index.clone().add(new THREE.Vector3(0, -0.08, 0)), null, true);
     input.animate(1);
     const lift = keys[0].getWorldPosition(new THREE.Vector3()).sub(center);
-    expect(lift.length()).toBeCloseTo(0.105 * 0.75 * 0.4, 6);
+    expect(lift.length()).toBeCloseTo(0.105 * 0.4, 6);
     expect(lift.clone().normalize().dot(normal)).toBeCloseTo(1, 6);
   });
 
@@ -75,6 +89,8 @@ describe('Keyborb fingertip interaction', () => {
     expect(input.sample(source, index, thumb, null, true).released).toBe(false);
     index.x = 0.04;
     thumb.x = -0.04;
+    expect(input.sample(source, index, thumb, null, true).released).toBe(false);
+    input.sample(source, index, thumb, null, true);
     expect(input.sample(source, index, thumb, null, true).released).toBe(true);
     index.x = thumb.x = 0;
     expect(input.sample(source, index, thumb, null, true).pressed).toBe(keys[0]);
@@ -110,6 +126,12 @@ describe('Keyborb fingertip interaction', () => {
     expect(input.nativePress(source, null)).toBeNull();
     expect(input.nativeRelease(source)).toBe(true);
     expect(input.sample(source, index, thumb, null, true).pressed).toBeNull();
+    expect(input.nativePress(source, null)).toBeNull();
+    input.nativeRelease(source);
+    thumb.x = -0.048;
+    for (let frame = 0; frame < 4; frame++) input.sample(source, index, thumb, null, true);
+    thumb.x = -0.02;
+    input.sample(source, index, thumb, null, true);
     expect(input.nativePress(source, null)).toBe(keys[0]);
   });
 
@@ -124,7 +146,7 @@ describe('Keyborb fingertip interaction', () => {
     expect(input.sample(source, index, thumb, null, true).pressed).toBeNull();
     input.nativeRelease(source);
     thumb.x = -0.08;
-    input.sample(source, index, thumb, null, true);
+    for (let frame = 0; frame < 4; frame++) input.sample(source, index, thumb, null, true);
     thumb.x = -0.04;
     expect(input.sample(source, index, thumb, null, true).pressed).toBe(keys[0]);
     expect(input.nativePress(source, null)).toBeNull();
@@ -132,6 +154,26 @@ describe('Keyborb fingertip interaction', () => {
     expect(input.sample(source, index, thumb, null, true).pressed).toBeNull();
     input.reset(source);
     expect(input.nativePress(source, keys[0])).toBeNull();
+  });
+
+  it('ignores brief opening jitter and late native events after a raw pinch', () => {
+    const { keys, source, input } = fixture();
+    const index = new THREE.Vector3(0, 0, 0.06);
+    const thumb = new THREE.Vector3(-0.08, 0, 0.06);
+    input.sample(source, index, thumb, null, true);
+    thumb.x = -0.04;
+    expect(input.sample(source, index, thumb, null, true).pressed).toBe(keys[0]);
+    thumb.x = -0.052;
+    input.sample(source, index, thumb, null, true, 0.05);
+    thumb.x = -0.04;
+    expect(input.sample(source, index, thumb, null, true).pressed).toBeNull();
+    thumb.x = -0.08;
+    for (let frame = 0; frame < 4; frame++) input.sample(source, index, thumb, null, true);
+    expect(input.nativePress(source, null)).toBeNull();
+    input.nativeRelease(source);
+    input.sample(source, index, thumb, null, true);
+    thumb.x = -0.04;
+    expect(input.sample(source, index, thumb, null, true).pressed).toBe(keys[0]);
   });
 
   it('supports a far ray target and resets lifts when the keyboard is hidden or tracking is lost', () => {
@@ -171,11 +213,11 @@ describe('Keyborb fingertip interaction', () => {
       true,
     );
     input.animate(1);
-    expect(keys[0].position.z).toBeCloseTo(0.105 * 0.75, 6);
-    expect(keys[1].position.z).toBeCloseTo(0.105 * 0.75, 6);
+    expect(keys[0].position.z).toBeCloseTo(0.105, 6);
+    expect(keys[1].position.z).toBeCloseTo(0.105, 6);
     input.reset(source);
     expect(keys[0].position.z).toBe(0);
-    expect(keys[1].position.z).toBeCloseTo(0.105 * 0.75, 6);
+    expect(keys[1].position.z).toBeCloseTo(0.105, 6);
     input.begin(null);
     expect(keys[1].position.z).toBe(0);
   });

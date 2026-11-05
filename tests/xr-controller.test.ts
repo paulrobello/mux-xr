@@ -465,6 +465,10 @@ describe('native XR controller event routing', () => {
       fakeXR.frame?.(60);
       expect(actions.sendKey).toHaveBeenCalledTimes(1);
       nativeEvent(0, 'selectend');
+      hit(workspace, { inputAction: 'key', key: 'a' });
+      fakeXR.frame?.(80);
+      expect(actions.sendKey).toHaveBeenCalledTimes(1);
+      nativeEvent(0, 'selectend');
     });
 
     it.each(['off', 'on'] as const)(
@@ -529,7 +533,8 @@ describe('native XR controller event routing', () => {
       expect(shift.userData.locked).toBe(true);
       expect(shift.userData.keyborbLabel.userData.labelText).toBe('Shift\nlock');
       pose('Shift', 0.08, 900);
-      pose('b', 0.04, 920);
+      pose('Shift', 0.08, 910);
+      pose('b', 0.04, 930);
       expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('b', { shift: true });
       workspace.selectTerminal('pane-b');
       fakeXR.frame?.(940);

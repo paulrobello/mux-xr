@@ -1432,6 +1432,7 @@ export function createWorkspaceScene(
             !gesture.pinching &&
             !priorityHandActions.has(String(ray?.object?.userData.inputAction)),
         ),
+        deltaSeconds,
       );
       if (sample.released && pokeSources.delete(controller)) modifierPresses.delete(controller);
       if (

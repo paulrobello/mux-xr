@@ -10,7 +10,7 @@
       "glyphColor": "#ffffff",
       "minimumOpacity": 0.18,
       "defaultMode": "auto",
-      "nearLiftDiameterRatio": 0.75,
+      "nearLiftDiameterRatio": 1,
       "pinchCloseMeters": 0.045,
       "pinchOpenMeters": 0.05,
       "interaction": "Controller trigger or index-thumb pinch; hover and contact never type."

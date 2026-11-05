@@ -326,13 +326,15 @@ async function main(): Promise<void> {
       const w = window as unknown as FixtureWindow;
       const index = w.__questHands[0].joints['index-finger-tip'];
       index.position.fromArray(point as [number, number, number]);
+      index.position.x += 0.04;
       w.__questHands[0].joints.wrist.position
         .copy(index.position)
         .add(new w.__questThree.Vector3(0.03, -0.12, 0.04));
       w.__questHands[0].joints['middle-finger-tip'].position
         .copy(index.position)
         .add(new w.__questThree.Vector3(0.03, 0.04, 0.02));
-      w.__questHands[0].joints['thumb-tip'].position.copy(index.position).x -= 0.08;
+      w.__questHands[0].joints['thumb-tip'].position.fromArray(point as [number, number, number]);
+      w.__questHands[0].joints['thumb-tip'].position.x -= 0.04;
     }, orb.point);
     await frames(page, 60);
     report.contactInputs = inputs.length;
@@ -349,11 +351,14 @@ async function main(): Promise<void> {
       });
       return Number(key?.userData.keyborbLift ?? 0);
     });
-    await page.evaluate(() => {
+    await page.evaluate((point) => {
       const w = window as unknown as FixtureWindow;
       const index = w.__questHands[0].joints['index-finger-tip'];
-      w.__questHands[0].joints['thumb-tip'].position.copy(index.position).x -= 0.04;
-    });
+      index.position.fromArray(point as [number, number, number]);
+      index.position.x += 0.02;
+      w.__questHands[0].joints['thumb-tip'].position.fromArray(point as [number, number, number]);
+      w.__questHands[0].joints['thumb-tip'].position.x -= 0.02;
+    }, orb.point);
     await frames(page, 60);
     report.pinchInputs = [...inputs];
     const raisedLift = await page.evaluate(() => {
@@ -364,7 +369,7 @@ async function main(): Promise<void> {
       });
       return Number(key?.userData.keyborbLift ?? 0);
     });
-    report.keyborbLift = { idle: idleLift, raised: raisedLift, expected: orb.diameter * 0.75 };
+    report.keyborbLift = { idle: idleLift, raised: raisedLift, expected: orb.diameter };
     await page.screenshot({
       path: join(checkedTestRoot, 'keyborb-keyboard-raised-a.png'),
       fullPage: true,
@@ -372,11 +377,57 @@ async function main(): Promise<void> {
     (report.screenshots as string[]).push('keyborb-keyboard-raised-a.png');
     await targetSelectHold(page, { inputAction: 'key', key: 'a' });
     report.nativePinchInputs = [...inputs];
-    await page.evaluate(() => {
+    const nativeRepeatBaseline = inputs.length;
+    await targetSelectHold(page, { inputAction: 'key', key: 'a' });
+    report.nativeRepeatInputs = inputs.slice(nativeRepeatBaseline);
+    const briefBaseline = inputs.length;
+    await page.evaluate((point) => {
       const w = window as unknown as FixtureWindow;
       const index = w.__questHands[0].joints['index-finger-tip'];
-      w.__questHands[0].joints['thumb-tip'].position.copy(index.position).x -= 0.08;
-    });
+      index.position.fromArray(point as [number, number, number]);
+      index.position.x += 0.025;
+      w.__questHands[0].joints['thumb-tip'].position.fromArray(point as [number, number, number]);
+      w.__questHands[0].joints['thumb-tip'].position.x -= 0.025;
+    }, orb.point);
+    await frames(page, 1);
+    await page.evaluate((point) => {
+      const w = window as unknown as FixtureWindow;
+      const index = w.__questHands[0].joints['index-finger-tip'];
+      index.position.fromArray(point as [number, number, number]);
+      index.position.x += 0.02;
+      w.__questHands[0].joints['thumb-tip'].position.fromArray(point as [number, number, number]);
+      w.__questHands[0].joints['thumb-tip'].position.x -= 0.02;
+    }, orb.point);
+    await frames(page, 1);
+    report.briefInputs = inputs.slice(briefBaseline);
+    const deliberateBaseline = inputs.length;
+    await page.evaluate((point) => {
+      const w = window as unknown as FixtureWindow;
+      const index = w.__questHands[0].joints['index-finger-tip'];
+      index.position.fromArray(point as [number, number, number]);
+      index.position.x += 0.04;
+      w.__questHands[0].joints['thumb-tip'].position.fromArray(point as [number, number, number]);
+      w.__questHands[0].joints['thumb-tip'].position.x -= 0.04;
+    }, orb.point);
+    await frames(page, 8);
+    await page.evaluate((point) => {
+      const w = window as unknown as FixtureWindow;
+      const index = w.__questHands[0].joints['index-finger-tip'];
+      index.position.fromArray(point as [number, number, number]);
+      index.position.x += 0.02;
+      w.__questHands[0].joints['thumb-tip'].position.fromArray(point as [number, number, number]);
+      w.__questHands[0].joints['thumb-tip'].position.x -= 0.02;
+    }, orb.point);
+    await frames(page, 60);
+    report.deliberateInputs = inputs.slice(deliberateBaseline);
+    await page.evaluate((point) => {
+      const w = window as unknown as FixtureWindow;
+      const index = w.__questHands[0].joints['index-finger-tip'];
+      index.position.fromArray(point as [number, number, number]);
+      index.position.x += 0.04;
+      w.__questHands[0].joints['thumb-tip'].position.fromArray(point as [number, number, number]);
+      w.__questHands[0].joints['thumb-tip'].position.x -= 0.04;
+    }, orb.point);
     await frames(page, 5);
     report.releasedInputs = [...inputs];
     const recoveryBaseline = inputs.length;
@@ -385,8 +436,10 @@ async function main(): Promise<void> {
       const hand = w.__questHands[0];
       const index = hand.joints['index-finger-tip'];
       index.position.fromArray(point as [number, number, number]);
+      index.position.x += 0.024;
       hand.joints.wrist.visible = false;
-      hand.joints['thumb-tip'].position.copy(index.position).x -= 0.048;
+      hand.joints['thumb-tip'].position.fromArray(point as [number, number, number]);
+      hand.joints['thumb-tip'].position.x -= 0.024;
       hand.joints['middle-finger-tip'].position.copy(hand.joints['thumb-tip'].position).y += 0.03;
     }, orb.point);
     await frames(page, 5);
@@ -395,20 +448,26 @@ async function main(): Promise<void> {
       hand.joints.wrist.visible = true;
     });
     await frames(page, 5);
-    await page.evaluate(() => {
+    await page.evaluate((point) => {
       const hand = (window as unknown as FixtureWindow).__questHands[0];
       const index = hand.joints['index-finger-tip'];
-      hand.joints['thumb-tip'].position.copy(index.position).x -= 0.02;
-    });
+      index.position.fromArray(point as [number, number, number]);
+      index.position.x += 0.01;
+      hand.joints['thumb-tip'].position.fromArray(point as [number, number, number]);
+      hand.joints['thumb-tip'].position.x -= 0.01;
+    }, orb.point);
     await frames(page, 8);
     report.recoveryBeforeNative = inputs.slice(recoveryBaseline);
     await targetSelectHold(page, { inputAction: 'key', key: 'a' });
     report.recoveryAfterNative = inputs.slice(recoveryBaseline);
-    await page.evaluate(() => {
+    await page.evaluate((point) => {
       const hand = (window as unknown as FixtureWindow).__questHands[0];
       const index = hand.joints['index-finger-tip'];
-      hand.joints['thumb-tip'].position.copy(index.position).x -= 0.08;
-    });
+      index.position.fromArray(point as [number, number, number]);
+      index.position.x += 0.04;
+      hand.joints['thumb-tip'].position.fromArray(point as [number, number, number]);
+      hand.joints['thumb-tip'].position.x -= 0.04;
+    }, orb.point);
     await frames(page, 5);
     report.recoveryAfterRelease = inputs.slice(recoveryBaseline);
     await page.evaluate(() => {
@@ -545,7 +604,10 @@ async function main(): Promise<void> {
       report.contactInputs === 0 &&
       JSON.stringify(report.pinchInputs) === JSON.stringify(['a']) &&
       JSON.stringify(report.nativePinchInputs) === JSON.stringify(['a']) &&
-      JSON.stringify(report.releasedInputs) === JSON.stringify(['a']) &&
+      JSON.stringify(report.nativeRepeatInputs) === JSON.stringify([]) &&
+      JSON.stringify(report.briefInputs) === JSON.stringify([]) &&
+      JSON.stringify(report.deliberateInputs) === JSON.stringify(['a']) &&
+      JSON.stringify(report.releasedInputs) === JSON.stringify(['a', 'a']) &&
       JSON.stringify(report.recoveryBeforeNative) === JSON.stringify([]) &&
       JSON.stringify(report.recoveryAfterNative) === JSON.stringify(['a']) &&
       JSON.stringify(report.recoveryAfterRelease) === JSON.stringify(['a']) &&

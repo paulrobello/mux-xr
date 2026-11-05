@@ -4,6 +4,7 @@ const PINCH_CLOSE = 0.045;
 const PINCH_OPEN = 0.05;
 const NEAR_ENTER = 0.08;
 const NEAR_EXIT = 0.11;
+const REARM_SECONDS = 0.04;
 
 interface Orb {
   mesh: THREE.Mesh;
@@ -23,7 +24,10 @@ interface HandState {
   armed: boolean;
   pinching: boolean;
   activated: boolean;
-  nativeHeld: boolean;
+  nativePhase: 'idle' | 'held' | 'released';
+  nativeEarly: boolean;
+  openSeconds: number;
+  openFrames: number;
   enabled: boolean;
   nearby: Orb | null;
   result: KeyborbPinchSample;
@@ -37,6 +41,7 @@ export function createKeyborbInput(): {
     thumb: THREE.Vector3 | null,
     rayKey: THREE.Mesh | null,
     enabled: boolean,
+    deltaSeconds?: number,
   ): KeyborbPinchSample;
   near(source: THREE.Object3D): boolean;
   hovered(source: THREE.Object3D): THREE.Mesh | null;
@@ -49,6 +54,7 @@ export function createKeyborbInput(): {
   const orbs: Orb[] = [];
   const hands = new Map<THREE.Object3D, HandState>();
   const center = new THREE.Vector3();
+  const midpoint = new THREE.Vector3();
   const normal = new THREE.Vector3();
   const delta = new THREE.Vector3();
   const scale = new THREE.Vector3();
@@ -100,14 +106,17 @@ export function createKeyborbInput(): {
       keyboard?.updateWorldMatrix(true, false);
       keyboard?.getWorldScale(scale);
     },
-    sample(source, index, thumb, rayKey, enabled) {
+    sample(source, index, thumb, rayKey, enabled, deltaSeconds = 1 / 60) {
       let state = hands.get(source);
       if (!state) {
         state = {
           armed: false,
           pinching: false,
           activated: false,
-          nativeHeld: false,
+          nativePhase: 'idle',
+          nativeEarly: false,
+          openSeconds: 0,
+          openFrames: 0,
           enabled: false,
           nearby: null,
           result: { hovered: null, pressed: null, released: false },
@@ -120,25 +129,23 @@ export function createKeyborbInput(): {
       if (!keyboard || !index || !thumb) {
         result.released = state.pinching;
         state.pinching = state.armed = false;
-        state.activated = state.nativeHeld = state.enabled = false;
+        state.activated = state.nativeEarly = state.enabled = false;
+        state.nativePhase = 'idle';
+        state.openSeconds = 0;
+        state.openFrames = 0;
         state.nearby = null;
         return result;
       }
       let nearest: Orb | null = null;
       let distance = state.nearby ? NEAR_EXIT : NEAR_ENTER;
+      midpoint.addVectors(index, thumb).multiplyScalar(0.5);
       for (const orb of orbs) {
         if (!orb.mesh.visible) continue;
         center.copy(orb.rest).applyMatrix4(keyboard.matrixWorld);
         normal.copy(orb.normal).transformDirection(keyboard.matrixWorld);
         const radius = (orb.diameter * Math.abs(scale.x)) / 2;
-        if (
-          Math.max(
-            delta.copy(index).sub(center).dot(normal),
-            delta.copy(thumb).sub(center).dot(normal),
-          ) < -radius
-        )
-          continue;
-        const candidate = Math.min(index.distanceTo(center), thumb.distanceTo(center)) - radius;
+        if (delta.copy(midpoint).sub(center).dot(normal) < -radius) continue;
+        const candidate = midpoint.distanceTo(center) - radius;
         if (candidate < distance) {
           nearest = orb;
           distance = candidate;
@@ -148,15 +155,30 @@ export function createKeyborbInput(): {
       result.hovered = nearest?.mesh ?? null;
       const separation = index.distanceTo(thumb);
       state.enabled = enabled;
-      if (separation >= PINCH_OPEN && !state.nativeHeld) {
+      const rawOpen = separation >= PINCH_OPEN;
+      const nativeOpen = state.nativePhase !== 'idle' && separation > PINCH_CLOSE;
+      state.openSeconds = rawOpen || nativeOpen ? state.openSeconds + Math.max(0, deltaSeconds) : 0;
+      state.openFrames = rawOpen || nativeOpen ? state.openFrames + (deltaSeconds > 0 ? 1 : 0) : 0;
+      if (
+        (rawOpen || nativeOpen) &&
+        (!state.activated || (state.openSeconds >= REARM_SECONDS && state.openFrames >= 2)) &&
+        state.nativePhase !== 'held'
+      ) {
         result.released = state.pinching;
         state.pinching = false;
-        state.activated = false;
-        state.armed = enabled;
+        state.nativeEarly = false;
+        state.armed = enabled && rawOpen;
       } else if (separation <= PINCH_CLOSE && !state.pinching) {
         state.pinching = true;
-        if (state.armed && enabled) result.pressed = nearest?.mesh ?? rayKey;
-        state.activated = Boolean(result.pressed);
+        if (!state.nativeEarly) {
+          state.activated = false;
+          if (enabled && (state.armed || state.nativePhase === 'held'))
+            result.pressed = nearest?.mesh ?? rayKey;
+          state.activated = Boolean(result.pressed);
+        }
+        state.nativeEarly = false;
+        state.openSeconds = 0;
+        state.openFrames = 0;
         state.armed = false;
       }
       if (!enabled) state.armed = false;
@@ -170,26 +192,34 @@ export function createKeyborbInput(): {
     },
     nativePress(source, rayKey) {
       const state = hands.get(source);
-      if (!keyboard || !state?.enabled || state.nativeHeld) return null;
-      state.nativeHeld = true;
-      if (state.activated) return null;
+      if (!keyboard || !state?.enabled || state.nativePhase === 'held') return null;
+      const rearmed =
+        state.nativePhase === 'released' &&
+        !state.pinching &&
+        state.openSeconds >= REARM_SECONDS &&
+        state.openFrames >= 2;
+      state.nativePhase = 'held';
+      if (state.activated && !rearmed) return null;
       const key = state.nearby?.mesh ?? rayKey;
       if (!key) return null;
-      state.pinching = state.activated = true;
+      state.nativeEarly = !state.pinching;
+      state.activated = true;
+      state.openSeconds = 0;
+      state.openFrames = 0;
       state.armed = false;
       return key;
     },
     nativeRelease(source) {
       const state = hands.get(source);
-      if (!state?.nativeHeld) return false;
-      state.nativeHeld = state.activated = state.armed = false;
-      state.pinching = true;
+      if (state?.nativePhase !== 'held') return false;
+      state.nativePhase = 'released';
+      state.armed = false;
       return true;
     },
     animate(deltaSeconds) {
       const alpha = 1 - Math.exp(-24 * Math.max(0, deltaSeconds));
       for (const orb of orbs) {
-        const wanted = targeted(orb) ? orb.diameter * 0.75 : 0;
+        const wanted = targeted(orb) ? orb.diameter : 0;
         orb.lift = THREE.MathUtils.lerp(orb.lift, wanted, alpha);
         orb.mesh.position.copy(orb.rest).addScaledVector(orb.normal, orb.lift);
         orb.mesh.userData.keyborbLift = orb.lift;
