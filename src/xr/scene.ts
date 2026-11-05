@@ -1448,6 +1448,7 @@ export function createWorkspaceScene(
             !priorityHandActions.has(String(ray?.object?.userData.inputAction)),
         ),
         deltaSeconds,
+        visual?.root.userData.keyborbPoint as THREE.Vector3 | undefined,
       );
       if (sample.released && pokeSources.delete(controller)) modifierPresses.delete(controller);
       if (
@@ -2981,6 +2982,7 @@ export function createWorkspaceScene(
     if (mutableState.updateAvailable === available) return;
     mutableState.updateAvailable = available;
     radialMenu.setUpdateAvailable(available);
+    wristWatch.setUpdateAvailable(available);
     if (updateNotice) updateNotice.visible = available && Boolean(renderer?.xr.isPresenting);
     notify();
   };

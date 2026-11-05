@@ -96,6 +96,25 @@ describe('wrist menu watch', () => {
     watch.dispose();
   });
 
+  it('shows the update indicator with reload help and disposes its resources', () => {
+    const watch = makeWatch();
+    const indicator = watch.root.getObjectByName('xr-wrist-menu-update-indicator') as THREE.Mesh;
+    expect(indicator).toBeDefined();
+    expect(indicator.visible).toBe(false);
+    expect(indicator.position).toEqual(new THREE.Vector3(0.023, 0.016, 0.016));
+    expect(indicator.userData.helpText).toBe('Update available. Open menu to reload.');
+    const geometryDispose = vi.spyOn(indicator.geometry, 'dispose');
+    const materialDispose = vi.spyOn(indicator.material as THREE.Material, 'dispose');
+    watch.setUpdateAvailable(true);
+    expect(indicator.visible).toBe(true);
+    watch.setUpdateAvailable(false);
+    expect(indicator.visible).toBe(false);
+    watch.dispose();
+    watch.dispose();
+    expect(geometryDispose).toHaveBeenCalledOnce();
+    expect(materialDispose).toHaveBeenCalledOnce();
+  });
+
   it('disposes owned case and strap resources but preserves the button resource', () => {
     const buttonGeometry = new THREE.PlaneGeometry(0.04, 0.03);
     const buttonMaterial = new THREE.MeshBasicMaterial();

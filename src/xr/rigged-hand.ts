@@ -87,6 +87,13 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
   const rotation = new THREE.Quaternion();
   const parentRotation = new THREE.Quaternion();
   const referenceDirection = new THREE.Vector3();
+  const previousDirection = new THREE.Vector3();
+  const inverseRotation = new THREE.Quaternion();
+  const visibleIndex = new THREE.Vector3();
+  const visibleThumb = new THREE.Vector3();
+  const pinchPoint = new THREE.Vector3();
+  let indexEnd: THREE.Bone | undefined;
+  let thumbEnd: THREE.Bone | undefined;
   const assetReady = (options.loader ?? new GLTFLoader())
     .loadAsync(options.assetUrl ?? RIGGED_HAND_ASSET_URL)
     .then((gltf) => {
@@ -121,6 +128,8 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
       mesh.name = 'authored-hand-skin';
       mesh.frustumCulled = false;
       mesh.raycast = () => undefined;
+      indexEnd = candidate.skeleton.getBoneByName('index_03');
+      thumbEnd = candidate.skeleton.getBoneByName('thumb_03');
       mesh.geometry.computeBoundingBox();
       wristOffset = mesh.geometry.boundingBox?.min.y ?? 0;
       const material = mesh.material as THREE.MeshStandardMaterial;
@@ -206,18 +215,34 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
       } else {
         const start = tracked.joints?.[JOINTS[digit][part]];
         const end = tracked.joints?.[JOINTS[digit][part + 1]];
-        if (start?.visible && end?.visible && bone.parent) {
+        const previous = tracked.joints?.[part === 0 ? 'wrist' : JOINTS[digit][part - 1]];
+        if (start?.visible && end?.visible && previous?.visible && bone.parent) {
           start.getWorldPosition(position);
           end.getWorldPosition(target);
           direction.copy(target).sub(position);
           const length = direction.length();
           if (length > 1e-4) {
             direction.divideScalar(length);
-            parentRotation.copy(authored.quaternion).multiply(driver.worldRest);
-            referenceDirection.set(0, 1, 0).applyQuaternion(parentRotation);
-            rotation.setFromUnitVectors(referenceDirection, direction).multiply(parentRotation);
-            bone.parent.getWorldQuaternion(parentRotation).invert();
-            bone.quaternion.copy(parentRotation).multiply(rotation);
+            previous.getWorldPosition(previousDirection);
+            previousDirection.subVectors(position, previousDirection).normalize();
+            if (digit === 0) {
+              parentRotation.copy(authored.quaternion).multiply(driver.worldRest);
+              rotation
+                .setFromUnitVectors(previousDirection, direction)
+                .premultiply(inverseRotation.copy(parentRotation).invert())
+                .multiply(parentRotation);
+            } else {
+              if (part === 0) previousDirection.copy(forward);
+              previousDirection.addScaledVector(across, -previousDirection.dot(across)).normalize();
+              direction.addScaledVector(across, -direction.dot(across)).normalize();
+              referenceDirection.crossVectors(previousDirection, direction);
+              const angle = Math.atan2(
+                referenceDirection.dot(across),
+                previousDirection.dot(direction),
+              );
+              rotation.setFromAxisAngle(driver.curlAxis, THREE.MathUtils.clamp(angle, -0.35, 1.9));
+            }
+            bone.quaternion.copy(rest).multiply(rotation);
           }
         }
       }
@@ -225,6 +250,16 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
     }
     mesh.updateWorldMatrix(true, false);
     mesh.skeleton.update();
+    if (indexEnd && thumbEnd) {
+      indexEnd.localToWorld(visibleIndex.set(0, indexEnd.userData.restLength, 0));
+      thumbEnd.localToWorld(visibleThumb.set(0, thumbEnd.userData.restLength, 0));
+      pinchPoint.addVectors(visibleIndex, visibleThumb).multiplyScalar(0.5);
+      const trackedDigits =
+        JOINTS[0].every((name) => tracked.joints?.[name]?.visible) &&
+        JOINTS[1].every((name) => tracked.joints?.[name]?.visible);
+      fallback.root.userData.keyborbPoint =
+        controllerMode || trackedDigits ? pinchPoint : undefined;
+    }
     for (let index = 0; index < probeVertices.length; index++) {
       mesh.getVertexPosition(probeVertices[index], probes[index].point);
       probes[index].point.applyMatrix4(mesh.matrixWorld);

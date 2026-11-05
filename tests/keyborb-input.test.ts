@@ -12,7 +12,7 @@ function fixture(): {
   const keys = [0, 0.13].map((x) => {
     const key = new THREE.Mesh(new THREE.SphereGeometry(0.0525));
     key.position.x = x;
-    Object.assign(key.userData, { keyborb: true, labelWidth: 0.105 });
+    Object.assign(key.userData, { keyborb: true, keyborbSlot: x, labelWidth: 0.105 });
     root.add(key);
     return key;
   });
@@ -23,6 +23,70 @@ function fixture(): {
 }
 
 describe('Keyborb fingertip interaction', () => {
+  it('uses the last displayed target for native event resampling and rearms on another orb', () => {
+    const { keys, source, input } = fixture();
+    const index = new THREE.Vector3(0.09, 0, 0.06);
+    const thumb = new THREE.Vector3(0.03, 0, 0.06);
+    input.sample(source, index, thumb, null, true);
+    index.x += 0.02;
+    thumb.x += 0.02;
+    expect(input.sample(source, index, thumb, null, true, 0).hovered).toBe(keys[0]);
+    expect(input.nativePress(source, null)).toBe(keys[0]);
+    expect(input.sample(source, index, thumb, null, true).hovered).toBe(keys[0]);
+    input.nativeRelease(source);
+    index.x = 0.17;
+    thumb.x = 0.09;
+    for (let frame = 0; frame < 4; frame++) input.sample(source, index, thumb, null, true);
+    index.x = 0.15;
+    thumb.x = 0.11;
+    expect(input.sample(source, index, thumb, null, true).pressed).toBe(keys[1]);
+  });
+  it('retains controller hover while pinch typing is disabled', () => {
+    const { keys, source, input } = fixture();
+    const result = input.sample(
+      source,
+      new THREE.Vector3(0.04, 0, 0.06),
+      new THREE.Vector3(-0.04, 0, 0.06),
+      null,
+      false,
+    );
+    expect(result.hovered).toBe(keys[0]);
+    expect(input.nativePress(source, null)).toBeNull();
+  });
+  it('keeps the hovered orb when the closing midpoint drifts across its neighbor', () => {
+    const { keys, source, input } = fixture();
+    const index = new THREE.Vector3(0.03, 0, 0.06);
+    const thumb = new THREE.Vector3(-0.03, 0, 0.06);
+    index.x = 0.09;
+    thumb.x = 0.03;
+    expect(input.sample(source, index, thumb, null, true).hovered).toBe(keys[0]);
+    index.x = 0.0975;
+    thumb.x = 0.0535;
+    expect(input.sample(source, index, thumb, null, true).pressed).toBe(keys[0]);
+  });
+
+  it('uses the supplied visual target point for acquisition', () => {
+    const { keys, source, input } = fixture();
+    const index = new THREE.Vector3(0.14, 0, 0.06);
+    const thumb = new THREE.Vector3(0, 0, 0.06);
+    expect(
+      input.sample(source, index, thumb, null, true, undefined, new THREE.Vector3(0, 0, 0.06))
+        .hovered,
+    ).toBe(keys[0]);
+  });
+
+  it('remaps a retained target to the same slot after a keyboard rebuild', () => {
+    const { root, source, input } = fixture();
+    const index = new THREE.Vector3(0.09, 0, 0.06);
+    const thumb = new THREE.Vector3(0.03, 0, 0.06);
+    input.sample(source, index, thumb, null, true);
+    const replacement = root.clone();
+    input.begin(replacement);
+    index.x = 0.0975;
+    thumb.x = 0.0535;
+    expect(input.sample(source, index, thumb, null, true).pressed).toBe(replacement.children[0]);
+  });
+
   it('selects the orb nearest the midpoint rather than either fingertip', () => {
     const { keys, source, input } = fixture();
     const result = input.sample(

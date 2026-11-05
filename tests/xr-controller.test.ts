@@ -435,6 +435,30 @@ describe('native XR controller event routing', () => {
       expect(workspace.state.keyborbEnabled).toBe(true);
     });
 
+    it('targets the rendered finger midpoint while using tracked separation for the pinch', () => {
+      const { workspace, actions } = setup('on');
+      workspace.showInput('keyboard');
+      const hand = connectHand();
+      const rawKey = objectWithData(workspace, { inputAction: 'key', key: 'a' });
+      const visibleKey = objectWithData(workspace, { inputAction: 'key', key: 'b' });
+      const rawPoint = rawKey.getWorldPosition(new THREE.Vector3());
+      const visiblePoint = visibleKey
+        .getWorldPosition(new THREE.Vector3())
+        .add(new THREE.Vector3(0, 0, 0.06));
+      const visual = workspace.scene.children.find(
+        (object) => object.name === 'xr-cartoon-hand' && object.userData.handedness === 'right',
+      );
+      if (!visual) throw new Error('Hand visual missing');
+      visual.userData.keyborbPoint = visiblePoint;
+      hand.joints['index-finger-tip'].position.copy(rawPoint).add(new THREE.Vector3(0.04, 0, 0));
+      hand.joints['thumb-tip'].position.copy(rawPoint).add(new THREE.Vector3(-0.04, 0, 0));
+      fakeXR.frame?.(20);
+      hand.joints['index-finger-tip'].position.copy(rawPoint).add(new THREE.Vector3(0.02, 0, 0));
+      hand.joints['thumb-tip'].position.copy(rawPoint).add(new THREE.Vector3(-0.02, 0, 0));
+      fakeXR.frame?.(40);
+      expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('b', undefined);
+    });
+
     it('changes Keyborb modes through native Settings controls', () => {
       const { workspace } = setup('off');
       workspace.showInput('settings');
@@ -527,8 +551,8 @@ describe('native XR controller event routing', () => {
       const pose = (key: string, gap: number, time: number): void => {
         const button = objectWithData(workspace, { inputAction: 'key', key });
         const point = button.getWorldPosition(new THREE.Vector3());
-        hand.joints['index-finger-tip'].position.copy(point);
-        hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(gap, 0, 0));
+        hand.joints['index-finger-tip'].position.copy(point).add(new THREE.Vector3(-gap / 2, 0, 0));
+        hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(gap / 2, 0, 0));
         hand.joints['middle-finger-tip'].position
           .copy(hand.joints['thumb-tip'].position)
           .add(new THREE.Vector3(0, 0.12, 0));
@@ -567,8 +591,12 @@ describe('native XR controller event routing', () => {
       );
       const pose = (gap: number): void => {
         for (const [index, hand] of hands.entries()) {
-          hand.joints['index-finger-tip'].position.copy(points[index]);
-          hand.joints['thumb-tip'].position.copy(points[index]).add(new THREE.Vector3(gap, 0, 0));
+          hand.joints['index-finger-tip'].position
+            .copy(points[index])
+            .add(new THREE.Vector3(-gap / 2, 0, 0));
+          hand.joints['thumb-tip'].position
+            .copy(points[index])
+            .add(new THREE.Vector3(gap / 2, 0, 0));
           hand.joints['middle-finger-tip'].position
             .copy(hand.joints['thumb-tip'].position)
             .add(new THREE.Vector3(0, 0.12, 0));

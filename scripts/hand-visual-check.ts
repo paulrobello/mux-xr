@@ -679,6 +679,15 @@ async function main(): Promise<void> {
         return Boolean(w.__questScene.getObjectByName('radial-menu-reload-update')?.visible);
       });
     if (await reloadVisible()) throw new Error('Watch offered Reload without an update');
+    if (
+      await page.evaluate(
+        () =>
+          (window as unknown as FixtureWindow).__questScene.getObjectByName(
+            'xr-wrist-menu-update-indicator',
+          )?.visible,
+      )
+    )
+      throw new Error('Watch indicator visible without an update');
     servedBuild = '2'.repeat(64);
     await page.evaluate(() =>
       (
@@ -686,7 +695,31 @@ async function main(): Promise<void> {
       ).__muxXR.checkForUpdate(),
     );
     await wait(page, reloadVisible, 'Watch did not offer Reload for the available update');
+    report.watchUpdateIndicator = await page.evaluate(
+      () =>
+        (window as unknown as FixtureWindow).__questScene.getObjectByName(
+          'xr-wrist-menu-update-indicator',
+        )?.visible,
+    );
+    if (!report.watchUpdateIndicator) throw new Error('Watch update indicator missing');
     await page.screenshot({ path: join(testRoot, 'hand-watch-reload.png') });
+    const watchClip = await page.evaluate(() => {
+      const w = window as unknown as FixtureWindow;
+      const watch = w.__questScene.getObjectByName('xr-wrist-menu-watch');
+      if (!watch) throw new Error('Watch missing');
+      const point = watch.getWorldPosition(new w.__questThree.Vector3()).project(w.__questCamera);
+      const rect = w.__questRenderer.domElement.getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(innerWidth - 180, rect.x + ((point.x + 1) * rect.width) / 2 - 90)),
+        y: Math.max(
+          0,
+          Math.min(innerHeight - 120, rect.y + ((1 - point.y) * rect.height) / 2 - 60),
+        ),
+        width: 180,
+        height: 120,
+      };
+    });
+    await page.screenshot({ path: join(testRoot, 'watch-update-close.png'), clip: watchClip });
     await writeFile(
       fixtureHtml,
       originalHtml.replace(

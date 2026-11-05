@@ -6,6 +6,7 @@ export interface WristMenuWatch {
   root: THREE.Group;
   update(wrist: THREE.Vector3, forward: THREE.Vector3, backNormal: THREE.Vector3): void;
   updateTime(nowMs: number): void;
+  setUpdateAvailable(available: boolean): void;
   setVisible(visible: boolean): void;
   updateTouch(probes: readonly HandContactProbe[] | null): boolean;
   readonly near: boolean;
@@ -27,9 +28,17 @@ export function createWristMenuWatch(button: THREE.Mesh): WristMenuWatch {
   strap.rotation.x = Math.PI / 2;
   strap.name = 'xr-wrist-menu-watch-strap';
   strap.raycast = () => undefined;
+  const updateIndicatorGeometry = new THREE.CircleGeometry(0.003, 16);
+  const updateIndicatorMaterial = new THREE.MeshBasicMaterial({ color: 0x35d7ff });
+  const updateIndicator = new THREE.Mesh(updateIndicatorGeometry, updateIndicatorMaterial);
+  updateIndicator.name = 'xr-wrist-menu-update-indicator';
+  updateIndicator.position.set(0.023, 0.016, 0.016);
+  updateIndicator.userData.inputAction = 'wristMenu';
+  updateIndicator.userData.helpText = 'Update available. Open menu to reload.';
+  updateIndicator.visible = false;
   button.userData.inputAction = 'wristMenu';
   button.position.z = 0.009;
-  root.add(strap, watchCase, button);
+  root.add(strap, watchCase, button, updateIndicator);
 
   const basis = new THREE.Matrix4();
   const rotation = new THREE.Quaternion();
@@ -54,6 +63,10 @@ export function createWristMenuWatch(button: THREE.Mesh): WristMenuWatch {
     const hour = hours % 12 || 12;
     const suffix = hours >= 12 ? 'PM' : 'AM';
     updateScalableLabel(button, `${hour}:${String(date.getMinutes()).padStart(2, '0')}\n${suffix}`);
+  };
+  const setUpdateAvailable = (available: boolean): void => {
+    if (disposed) return;
+    updateIndicator.visible = available;
   };
 
   const update = (
@@ -127,17 +140,20 @@ export function createWristMenuWatch(button: THREE.Mesh): WristMenuWatch {
     root.visible = false;
     root.removeFromParent();
     root.remove(button);
-    root.remove(watchCase, strap);
+    root.remove(watchCase, strap, updateIndicator);
     caseGeometry.dispose();
     caseMaterial.dispose();
     strapGeometry.dispose();
     strapMaterial.dispose();
+    updateIndicatorGeometry.dispose();
+    updateIndicatorMaterial.dispose();
     root.clear();
   };
   return {
     root,
     update,
     updateTime,
+    setUpdateAvailable,
     setVisible,
     updateTouch,
     get near() {

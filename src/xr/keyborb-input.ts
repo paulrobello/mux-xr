@@ -42,6 +42,7 @@ export function createKeyborbInput(): {
     rayKey: THREE.Mesh | null,
     enabled: boolean,
     deltaSeconds?: number,
+    targetPoint?: THREE.Vector3,
   ): KeyborbPinchSample;
   near(source: THREE.Object3D): boolean;
   hovered(source: THREE.Object3D): THREE.Mesh | null;
@@ -87,6 +88,11 @@ export function createKeyborbInput(): {
     begin(root) {
       if (root && !root.visible) root = null;
       if (root !== keyboard) {
+        const previousSlots = new Map<HandState, number>();
+        for (const hand of hands.values()) {
+          const slot = hand.nearby?.mesh.userData.keyborbSlot;
+          if (typeof slot === 'number') previousSlots.set(hand, slot);
+        }
         restore();
         keyboard = root;
         orbs.length = 0;
@@ -102,11 +108,14 @@ export function createKeyborbInput(): {
             lift: 0,
           });
         }
+        for (const [hand, slot] of previousSlots) {
+          hand.nearby = orbs.find((orb) => orb.mesh.userData.keyborbSlot === slot) ?? null;
+        }
       }
       keyboard?.updateWorldMatrix(true, false);
       keyboard?.getWorldScale(scale);
     },
-    sample(source, index, thumb, rayKey, enabled, deltaSeconds = 1 / 60) {
+    sample(source, index, thumb, rayKey, enabled, deltaSeconds = 1 / 60, targetPoint) {
       let state = hands.get(source);
       if (!state) {
         state = {
@@ -136,26 +145,46 @@ export function createKeyborbInput(): {
         state.nearby = null;
         return result;
       }
-      let nearest: Orb | null = null;
-      let distance = state.nearby ? NEAR_EXIT : NEAR_ENTER;
       midpoint.addVectors(index, thumb).multiplyScalar(0.5);
+      const acquisitionPoint = targetPoint ?? midpoint;
+      const separation = index.distanceTo(thumb);
+      const rawOpen = separation >= PINCH_OPEN;
+      const retained = state.nearby;
+      const latchRetained =
+        enabled &&
+        retained !== null &&
+        (deltaSeconds === 0 ||
+          state.pinching ||
+          state.nativePhase === 'held' ||
+          (state.armed && !rawOpen));
+      let nearest: Orb | null = null;
+      let distance = retained ? NEAR_EXIT : NEAR_ENTER;
       for (const orb of orbs) {
         if (!orb.mesh.visible) continue;
         center.copy(orb.rest).applyMatrix4(keyboard.matrixWorld);
         normal.copy(orb.normal).transformDirection(keyboard.matrixWorld);
         const radius = (orb.diameter * Math.abs(scale.x)) / 2;
-        if (delta.copy(midpoint).sub(center).dot(normal) < -radius) continue;
-        const candidate = midpoint.distanceTo(center) - radius;
+        if (delta.copy(acquisitionPoint).sub(center).dot(normal) < -radius) continue;
+        const candidate = acquisitionPoint.distanceTo(center) - radius;
         if (candidate < distance) {
           nearest = orb;
           distance = candidate;
         }
       }
+      if (latchRetained && retained?.mesh.visible) {
+        center.copy(retained.rest).applyMatrix4(keyboard.matrixWorld);
+        normal.copy(retained.normal).transformDirection(keyboard.matrixWorld);
+        const radius = (retained.diameter * Math.abs(scale.x)) / 2;
+        const retainedDistance = acquisitionPoint.distanceTo(center) - radius;
+        if (
+          delta.copy(acquisitionPoint).sub(center).dot(normal) >= -radius &&
+          retainedDistance < NEAR_EXIT
+        )
+          nearest = retained;
+      }
       state.nearby = nearest;
-      result.hovered = nearest?.mesh ?? null;
-      const separation = index.distanceTo(thumb);
+      result.hovered = state.nearby?.mesh ?? null;
       state.enabled = enabled;
-      const rawOpen = separation >= PINCH_OPEN;
       const nativeOpen = state.nativePhase !== 'idle' && separation > PINCH_CLOSE;
       state.openSeconds = rawOpen || nativeOpen ? state.openSeconds + Math.max(0, deltaSeconds) : 0;
       state.openFrames = rawOpen || nativeOpen ? state.openFrames + (deltaSeconds > 0 ? 1 : 0) : 0;
