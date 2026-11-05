@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import { createElasticArm } from './elastic-arm';
+import type { HandContactProbe } from './hand-contact';
 
 type HandSide = 'left' | 'right';
 type HandJoints = THREE.Group & { joints?: Record<string, THREE.Object3D | undefined> };
 
 export interface CartoonHand {
   root: THREE.Group;
+  readonly contactProbes: readonly HandContactProbe[];
   update(hand: THREE.Group, camera: THREE.Object3D, side: HandSide, deltaSeconds: number): void;
   updateController(
     pose: THREE.Object3D,
@@ -32,25 +34,25 @@ const THUMB_JOINTS = [
   'thumb-phalanx-distal',
   'thumb-tip',
 ];
-const RADII = [0.018, 0.0135, 0.015, 0.017];
+const RADII = [0.018, 0.015, 0.015, 0.0145];
 const JOINT_NAMES = FINGERS.map((finger, index) =>
   index === 0 ? THUMB_JOINTS : PARTS.map((part) => `${finger}-${part}`),
 );
 const LITTLE_JOINTS = PARTS.map((part) => `pinky-finger-${part}`);
 const REST = [
   [
-    [0.03, 0.04],
+    [0.03, 0.045],
     [0.055, 0.045],
-    [0.08, 0.05],
-    [0.1, 0.052],
-    [0.11, 0.055],
+    [0.08, 0.045],
+    [0.1, 0.045],
+    [0.11, 0.045],
   ],
   [
-    [0.025, 0.025],
-    [0.03, 0.075],
-    [0.03, 0.11],
-    [0.03, 0.14],
-    [0.03, 0.16],
+    [0.035, 0.025],
+    [0.04, 0.075],
+    [0.04, 0.115],
+    [0.04, 0.15],
+    [0.04, 0.17],
   ],
   [
     [0, 0.03],
@@ -61,10 +63,10 @@ const REST = [
   ],
   [
     [-0.025, 0.025],
-    [-0.03, 0.07],
-    [-0.035, 0.105],
-    [-0.04, 0.13],
-    [-0.04, 0.15],
+    [-0.03, 0.065],
+    [-0.035, 0.095],
+    [-0.04, 0.12],
+    [-0.04, 0.145],
   ],
 ] as const;
 
@@ -149,8 +151,28 @@ export function createCartoonHand(): CartoonHand {
   const controllerBend = new THREE.Vector3();
   const curl = [0, 0, 0];
   const controls = FINGERS.map(() => Array.from({ length: 5 }, () => new THREE.Vector3()));
-  const curves = controls.map((points) => new THREE.CatmullRomCurve3(points, false, 'centripetal'));
+  const renderControls = FINGERS.map(() => Array.from({ length: 5 }, () => new THREE.Vector3()));
+  const curves = renderControls.map(
+    (points) => new THREE.CatmullRomCurve3(points, false, 'centripetal'),
+  );
   const samples = Array.from({ length: SECTIONS + 1 }, () => new THREE.Vector3());
+  const probePoints = FINGERS.map(() => Array.from({ length: 8 }, () => new THREE.Vector3()));
+  const palmProbes = Array.from({ length: 9 }, () => new THREE.Vector3());
+  const palmOffsets = palmProbes.map((_, index) =>
+    index === 0
+      ? new THREE.Vector2()
+      : new THREE.Vector2(
+          Math.cos((index * Math.PI) / 4),
+          Math.sin((index * Math.PI) / 4),
+        ).multiplyScalar(0.55),
+  );
+  const contactProbes: HandContactProbe[] = [
+    { point: wrist, radius: 0.022 },
+    ...palmProbes.map((point) => ({ point, radius: 0.024 })),
+    ...probePoints.flatMap((points, finger) =>
+      points.map((point) => ({ point, radius: RADII[finger] })),
+    ),
+  ];
   root.userData.armAnchor = anchor;
   root.userData.wristPosition = wrist;
   root.userData.palmForward = forward;
@@ -185,9 +207,31 @@ export function createCartoonHand(): CartoonHand {
     arm.reset();
     curl.fill(0);
   };
+  const prepareRenderControls = (blend: number, width: number, length: number): void => {
+    for (let finger = 0; finger < FINGERS.length; finger++)
+      for (let part = 0; part < 5; part++)
+        renderControls[finger][part].copy(controls[finger][part]);
+    if (blend <= 0) return;
+    temp.copy(controls[1][4]).sub(controls[2][4]);
+    const splay = Math.max(0, 0.042 - temp.dot(across)) * blend * 0.5;
+    const indexExtension = THREE.MathUtils.clamp(-0.004 - temp.dot(forward), 0, 0.022) * blend;
+    for (let part = 1; part < 5; part++) {
+      const fraction = part / 4;
+      temp
+        .copy(center)
+        .addScaledVector(across, width * 0.9 + 0.05 * fraction)
+        .addScaledVector(forward, -length * 0.08);
+      renderControls[0][part].lerp(temp, blend);
+      renderControls[1][part]
+        .addScaledVector(across, splay * fraction)
+        .addScaledVector(forward, indexExtension * fraction);
+      renderControls[2][part].addScaledVector(across, -splay * fraction);
+    }
+  };
 
   return {
     root,
+    contactProbes,
     hide,
     update(hand, camera, side, deltaSeconds) {
       if (disposed || !hand.visible) {
@@ -222,6 +266,31 @@ export function createCartoonHand(): CartoonHand {
         ? THREE.MathUtils.clamp(middleBase.distanceTo(wrist) * 0.64, 0.047, 0.07)
         : 0.057;
       center.copy(wrist).addScaledVector(forward, length * 0.82);
+      for (const [index, probe] of palmProbes.entries())
+        probe
+          .copy(center)
+          .addScaledVector(across, width * palmOffsets[index].x)
+          .addScaledVector(forward, length * palmOffsets[index].y);
+      for (let finger = 0; finger < FINGERS.length; finger++) {
+        const points = controls[finger];
+        for (let part = 0; part < 5; part++) {
+          const name = JOINT_NAMES[finger][part];
+          if (!name || !joint(source, name, points[part]))
+            fallback(points[part], REST[finger][part][0], REST[finger][part][1]);
+          if (finger === 3 && joint(source, LITTLE_JOINTS[part], temp))
+            points[part].lerp(temp, 0.42);
+        }
+      }
+      const fingertipDistance = Math.min(
+        controls[0][4].distanceTo(controls[1][4]),
+        controls[0][4].distanceTo(controls[2][4]),
+        controls[0][4].distanceTo(controls[3][4]),
+      );
+      prepareRenderControls(
+        hand === synthetic ? 0 : THREE.MathUtils.smoothstep(fingertipDistance, 0.05, 0.085),
+        width,
+        length,
+      );
       for (let vertex = 0; vertex < palmCount; vertex++) {
         position
           .copy(center)
@@ -237,14 +306,7 @@ export function createCartoonHand(): CartoonHand {
         write(vertex, position, surfaceNormal);
       }
       for (let finger = 0; finger < FINGERS.length; finger++) {
-        const points = controls[finger];
-        for (let part = 0; part < 5; part++) {
-          const name = JOINT_NAMES[finger][part];
-          if (!name || !joint(source, name, points[part]))
-            fallback(points[part], REST[finger][part][0], REST[finger][part][1]);
-          if (finger === 3 && joint(source, LITTLE_JOINTS[part], temp))
-            points[part].lerp(temp, 0.42);
-        }
+        const points = renderControls[finger];
         if (finger === 0)
           points[0]
             .copy(center)
@@ -253,6 +315,8 @@ export function createCartoonHand(): CartoonHand {
         else points[0].lerp(center, 0.45);
         const curve = curves[finger];
         for (let ring = 0; ring <= SECTIONS; ring++) curve.getPoint(ring / SECTIONS, samples[ring]);
+        for (let probe = 0; probe < probePoints[finger].length; probe++)
+          probePoints[finger][probe].copy(samples[probe * 2]);
         radial.copy(normal);
         const radius = RADII[finger];
         const start = palmCount + finger * FINGER_VERTICES;

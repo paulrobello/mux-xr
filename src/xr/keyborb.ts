@@ -5,7 +5,7 @@ export function createKeyborbKey(label: string, diameter: number): THREE.Mesh {
   const color = new THREE.Color(0xffffff);
   const material = Object.assign(
     new THREE.ShaderMaterial({
-      uniforms: { tint: { value: color } },
+      uniforms: { tint: { value: color }, pressed: { value: 0 } },
       transparent: true,
       depthWrite: false,
       vertexShader: `
@@ -20,6 +20,7 @@ export function createKeyborbKey(label: string, diameter: number): THREE.Mesh {
       `,
       fragmentShader: `
         uniform vec3 tint;
+        uniform float pressed;
         varying vec3 surfaceNormal;
         varying vec3 viewDirection;
         void main() {
@@ -30,7 +31,9 @@ export function createKeyborbKey(label: string, diameter: number): THREE.Mesh {
           float shine = pow(max(dot(reflect(-light, n), view), 0.0), 32.0);
           vec3 shell = mix(vec3(0.04, 0.12, 0.19), vec3(0.32, 0.72, 0.84), rim);
           shell = shell * tint + vec3(shine * 0.65);
-          gl_FragColor = vec4(shell, 0.18 + rim * 0.56 + shine * 0.2);
+          vec3 confirmation = mix(vec3(0.05, 0.55, 0.19), vec3(0.36, 0.95, 0.62), rim);
+          shell = mix(shell, confirmation + vec3(shine * 0.3), pressed);
+          gl_FragColor = vec4(shell, mix(0.18 + rim * 0.56 + shine * 0.2, 0.88, pressed));
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
         }
@@ -56,4 +59,8 @@ export function createKeyborbKey(label: string, diameter: number): THREE.Mesh {
     labelHeight: diameter,
   });
   return root;
+}
+
+export function setKeyborbPressed(orb: THREE.Mesh, amount: number): void {
+  if (orb.material instanceof THREE.ShaderMaterial) orb.material.uniforms.pressed.value = amount;
 }

@@ -38,6 +38,29 @@ function trackedHand(side: 'left' | 'right'): Hand {
 }
 
 describe('cartoon tracked hands', () => {
+  it('keeps a compact neutral silhouette and exposes world-space contact probes', () => {
+    const visual = createCartoonHand();
+    const pose = new THREE.Group();
+    visual.updateController(pose, new THREE.PerspectiveCamera(), 'right', undefined, 1);
+    const index = visual.root.userData.indexTip as THREE.Vector3;
+    const middle = visual.root.userData.middleTip as THREE.Vector3;
+    const outer = visual.root.userData.outerTip as THREE.Vector3;
+    expect(Math.abs(index.x - middle.x)).toBeGreaterThan(0.03);
+    expect(Math.abs(index.y - middle.y)).toBeLessThan(0.01);
+    expect(middle.y - outer.y).toBeGreaterThan(0.02);
+    for (const point of [
+      index,
+      middle,
+      outer,
+      visual.root.userData.thumbTip,
+      visual.root.userData.palmPosition,
+    ])
+      expect(visual.contactProbes.some((probe) => probe.point.distanceTo(point) < 1e-6)).toBe(true);
+    expect(visual.contactProbes.every((probe) => probe.radius > 0)).toBe(true);
+    expect(visual.contactProbes.every((probe) => probe.point.length() < 1)).toBe(true);
+    visual.dispose();
+  });
+
   it('curls index on trigger, preserves index on grip and thumb button presses, and reuses skin buffers', () => {
     const visual = createCartoonHand();
     const pose = new THREE.Group();
@@ -171,6 +194,7 @@ describe('cartoon tracked hands', () => {
     expect(skin.geometry.getAttribute('position')).toBe(attribute);
     expect(Array.from(attribute.array)).not.toEqual(before);
     expect(hand.joints['index-finger-tip'].position.equals(position)).toBe(true);
+    expect((visual.root.userData.indexTip as THREE.Vector3).equals(position)).toBe(true);
     visual.dispose();
   });
 

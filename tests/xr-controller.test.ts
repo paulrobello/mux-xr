@@ -406,11 +406,18 @@ describe('native XR controller event routing', () => {
       hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(-0.02, 0, 0));
       fakeXR.frame?.(90);
       expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
+      const rebuiltOrb = objectWithData(workspace, { inputAction: 'key', key: 'a' }) as THREE.Mesh<
+        THREE.SphereGeometry,
+        THREE.ShaderMaterial
+      >;
+      expect(rebuiltOrb).not.toBe(orb);
+      expect(rebuiltOrb.material.uniforms.pressed.value).toBe(1);
       hit(workspace, { key: 'a' });
       for (let frame = 0; frame < 20; frame++) fakeXR.frame?.(100 + frame * 16);
       expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
       hand.joints['index-finger-tip'].position.x += 0.08;
       fakeXR.frame?.(500);
+      expect(rebuiltOrb.material.uniforms.pressed.value).toBe(0);
       nativeEvent(0, 'selectend');
       nativeEvent(0, 'select');
       expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
@@ -821,7 +828,7 @@ describe('native XR controller event routing', () => {
       expect(left.resizeGrid).not.toHaveBeenCalled();
     });
 
-    it('opens the wrist watch by left index contact once and rearms after withdrawal', () => {
+    it('opens the watch by left palm contact and blocks only the nearby left ray', () => {
       const { workspace, actions } = setup();
       connectHand(0);
       const leftHand = connectHand(1);
@@ -830,16 +837,38 @@ describe('native XR controller event routing', () => {
       const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
         face.getWorldQuaternion(new THREE.Quaternion()),
       );
-      leftHand.joints['index-finger-tip'].position.copy(point).addScaledVector(normal, 0.08);
+      const leftVisual = objectWithData(workspace, { handedness: 'left' });
+      const movePalm = (distance: number): void => {
+        const delta = point
+          .clone()
+          .addScaledVector(normal, distance)
+          .sub(leftVisual.userData.palmPosition);
+        for (const joint of Object.values(leftHand.joints)) joint.position.add(delta);
+      };
+      movePalm(0.2);
       fakeXR.frame?.(20);
-      leftHand.joints['index-finger-tip'].position.copy(point).addScaledVector(normal, 0.005);
+      movePalm(0.06);
       fakeXR.frame?.(40);
+      const rays = (fakeXR.controllers as THREE.Group[]).map((controller) =>
+        controller.children.find((child) => child instanceof THREE.Line),
+      );
+      expect(rays.map((ray) => ray?.visible)).toEqual([true, false]);
+      expect(workspace.state.radialOpen).toBe(false);
+      aimController(
+        fakeXR.controllers[1] as THREE.Group,
+        objectWithData(workspace, { terminalId: 'pane-b' }),
+      );
+      nativeEvent(1, 'selectstart');
+      expect(workspace.state.selectedTerminalId).toBe('pane-a');
+      movePalm(0.01);
+      fakeXR.frame?.(60);
       expect(workspace.state.radialOpen).toBe(true);
-      fakeXR.frame?.(100);
+      fakeXR.frame?.(380);
       expect(workspace.state.radialOpen).toBe(true);
-      leftHand.joints['index-finger-tip'].position.copy(point).addScaledVector(normal, 0.08);
+      movePalm(0.2);
       fakeXR.frame?.(400);
-      leftHand.joints['index-finger-tip'].position.copy(point).addScaledVector(normal, 0.005);
+      expect(rays.map((ray) => ray?.visible)).toEqual([true, true]);
+      movePalm(0.01);
       fakeXR.frame?.(450);
       expect(workspace.state.radialOpen).toBe(false);
       expect(actions.sendKey).not.toHaveBeenCalled();
@@ -921,16 +950,18 @@ describe('native XR controller event routing', () => {
     const { workspace, actions, container } = fixture();
     connectController(0, [0, 0, 0, 0], 'right');
     connectController(1, [0, 0, 0, 0], 'left');
+    const leftController = fakeXR.controllers[1] as THREE.Group;
+    leftController.position.x = -0.5;
     fakeXR.frame?.(20);
     hit(workspace, { inputAction: 'wristMenu' });
     expect(workspace.state.radialOpen).toBe(false);
     const face = objectWithData(workspace, { inputAction: 'wristMenu' });
-    const leftController = fakeXR.controllers[1] as THREE.Group;
     aimController(leftController, face);
     workspace.scene.updateMatrixWorld(true);
+    fakeXR.frame?.(40);
     leftController.dispatchEvent({ type: 'selectstart' } as never);
     expect(workspace.state.radialOpen).toBe(true);
-    fakeXR.frame?.(40);
+    fakeXR.frame?.(60);
     expect(workspace.state.radialOpen).toBe(true);
     expect(actions.sendKey).not.toHaveBeenCalled();
     workspace.dispose();

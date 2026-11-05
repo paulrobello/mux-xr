@@ -58,7 +58,7 @@ import {
   type HierarchyNavigator,
 } from './hierarchy-navigator';
 import { curveKeyboardContent } from './keyboard-surface';
-import { createKeyborbKey } from './keyborb';
+import { createKeyborbKey, setKeyborbPressed } from './keyborb';
 import { createKeyborbInput } from './keyborb-input';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import { createPaneFocus } from './pane-focus';
@@ -621,6 +621,7 @@ export function createWorkspaceScene(
   const handContacts = new Map<THREE.Group, HandContact>();
   const keyboardProximity = new Map<THREE.Group, HandContact>();
   const keyborbInput = createKeyborbInput();
+  const keyborbFlashes = new Map<number, number>();
   const priorityHandActions = new Set([
     'wristMenu',
     'toggleRadial',
@@ -916,6 +917,14 @@ export function createWorkspaceScene(
   const resetHandContacts = (refresh = false): void => {
     for (const source of handContacts.keys()) resetHandContact(source, refresh);
     keyborbInput.reset();
+    if (keyborbFlashes.size && inputRoot) {
+      for (const child of inputRoot.children) {
+        const slot = child.userData.keyborbSlot as number | undefined;
+        if (slot !== undefined && keyborbFlashes.has(slot))
+          setKeyborbPressed(child as THREE.Mesh, 0);
+      }
+    }
+    keyborbFlashes.clear();
   };
   const releaseMouse = (source: THREE.Group | number): void => {
     const capture = mouseCaptures.get(source);
@@ -1304,7 +1313,7 @@ export function createWorkspaceScene(
     } else handTrackingLost.delete(root);
     const ray = root.children.find((child) => child instanceof THREE.Line);
     const contact = root.children.find((child) => child instanceof THREE.Mesh);
-    if (ray) ray.visible = gesture.tracked && !keyboardRaysBlocked;
+    if (ray) ray.visible = gesture.tracked && !controllerRayBlocked(root);
     if (contact && !gesture.tracked) contact.visible = false;
     if (!gesture.tracked) root.userData.rayDistance = 0;
     return gesture;
@@ -1315,6 +1324,8 @@ export function createWorkspaceScene(
     return Boolean(gesture?.tracked && !gesture.pinching && handInputStates.get(root)?.neutral);
   };
   let keyboardRaysBlocked = false;
+  const controllerRayBlocked = (source: THREE.Group): boolean =>
+    keyboardRaysBlocked || (controllerHandedness.get(source) === 'left' && wristWatch.near);
   const keyboardSurface = (): THREE.Group | null =>
     inputRoot &&
     (inputMode === 'keyboard' || inputMode === 'command-editor') &&
@@ -1383,6 +1394,9 @@ export function createWorkspaceScene(
     return blocked;
   };
   const pressKeyborb = (controller: THREE.Group, key: THREE.Mesh, pinch = true): void => {
+    const slot = key.userData.keyborbSlot as number | undefined;
+    if (pinch && slot !== undefined)
+      keyborbFlashes.set(slot, (previousRenderTime ?? performance.now()) + 240);
     const modifier = key.userData.modifier as KeyboardModifier | undefined;
     const before = modifier
       ? {
@@ -1551,10 +1565,6 @@ export function createWorkspaceScene(
             continue;
           }
           visual?.update(hand, renderer.xr.getCamera(), side, deltaSeconds);
-          if (gesture.pinching && !heldControllers.has(controller))
-            handGrabActions.get(controller)?.grab();
-          else if (!gesture.pinching && heldControllers.has(controller))
-            handGrabActions.get(controller)?.release();
         } else {
           const grip = controllerGrips.get(controller);
           visual?.updateController(
@@ -1577,13 +1587,23 @@ export function createWorkspaceScene(
           rightVisual.root.userData.palmForward as THREE.Vector3,
           rightVisual.root.userData.wristBackNormal as THREE.Vector3,
         );
-      if (
-        wristWatch.updateTouch(
-          leftVisual?.root.visible ? (leftVisual.root.userData.indexTip as THREE.Vector3) : null,
-        ) &&
-        leftController
-      )
-        toggleWristMenu(leftController);
+      const watchWasNear = wristWatch.near;
+      const watchPressed = wristWatch.updateTouch(
+        leftVisual?.root.visible ? leftVisual.contactProbes : null,
+      );
+      if (leftController && wristWatch.near && !watchWasNear) {
+        releaseMouse(leftController);
+        if (textSelection?.source === leftController && textSelection.phase === 'dragging')
+          cancelTextSelection();
+      }
+      for (const controller of controllerRoots) {
+        if (!activeHand(controller) || !handVisuals.get(controller)?.root.visible) continue;
+        const pinching = handInputStates.get(controller)?.pinching;
+        if (pinching && !heldControllers.has(controller)) handGrabActions.get(controller)?.grab();
+        else if (!pinching && heldControllers.has(controller))
+          handGrabActions.get(controller)?.release();
+      }
+      if (watchPressed && leftController) toggleWristMenu(leftController, true);
     } else {
       for (const visual of handVisuals.values()) visual.hide();
       wristWatch.setVisible(false);
@@ -1979,6 +1999,7 @@ export function createWorkspaceScene(
         const nearOrb = keyborbInput.hovered(controller);
         const nearKeyboard = Boolean(nearOrb || (sample?.nearKeyboard && contactKeyboard()));
         const nearControl = nearOrb ?? sample?.hovered;
+        const rayBlocked = controllerRayBlocked(controller);
         const target: InputTarget | null = nearKeyboard
           ? nearControl
             ? {
@@ -1987,7 +2008,7 @@ export function createWorkspaceScene(
                 object: nearControl,
               }
             : null
-          : keyboardRaysBlocked
+          : rayBlocked
             ? null
             : targetFromController(controller, false);
         moveMouse(controller, target);
@@ -1998,7 +2019,7 @@ export function createWorkspaceScene(
           | THREE.Line
           | undefined;
         if (line) {
-          line.visible = !keyboardRaysBlocked;
+          line.visible = !rayBlocked;
           line.scale.z = distance / CONTROLLER_RAY_LENGTH;
         }
         const contact = controller.children.find((child) => child instanceof THREE.Mesh) as
@@ -2006,7 +2027,7 @@ export function createWorkspaceScene(
           | undefined;
         if (contact) {
           contact.position.set(0, 0, -distance);
-          contact.visible = !keyboardRaysBlocked && Boolean(target?.object);
+          contact.visible = !rayBlocked && Boolean(target?.object);
         }
         const object = target?.object;
         if (radialMenu.interactive && object?.userData.radialAction)
@@ -2051,6 +2072,16 @@ export function createWorkspaceScene(
     if (updateNotice)
       updateNotice.visible = mutableState.updateAvailable && Boolean(renderer?.xr.isPresenting);
     updateHoverPosition();
+    if (keyborbFlashes.size && inputRoot) {
+      for (const child of inputRoot.children) {
+        const slot = child.userData.keyborbSlot as number | undefined;
+        if (slot === undefined) continue;
+        const expires = keyborbFlashes.get(slot);
+        if (expires === undefined) continue;
+        setKeyborbPressed(child as THREE.Mesh, THREE.MathUtils.clamp((expires - time) / 90, 0, 1));
+        if (expires <= time) keyborbFlashes.delete(slot);
+      }
+    }
     observatory.rotation.y = time * 0.00001;
     for (const panel of panels.values()) panel.surface.flush?.();
     renderer?.render(scene, camera);
@@ -2781,7 +2812,7 @@ export function createWorkspaceScene(
       }
     } else {
       const unit = 0.13;
-      for (const key of keyboardKeys) {
+      for (const [slot, key] of keyboardKeys.entries()) {
         const label =
           key.key.length === 1 && key.key !== ' '
             ? terminalKeyLabel(key.key, Boolean(modifierState.active.shift))
@@ -2791,6 +2822,7 @@ export function createWorkspaceScene(
           : createLabelButton(label, key.width * unit - 0.014, key.height * unit - 0.03, {
               key: key.key,
             });
+        if (mutableState.keyborbEnabled) button.userData.keyborbSlot = slot;
         Object.assign(button.userData, {
           inputAction: 'key',
           key: key.key,
@@ -3448,7 +3480,7 @@ export function createWorkspaceScene(
     return { terminalId, kind: key ? 'key' : 'terminal', object: hit, uv: intersection?.uv };
   };
   const targetFromController = (root: THREE.Group, updateWorld = true): InputTarget | null => {
-    if (keyboardRaysBlocked) {
+    if (controllerRayBlocked(root)) {
       root.userData.rayDistance = 0;
       return null;
     }
@@ -4228,12 +4260,12 @@ export function createWorkspaceScene(
     mutableState.radialOpen = true;
     notify();
   };
-  const toggleWristMenu = (source: THREE.Group): void => {
+  const toggleWristMenu = (source: THREE.Group, fromTouch = false): void => {
     if (controllerHandedness.get(source) !== 'left') return;
     const stamp = previousRenderTime ?? performance.now();
     if (stamp - wristMenuLastPressed < 250) return;
     wristMenuLastPressed = stamp;
-    wristWatch.updateTouch(null);
+    if (!fromTouch) wristWatch.updateTouch(null);
     const owner =
       controllerRoots.find((root) => controllerHandedness.get(root) === 'right') ?? source;
     const wasOpen = radialMenu.isOpen;

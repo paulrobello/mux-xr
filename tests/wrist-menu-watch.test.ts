@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
+import type { HandContactProbe } from '../src/xr/hand-contact';
 import { createWristMenuWatch } from '../src/xr/wrist-menu-watch';
 
 function makeWatch(): ReturnType<typeof createWristMenuWatch> {
@@ -8,29 +9,55 @@ function makeWatch(): ReturnType<typeof createWristMenuWatch> {
   );
 }
 
+function probe(
+  watch: ReturnType<typeof createWristMenuWatch>,
+  localPoint: THREE.Vector3,
+  radius = 0.004,
+): HandContactProbe {
+  watch.root.updateMatrixWorld(true);
+  return { point: localPoint.clone().applyMatrix4(watch.root.matrixWorld), radius };
+}
+
 describe('wrist menu watch', () => {
   it('requires withdrawal and fires once per touch entry', () => {
     const watch = makeWatch();
     const wrist = new THREE.Vector3();
     watch.update(wrist, new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1));
     watch.setVisible(true);
-    const far = new THREE.Vector3(0, 0.012, 0.09);
-    const near = new THREE.Vector3(0, 0.012, 0.044);
-    expect(watch.updateTouch(near)).toBe(false);
+    const far = [probe(watch, new THREE.Vector3(0, 0, 0.1))];
+    const near = [probe(watch, new THREE.Vector3(0, 0, 0.055))];
+    const touch = [probe(watch, new THREE.Vector3(0, 0, 0.01))];
+    expect(watch.updateTouch(touch)).toBe(false);
+    expect(watch.near).toBe(true);
     expect(watch.updateTouch(far)).toBe(false);
-    expect(watch.updateTouch(near)).toBe(true);
+    expect(watch.near).toBe(false);
     expect(watch.updateTouch(near)).toBe(false);
+    expect(watch.updateTouch(touch)).toBe(true);
+    expect(watch.updateTouch(touch)).toBe(false);
     expect(watch.updateTouch(far)).toBe(false);
-    expect(watch.updateTouch(near)).toBe(true);
+    expect(watch.updateTouch(touch)).toBe(true);
     watch.dispose();
   });
 
-  it('rejects initial contact and backside presses, and resets on hide or null', () => {
+  it('accepts contact on every case side and resets on tracking loss', () => {
     const watch = makeWatch();
     watch.update(new THREE.Vector3(), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1));
     watch.setVisible(true);
-    expect(watch.updateTouch(new THREE.Vector3(0, 0.012, 0.044))).toBe(false);
-    expect(watch.updateTouch(new THREE.Vector3(0, 0.012, 0.01))).toBe(false);
+    const sides = [
+      new THREE.Vector3(0.034, 0, 0),
+      new THREE.Vector3(-0.034, 0, 0),
+      new THREE.Vector3(0, 0.026, 0),
+      new THREE.Vector3(0, -0.026, 0),
+      new THREE.Vector3(0, 0, 0.01),
+      new THREE.Vector3(0, 0, -0.01),
+      new THREE.Vector3(0.022, -0.012, -0.03),
+    ];
+    for (const side of sides) {
+      expect(watch.updateTouch([probe(watch, new THREE.Vector3(0.1, 0, 0))])).toBe(false);
+      expect(watch.updateTouch([probe(watch, side)])).toBe(true);
+      expect(watch.updateTouch(null)).toBe(false);
+      expect(watch.near).toBe(false);
+    }
     watch.setVisible(false);
     watch.setVisible(true);
     expect(watch.updateTouch(null)).toBe(false);

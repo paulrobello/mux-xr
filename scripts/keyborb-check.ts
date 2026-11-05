@@ -359,6 +359,28 @@ async function main(): Promise<void> {
       w.__questHands[0].joints['thumb-tip'].position.fromArray(point as [number, number, number]);
       w.__questHands[0].joints['thumb-tip'].position.x -= 0.02;
     }, orb.point);
+    await frames(page, 3);
+    report.pinchFlash = await page.evaluate(() => {
+      const w = window as unknown as FixtureWindow;
+      let pressed = 0;
+      w.__questScene.traverse((object) => {
+        if (object.userData.inputAction === 'key' && object.userData.key === 'a')
+          pressed = Number(
+            (
+              object as import('three').Mesh<
+                import('three').BufferGeometry,
+                import('three').ShaderMaterial
+              >
+            ).material.uniforms.pressed.value,
+          );
+      });
+      return pressed;
+    });
+    await page.screenshot({
+      path: join(checkedTestRoot, 'keyborb-pinch-flash.png'),
+      fullPage: true,
+    });
+    (report.screenshots as string[]).push('keyborb-pinch-flash.png');
     await frames(page, 60);
     report.pinchInputs = [...inputs];
     const raisedLift = await page.evaluate(() => {
@@ -600,6 +622,7 @@ async function main(): Promise<void> {
     });
     (report.screenshots as string[]).push('keyborb-settings-mobile.png');
     report.ok =
+      Number(report.pinchFlash) > 0 &&
       persisted.join(',') === 'off,on,auto' &&
       report.contactInputs === 0 &&
       JSON.stringify(report.pinchInputs) === JSON.stringify(['a']) &&

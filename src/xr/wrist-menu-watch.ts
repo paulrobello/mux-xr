@@ -1,10 +1,12 @@
 import * as THREE from 'three';
+import type { HandContactProbe } from './hand-contact';
 
 export interface WristMenuWatch {
   root: THREE.Group;
   update(wrist: THREE.Vector3, forward: THREE.Vector3, backNormal: THREE.Vector3): void;
   setVisible(visible: boolean): void;
-  updateTouch(leftIndexTip: THREE.Vector3 | null): boolean;
+  updateTouch(probes: readonly HandContactProbe[] | null): boolean;
+  readonly near: boolean;
   dispose(): void;
 }
 
@@ -32,11 +34,10 @@ export function createWristMenuWatch(button: THREE.Mesh): WristMenuWatch {
   const right = new THREE.Vector3();
   const up = new THREE.Vector3();
   const normal = new THREE.Vector3();
-  const center = new THREE.Vector3();
-  const buttonNormal = new THREE.Vector3();
-  const delta = new THREE.Vector3();
+  const localProbe = new THREE.Vector3();
+  const inverseRoot = new THREE.Matrix4();
+  let near = false;
   let armed = false;
-  let latched = false;
   let disposed = false;
 
   const update = (
@@ -63,35 +64,50 @@ export function createWristMenuWatch(button: THREE.Mesh): WristMenuWatch {
   const setVisible = (visible: boolean): void => {
     root.visible = visible;
     if (!visible) {
+      near = false;
       armed = false;
-      latched = false;
     }
   };
-  const updateTouch = (tip: THREE.Vector3 | null): boolean => {
-    if (disposed || !root.visible || !tip) {
+  const updateTouch = (probes: readonly HandContactProbe[] | null): boolean => {
+    if (disposed || !root.visible || !probes || probes.length === 0) {
+      near = false;
       armed = false;
-      latched = false;
       return false;
     }
-    button.updateMatrixWorld(true);
-    button.getWorldPosition(center);
-    button.getWorldQuaternion(rotation);
-    buttonNormal.set(0, 0, 1).applyQuaternion(rotation).normalize();
-    delta.copy(tip).sub(center);
-    const planeOffset = delta.dot(buttonNormal);
-    const radial = Math.max(0, delta.lengthSq() - planeOffset * planeOffset);
-    if (planeOffset > 0.035 || (planeOffset >= 0 && radial > 0.045 * 0.045)) {
-      armed = true;
-      latched = false;
+    root.updateMatrixWorld(true);
+    inverseRoot.copy(root.matrixWorld).invert();
+    const halfX = 0.03;
+    const halfY = 0.022;
+    const halfZ = 0.006;
+    let nearestSurfaceGap = Number.POSITIVE_INFINITY;
+    for (const probe of probes) {
+      if (!Number.isFinite(probe.radius) || probe.radius < 0) continue;
+      localProbe.copy(probe.point).applyMatrix4(inverseRoot);
+      const dx = Math.max(Math.abs(localProbe.x) - halfX, 0);
+      const dy = Math.max(Math.abs(localProbe.y) - halfY, 0);
+      const dz = Math.max(Math.abs(localProbe.z) - halfZ, 0);
+      const caseDistance = Math.hypot(dx, dy, dz);
+      const bandRadius = Math.hypot(
+        localProbe.x - strap.position.x,
+        localProbe.z - strap.position.z,
+      );
+      const bandDistance = Math.hypot(bandRadius - 0.022, localProbe.y - strap.position.y) - 0.005;
+      nearestSurfaceGap = Math.min(
+        nearestSurfaceGap,
+        caseDistance - probe.radius,
+        bandDistance - probe.radius,
+      );
     }
-    if (!armed || latched || planeOffset < -0.004 || planeOffset > 0.014 || radial > 0.027 * 0.027)
-      return false;
-    latched = true;
+    near = nearestSurfaceGap <= (near ? 0.055 : 0.045);
+    if (nearestSurfaceGap >= 0.025) armed = true;
+    if (!armed || nearestSurfaceGap > 0.004) return false;
+    armed = false;
     return true;
   };
   const dispose = (): void => {
     if (disposed) return;
     disposed = true;
+    near = false;
     root.visible = false;
     root.removeFromParent();
     root.remove(button);
@@ -102,5 +118,14 @@ export function createWristMenuWatch(button: THREE.Mesh): WristMenuWatch {
     strapMaterial.dispose();
     root.clear();
   };
-  return { root, update, setVisible, updateTouch, dispose };
+  return {
+    root,
+    update,
+    setVisible,
+    updateTouch,
+    get near() {
+      return near;
+    },
+    dispose,
+  };
 }
