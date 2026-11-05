@@ -2979,6 +2979,7 @@ export function createWorkspaceScene(
   const setUpdateAvailable = (available: boolean): void => {
     if (mutableState.updateAvailable === available) return;
     mutableState.updateAvailable = available;
+    radialMenu.setUpdateAvailable(available);
     if (updateNotice) updateNotice.visible = available && Boolean(renderer?.xr.isPresenting);
     notify();
   };
@@ -3307,6 +3308,10 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'reloadUpdate') {
+      if (radialMenu.root.visible) {
+        radialMenu.close();
+        mutableState.radialOpen = false;
+      }
       actions.reloadApp?.();
       return true;
     }

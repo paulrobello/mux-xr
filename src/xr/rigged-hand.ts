@@ -58,6 +58,13 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
   const originalUpdate = fallback.update.bind(fallback);
   const originalController = fallback.updateController.bind(fallback);
   const skin = fallback.root.getObjectByName('cartoon-hand-skin');
+  const wristJoint = new THREE.Mesh(
+    new THREE.SphereGeometry(0.023, 16, 12),
+    (skin as THREE.Mesh).material,
+  );
+  wristJoint.name = 'authored-hand-wrist';
+  wristJoint.raycast = () => undefined;
+  fallback.root.add(wristJoint);
   fallback.root.userData.handAsset = 'loading';
   let authored: THREE.Group | undefined;
   let mesh: THREE.SkinnedMesh | undefined;
@@ -150,6 +157,7 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
         probeVertices.push(index);
         probes.push({ point: new THREE.Vector3(), radius: 0.012 });
       }
+      probes.push({ point: wristJoint.position, radius: 0.023 });
       fallback.root.add(authored);
       if (skin) skin.visible = false;
       fallback.root.userData.handAsset = 'loaded';
@@ -162,6 +170,9 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
 
   fallback.update = (source, camera, side, deltaSeconds): void => {
     originalUpdate(source, camera, side, deltaSeconds);
+    wristJoint.position
+      .copy(fallback.root.userData.wristPosition as THREE.Vector3)
+      .addScaledVector(fallback.root.userData.palmForward as THREE.Vector3, 0.006);
     if (!authored || !mesh || !fallback.root.visible) return;
     forward.copy(fallback.root.userData.palmForward as THREE.Vector3);
     normal.copy(fallback.root.userData.wristBackNormal as THREE.Vector3).negate();
@@ -200,7 +211,7 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
     }
     mesh.updateWorldMatrix(true, false);
     mesh.skeleton.update();
-    for (let index = 0; index < probes.length; index++) {
+    for (let index = 0; index < probeVertices.length; index++) {
       mesh.getVertexPosition(probeVertices[index], probes[index].point);
       probes[index].point.applyMatrix4(mesh.matrixWorld);
     }
@@ -238,6 +249,7 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
       if (disposed) return;
       disposed = true;
       if (authored) disposeAsset(authored);
+      wristJoint.geometry.dispose();
       fallback.dispose();
     },
   };

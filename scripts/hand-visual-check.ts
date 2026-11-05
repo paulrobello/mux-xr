@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import { chromium, type Page, type WebSocketRoute } from 'playwright';
@@ -108,12 +108,26 @@ async function wait(
 async function main(): Promise<void> {
   await mkdir(testRoot, { recursive: true });
   prepareQuestFixture(testRoot);
+  const fixtureHtml = join(testRoot, '__quest-controls.html');
+  const originalHtml = await readFile(fixtureHtml, 'utf8');
+  const initialBuild = '1'.repeat(64);
+  let servedBuild = initialBuild;
+  await writeFile(
+    fixtureHtml,
+    originalHtml.replace(
+      '<head>',
+      `<head><meta name="build-fingerprint" content="${initialBuild}">`,
+    ),
+  );
   const browser = await chromium.launch({
     channel: 'chromium',
     headless: true,
     args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
   });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  await page.route('**/version.json', (route) =>
+    route.fulfill({ json: { buildId: servedBuild, version: 'test' } }),
+  );
   const errors: string[] = [];
   const inputs: string[] = [];
   let resizes = 0;
@@ -503,6 +517,50 @@ async function main(): Promise<void> {
     )
       throw new Error(`Watch failed: ${JSON.stringify(report.watch)}`);
     await page.screenshot({ path: join(testRoot, 'hand-watch-menu.png') });
+    const reloadVisible = (): Promise<boolean> =>
+      page.evaluate(() => {
+        const w = window as unknown as FixtureWindow;
+        return Boolean(w.__questScene.getObjectByName('radial-menu-reload-update')?.visible);
+      });
+    if (await reloadVisible()) throw new Error('Watch offered Reload without an update');
+    servedBuild = '2'.repeat(64);
+    await page.evaluate(() =>
+      (
+        window as unknown as { __muxXR: { checkForUpdate(): Promise<void> } }
+      ).__muxXR.checkForUpdate(),
+    );
+    await wait(page, reloadVisible, 'Watch did not offer Reload for the available update');
+    await page.screenshot({ path: join(testRoot, 'hand-watch-reload.png') });
+    await writeFile(
+      fixtureHtml,
+      originalHtml.replace(
+        '<head>',
+        `<head><meta name="build-fingerprint" content="${servedBuild}">`,
+      ),
+    );
+    await Promise.all([
+      page.waitForURL((url) => url.searchParams.has('_reload')),
+      page.evaluate(() => {
+        const w = window as unknown as FixtureWindow;
+        const button = w.__questScene.getObjectByName('radial-menu-reload-update');
+        if (!button) throw new Error('Watch Reload button missing');
+        const controller = w.__questControllers[0];
+        const rotation = button.getWorldQuaternion(new w.__questThree.Quaternion());
+        controller.position
+          .copy(button.getWorldPosition(new w.__questThree.Vector3()))
+          .add(new w.__questThree.Vector3(0, 0, 0.3).applyQuaternion(rotation));
+        controller.quaternion.copy(rotation);
+        w.__questScene.updateMatrixWorld(true);
+        controller.dispatchEvent({ type: 'selectstart' } as never);
+      }),
+    ]);
+    await page.waitForFunction(
+      (expected) =>
+        (window as unknown as { __muxXR?: { getState(): { buildId: string } } }).__muxXR?.getState()
+          .buildId === expected,
+      servedBuild,
+    );
+    report.watchReload = true;
     report.resizes = resizes;
     const meshReport = report.meshes as {
       count: number;

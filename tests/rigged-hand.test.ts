@@ -44,6 +44,12 @@ describe('authored rigged hand', () => {
     const pose = new THREE.Group();
     const camera = new THREE.PerspectiveCamera();
     hand.updateController(pose, camera, 'left', undefined, 1 / 60);
+    const wristJoint = hand.root.getObjectByName('authored-hand-wrist') as THREE.Mesh;
+    const wrist = hand.root.userData.wristPosition as THREE.Vector3;
+    expect(wristJoint.position.distanceTo(wrist)).toBeCloseTo(0.006);
+    expect((wristJoint.geometry as THREE.SphereGeometry).parameters.radius).toBeGreaterThan(
+      wristJoint.position.distanceTo(wrist) + 0.014,
+    );
     const original = hand.contactProbes.map((probe) => probe.point.clone());
     expect(original.length).toBeGreaterThan(20);
     pose.position.set(0.3, 1.2, -0.8);

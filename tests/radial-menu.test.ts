@@ -70,6 +70,12 @@ describe('animated radial menu', () => {
 
   it('propagates pick metadata and handles close and repeated open without leaks', () => {
     const menu = createRadialMenu();
+    const reload = menu.root.getObjectByName('radial-menu-reload-update');
+    expect(reload?.visible).toBe(false);
+    menu.setUpdateAvailable(true);
+    expect(reload?.visible).toBe(true);
+    menu.setUpdateAvailable(false);
+    expect(reload?.visible).toBe(false);
     expect(menu.root.userData).toMatchObject({
       inputAction: 'grabRadial',
       rootUIgrabbable: true,

@@ -19,6 +19,7 @@ export interface RadialMenu {
   open(): void;
   close(): void;
   update(deltaSeconds: number): void;
+  setUpdateAvailable(available: boolean): void;
   setHovered(action: RadialMenuAction | null): void;
   dispose(): void;
 }
@@ -104,6 +105,20 @@ export function createRadialMenu(): RadialMenu {
   const geometries = new Set<THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>();
   const targets: Target[] = [];
+  const reloadButton = createScalableLabel('Reload update', 0.34, 0.075, {
+    background: COLORS.selected,
+    backplate: true,
+  });
+  reloadButton.name = 'radial-menu-reload-update';
+  reloadButton.position.set(0, -0.43, 0.01);
+  reloadButton.userData.inputAction = 'reloadUpdate';
+  reloadButton.userData.helpText = 'Exit XR and reload the available update';
+  reloadButton.traverse((child) => {
+    child.userData.inputAction = 'reloadUpdate';
+    child.userData.helpText = 'Exit XR and reload the available update';
+  });
+  reloadButton.visible = false;
+  contents.add(reloadButton);
   const center = new THREE.Group();
   center.name = 'radial-menu-cancel';
   center.userData.inputAction = 'radialAction';
@@ -282,6 +297,9 @@ export function createRadialMenu(): RadialMenu {
           target.label.rotation.z = -(target.finalAngle - Math.PI / 2);
         }
       }
+    },
+    setUpdateAvailable(available): void {
+      reloadButton.visible = available;
     },
     setHovered(action): void {
       if (disposed || !api.interactive) return;

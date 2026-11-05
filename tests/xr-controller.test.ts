@@ -971,6 +971,38 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('shows the radial Reload button only for an available update and closes before reload', () => {
+    const { workspace, actions, container } = fixture();
+    connectController(0, [0, 0, 0, 0], 'right');
+    connectController(1, [0, 0, 0, 0], 'left');
+    const leftController = fakeXR.controllers[1] as THREE.Group;
+    leftController.position.x = -0.5;
+    fakeXR.frame?.(20);
+    const face = objectWithData(workspace, { inputAction: 'wristMenu' });
+    aimController(leftController, face);
+    workspace.scene.updateMatrixWorld(true);
+    fakeXR.frame?.(40);
+    leftController.dispatchEvent({ type: 'selectstart' } as never);
+    expect(workspace.state.radialOpen).toBe(true);
+    fakeXR.frame?.(940);
+
+    const reload = workspace.scene.getObjectByName('radial-menu-reload-update');
+    if (!reload) throw new Error('Radial Reload button not found');
+    expect(reload.visible).toBe(false);
+    workspace.setUpdateAvailable(true);
+    expect(reload.visible).toBe(true);
+    workspace.setUpdateAvailable(false);
+    expect(reload.visible).toBe(false);
+    workspace.setUpdateAvailable(true);
+    expect(reload.visible).toBe(true);
+
+    hit(workspace, { inputAction: 'reloadUpdate' });
+    expect(actions.reloadApp).toHaveBeenCalledOnce();
+    expect(workspace.state.radialOpen).toBe(false);
+    workspace.dispose();
+    container.remove();
+  });
+
   it('shows a readable three-line dictation excerpt and scrolls without changing its text', () => {
     const { workspace, actions, container } = fixture();
     const transcript = Array.from({ length: 60 }, (_, index) => `word${index}`).join('\n');
@@ -1977,7 +2009,9 @@ describe('native XR controller event routing', () => {
     const { workspace, actions, container } = fixture();
     fakeXR.presenting = false;
     workspace.setUpdateAvailable(true);
-    const notice = objectWithData(workspace, { inputAction: 'reloadUpdate' });
+    const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+    const notice = hud?.children.find((child) => child.userData.inputAction === 'reloadUpdate');
+    if (!notice) throw new Error('XR update notice not found');
     expect(notice.visible).toBe(false);
     expect(() => hit(workspace, { inputAction: 'reloadUpdate' })).toThrow('Control not found');
     workspace.showInput('keyboard');
