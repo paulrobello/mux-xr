@@ -270,6 +270,13 @@ describe('authored rigged hand', () => {
         ['phalanx-proximal', 'phalanx-intermediate', 'phalanx-distal'].forEach((part, i) => {
           joints[`${name}_0${i + 1}`] = `${finger}-finger-${part}`;
         });
+      const palmNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(
+        (hand.root.getObjectByName('authored-hand-root') as THREE.Object3D).getWorldQuaternion(
+          new THREE.Quaternion(),
+        ),
+      );
+      const roots: Record<string, { bone: THREE.Vector3; joint: THREE.Vector3 }> = {};
+      const flat = (axis: THREE.Vector3) => axis.clone().projectOnPlane(palmNormal).normalize();
       for (const [name, joint] of Object.entries(joints)) {
         const bone = mesh.skeleton.getBoneByName(name) as THREE.Bone;
         const boneAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(
@@ -278,8 +285,19 @@ describe('authored rigged hand', () => {
         const jointAxis = new THREE.Vector3(0, 0, -1).applyQuaternion(
           source.joints[joint].getWorldQuaternion(new THREE.Quaternion()),
         );
-        expect(boneAxis.angleTo(jointAxis)).toBeLessThan(THREE.MathUtils.degToRad(1));
+        if (name.startsWith('thumb') || name.startsWith('middle')) {
+          expect(boneAxis.angleTo(jointAxis)).toBeLessThan(THREE.MathUtils.degToRad(1));
+        } else {
+          // Index and outer only swing about the palm normal; their tracked curl is kept.
+          expect(Math.abs(boneAxis.dot(palmNormal) - jointAxis.dot(palmNormal))).toBeLessThan(0.02);
+        }
+        if (name.endsWith('_01')) roots[name] = { bone: flat(boneAxis), joint: flat(jointAxis) };
       }
+      // The neutral open hand's tracked fan is narrowed toward the middle finger.
+      for (const name of ['index_01', 'outer_01'])
+        expect(roots[name].bone.angleTo(roots.middle_01.bone)).toBeLessThan(
+          roots[name].joint.angleTo(roots.middle_01.joint),
+        );
       const index = mesh.skeleton.getBoneByName('index_03') as THREE.Bone;
       const thumb = mesh.skeleton.getBoneByName('thumb_03') as THREE.Bone;
       const visibleMidpoint = index

@@ -7,6 +7,9 @@ import { createHandPoseConstraints } from './hand-pose-constraints';
 
 export const RIGGED_HAND_ASSET_URL = '/assets/hand.glb?v=6f2274e0a394';
 const DIGITS = ['thumb', 'index', 'middle', 'outer'] as const;
+// The cartoon's three wide fingers stand in for four real ones, so tracked spread reads as a fan.
+const SPLAY_KEEP = 0.3;
+const SPLAY_INWARD = 0.05;
 const neutralPoses = neutralReference as Record<'left' | 'right', Record<string, number[]>>;
 const JOINTS = [
   ['thumb-metacarpal', 'thumb-phalanx-proximal', 'thumb-phalanx-distal', 'thumb-tip'],
@@ -95,6 +98,10 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
   const visibleIndex = new THREE.Vector3();
   const visibleThumb = new THREE.Vector3();
   const pinchPoint = new THREE.Vector3();
+  const splayVector = new THREE.Vector3();
+  const knuckle = new THREE.Vector3();
+  const palmNormal = new THREE.Vector3();
+  const swings = [0, 0, 0, 0].map(() => new THREE.Quaternion());
   let indexEnd: THREE.Bone | undefined;
   let thumbEnd: THREE.Bone | undefined;
   const assetReady = (options.loader ?? new GLTFLoader())
@@ -228,6 +235,28 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
     authored.updateMatrixWorld(true);
     authored.getWorldQuaternion(palmRotation);
     inverseRotation.copy(palmRotation).invert();
+    const splay = (digit: number): number | undefined => {
+      const base = tracked.joints?.[JOINTS[digit][0]];
+      const tip = tracked.joints?.[JOINTS[digit][3]];
+      if (!base?.visible || !tip?.visible) return undefined;
+      base.getWorldPosition(knuckle);
+      tip.getWorldPosition(splayVector).sub(knuckle).applyQuaternion(inverseRotation);
+      return Math.atan2(splayVector.x, splayVector.y);
+    };
+    const middleSplay = controllerMode ? undefined : splay(2);
+    palmNormal.set(0, 0, 1).applyQuaternion(palmRotation);
+    for (const digit of [1, 3]) {
+      const own = middleSplay === undefined ? undefined : splay(digit);
+      const planar = Math.hypot(splayVector.x, splayVector.y);
+      const weight = THREE.MathUtils.smoothstep(planar, 0.045, 0.065);
+      const angle =
+        own === undefined || middleSplay === undefined
+          ? 0
+          : weight *
+            ((1 - SPLAY_KEEP) * (own - (middleSplay as number)) +
+              (digit === 1 ? 1 : -1) * SPLAY_INWARD);
+      swings[digit].setFromAxisAngle(palmNormal, angle);
+    }
     for (const driver of drivers) {
       const { bone, rest, digit, part } = driver;
       bone.matrixAutoUpdate = true;
@@ -247,7 +276,8 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
             .premultiply(inverseRotation)
             .multiply(driver.neutralInverse[side])
             .multiply(driver.alignedRest[side])
-            .premultiply(palmRotation);
+            .premultiply(palmRotation)
+            .premultiply(swings[digit]);
           bone.parent.getWorldQuaternion(parentRotation).invert();
           bone.quaternion.copy(parentRotation).multiply(rotation).normalize();
         }
