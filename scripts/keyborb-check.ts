@@ -109,7 +109,7 @@ async function frames(page: Page, count = 3): Promise<void> {
   }, count);
 }
 async function targetSelect(page: Page, data: Record<string, unknown>): Promise<void> {
-  await page.evaluate((data) => {
+  await page.evaluate(async (data) => {
     const w = window as unknown as FixtureWindow;
     let target: import('three').Object3D | undefined;
     w.__questScene.traverse((object) => {
@@ -119,6 +119,51 @@ async function targetSelect(page: Page, data: Record<string, unknown>): Promise<
     if (!target) throw new Error(`XR target missing: ${JSON.stringify(data)}`);
     const controller = w.__questControllers[0];
     const q = target.getWorldQuaternion(new w.__questThree.Quaternion());
+    const visual = w.__questScene.children.filter((root) => root.name === 'xr-cartoon-hand')[0];
+    const hand = w.__questHands[0];
+    const renderedPalmPosition = visual?.userData.renderedPalmPosition;
+    const renderedPalmDirection = visual?.userData.renderedPalmDirection;
+    if (
+      visual &&
+      hand?.visible &&
+      renderedPalmPosition instanceof w.__questThree.Vector3 &&
+      renderedPalmDirection instanceof w.__questThree.Vector3 &&
+      renderedPalmDirection.lengthSq() > 1e-8
+    ) {
+      const originalPosition = hand.position.clone();
+      const originalQuaternion = hand.quaternion.clone();
+      const originalScale = hand.scale.clone();
+      const oldPalm = renderedPalmPosition.clone();
+      const oldDirection = renderedPalmDirection.clone().normalize();
+      const desiredOrigin = target
+        .getWorldPosition(new w.__questThree.Vector3())
+        .add(new w.__questThree.Vector3(0, 0, 0.5).applyQuaternion(q));
+      const desiredDirection = new w.__questThree.Vector3(0, 0, -1).applyQuaternion(q);
+      const delta = new w.__questThree.Quaternion().setFromUnitVectors(
+        oldDirection,
+        desiredDirection.normalize(),
+      );
+      const handOrigin = hand.getWorldPosition(new w.__questThree.Vector3());
+      const rotatedPalm = oldPalm.clone().sub(handOrigin).applyQuaternion(delta).add(handOrigin);
+      hand.quaternion.premultiply(delta);
+      hand.position.add(desiredOrigin.sub(rotatedPalm));
+      w.__questScene.updateMatrixWorld(true);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      try {
+        controller.dispatchEvent({ type: 'selectstart' } as never);
+        controller.dispatchEvent({ type: 'select' } as never);
+        controller.dispatchEvent({ type: 'selectend' } as never);
+      } finally {
+        hand.position.copy(originalPosition);
+        hand.quaternion.copy(originalQuaternion);
+        hand.scale.copy(originalScale);
+        w.__questScene.updateMatrixWorld(true);
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      return;
+    }
     controller.position
       .copy(target.getWorldPosition(new w.__questThree.Vector3()))
       .add(new w.__questThree.Vector3(0, 0, 0.3).applyQuaternion(q));

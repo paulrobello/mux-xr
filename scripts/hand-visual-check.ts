@@ -129,6 +129,13 @@ async function main(): Promise<void> {
   const capturedHands = JSON.parse(
     await readFile(new URL('../tests/fixtures/quest-hand-poses.json', import.meta.url), 'utf8'),
   );
+  const neutralHands = JSON.parse(
+    await readFile(new URL('../tests/fixtures/quest-neutral-hands.json', import.meta.url), 'utf8'),
+  );
+  await page.addInitScript(
+    (capture) => Object.assign(window, { __neutralHandPoses: capture }),
+    neutralHands,
+  );
   await page.addInitScript(
     (capture) => Object.assign(window, { __recordedHandPoses: capture }),
     capturedHands,
@@ -257,60 +264,44 @@ async function main(): Promise<void> {
         } as never);
         const hand = w.__questHands[i];
         hand.visible = true;
-        const mirror = i === 0 ? -1 : 1;
-        const wrist = new T.Vector3(i === 0 ? 0.24 : -0.24, 1.38, -0.55);
-        hand.joints.wrist.position.copy(wrist);
-        const lengths: Record<string, number> = {
-          'index-finger': 0.16,
-          'middle-finger': 0.18,
-          'ring-finger': 0.16,
-          'pinky-finger': 0.13,
-        };
-        const offsets: Record<string, number> = {
-          'index-finger': 0.03,
-          'middle-finger': 0,
-          'ring-finger': -0.028,
-          'pinky-finger': -0.052,
-        };
+        const capture = (
+          window as unknown as {
+            __neutralHandPoses: {
+              hands: Array<{ side: string; joints: Record<string, { matrix: number[] }> }>;
+            };
+          }
+        ).__neutralHandPoses.hands.find((pose) => pose.side === (i ? 'left' : 'right'));
+        if (!capture) throw new Error('Neutral hand capture missing');
+        const point = (name: string): import('three').Vector3 =>
+          new T.Vector3().setFromMatrixPosition(
+            new T.Matrix4().fromArray(capture.joints[name].matrix),
+          );
+        const forward = point('middle-finger-phalanx-proximal').normalize();
+        const across = point('index-finger-phalanx-proximal').sub(
+          point('pinky-finger-phalanx-proximal'),
+        );
+        across.addScaledVector(forward, -across.dot(forward)).normalize();
+        const normal = new T.Vector3().crossVectors(across, forward).normalize();
+        const sourceBasis = new T.Matrix4().makeBasis(across, forward, normal);
+        const placement = new T.Matrix4()
+          .makeBasis(
+            new T.Vector3(i ? 1 : -1, 0, 0),
+            new T.Vector3(0, 1, 0),
+            new T.Vector3(0, 0, i ? 1 : -1),
+          )
+          .multiply(sourceBasis.invert());
+        placement.setPosition(i ? -0.24 : 0.24, 1.38, -0.55);
         for (const [name, joint] of Object.entries(hand.joints)) {
           joint.visible = true;
-          if (name === 'wrist') continue;
-          const finger = Object.keys(lengths).find((key) => name.startsWith(key));
-          if (!finger) {
-            const thumb =
-              {
-                'thumb-metacarpal': 0.035,
-                'thumb-phalanx-proximal': 0.055,
-                'thumb-phalanx-distal': 0.075,
-                'thumb-tip': 0.09,
-              }[name] ?? 0.09;
-            const height =
-              name === 'thumb-metacarpal'
-                ? 0.018
-                : name === 'thumb-phalanx-proximal'
-                  ? 0.03
-                  : name === 'thumb-phalanx-distal'
-                    ? 0.045
-                    : 0.06;
-            joint.position.copy(wrist).add(new T.Vector3(thumb * mirror, height, 0));
-            continue;
-          }
-          const fraction = name.endsWith('tip')
-            ? 1
-            : name.includes('distal')
-              ? 0.85
-              : name.includes('intermediate')
-                ? 0.67
-                : name.includes('proximal')
-                  ? 0.47
-                  : 0.17;
-          joint.position
-            .copy(wrist)
-            .add(new T.Vector3(offsets[finger] * mirror, lengths[finger] * fraction, 0));
+          joint.matrix.multiplyMatrices(
+            placement,
+            new T.Matrix4().fromArray(capture.joints[name].matrix),
+          );
+          joint.matrix.decompose(joint.position, joint.quaternion, joint.scale);
         }
         rest.push(
           Object.fromEntries(
-            Object.entries(hand.joints).map(([name, node]) => [name, node.position.toArray()]),
+            Object.entries(hand.joints).map(([name, node]) => [name, node.matrix.toArray()]),
           ),
         );
         controller.position.set(5 + i, 5, 0);
@@ -333,9 +324,13 @@ async function main(): Promise<void> {
         const rest = (window as unknown as { __cartoonRest: Array<Record<string, number[]>> })
           .__cartoonRest[0];
         for (const [name, point] of Object.entries(rest)) {
-          hand.joints[name].position.fromArray(point);
+          hand.joints[name].matrix.fromArray(point);
+          hand.joints[name].matrix.decompose(
+            hand.joints[name].position,
+            hand.joints[name].quaternion,
+            hand.joints[name].scale,
+          );
           hand.joints[name].visible = true;
-          hand.joints[name].quaternion.identity();
         }
         if (kind === 'index-pinch') {
           const wrist = hand.joints.wrist.position;
@@ -351,6 +346,32 @@ async function main(): Promise<void> {
           };
           for (const [name, [x, y, z]] of Object.entries(pinch))
             hand.joints[name].position.copy(wrist).add(new T.Vector3(-x, y, -z));
+          for (const chain of [
+            ['thumb-metacarpal', 'thumb-phalanx-proximal', 'thumb-phalanx-distal', 'thumb-tip'],
+            [
+              'index-finger-phalanx-proximal',
+              'index-finger-phalanx-intermediate',
+              'index-finger-phalanx-distal',
+              'index-finger-tip',
+            ],
+          ]) {
+            for (let part = 0; part < 3; part++) {
+              const start = chain[part],
+                end = chain[part + 1];
+              const from = new T.Vector3()
+                .setFromMatrixPosition(new T.Matrix4().fromArray(rest[end]))
+                .sub(new T.Vector3().setFromMatrixPosition(new T.Matrix4().fromArray(rest[start])))
+                .normalize();
+              const to = hand.joints[end].position
+                .clone()
+                .sub(hand.joints[start].position)
+                .normalize();
+              hand.joints[start].quaternion.premultiply(
+                new T.Quaternion().setFromUnitVectors(from, to),
+              );
+            }
+            hand.joints[chain[3]].quaternion.copy(hand.joints[chain[2]].quaternion);
+          }
         }
         if (kind === 'upturned' || kind === 'side-on') {
           const wrist = hand.joints.wrist.position.clone();
@@ -364,7 +385,7 @@ async function main(): Promise<void> {
               .applyQuaternion(rotation)
               .add(wrist)
               .add(new T.Vector3(0.1, 0.05, -0.15));
-            joint.quaternion.copy(rotation);
+            joint.quaternion.premultiply(rotation);
           }
         }
         if (kind === 'tracking-loss') hand.joints['middle-finger-tip'].visible = false;
@@ -449,6 +470,21 @@ async function main(): Promise<void> {
               );
               const anchor = root.userData.armAnchor as import('three').Vector3;
               const wrist = root.userData.wristPosition as import('three').Vector3;
+              const controller = w.__questControllers[root.userData.handedness === 'right' ? 0 : 1];
+              const laser = controller.children.find(
+                (child) => child instanceof w.__questThree.Line,
+              );
+              if (!laser) throw new Error('Hand laser missing');
+              const laserOrigin = laser.getWorldPosition(new w.__questThree.Vector3());
+              const laserDirection = laser
+                .localToWorld(new w.__questThree.Vector3(0, 0, -1))
+                .sub(laserOrigin)
+                .normalize();
+              if (
+                laserOrigin.distanceTo(root.userData.renderedPalmPosition) > 1e-5 ||
+                laserDirection.dot(root.userData.renderedPalmDirection) < 0.99999
+              )
+                throw new Error('Hand laser does not match rendered palm pose');
               const model = root.getObjectByName('authored-hand-root');
               if (
                 !model ||

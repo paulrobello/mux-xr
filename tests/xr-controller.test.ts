@@ -338,6 +338,57 @@ describe('native XR controller event routing', () => {
       fakeXR.frame?.(time);
     };
 
+    it('uses the rendered palm pose for the ray and keeps native fallback aligned', () => {
+      const { workspace } = setup('off');
+      connectHand();
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      const visual = workspace.scene.getObjectByName('xr-cartoon-hand');
+      const line = controller.children.find((child) => child instanceof THREE.Line) as THREE.Line;
+      if (!visual || !line) throw new Error('Tracked hand ray fixtures missing');
+      const palmPosition = new THREE.Vector3(0.42, 1.18, -0.72);
+      const palmNormal = new THREE.Vector3(0.6, 0.2, -0.77).normalize();
+      visual.userData.renderedPalmPosition = palmPosition;
+      visual.userData.renderedPalmDirection = palmNormal;
+      controller.position.set(-0.3, 0.8, 0.4);
+      controller.rotation.set(0.2, -0.35, 0.1);
+      controller.scale.set(1.7, 0.8, 1.3);
+      fakeXR.frame?.(32);
+      expect(line.getWorldPosition(new THREE.Vector3()).distanceTo(palmPosition)).toBeLessThan(
+        1e-6,
+      );
+      expect(
+        line.getWorldDirection(new THREE.Vector3()).negate().distanceTo(palmNormal),
+      ).toBeLessThan(1e-6);
+      const expectedEnd = palmPosition
+        .clone()
+        .addScaledVector(palmNormal, Number(controller.userData.rayDistance));
+      const points = line.geometry.getAttribute('position');
+      const drawnEnd = line.localToWorld(
+        new THREE.Vector3().fromBufferAttribute(points, points.count - 1),
+      );
+      const contact = controller.children.find(
+        (child) => child instanceof THREE.Mesh,
+      ) as THREE.Mesh;
+      expect(drawnEnd.distanceTo(expectedEnd)).toBeLessThan(1e-6);
+      expect(contact.getWorldPosition(new THREE.Vector3()).distanceTo(expectedEnd)).toBeLessThan(
+        1e-6,
+      );
+      expect((line.material as THREE.LineBasicMaterial).depthTest).toBe(false);
+
+      delete visual.userData.renderedPalmPosition;
+      delete visual.userData.renderedPalmDirection;
+      fakeXR.frame?.(48);
+      const nativeOrigin = controller.getWorldPosition(new THREE.Vector3());
+      const nativeDirection = controller.getWorldDirection(new THREE.Vector3());
+      expect(line.getWorldPosition(new THREE.Vector3()).distanceTo(nativeOrigin)).toBeLessThan(
+        1e-6,
+      );
+      expect(line.getWorldDirection(new THREE.Vector3()).distanceTo(nativeDirection)).toBeLessThan(
+        1e-6,
+      );
+      expect((line.material as THREE.LineBasicMaterial).depthTest).toBe(true);
+    });
+
     it('switches Auto on hand source changes without moving or retargeting the keyboard', () => {
       const { workspace, actions } = setup('auto');
       workspace.showInput('keyboard');

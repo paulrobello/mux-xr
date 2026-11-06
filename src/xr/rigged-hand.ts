@@ -2,9 +2,11 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { type CartoonHand, createCartoonHand } from './cartoon-hand';
 import type { HandContactProbe } from './hand-contact';
+import neutralReference from './hand-neutral-reference.json';
 
 export const RIGGED_HAND_ASSET_URL = '/assets/hand.glb?v=95714f02a92e';
 const DIGITS = ['thumb', 'index', 'middle', 'outer'] as const;
+const neutralPoses = neutralReference as Record<'left' | 'right', Record<string, number[]>>;
 const JOINTS = [
   ['thumb-metacarpal', 'thumb-phalanx-proximal', 'thumb-phalanx-distal', 'thumb-tip'],
   [
@@ -40,6 +42,7 @@ interface JointDriver {
   restPosition: THREE.Vector3;
   restScale: THREE.Vector3;
   worldRest: THREE.Quaternion;
+  neutralInverse: Record<'left' | 'right', THREE.Quaternion>;
   curlAxis: THREE.Vector3;
   digit: number;
   part: number;
@@ -78,17 +81,17 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
   const probes: HandContactProbe[] = [];
   const probeVertices: number[] = [];
   const position = new THREE.Vector3();
-  const target = new THREE.Vector3();
   const forward = new THREE.Vector3();
   const normal = new THREE.Vector3();
   const across = new THREE.Vector3();
-  const direction = new THREE.Vector3();
   const basis = new THREE.Matrix4();
   const rotation = new THREE.Quaternion();
   const parentRotation = new THREE.Quaternion();
-  const referenceDirection = new THREE.Vector3();
-  const previousDirection = new THREE.Vector3();
+  const palmRotation = new THREE.Quaternion();
   const inverseRotation = new THREE.Quaternion();
+  const palmCenter = new THREE.Vector3();
+  const renderedPalmPosition = new THREE.Vector3();
+  const renderedPalmDirection = new THREE.Vector3();
   const visibleIndex = new THREE.Vector3();
   const visibleThumb = new THREE.Vector3();
   const pinchPoint = new THREE.Vector3();
@@ -158,6 +161,14 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
             restPosition: bone.position.clone(),
             restScale: bone.scale.clone(),
             worldRest: worldRotation,
+            neutralInverse: {
+              left: new THREE.Quaternion()
+                .fromArray(neutralPoses.left[JOINTS[digit][part]])
+                .invert(),
+              right: new THREE.Quaternion()
+                .fromArray(neutralPoses.right[JOINTS[digit][part]])
+                .invert(),
+            },
             curlAxis,
             digit,
             part,
@@ -166,14 +177,26 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
       }
       const cells = new Set<string>();
       const vertices = mesh.geometry.getAttribute('position');
+      const skinIndices = mesh.geometry.getAttribute('skinIndex');
+      const skinWeights = mesh.geometry.getAttribute('skinWeight');
+      const wristIndex = mesh.skeleton.bones.findIndex((bone) => bone.name === 'wrist');
+      let palmWeight = 0;
       for (let index = 0; index < vertices.count; index++) {
         position.fromBufferAttribute(vertices, index);
+        for (let influence = 0; influence < 4; influence++) {
+          const weight = skinWeights.getComponent(index, influence);
+          if (skinIndices.getComponent(index, influence) === wristIndex && weight > 0.8) {
+            palmCenter.addScaledVector(position, weight);
+            palmWeight += weight;
+          }
+        }
         const cell = `${Math.floor(position.x / 0.015)},${Math.floor(position.y / 0.015)},${Math.floor(position.z / 0.015)}`;
         if (cells.has(cell)) continue;
         cells.add(cell);
         probeVertices.push(index);
         probes.push({ point: new THREE.Vector3(), radius: 0.012 });
       }
+      if (palmWeight > 0) palmCenter.divideScalar(palmWeight);
       probes.push({ point: wristJoint.position, radius: 0.019 });
       fallback.root.add(authored);
       if (skin) skin.visible = false;
@@ -201,6 +224,8 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
       .addScaledVector(forward, -wristOffset);
     authored.quaternion.setFromRotationMatrix(basis);
     authored.updateMatrixWorld(true);
+    authored.getWorldQuaternion(palmRotation);
+    inverseRotation.copy(palmRotation).invert();
     for (const driver of drivers) {
       const { bone, rest, digit, part } = driver;
       bone.matrixAutoUpdate = true;
@@ -213,43 +238,28 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
         rotation.setFromAxisAngle(driver.curlAxis, angle);
         bone.quaternion.multiply(rotation);
       } else {
-        const start = tracked.joints?.[JOINTS[digit][part]];
-        const end = tracked.joints?.[JOINTS[digit][part + 1]];
-        const previous = tracked.joints?.[part === 0 ? 'wrist' : JOINTS[digit][part - 1]];
-        if (start?.visible && end?.visible && previous?.visible && bone.parent) {
-          start.getWorldPosition(position);
-          end.getWorldPosition(target);
-          direction.copy(target).sub(position);
-          const length = direction.length();
-          if (length > 1e-4) {
-            direction.divideScalar(length);
-            previous.getWorldPosition(previousDirection);
-            previousDirection.subVectors(position, previousDirection).normalize();
-            if (digit === 0) {
-              parentRotation.copy(authored.quaternion).multiply(driver.worldRest);
-              rotation
-                .setFromUnitVectors(previousDirection, direction)
-                .premultiply(inverseRotation.copy(parentRotation).invert())
-                .multiply(parentRotation);
-            } else {
-              if (part === 0) previousDirection.copy(forward);
-              previousDirection.addScaledVector(across, -previousDirection.dot(across)).normalize();
-              direction.addScaledVector(across, -direction.dot(across)).normalize();
-              referenceDirection.crossVectors(previousDirection, direction);
-              const angle = Math.atan2(
-                referenceDirection.dot(across),
-                previousDirection.dot(direction),
-              );
-              rotation.setFromAxisAngle(driver.curlAxis, THREE.MathUtils.clamp(angle, -0.35, 1.9));
-            }
-            bone.quaternion.copy(rest).multiply(rotation);
-          }
+        const joint = tracked.joints?.[JOINTS[digit][part]];
+        if (joint?.visible && bone.parent) {
+          joint.getWorldQuaternion(rotation);
+          rotation
+            .premultiply(inverseRotation)
+            .multiply(driver.neutralInverse[side])
+            .multiply(driver.worldRest)
+            .premultiply(palmRotation);
+          bone.parent.getWorldQuaternion(parentRotation).invert();
+          bone.quaternion.copy(parentRotation).multiply(rotation).normalize();
         }
       }
       bone.updateWorldMatrix(false, true);
     }
     mesh.updateWorldMatrix(true, false);
     mesh.skeleton.update();
+    renderedPalmPosition.copy(palmCenter).applyMatrix4(mesh.matrixWorld);
+    renderedPalmDirection.copy(forward);
+    fallback.root.userData.renderedPalmPosition = controllerMode ? undefined : renderedPalmPosition;
+    fallback.root.userData.renderedPalmDirection = controllerMode
+      ? undefined
+      : renderedPalmDirection;
     if (indexEnd && thumbEnd) {
       indexEnd.localToWorld(visibleIndex.set(0, indexEnd.userData.restLength, 0));
       thumbEnd.localToWorld(visibleThumb.set(0, thumbEnd.userData.restLength, 0));

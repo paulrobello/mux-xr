@@ -661,6 +661,14 @@ export function createWorkspaceScene(
     onDisconnected: (event: Event) => void;
   }> = [];
   const tempMatrix = new THREE.Matrix4();
+  const controllerRayInverse = new THREE.Matrix4();
+  const controllerRayOrigin = new THREE.Vector3();
+  const controllerRayDirection = new THREE.Vector3();
+  const controllerRayLocalOrigin = new THREE.Vector3();
+  const controllerRayLocalEndpoint = new THREE.Vector3();
+  const controllerRayLocalDirection = new THREE.Vector3();
+  const controllerRayQuaternion = new THREE.Quaternion();
+  const controllerRayForward = new THREE.Vector3(0, 0, -1);
   const reachPosition = new THREE.Vector3();
   const dragStates = new Map<
     THREE.Group,
@@ -2003,6 +2011,7 @@ export function createWorkspaceScene(
         const nearKeyboard = Boolean(nearOrb || (sample?.nearKeyboard && contactKeyboard()));
         const nearControl = nearOrb ?? sample?.hovered;
         const rayBlocked = controllerRayBlocked(controller);
+        const hasRenderedPalmPose = setControllerRayPose(controller);
         const target: InputTarget | null = nearKeyboard
           ? nearControl
             ? {
@@ -2021,17 +2030,16 @@ export function createWorkspaceScene(
         const line = controller.children.find((child) => child instanceof THREE.Line) as
           | THREE.Line
           | undefined;
-        if (line) {
-          line.visible = !rayBlocked;
-          line.scale.z = distance / CONTROLLER_RAY_LENGTH;
-        }
+        if (line) line.visible = !rayBlocked;
         const contact = controller.children.find((child) => child instanceof THREE.Mesh) as
           | THREE.Mesh
           | undefined;
         if (contact) {
-          contact.position.set(0, 0, -distance);
+          applyControllerRayVisual(controller, line, contact, distance, hasRenderedPalmPose);
           contact.visible = !rayBlocked && Boolean(target?.object);
         }
+        if (!contact)
+          applyControllerRayVisual(controller, line, undefined, distance, hasRenderedPalmPose);
         const object = target?.object;
         if (radialMenu.interactive && object?.userData.radialAction)
           radialHoverAction ??= object.userData.radialAction as RadialMenuAction;
@@ -3488,15 +3496,74 @@ export function createWorkspaceScene(
     const key = hit.userData.key as string | undefined;
     return { terminalId, kind: key ? 'key' : 'terminal', object: hit, uv: intersection?.uv };
   };
+  const setControllerRayPose = (root: THREE.Group): boolean => {
+    const visual = handVisuals.get(root);
+    const renderedPalmPosition =
+      activeHand(root) && visual?.root.visible
+        ? (visual.root.userData.renderedPalmPosition as THREE.Vector3 | undefined)
+        : undefined;
+    const renderedPalmDirection =
+      activeHand(root) && visual?.root.visible
+        ? (visual.root.userData.renderedPalmDirection as THREE.Vector3 | undefined)
+        : undefined;
+    const hasRenderedPalmPose =
+      renderedPalmPosition instanceof THREE.Vector3 &&
+      renderedPalmDirection instanceof THREE.Vector3 &&
+      renderedPalmDirection.lengthSq() > 1e-8;
+    if (hasRenderedPalmPose) {
+      controllerRayOrigin.copy(renderedPalmPosition);
+      controllerRayDirection.copy(renderedPalmDirection).normalize();
+    } else {
+      controllerRayOrigin.setFromMatrixPosition(root.matrixWorld);
+      tempMatrix.identity().extractRotation(root.matrixWorld);
+      controllerRayDirection.copy(controllerRayForward).applyMatrix4(tempMatrix).normalize();
+    }
+    raycaster.ray.set(controllerRayOrigin, controllerRayDirection);
+    return hasRenderedPalmPose;
+  };
+  const applyControllerRayVisual = (
+    root: THREE.Group,
+    line: THREE.Line | undefined,
+    contact: THREE.Mesh | undefined,
+    distance: number,
+    hasRenderedPalmPose: boolean,
+  ): void => {
+    if (!line && !contact) return;
+    if (line) {
+      (line.material as THREE.LineBasicMaterial).depthTest = !hasRenderedPalmPose;
+      line.renderOrder = hasRenderedPalmPose ? 1000 : 0;
+    }
+    if (!hasRenderedPalmPose) {
+      line?.position.set(0, 0, 0);
+      line?.quaternion.identity();
+      if (line) line.scale.z = distance / CONTROLLER_RAY_LENGTH;
+      contact?.position.set(0, 0, -distance);
+      return;
+    }
+    controllerRayInverse.copy(root.matrixWorld).invert();
+    controllerRayLocalOrigin.copy(controllerRayOrigin).applyMatrix4(controllerRayInverse);
+    controllerRayLocalDirection
+      .copy(controllerRayDirection)
+      .transformDirection(controllerRayInverse);
+    controllerRayLocalEndpoint
+      .copy(controllerRayOrigin)
+      .addScaledVector(controllerRayDirection, distance)
+      .applyMatrix4(controllerRayInverse);
+    controllerRayQuaternion.setFromUnitVectors(controllerRayForward, controllerRayLocalDirection);
+    line?.position.copy(controllerRayLocalOrigin);
+    line?.quaternion.copy(controllerRayQuaternion);
+    if (line)
+      line.scale.z =
+        controllerRayLocalOrigin.distanceTo(controllerRayLocalEndpoint) / CONTROLLER_RAY_LENGTH;
+    contact?.position.copy(controllerRayLocalEndpoint);
+  };
   const targetFromController = (root: THREE.Group, updateWorld = true): InputTarget | null => {
     if (controllerRayBlocked(root)) {
       root.userData.rayDistance = 0;
       return null;
     }
     if (updateWorld) scene.updateMatrixWorld(true);
-    tempMatrix.identity().extractRotation(root.matrixWorld);
-    raycaster.ray.origin.setFromMatrixPosition(root.matrixWorld);
-    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix).normalize();
+    setControllerRayPose(root);
     const target = targetFromRay();
     root.userData.rayDistance = Math.max(0.02, lastRayDistance);
     return target;
