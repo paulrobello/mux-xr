@@ -2,12 +2,16 @@ import * as THREE from 'three';
 import neutralReference from './hand-neutral-reference.json';
 
 type HandJoints = THREE.Group & { joints?: Record<string, THREE.Object3D | undefined> };
+const CONTACT_JOINTS = ['phalanx-proximal', 'phalanx-intermediate', 'phalanx-distal', 'tip'];
 
 export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.Group) {
   const bone = (name: string): THREE.Bone => mesh.skeleton.getBoneByName(name) as THREE.Bone;
   const thumb = [bone('thumb_01'), bone('thumb_02'), bone('thumb_03')];
   const roots = [bone('index_01'), bone('middle_01'), bone('outer_01')];
   const ends = [bone('index_03'), bone('middle_03'), bone('outer_03')];
+  const contactChains = ['index', 'middle'].map((digit) =>
+    [1, 2, 3].map((part) => bone(`${digit}_0${part}`)),
+  );
   const fingerJoints = ['index', 'middle', 'outer'].flatMap((digit) =>
     [1, 2, 3].map((part) => {
       const item = bone(`${digit}_0${part}`);
@@ -25,6 +29,7 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
     .getWorldPosition(new THREE.Vector3())
     .distanceTo(thumb[0].getWorldPosition(new THREE.Vector3()));
   const distalLength = Number(thumb[2].userData.restLength);
+  const padOverhang = measurePadOverhang(mesh, thumb[2], distalLength);
   const points = Array.from({ length: 4 }, () => new THREE.Vector3());
   const directions = Array.from({ length: 3 }, () => new THREE.Vector3());
   const palm = new THREE.Quaternion();
@@ -45,7 +50,8 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
   const current = new THREE.Vector3();
   const rawThumb = new THREE.Vector3();
   const rawIndex = new THREE.Vector3();
-  const rawKnuckle = new THREE.Vector3();
+  const contactOffset = new THREE.Vector3();
+  const segment = new THREE.Line3();
   const thumbNeutral = {
     left: new THREE.Vector3().fromArray(neutralReference.thumbBasePositions.left),
     right: new THREE.Vector3().fromArray(neutralReference.thumbBasePositions.right),
@@ -100,8 +106,9 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
     }
   }
 
-  // The authored finger roots are about twice as far apart as a real hand's, so
-  // closing fingers converge toward the middle finger to avoid a claw.
+  // The authored digits are wider than real fingers, so closing fingers swing toward the
+  // middle finger to avoid a claw. Roots never translate: moving a skinned root bunches
+  // the palm skin into a lump.
   function cupPalm(closure: number): void {
     root.worldToLocal(endpoint(ends[1], middleTip));
     for (const index of [0, 2]) {
@@ -110,16 +117,10 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
       root.worldToLocal(endpoint(ends[index], tip));
       root.worldToLocal(item.getWorldPosition(base));
       const excess = Math.max(0, sign * (tip.x - middleTip.x) - 0.021) * closure;
-      const shift = Math.min(index === 0 ? 0.0145 : 0.01, excess * 0.6);
       item.parent?.getWorldQuaternion(parent).invert();
-      delta
-        .set(-sign * shift, 0, 0)
-        .applyQuaternion(palm)
-        .applyQuaternion(parent);
-      item.position.add(delta);
       const cup = Math.min(
         0.26,
-        Math.atan2(excess - shift, Math.max(0.015, Math.abs(tip.z - base.z))),
+        Math.atan2(excess * 0.4, Math.max(0.015, Math.abs(tip.z - base.z))),
       );
       axis.set(0, 1, 0).applyQuaternion(palm).applyQuaternion(parent);
       rotation.setFromAxisAngle(axis, -sign * Math.sign(tip.z - base.z) * cup);
@@ -129,17 +130,41 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
   }
 
   function applyThumbOpposition(hand: HandJoints, side: 'left' | 'right', closure: number): void {
-    if (
-      !read(hand, 'thumb-tip', rawThumb) ||
-      !read(hand, 'index-finger-tip', rawIndex) ||
-      !read(hand, 'index-finger-phalanx-intermediate', rawKnuckle)
-    )
-      return;
-    const pinch = 1 - THREE.MathUtils.smoothstep(rawThumb.distanceTo(rawIndex), 0.012, 0.075);
+    if (!read(hand, 'thumb-tip', rawThumb) || !read(hand, 'index-finger-tip', rawIndex)) return;
+    // The resting thumb lies on whichever phalanx it touches, so locate that contact on the
+    // tracked index/middle segments and reproduce it on the matching model segment.
+    let contactDistance = Number.POSITIVE_INFINITY;
+    let contactDigit = 0;
+    let contactSegment = 0;
+    let contactT = 0;
+    for (let digit = 0; digit < 2; digit++) {
+      const prefix = digit === 0 ? 'index' : 'middle';
+      if (!CONTACT_JOINTS.every((name, i) => read(hand, `${prefix}-finger-${name}`, points[i])))
+        return;
+      for (let k = 0; k < 3; k++) {
+        segment.set(points[k], points[k + 1]);
+        const t = segment.closestPointToPointParameter(rawThumb, true);
+        segment.at(t, current);
+        const distance = current.distanceTo(rawThumb);
+        if (distance >= contactDistance) continue;
+        contactDistance = distance;
+        contactDigit = digit;
+        contactSegment = k;
+        contactT = t;
+        contactOffset.subVectors(rawThumb, current);
+      }
+    }
+    const tipContact =
+      contactDigit === 0 && contactSegment === 2
+        ? THREE.MathUtils.smoothstep(contactT, 0.3, 0.8)
+        : 0;
+    // A curled fist brings the thumb within pinch range of the buried index tip; only count
+    // it as a pinch there when the thumb actually touches the tip.
+    const pinch =
+      (1 - THREE.MathUtils.smoothstep(rawThumb.distanceTo(rawIndex), 0.012, 0.075)) *
+      THREE.MathUtils.lerp(1, tipContact, closure);
     const fold =
-      closure *
-      (1 - pinch) *
-      (1 - THREE.MathUtils.smoothstep(rawThumb.distanceTo(rawKnuckle), 0.035, 0.065));
+      closure * (1 - pinch) * (1 - THREE.MathUtils.smoothstep(contactDistance, 0.03, 0.055));
     const weight = pinch + fold;
     if (weight <= 0) return;
     if (read(hand, 'wrist', base) && read(hand, 'thumb-phalanx-proximal', delta)) {
@@ -152,18 +177,28 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
     }
 
     thumb[0].getWorldPosition(base);
-    bone('index_02').getWorldPosition(target);
+    const chain = contactChains[contactDigit];
+    chain[contactSegment].getWorldPosition(target);
+    if (contactSegment < 2) chain[contactSegment + 1].getWorldPosition(current);
+    else endpoint(chain[2], current);
+    target.lerp(current, contactT);
+    // Bone endpoints sit inside the rounded pads, so contact requires a finite separation;
+    // a hovering thumb keeps its tracked clearance beyond that.
+    const separation = 0.022 + Math.max(0, contactDistance - 0.02);
+    if (contactOffset.lengthSq() > 1e-8)
+      target.addScaledVector(contactOffset.normalize(), separation);
+    else target.addScaledVector(axis.subVectors(base, target).normalize(), separation);
     endpoint(ends[0], tip);
-    const pinchShare = pinch / (pinch + fold);
-    target.lerp(tip, pinchShare);
-    axis.subVectors(base, target).normalize();
-    // Bone endpoints sit inside the rounded pads, so contact requires a finite separation.
-    target.addScaledVector(axis, THREE.MathUtils.lerp(0.022, 0.017, pinchShare));
+    tip.addScaledVector(axis.subVectors(base, tip).normalize(), 0.017);
+    target.lerp(tip, pinch / weight);
     axis.subVectors(target, base);
+    // The tracked tip joint sits at the skin while the bone ends inside the pad, so a folded
+    // thumb aims its pad surface at the contact. The pinch offset was tuned on bone ends.
+    const reach = distalLength + padOverhang * (fold / weight);
     const distance = THREE.MathUtils.clamp(
       axis.length(),
-      proximalLength - distalLength + 0.001,
-      proximalLength + distalLength - 0.0005,
+      proximalLength - reach + 0.001,
+      proximalLength + reach - 0.0005,
     );
     axis.normalize();
     end.copy(base).addScaledVector(axis, distance);
@@ -172,7 +207,7 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
     if (pole.lengthSq() < 1e-6) pole.copy(forward).addScaledVector(axis, -forward.dot(axis));
     pole.normalize();
     const cosine =
-      (proximalLength ** 2 + distance ** 2 - distalLength ** 2) / (2 * proximalLength * distance);
+      (proximalLength ** 2 + distance ** 2 - reach ** 2) / (2 * proximalLength * distance);
     elbow
       .copy(base)
       .addScaledVector(axis, proximalLength * cosine)
@@ -194,4 +229,25 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
       thumb[i].updateWorldMatrix(false, true);
     }
   }
+}
+
+function measurePadOverhang(mesh: THREE.SkinnedMesh, tip: THREE.Bone, length: number): number {
+  const index = mesh.skeleton.bones.indexOf(tip);
+  const position = mesh.geometry.getAttribute('position');
+  const skinIndex = mesh.geometry.getAttribute('skinIndex');
+  const skinWeight = mesh.geometry.getAttribute('skinWeight');
+  const toBone = new THREE.Matrix4().multiplyMatrices(
+    mesh.skeleton.boneInverses[index],
+    mesh.bindMatrix,
+  );
+  const vertex = new THREE.Vector3();
+  let surface = length;
+  for (let i = 0; i < position.count; i++) {
+    let weight = 0;
+    for (let k = 0; k < 4; k++)
+      if (skinIndex.getComponent(i, k) === index) weight += skinWeight.getComponent(i, k);
+    if (weight < 0.5) continue;
+    surface = Math.max(surface, vertex.fromBufferAttribute(position, i).applyMatrix4(toBone).y);
+  }
+  return surface - length;
 }

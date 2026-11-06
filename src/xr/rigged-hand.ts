@@ -5,7 +5,7 @@ import type { HandContactProbe } from './hand-contact';
 import neutralReference from './hand-neutral-reference.json';
 import { createHandPoseConstraints } from './hand-pose-constraints';
 
-export const RIGGED_HAND_ASSET_URL = '/assets/hand.glb?v=836fabdaccd9';
+export const RIGGED_HAND_ASSET_URL = '/assets/hand.glb?v=6f2274e0a394';
 const DIGITS = ['thumb', 'index', 'middle', 'outer'] as const;
 const neutralPoses = neutralReference as Record<'left' | 'right', Record<string, number[]>>;
 const JOINTS = [

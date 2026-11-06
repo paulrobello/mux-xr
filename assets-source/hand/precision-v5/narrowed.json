@@ -1,0 +1,60 @@
+{
+  "shift_m": {
+    "index": 0.017,
+    "outer": 0.014
+  },
+  "params": {
+    "solver": "biharmonic",
+    "digit_lock": 0.9,
+    "taper_low": 0.08,
+    "solve_iterations": 3000,
+    "relax_steps": 4,
+    "web_round": 60,
+    "web_radius": 0.018,
+    "web_floor_z": 0.126,
+    "edge": [
+      0.013,
+      0.112,
+      0.026
+    ]
+  },
+  "bones_mm": {
+    "index_01": [
+      [
+        29.55,
+        0.0,
+        127.5
+      ],
+      [
+        34.56,
+        0.0,
+        153.0
+      ]
+    ],
+    "middle_01": [
+      [
+        -1.6,
+        0.0,
+        135.5
+      ],
+      [
+        -1.1,
+        0.0,
+        159.0
+      ]
+    ],
+    "outer_01": [
+      [
+        -33.8,
+        0.0,
+        125.72
+      ],
+      [
+        -40.21,
+        0.0,
+        151.65
+      ]
+    ]
+  },
+  "topology_and_weights_sha256": "bcf7c8ae69942233ccdb21cd4803e99f426239bc22e546cf873b672810e3fd9d"
+}

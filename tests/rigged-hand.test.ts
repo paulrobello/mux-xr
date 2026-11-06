@@ -153,6 +153,57 @@ describe('authored rigged hand', () => {
       hand.dispose();
     },
   );
+  it.each(gestures.sets['captured-fist'].hands)(
+    'rests the captured $side fist thumb where the tracked thumb touches the index',
+    async (pose) => {
+      const hand = createRiggedHand({ loader: parsedLoader() });
+      await hand.assetReady;
+      const source = poseSource(pose.joints);
+      source.rotation.set(0.3, -0.6, 0.4);
+      source.updateMatrixWorld(true);
+      hand.update(source, new THREE.PerspectiveCamera(), pose.side, 1 / 60);
+      const mesh = authoredMeshes(hand.root)[0];
+      const root = hand.root.getObjectByName('authored-hand-root') as THREE.Object3D;
+      const palm = root.getWorldQuaternion(new THREE.Quaternion()).invert();
+      const thumb = mesh.skeleton.getBoneByName('thumb_03') as THREE.Bone;
+      // The tracked tip joint sits at the skin, so compare the rendered pad surface.
+      const thumbIndex = mesh.skeleton.bones.indexOf(thumb);
+      const skinIndex = mesh.geometry.getAttribute('skinIndex');
+      const skinWeight = mesh.geometry.getAttribute('skinWeight');
+      const head = thumb.getWorldPosition(new THREE.Vector3());
+      const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(
+        thumb.getWorldQuaternion(new THREE.Quaternion()),
+      );
+      let reach = 0;
+      for (let i = 0; i < skinIndex.count; i++) {
+        let weight = 0;
+        for (let k = 0; k < 4; k++)
+          if (skinIndex.getComponent(i, k) === thumbIndex) weight += skinWeight.getComponent(i, k);
+        if (weight < 0.5) continue;
+        const vertex = mesh.localToWorld(mesh.getVertexPosition(i, new THREE.Vector3()));
+        reach = Math.max(reach, vertex.sub(head).dot(axis));
+      }
+      const rendered = head
+        .addScaledVector(axis, reach)
+        .sub(
+          (mesh.skeleton.getBoneByName('index_02') as THREE.Bone).getWorldPosition(
+            new THREE.Vector3(),
+          ),
+        )
+        .applyQuaternion(palm);
+      const tracked = source.joints['thumb-tip']
+        .getWorldPosition(new THREE.Vector3())
+        .sub(
+          source.joints['index-finger-phalanx-intermediate'].getWorldPosition(new THREE.Vector3()),
+        )
+        .applyQuaternion(palm);
+      // The tracked thumb rests beside the index PIP knuckle; the rendered thumb keeps that
+      // offset instead of folding across the fingers.
+      expect(tracked.length()).toBeLessThan(0.03);
+      expect(rendered.distanceTo(tracked)).toBeLessThan(0.0035);
+      hand.dispose();
+    },
+  );
   it.each([
     ...gestures.sets['captured-close'].hands.map((pose) => ({ ...pose, kind: 'partial' })),
     ...gestures.sets['captured-fist'].hands.map((pose) => ({ ...pose, kind: 'full fist' })),
@@ -186,10 +237,10 @@ describe('authored rigged hand', () => {
       for (const point of points[side])
         for (const other of points[1]) gap = Math.min(gap, point.distanceTo(other));
       const rightPartial = pose.side === 'right' && pose.kind === 'partial';
-      // Tracked curl is no longer replaced by a canned fist; the authored roots are
-      // ~45 mm apart, so the palm cup narrows but does not close the gaps.
+      // Tracked curl drives the digits directly; the roots sit ~30 mm apart, so closing
+      // fingers come together without touching.
       expect(gap).toBeLessThan(rightPartial ? 0.018 : 0.014);
-      if (rightPartial) expect(gap).toBeGreaterThan(0.01);
+      expect(gap).toBeGreaterThan(0.002);
     }
     for (const bone of mesh.skeleton.bones)
       for (const axis of [0, 1, 2])
@@ -387,8 +438,6 @@ describe('authored rigged hand', () => {
           const localPosition = new THREE.Vector3().setFromMatrixPosition(bone.matrix);
           const rootTravel = localPosition.distanceTo(originalPositions[index]);
           if (bone.name === 'thumb_01') expect(rootTravel).toBeLessThanOrEqual(0.050001);
-          else if (bone.name === 'index_01') expect(rootTravel).toBeLessThanOrEqual(0.014501);
-          else if (bone.name === 'outer_01') expect(rootTravel).toBeLessThanOrEqual(0.010001);
           else expect(rootTravel).toBeLessThan(1e-6);
         }
         expect(hand.root.getObjectByName('authored-hand-root')?.scale.toArray()).toEqual([1, 1, 1]);
