@@ -10,6 +10,7 @@ const DIGITS = ['thumb', 'index', 'middle', 'outer'] as const;
 // The cartoon's three wide fingers stand in for four real ones, so tracked spread reads as a fan.
 const SPLAY_KEEP = 0.3;
 const SPLAY_INWARD = 0.05;
+const SPLAY_LIMIT = 0.35;
 const neutralPoses = neutralReference as Record<'left' | 'right', Record<string, number[]>>;
 const JOINTS = [
   ['thumb-metacarpal', 'thumb-phalanx-proximal', 'thumb-phalanx-distal', 'thumb-tip'],
@@ -235,26 +236,36 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
     authored.updateMatrixWorld(true);
     authored.getWorldQuaternion(palmRotation);
     inverseRotation.copy(palmRotation).invert();
-    const splay = (digit: number): number | undefined => {
+    // A curled finger's knuckle-to-tip vector folds back into the palm, so its spread
+    // angle is meaningless; each angle is returned with a weight that fades it out.
+    const splay = (digit: number): { angle: number; weight: number } | undefined => {
       const base = tracked.joints?.[JOINTS[digit][0]];
       const tip = tracked.joints?.[JOINTS[digit][3]];
       if (!base?.visible || !tip?.visible) return undefined;
       base.getWorldPosition(knuckle);
       tip.getWorldPosition(splayVector).sub(knuckle).applyQuaternion(inverseRotation);
-      return Math.atan2(splayVector.x, splayVector.y);
+      return {
+        angle: Math.atan2(splayVector.x, splayVector.y),
+        weight: THREE.MathUtils.smoothstep(Math.hypot(splayVector.x, splayVector.y), 0.045, 0.065),
+      };
     };
-    const middleSplay = controllerMode ? undefined : splay(2);
+    const middle = controllerMode ? undefined : splay(2);
     palmNormal.set(0, 0, 1).applyQuaternion(palmRotation);
     for (const digit of [1, 3]) {
-      const own = middleSplay === undefined ? undefined : splay(digit);
-      const planar = Math.hypot(splayVector.x, splayVector.y);
-      const weight = THREE.MathUtils.smoothstep(planar, 0.045, 0.065);
-      const angle =
-        own === undefined || middleSplay === undefined
-          ? 0
-          : weight *
-            ((1 - SPLAY_KEEP) * (own - (middleSplay as number)) +
-              (digit === 1 ? 1 : -1) * SPLAY_INWARD);
+      const own = middle === undefined ? undefined : splay(digit);
+      let angle = 0;
+      if (own && middle) {
+        const spread = THREE.MathUtils.euclideanModulo(
+          own.angle - middle.weight * middle.angle + Math.PI,
+          2 * Math.PI,
+        );
+        angle = THREE.MathUtils.clamp(
+          own.weight *
+            ((1 - SPLAY_KEEP) * (spread - Math.PI) + (digit === 1 ? 1 : -1) * SPLAY_INWARD),
+          -SPLAY_LIMIT,
+          SPLAY_LIMIT,
+        );
+      }
       swings[digit].setFromAxisAngle(palmNormal, angle);
     }
     for (const driver of drivers) {

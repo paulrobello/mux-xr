@@ -204,6 +204,63 @@ describe('authored rigged hand', () => {
       hand.dispose();
     },
   );
+  it.each(gestures.sets['captured-fist'].hands)(
+    'bends the captured $side fist thumb tip the way the tracked thumb bends',
+    async (pose) => {
+      const hand = createRiggedHand({ loader: parsedLoader() });
+      await hand.assetReady;
+      const source = poseSource(pose.joints);
+      hand.update(source, new THREE.PerspectiveCamera(), pose.side, 1 / 60);
+      const mesh = authoredMeshes(hand.root)[0];
+      const thumb = mesh.skeleton.getBoneByName('thumb_03') as THREE.Bone;
+      const rendered = new THREE.Vector3(0, 1, 0).applyQuaternion(
+        thumb.getWorldQuaternion(new THREE.Quaternion()),
+      );
+      const at = (name: string) => source.joints[name].getWorldPosition(new THREE.Vector3());
+      const tracked = at('thumb-tip').sub(at('thumb-phalanx-distal')).normalize();
+      const root = hand.root.getObjectByName('authored-hand-root') as THREE.Object3D;
+      const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
+        root.getWorldQuaternion(new THREE.Quaternion()),
+      );
+      // The tracked tip curls toward the palm; the rendered tip must not hyperextend away.
+      expect(Math.abs(rendered.dot(normal) - tracked.dot(normal))).toBeLessThan(0.1);
+      expect(THREE.MathUtils.radToDeg(rendered.angleTo(tracked))).toBeLessThan(20);
+      hand.dispose();
+    },
+  );
+  it.each(['left', 'right'] as const)(
+    'keeps the %s index pointing forward when the other fingers curl',
+    async (side) => {
+      const hand = createRiggedHand({ loader: parsedLoader() });
+      await hand.assetReady;
+      const open = neutralCapture.hands.find((entry) => entry.side === side)?.joints;
+      const fist = gestures.sets['captured-fist'].hands.find(
+        (entry) => entry.side === side,
+      )?.joints;
+      if (!open || !fist) throw new Error('Missing captured hand');
+      const wrist = (joints: typeof open) => new THREE.Matrix4().fromArray(joints.wrist.matrix);
+      const move = wrist(open).multiply(wrist(fist).invert());
+      const joints = { ...open };
+      for (const [name, entry] of Object.entries(fist))
+        if (/^(middle|ring|pinky)-finger-/.test(name))
+          joints[name] = {
+            matrix: new THREE.Matrix4().fromArray(entry.matrix).premultiply(move).toArray(),
+          };
+      const source = poseSource(joints);
+      hand.update(source, new THREE.PerspectiveCamera(), side, 1 / 60);
+      const mesh = authoredMeshes(hand.root)[0];
+      const at = (name: string) => source.joints[name].getWorldPosition(new THREE.Vector3());
+      const tracked = at('index-finger-phalanx-intermediate')
+        .sub(at('index-finger-phalanx-proximal'))
+        .normalize();
+      const bone = mesh.skeleton.getBoneByName('index_01') as THREE.Bone;
+      const rendered = new THREE.Vector3(0, 1, 0).applyQuaternion(
+        bone.getWorldQuaternion(new THREE.Quaternion()),
+      );
+      expect(THREE.MathUtils.radToDeg(rendered.angleTo(tracked))).toBeLessThan(20);
+      hand.dispose();
+    },
+  );
   it.each([
     ...gestures.sets['captured-close'].hands.map((pose) => ({ ...pose, kind: 'partial' })),
     ...gestures.sets['captured-fist'].hands.map((pose) => ({ ...pose, kind: 'full fist' })),
