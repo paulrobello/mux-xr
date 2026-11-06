@@ -12,6 +12,15 @@ Updated November 5, 2026, after the approximately 9:00 PM PST Quest recording.
 - **Contract change.** The neutral hand no longer reproduces the authored Open mesh. It follows Paul's real hand. The mesh, weights and Blender file are unchanged.
 - **Still open.** Paul has to accept the result in the headset. Full-fist finger gaps measure about 12 mm (they were 6 mm when the canned fist overrode tracking). The max sampled thumb step is 32–42° against 68–72° before, still higher than the input during opposition transitions. Paul authorized Blender re-rigging on November 5 (~9:40 PM). If the thumb web creases at the new tracked angles, or the 45 mm finger-root spacing still reads as claw-like, adjust the rig or weights in `/path/to/editable-hand.blend`.
 
+- **Blender tuning (November 5, ~10:15 PM PST), not pushed.** Paul chose to tune in Blender first and reported: "the hand looks a bit webbed and outside finger is bent a bit".
+  - **Outer finger.** The outer-finger mesh sat 6–8 mm outward of its straightened bones, which made it look bent. The mesh and bones are now on one straight axis, and the outer root is at x=−47.8 mm.
+  - **Webs.** Both web crotches are about 10 mm lower and stay round.
+  - **Model edit.** Vertices and outer bones changed only. Topology, weights, groups and actions are unchanged. The new asset is `assets-source/hand/precision-v4` (GLB `836fabdaccd9…`). Paul's open `XR_hand.blend` was not modified, and the snapshot is `precision-v4/pre-edit.blend`.
+  - **Independent review.** Over four tuning rounds the scores were 76, 72, 74 and 82/100, against 55–62 for the previous model. Remaining minor items are a faint shading ridge at the inner index root and slightly slimmer digit roots.
+  - **Checks.** `make checkall-ci` is green (527 tests). The VR, AR and Keyborb fixtures pass on M4 Max Metal. Across 248 captured frames the minimum finger gap is 3.2 mm (was 4.0), with none under 2 mm.
+  - **Evidence.** In the primary checkout, `.local/evidence/hand-shape-1105/` holds renders1–4 and fixtures.
+  - **Correction.** The 20:59:59 clip predates `fa3d942`. No Quest recording of the aligned retarget exists yet.
+
 ## Start here: the hands are still broken
 
 Paul's latest feedback is: **"hands are still messed up, pull latest video then create handoff.md for a new agent to take over"**.
@@ -37,7 +46,7 @@ The overview contains open hands, curls, rotations and pinch-like poses. It is a
 | --- | --- |
 | Primary checkout | `/Users/localuser/Repos/mux-xr` |
 | Current Codex checkout | `/path/to/mux-xr` |
-| Code baseline | `fa3d942` (hand retarget fix; earlier baseline `94bc28b`) |
+| Code baseline | precision-v4 hand asset on top of `fa3d942` (hand retarget fix; earlier baseline `94bc28b`) |
 | Latest runtime change | `fa3d942` |
 | Live frontend | `https://192.0.2.10:4240` |
 | Served build | rebuilt from `fa3d942` on November 5 (~9:50 PM PST) |
