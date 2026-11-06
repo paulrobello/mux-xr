@@ -89,14 +89,25 @@ const neutralCapture = JSON.parse(
 ) as {
   hands: Array<{ side: 'left' | 'right'; joints: Record<string, { matrix: number[] }> }>;
 };
+const gestures = JSON.parse(readFileSync('tests/fixtures/quest-gesture-poses.json', 'utf8')) as {
+  sets: Record<
+    string,
+    { hands: Array<{ side: 'left' | 'right'; joints: Record<string, { matrix: number[] }> }> }
+  >;
+};
 function neutralSource(
   side: 'left' | 'right',
 ): THREE.Group & { joints: Record<string, THREE.Group> } {
   const captured = neutralCapture.hands.find((hand) => hand.side === side);
   if (!captured) throw new Error('Missing neutral hand');
+  return poseSource(captured.joints);
+}
+function poseSource(
+  joints: Record<string, { matrix: number[] }>,
+): THREE.Group & { joints: Record<string, THREE.Group> } {
   const source = new THREE.Group() as THREE.Group & { joints: Record<string, THREE.Group> };
   source.joints = {};
-  for (const [name, entry] of Object.entries(captured.joints)) {
+  for (const [name, entry] of Object.entries(joints)) {
     const joint = new THREE.Group();
     joint.matrix.fromArray(entry.matrix);
     joint.matrix.decompose(joint.position, joint.quaternion, joint.scale);
@@ -109,6 +120,81 @@ function neutralSource(
 }
 
 describe('authored rigged hand', () => {
+  it.each(gestures.sets['captured-pinch'].hands)(
+    'brings the captured $side pinch pads together without changing tracking',
+    async (pose) => {
+      const hand = createRiggedHand({ loader: parsedLoader() });
+      await hand.assetReady;
+      const source = poseSource(pose.joints);
+      const before = JSON.stringify(
+        Object.values(source.joints).map((joint) => joint.matrix.elements),
+      );
+      const mesh = authoredMeshes(hand.root)[0];
+      const index = mesh.skeleton.getBoneByName('index_03') as THREE.Bone;
+      const thumb = mesh.skeleton.getBoneByName('thumb_03') as THREE.Bone;
+      const indexTip = new THREE.Vector3();
+      const thumbTip = new THREE.Vector3();
+      for (const roll of [0, Math.PI / 2, Math.PI]) {
+        source.rotation.set(0.3, -0.6, roll);
+        hand.update(source, new THREE.PerspectiveCamera(), pose.side, 1 / 60);
+        index.localToWorld(indexTip.set(0, index.userData.restLength, 0));
+        thumb.localToWorld(thumbTip.set(0, thumb.userData.restLength, 0));
+        expect(thumbTip.distanceTo(indexTip)).toBeGreaterThan(0.009);
+        expect(thumbTip.distanceTo(indexTip)).toBeLessThan(0.024);
+        expect(
+          (hand.root.userData.thumbTip as THREE.Vector3).distanceTo(
+            source.joints['thumb-tip'].getWorldPosition(new THREE.Vector3()),
+          ),
+        ).toBeLessThan(1e-6);
+      }
+      expect(
+        JSON.stringify(Object.values(source.joints).map((joint) => joint.matrix.elements)),
+      ).toBe(before);
+      hand.dispose();
+    },
+  );
+  it.each(gestures.sets['captured-close'].hands)(
+    'reduces the captured $side finger gaps while keeping bone dimensions',
+    async (pose) => {
+      const hand = createRiggedHand({ loader: parsedLoader() });
+      await hand.assetReady;
+      const mesh = authoredMeshes(hand.root)[0];
+      const positions = mesh.geometry.getAttribute('position');
+      const indices = mesh.geometry.getAttribute('skinIndex');
+      const weights = mesh.geometry.getAttribute('skinWeight');
+      const surfaces: number[][] = ['index', 'middle', 'outer'].map((name) => {
+        const vertices: number[] = [];
+        const root = mesh.skeleton.getBoneByName(`${name}_01`) as THREE.Bone;
+        const cutoff = root.getWorldPosition(new THREE.Vector3()).y + 0.012;
+        for (let vertex = 0; vertex < positions.count; vertex++) {
+          if (positions.getY(vertex) < cutoff) continue;
+          let influence = 0;
+          for (let part = 0; part < 4; part++)
+            if (mesh.skeleton.bones[indices.getComponent(vertex, part)].name.startsWith(`${name}_`))
+              influence += weights.getComponent(vertex, part);
+          if (influence > 0.8) vertices.push(vertex);
+        }
+        return vertices;
+      });
+      hand.update(poseSource(pose.joints), new THREE.PerspectiveCamera(), pose.side, 1 / 60);
+      const points = surfaces.map((vertices) =>
+        vertices.map((vertex) => mesh.getVertexPosition(vertex, new THREE.Vector3())),
+      );
+      for (const side of [0, 2]) {
+        let gap = Infinity;
+        for (const point of points[side])
+          for (const other of points[1]) gap = Math.min(gap, point.distanceTo(other));
+        expect(gap).toBeLessThan(pose.side === 'left' ? 0.006 : 0.018);
+        if (pose.side === 'right') expect(gap).toBeGreaterThan(0.01);
+      }
+      for (const bone of mesh.skeleton.bones)
+        for (const axis of [0, 1, 2])
+          expect(
+            new THREE.Vector3().setFromMatrixColumn(bone.matrixWorld, axis).length(),
+          ).toBeCloseTo(1, 5);
+      hand.dispose();
+    },
+  );
   it.each(['left', 'right'] as const)(
     'matches the authored Open mesh for the calibrated %s hand',
     async (side) => {
@@ -141,7 +227,7 @@ describe('authored rigged hand', () => {
   );
 
   it.each(['left', 'right'] as const)(
-    'applies %s thumb base motion once without adding child bends',
+    'applies %s unopposed thumb base motion once without adding child bends',
     async (side) => {
       const hand = createRiggedHand({ loader: parsedLoader() });
       await hand.assetReady;
@@ -152,7 +238,14 @@ describe('authored rigged hand', () => {
       );
       const rest = thumb.map((bone) => bone.quaternion.clone());
       const pivot = source.joints['thumb-metacarpal'].position.clone();
-      const turn = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.7);
+      const thumbDirection = source.joints['thumb-tip'].position.clone().sub(pivot);
+      const awayFromIndex = source.joints['thumb-tip'].position
+        .clone()
+        .sub(source.joints['index-finger-tip'].position);
+      const turn = new THREE.Quaternion().setFromAxisAngle(
+        thumbDirection.cross(awayFromIndex).normalize(),
+        0.7,
+      );
       for (const [name, joint] of Object.entries(source.joints)) {
         if (!name.startsWith('thumb-')) continue;
         joint.position.sub(pivot).applyQuaternion(turn).add(pivot);
@@ -184,7 +277,14 @@ describe('authored rigged hand', () => {
             ? ['thumb-phalanx-proximal', 'thumb-phalanx-distal', 'thumb-tip']
             : ['thumb-phalanx-distal', 'thumb-tip'];
         const pivot = source.joints[names[0]].position.clone();
-        const turn = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.7);
+        const thumbDirection = source.joints['thumb-tip'].position.clone().sub(pivot);
+        const awayFromIndex = source.joints['thumb-tip'].position
+          .clone()
+          .sub(source.joints['index-finger-tip'].position);
+        const turn = new THREE.Quaternion().setFromAxisAngle(
+          thumbDirection.cross(awayFromIndex).normalize(),
+          0.7,
+        );
         for (const name of names) {
           const joint = source.joints[name];
           joint.position.sub(pivot).applyQuaternion(turn).add(pivot);
@@ -241,7 +341,11 @@ describe('authored rigged hand', () => {
           );
           expect(Math.max(...scales) - Math.min(...scales)).toBeLessThan(1e-5);
           const localPosition = new THREE.Vector3().setFromMatrixPosition(bone.matrix);
-          expect(localPosition.distanceTo(originalPositions[index])).toBeLessThan(1e-6);
+          const rootTravel = localPosition.distanceTo(originalPositions[index]);
+          if (bone.name === 'thumb_01') expect(rootTravel).toBeLessThanOrEqual(0.050001);
+          else if (bone.name === 'index_01') expect(rootTravel).toBeLessThanOrEqual(0.014501);
+          else if (bone.name === 'outer_01') expect(rootTravel).toBeLessThanOrEqual(0.010001);
+          else expect(rootTravel).toBeLessThan(1e-6);
         }
         expect(hand.root.getObjectByName('authored-hand-root')?.scale.toArray()).toEqual([1, 1, 1]);
         for (const digit of ['thumb', 'index'] as const) {

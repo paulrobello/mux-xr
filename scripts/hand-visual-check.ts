@@ -129,6 +129,9 @@ async function main(): Promise<void> {
   const capturedHands = JSON.parse(
     await readFile(new URL('../tests/fixtures/quest-hand-poses.json', import.meta.url), 'utf8'),
   );
+  const capturedGesturePoses = JSON.parse(
+    await readFile(new URL('../tests/fixtures/quest-gesture-poses.json', import.meta.url), 'utf8'),
+  );
   const neutralHands = JSON.parse(
     await readFile(new URL('../tests/fixtures/quest-neutral-hands.json', import.meta.url), 'utf8'),
   );
@@ -139,6 +142,10 @@ async function main(): Promise<void> {
   await page.addInitScript(
     (capture) => Object.assign(window, { __recordedHandPoses: capture }),
     capturedHands,
+  );
+  await page.addInitScript(
+    (capture) => Object.assign(window, { __capturedGesturePoses: capture }),
+    capturedGesturePoses,
   );
   await page.route('**/version.json', (route) =>
     route.fulfill({ json: { buildId: servedBuild, version: 'test' } }),
@@ -316,6 +323,12 @@ async function main(): Promise<void> {
       ['upturned', 'upturned'],
       ['side-on', 'side-on'],
       ['quest-pose', 'quest-pose'],
+      ['captured-pinch', 'captured-pinch'],
+      ['captured-close', 'captured-close'],
+      ['captured-pinch-side', 'captured-pinch-side'],
+      ['captured-close-side', 'captured-close-side'],
+      ['captured-pinch-opposite', 'captured-pinch-opposite'],
+      ['captured-close-opposite', 'captured-close-opposite'],
       ['tracking-loss', 'tracking-loss'],
     ] as const) {
       await page.evaluate((kind) => {
@@ -399,15 +412,24 @@ async function main(): Promise<void> {
           }
         }
         if (kind === 'tracking-loss') hand.joints['middle-finger-tip'].visible = false;
-        if (kind === 'quest-pose') {
-          const captured = (
-            window as unknown as {
-              __recordedHandPoses: {
-                hands: Array<{ side: string; joints: Record<string, { matrix: number[] }> }>;
-              };
-            }
-          ).__recordedHandPoses;
-          for (const pose of captured.hands) {
+        if (kind === 'quest-pose' || kind.startsWith('captured-')) {
+          const captures = window as unknown as {
+            __recordedHandPoses: {
+              hands: Array<{ side: string; joints: Record<string, { matrix: number[] }> }>;
+            };
+            __capturedGesturePoses: {
+              sets: Record<
+                string,
+                { hands: Array<{ side: string; joints: Record<string, { matrix: number[] }> }> }
+              >;
+            };
+          };
+          const captureSet = kind.replace(/-(side|opposite)$/, '');
+          const poses =
+            kind === 'quest-pose'
+              ? captures.__recordedHandPoses
+              : captures.__capturedGesturePoses.sets[captureSet];
+          for (const pose of poses.hands) {
             const right = pose.side === 'right';
             const source = w.__questHands[right ? 0 : 1];
             const point = (name: string) =>
@@ -438,6 +460,16 @@ async function main(): Promise<void> {
               joint.matrix.decompose(joint.position, joint.quaternion, joint.scale);
               joint.visible = true;
             }
+            if (kind.endsWith('-side') || kind.endsWith('-opposite')) {
+              const wrist = source.joints.wrist.position.clone();
+              const turn = new T.Quaternion().setFromAxisAngle(new T.Vector3(0, 1, 0), Math.PI / 3);
+              if (kind.endsWith('-opposite'))
+                turn.setFromAxisAngle(new T.Vector3(0, 1, 0), -Math.PI / 3);
+              for (const joint of Object.values(source.joints)) {
+                joint.position.sub(wrist).applyQuaternion(turn).add(wrist);
+                joint.quaternion.premultiply(turn);
+              }
+            }
           }
         }
         w.__questScene.updateMatrixWorld(true);
@@ -466,6 +498,51 @@ async function main(): Promise<void> {
         return maxStretch;
       });
       if (rigid > 1e-5) throw new Error(`Hand bone stretched in ${name}: ${rigid}`);
+      if (name.startsWith('captured-pinch')) {
+        const metrics = await page.evaluate(() => {
+          const w = window as unknown as FixtureWindow & {
+            __capturedGesturePoses: {
+              sets: Record<
+                string,
+                { hands: Array<{ side: string; rawTrackedThumbIndexDistance: number }> }
+              >;
+            };
+          };
+          return w.__questScene.children
+            .filter((root) => root.name === 'xr-cartoon-hand')
+            .map((root) => {
+              const skin = root.getObjectByName(
+                'authored-hand-skin',
+              ) as import('three').SkinnedMesh;
+              const index = skin.skeleton.getBoneByName('index_03') as import('three').Bone;
+              const thumb = skin.skeleton.getBoneByName('thumb_03') as import('three').Bone;
+              const indexEnd = index.localToWorld(
+                new w.__questThree.Vector3(0, index.userData.restLength, 0),
+              );
+              const thumbEnd = thumb.localToWorld(
+                new w.__questThree.Vector3(0, thumb.userData.restLength, 0),
+              );
+              const side = String(root.userData.handedness);
+              const raw = w.__capturedGesturePoses.sets['captured-pinch'].hands.find(
+                (hand) => hand.side === side,
+              );
+              if (!raw) throw new Error(`Captured pinch metadata missing for ${side}`);
+              return {
+                side,
+                rawTrackedThumbIndexDistance: raw.rawTrackedThumbIndexDistance,
+                renderedBoneEndDistance: thumbEnd.distanceTo(indexEnd),
+              };
+            });
+        });
+        report[`${name}Metrics`] = metrics;
+        if (
+          metrics.some(
+            (metric) =>
+              metric.rawTrackedThumbIndexDistance >= 0.01 || metric.renderedBoneEndDistance >= 0.03,
+          )
+        )
+          throw new Error(`Captured pinch closure failed: ${JSON.stringify(metrics)}`);
+      }
       if (name === 'open') {
         report.open = await page.evaluate(() => {
           const w = window as unknown as FixtureWindow;

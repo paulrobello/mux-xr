@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { type CartoonHand, createCartoonHand } from './cartoon-hand';
 import type { HandContactProbe } from './hand-contact';
 import neutralReference from './hand-neutral-reference.json';
+import { createHandPoseConstraints } from './hand-pose-constraints';
 
 export const RIGGED_HAND_ASSET_URL = '/assets/hand.glb?v=95714f02a92e';
 const DIGITS = ['thumb', 'index', 'middle', 'outer'] as const;
@@ -74,6 +75,7 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
   fallback.root.userData.handAsset = 'loading';
   let authored: THREE.Group | undefined;
   let mesh: THREE.SkinnedMesh | undefined;
+  let poseConstraints: ReturnType<typeof createHandPoseConstraints> | undefined;
   let disposed = false;
   let controllerMode = false;
   let wristOffset = 0;
@@ -184,6 +186,7 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
         probes.push({ point: new THREE.Vector3(), radius: 0.012 });
       }
       probes.push({ point: wristJoint.position, radius: 0.019 });
+      poseConstraints = createHandPoseConstraints(mesh, authored);
       fallback.root.add(authored);
       if (skin) skin.visible = false;
       fallback.root.userData.handAsset = 'loaded';
@@ -238,6 +241,11 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
       }
       bone.updateWorldMatrix(false, true);
     }
+    poseConstraints?.update(
+      tracked,
+      side,
+      controllerMode ? Math.min(curls[1], curls[2], curls[3]) : undefined,
+    );
     mesh.updateWorldMatrix(true, false);
     mesh.skeleton.update();
     if (indexEnd && thumbEnd) {
