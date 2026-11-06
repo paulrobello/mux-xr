@@ -186,7 +186,9 @@ describe('authored rigged hand', () => {
       for (const point of points[side])
         for (const other of points[1]) gap = Math.min(gap, point.distanceTo(other));
       const rightPartial = pose.side === 'right' && pose.kind === 'partial';
-      expect(gap).toBeLessThan(rightPartial ? 0.018 : 0.006);
+      // Tracked curl is no longer replaced by a canned fist; the authored roots are
+      // ~45 mm apart, so the palm cup narrows but does not close the gaps.
+      expect(gap).toBeLessThan(rightPartial ? 0.018 : 0.014);
       if (rightPartial) expect(gap).toBeGreaterThan(0.01);
     }
     for (const bone of mesh.skeleton.bones)
@@ -197,23 +199,36 @@ describe('authored rigged hand', () => {
     hand.dispose();
   });
   it.each(['left', 'right'] as const)(
-    'matches the authored Open mesh for the calibrated %s hand',
+    'aims every %s bone along its tracked neutral joint',
     async (side) => {
       const hand = createRiggedHand({ loader: parsedLoader() });
       await hand.assetReady;
       const source = neutralSource(side);
       hand.update(source, new THREE.PerspectiveCamera(), side, 1 / 60);
       const mesh = authoredMeshes(hand.root)[0];
-      const positions = mesh.geometry.getAttribute('position');
-      let largestChange = 0;
-      const before = new THREE.Vector3();
-      const after = new THREE.Vector3();
-      for (let index = 0; index < positions.count; index++) {
-        before.fromBufferAttribute(positions, index);
-        mesh.getVertexPosition(index, after);
-        largestChange = Math.max(largestChange, before.distanceTo(after));
+      const joints: Record<string, string> = {
+        thumb_01: 'thumb-phalanx-proximal',
+        thumb_02: 'thumb-phalanx-proximal',
+        thumb_03: 'thumb-phalanx-distal',
+      };
+      for (const [name, finger] of [
+        ['index', 'index'],
+        ['middle', 'middle'],
+        ['outer', 'ring'],
+      ])
+        ['phalanx-proximal', 'phalanx-intermediate', 'phalanx-distal'].forEach((part, i) => {
+          joints[`${name}_0${i + 1}`] = `${finger}-finger-${part}`;
+        });
+      for (const [name, joint] of Object.entries(joints)) {
+        const bone = mesh.skeleton.getBoneByName(name) as THREE.Bone;
+        const boneAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(
+          bone.getWorldQuaternion(new THREE.Quaternion()),
+        );
+        const jointAxis = new THREE.Vector3(0, 0, -1).applyQuaternion(
+          source.joints[joint].getWorldQuaternion(new THREE.Quaternion()),
+        );
+        expect(boneAxis.angleTo(jointAxis)).toBeLessThan(THREE.MathUtils.degToRad(1));
       }
-      expect(largestChange).toBeLessThan(1e-5);
       const index = mesh.skeleton.getBoneByName('index_03') as THREE.Bone;
       const thumb = mesh.skeleton.getBoneByName('thumb_03') as THREE.Bone;
       const visibleMidpoint = index
@@ -237,6 +252,7 @@ describe('authored rigged hand', () => {
       const thumb = [1, 2, 3].map(
         (part) => mesh.skeleton.getBoneByName(`thumb_0${part}`) as THREE.Bone,
       );
+      hand.update(source, new THREE.PerspectiveCamera(), side, 1 / 60);
       const rest = thumb.map((bone) => bone.quaternion.clone());
       const pivot = source.joints['thumb-metacarpal'].position.clone();
       const thumbDirection = source.joints['thumb-tip'].position.clone().sub(pivot);
@@ -272,6 +288,7 @@ describe('authored rigged hand', () => {
         const thumb = [1, 2, 3].map(
           (index) => mesh.skeleton.getBoneByName(`thumb_0${index}`) as THREE.Bone,
         );
+        hand.update(source, new THREE.PerspectiveCamera(), side, 1 / 60);
         const rest = thumb.map((bone) => bone.quaternion.clone());
         const names =
           part === 'proximal'
@@ -301,6 +318,32 @@ describe('authored rigged hand', () => {
       },
     );
   }
+  it.each(questPoses.hands)(
+    'keeps the unopposed $side thumb on its tracked direction',
+    async (pose) => {
+      const hand = createRiggedHand({ loader: parsedLoader() });
+      await hand.assetReady;
+      const source = poseSource(pose.joints);
+      const tip = (name: string) => source.joints[name].getWorldPosition(new THREE.Vector3());
+      expect(tip('thumb-tip').distanceTo(tip('index-finger-tip'))).toBeGreaterThan(0.075);
+      hand.update(source, new THREE.PerspectiveCamera(), pose.side, 1 / 60);
+      const mesh = authoredMeshes(hand.root)[0];
+      for (const [name, joint] of [
+        ['thumb_01', 'thumb-phalanx-proximal'],
+        ['thumb_03', 'thumb-phalanx-distal'],
+      ]) {
+        const bone = mesh.skeleton.getBoneByName(name) as THREE.Bone;
+        const boneAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(
+          bone.getWorldQuaternion(new THREE.Quaternion()),
+        );
+        const jointAxis = new THREE.Vector3(0, 0, -1).applyQuaternion(
+          source.joints[joint].getWorldQuaternion(new THREE.Quaternion()),
+        );
+        expect(boneAxis.angleTo(jointAxis)).toBeLessThan(THREE.MathUtils.degToRad(1));
+      }
+      hand.dispose();
+    },
+  );
   it.each(questPoses.hands)(
     'preserves bone dimensions with recorded Quest $side joints',
     async (pose) => {

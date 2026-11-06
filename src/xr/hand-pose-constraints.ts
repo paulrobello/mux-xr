@@ -20,15 +20,11 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
       return { bone: item, rest: item.quaternion.clone(), axis, part: part - 1 };
     }),
   );
-  const thumbRest = thumb.map((item) => item.getWorldQuaternion(new THREE.Quaternion()));
   const thumbCurrent = thumb.map(() => new THREE.Quaternion());
-  const proximalRest = thumb[2]
+  const proximalLength = thumb[2]
     .getWorldPosition(new THREE.Vector3())
-    .sub(thumb[0].getWorldPosition(new THREE.Vector3()));
-  const proximalLength = proximalRest.length();
-  proximalRest.normalize();
+    .distanceTo(thumb[0].getWorldPosition(new THREE.Vector3()));
   const distalLength = Number(thumb[2].userData.restLength);
-  const distalRest = new THREE.Vector3(0, 1, 0).applyQuaternion(thumbRest[2]);
   const points = Array.from({ length: 4 }, () => new THREE.Vector3());
   const directions = Array.from({ length: 3 }, () => new THREE.Vector3());
   const palm = new THREE.Quaternion();
@@ -46,6 +42,7 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
   const pole = new THREE.Vector3();
   const elbow = new THREE.Vector3();
   const end = new THREE.Vector3();
+  const current = new THREE.Vector3();
   const rawThumb = new THREE.Vector3();
   const rawIndex = new THREE.Vector3();
   const rawKnuckle = new THREE.Vector3();
@@ -85,99 +82,116 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
         }
       }
 
-      const fistBlend = THREE.MathUtils.smoothstep(closure, 0.3, 1);
-      const curlSign = controllerClosure !== undefined || side === 'right' ? 1 : -1;
-      for (const joint of fingerJoints) {
-        rotation.setFromAxisAngle(joint.axis, [1.2, 1.35, 0.75][joint.part] * curlSign);
-        rotation.premultiply(joint.rest);
-        joint.bone.quaternion.slerp(rotation, fistBlend).normalize();
-        joint.bone.updateWorldMatrix(false, true);
-      }
-      root.worldToLocal(endpoint(ends[1], middleTip));
-      for (const index of [0, 2]) {
-        const item = roots[index];
-        const sign = index === 0 ? 1 : -1;
-        root.worldToLocal(endpoint(ends[index], tip));
-        root.worldToLocal(item.getWorldPosition(base));
-        const excess = Math.max(0, sign * (tip.x - middleTip.x) - 0.021) * closure;
-        const shift = Math.min(index === 0 ? 0.0145 : 0.01, excess * 0.6);
-        item.parent?.getWorldQuaternion(parent).invert();
-        delta
-          .set(-sign * shift, 0, 0)
-          .applyQuaternion(palm)
-          .applyQuaternion(parent);
-        item.position.add(delta);
-        const cup = Math.min(
-          0.26,
-          Math.atan2(excess - shift, Math.max(0.015, Math.abs(tip.z - base.z))),
-        );
-        axis.set(0, 1, 0).applyQuaternion(palm).applyQuaternion(parent);
-        rotation.setFromAxisAngle(axis, -sign * Math.sign(tip.z - base.z) * cup);
-        item.quaternion.premultiply(rotation);
-        item.updateWorldMatrix(false, true);
-      }
-
-      if (controllerClosure !== undefined) return;
-      if (
-        !read(hand, 'wrist', base) ||
-        !read(hand, 'thumb-phalanx-proximal', delta) ||
-        !read(hand, 'thumb-tip', rawThumb) ||
-        !read(hand, 'index-finger-tip', rawIndex) ||
-        !read(hand, 'index-finger-phalanx-intermediate', rawKnuckle)
-      )
-        return;
-
-      delta.sub(base).applyQuaternion(inversePalm).sub(thumbNeutral[side]).clampLength(0, 0.05);
-      thumb[0].parent?.getWorldQuaternion(parent).invert();
-      thumb[0].position.add(delta.applyQuaternion(palm).applyQuaternion(parent));
-      thumb[0].updateWorldMatrix(false, true);
-      const pinch = 1 - THREE.MathUtils.smoothstep(rawThumb.distanceTo(rawIndex), 0.012, 0.075);
-      const fold =
-        closure *
-        (1 - pinch) *
-        (1 - THREE.MathUtils.smoothstep(rawThumb.distanceTo(rawKnuckle), 0.035, 0.065));
-      const weight = pinch + fold;
-      if (weight <= 0) return;
-
-      thumb[0].getWorldPosition(base);
-      bone('index_02').getWorldPosition(target);
-      endpoint(ends[0], tip);
-      const pinchShare = pinch / (pinch + fold);
-      target.lerp(tip, pinchShare);
-      axis.subVectors(base, target).normalize();
-      // Bone endpoints sit inside the rounded pads, so contact requires a finite separation.
-      target.addScaledVector(axis, THREE.MathUtils.lerp(0.022, 0.017, pinchShare));
-      axis.subVectors(target, base);
-      const distance = THREE.MathUtils.clamp(
-        axis.length(),
-        proximalLength - distalLength + 0.001,
-        proximalLength + distalLength - 0.0005,
-      );
-      axis.normalize();
-      end.copy(base).addScaledVector(axis, distance);
-      pole.set(0, 0, side === 'left' ? -1 : 1).applyQuaternion(palm);
-      pole.addScaledVector(axis, -pole.dot(axis));
-      if (pole.lengthSq() < 1e-6) pole.copy(forward).addScaledVector(axis, -forward.dot(axis));
-      pole.normalize();
-      const cosine =
-        (proximalLength ** 2 + distance ** 2 - distalLength ** 2) / (2 * proximalLength * distance);
-      elbow
-        .copy(base)
-        .addScaledVector(axis, proximalLength * cosine)
-        .addScaledVector(pole, proximalLength * Math.sqrt(Math.max(0, 1 - cosine ** 2)));
-      directions[0].subVectors(elbow, base).normalize().applyQuaternion(inversePalm);
-      directions[1].subVectors(end, elbow).normalize().applyQuaternion(inversePalm);
-      for (let i = 0; i < 3; i++) thumb[i].getWorldQuaternion(thumbCurrent[i]);
-      for (let i = 0; i < 3; i++) {
-        swing.setFromUnitVectors(i < 2 ? proximalRest : distalRest, directions[i < 2 ? 0 : 1]);
-        rotation.copy(palm).multiply(swing).multiply(thumbRest[i]);
-        thumbCurrent[i].slerp(rotation, weight);
-        rotation.copy(thumbCurrent[i]);
-        thumb[i].parent?.getWorldQuaternion(parent).invert();
-        rotation.premultiply(parent);
-        thumb[i].quaternion.copy(rotation).normalize();
-        thumb[i].updateWorldMatrix(false, true);
-      }
+      // Tracked fingers follow their joints directly; the coordinated fist only shapes
+      // the controller grip, which has no per-joint data.
+      if (controllerClosure !== undefined) applyControllerGrip(closure);
+      cupPalm(closure);
+      if (controllerClosure === undefined) applyThumbOpposition(hand, side, closure);
     },
   };
+
+  function applyControllerGrip(closure: number): void {
+    const fistBlend = THREE.MathUtils.smoothstep(closure, 0.3, 1);
+    for (const joint of fingerJoints) {
+      rotation.setFromAxisAngle(joint.axis, [1.2, 1.35, 0.75][joint.part]);
+      rotation.premultiply(joint.rest);
+      joint.bone.quaternion.slerp(rotation, fistBlend).normalize();
+      joint.bone.updateWorldMatrix(false, true);
+    }
+  }
+
+  // The authored finger roots are about twice as far apart as a real hand's, so
+  // closing fingers converge toward the middle finger to avoid a claw.
+  function cupPalm(closure: number): void {
+    root.worldToLocal(endpoint(ends[1], middleTip));
+    for (const index of [0, 2]) {
+      const item = roots[index];
+      const sign = index === 0 ? 1 : -1;
+      root.worldToLocal(endpoint(ends[index], tip));
+      root.worldToLocal(item.getWorldPosition(base));
+      const excess = Math.max(0, sign * (tip.x - middleTip.x) - 0.021) * closure;
+      const shift = Math.min(index === 0 ? 0.0145 : 0.01, excess * 0.6);
+      item.parent?.getWorldQuaternion(parent).invert();
+      delta
+        .set(-sign * shift, 0, 0)
+        .applyQuaternion(palm)
+        .applyQuaternion(parent);
+      item.position.add(delta);
+      const cup = Math.min(
+        0.26,
+        Math.atan2(excess - shift, Math.max(0.015, Math.abs(tip.z - base.z))),
+      );
+      axis.set(0, 1, 0).applyQuaternion(palm).applyQuaternion(parent);
+      rotation.setFromAxisAngle(axis, -sign * Math.sign(tip.z - base.z) * cup);
+      item.quaternion.premultiply(rotation);
+      item.updateWorldMatrix(false, true);
+    }
+  }
+
+  function applyThumbOpposition(hand: HandJoints, side: 'left' | 'right', closure: number): void {
+    if (
+      !read(hand, 'thumb-tip', rawThumb) ||
+      !read(hand, 'index-finger-tip', rawIndex) ||
+      !read(hand, 'index-finger-phalanx-intermediate', rawKnuckle)
+    )
+      return;
+    const pinch = 1 - THREE.MathUtils.smoothstep(rawThumb.distanceTo(rawIndex), 0.012, 0.075);
+    const fold =
+      closure *
+      (1 - pinch) *
+      (1 - THREE.MathUtils.smoothstep(rawThumb.distanceTo(rawKnuckle), 0.035, 0.065));
+    const weight = pinch + fold;
+    if (weight <= 0) return;
+    if (read(hand, 'wrist', base) && read(hand, 'thumb-phalanx-proximal', delta)) {
+      delta.sub(base).applyQuaternion(inversePalm).sub(thumbNeutral[side]).clampLength(0, 0.05);
+      thumb[0].parent?.getWorldQuaternion(parent).invert();
+      thumb[0].position.add(
+        delta.multiplyScalar(weight).applyQuaternion(palm).applyQuaternion(parent),
+      );
+      thumb[0].updateWorldMatrix(false, true);
+    }
+
+    thumb[0].getWorldPosition(base);
+    bone('index_02').getWorldPosition(target);
+    endpoint(ends[0], tip);
+    const pinchShare = pinch / (pinch + fold);
+    target.lerp(tip, pinchShare);
+    axis.subVectors(base, target).normalize();
+    // Bone endpoints sit inside the rounded pads, so contact requires a finite separation.
+    target.addScaledVector(axis, THREE.MathUtils.lerp(0.022, 0.017, pinchShare));
+    axis.subVectors(target, base);
+    const distance = THREE.MathUtils.clamp(
+      axis.length(),
+      proximalLength - distalLength + 0.001,
+      proximalLength + distalLength - 0.0005,
+    );
+    axis.normalize();
+    end.copy(base).addScaledVector(axis, distance);
+    pole.set(0, 0, side === 'left' ? -1 : 1).applyQuaternion(palm);
+    pole.addScaledVector(axis, -pole.dot(axis));
+    if (pole.lengthSq() < 1e-6) pole.copy(forward).addScaledVector(axis, -forward.dot(axis));
+    pole.normalize();
+    const cosine =
+      (proximalLength ** 2 + distance ** 2 - distalLength ** 2) / (2 * proximalLength * distance);
+    elbow
+      .copy(base)
+      .addScaledVector(axis, proximalLength * cosine)
+      .addScaledVector(pole, proximalLength * Math.sqrt(Math.max(0, 1 - cosine ** 2)));
+    directions[0].subVectors(elbow, base).normalize();
+    directions[1].subVectors(end, elbow).normalize();
+    for (let i = 0; i < 3; i++) thumb[i].getWorldQuaternion(thumbCurrent[i]);
+    for (let i = 0; i < 3; i++) {
+      // Swinging from the tracked direction keeps the pad roll continuous as the
+      // opposition weight rises and falls.
+      current.set(0, 1, 0).applyQuaternion(thumbCurrent[i]);
+      swing.setFromUnitVectors(current, directions[i < 2 ? 0 : 1]);
+      rotation.copy(swing).multiply(thumbCurrent[i]);
+      thumbCurrent[i].slerp(rotation, weight);
+      rotation.copy(thumbCurrent[i]);
+      thumb[i].parent?.getWorldQuaternion(parent).invert();
+      rotation.premultiply(parent);
+      thumb[i].quaternion.copy(rotation).normalize();
+      thumb[i].updateWorldMatrix(false, true);
+    }
+  }
 }

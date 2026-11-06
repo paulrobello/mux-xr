@@ -43,7 +43,7 @@ interface JointDriver {
   rest: THREE.Quaternion;
   restPosition: THREE.Vector3;
   restScale: THREE.Vector3;
-  worldRest: THREE.Quaternion;
+  alignedRest: Record<'left' | 'right', THREE.Quaternion>;
   neutralInverse: Record<'left' | 'right', THREE.Quaternion>;
   curlAxis: THREE.Vector3;
   digit: number;
@@ -158,16 +158,29 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
           // The visible thumb starts at MCP; its first two bones form the proximal phalanx.
           const jointName =
             digit === 0 && part < 2 ? 'thumb-phalanx-proximal' : JOINTS[digit][part];
+          const neutral = {
+            left: new THREE.Quaternion().fromArray(neutralPoses.left[jointName]),
+            right: new THREE.Quaternion().fromArray(neutralPoses.right[jointName]),
+          };
+          // The authored rest pose differs from the tracked neutral by up to 75 degrees
+          // (sideways thumb), so each bone is re-aimed along the neutral joint's -Z axis.
+          const aligned = (side: 'left' | 'right'): THREE.Quaternion =>
+            new THREE.Quaternion()
+              .setFromUnitVectors(
+                restDirection,
+                new THREE.Vector3(0, 0, -1).applyQuaternion(neutral[side]),
+              )
+              .multiply(worldRotation);
           drivers.push({
             bone,
             jointName,
             rest,
             restPosition: bone.position.clone(),
             restScale: bone.scale.clone(),
-            worldRest: worldRotation,
+            alignedRest: { left: aligned('left'), right: aligned('right') },
             neutralInverse: {
-              left: new THREE.Quaternion().fromArray(neutralPoses.left[jointName]).invert(),
-              right: new THREE.Quaternion().fromArray(neutralPoses.right[jointName]).invert(),
+              left: neutral.left.clone().invert(),
+              right: neutral.right.clone().invert(),
             },
             curlAxis,
             digit,
@@ -233,7 +246,7 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
           rotation
             .premultiply(inverseRotation)
             .multiply(driver.neutralInverse[side])
-            .multiply(driver.worldRest)
+            .multiply(driver.alignedRest[side])
             .premultiply(palmRotation);
           bone.parent.getWorldQuaternion(parentRotation).invert();
           bone.quaternion.copy(parentRotation).multiply(rotation).normalize();
