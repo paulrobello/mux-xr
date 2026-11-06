@@ -5,9 +5,10 @@ Updated November 5, 2026, after the approximately 9:00 PM PST Quest recording.
 ## Progress since this handoff (November 5, ~9:45 PM PST)
 
 - **A1 done.** Dense review of the 20:59:59 clip is in `.local/evidence/hand-review-1105b/findings.md` (primary checkout). Main failures: P1, the thumb renders as a rigid sideways paddle whenever it is not pinching, and snaps when opposition releases (17.37→17.47 s). P2, the fingers merge or interpenetrate during partial curls (12.0–13.0 s, 17.07–17.37 s). P3, the open spread is wide. P4, there are one-frame curl and thumb pops.
-- **A2 root cause.** The layer replay (`.local/hand-motion/layers/` in the worktree, with plots `layers.png`, `aligned.png` and `candidate.png`) showed that the base retarget caused the paddle, not the constraint layer. The authored rest pose sits 15–33° from Paul's tracked neutral on the fingers and **67–75° on the thumb** (authored sideways, tracked forward beside the index). Neutral-relative deltas were applied to that rest, so the thumb never left the sideways pose. The runtime palm basis matches the neutral-capture basis, and the neutral quaternion −Z matches the segment directions within 1–3°.
-- **Fix `197105e` (merged to main).** Each bone now applies its deltas to the rest re-aimed along the neutral joint's −Z axis, so every bone points along its tracked joint. Tracked fingers no longer blend toward the canned fist. That blend now applies only to the controller grip. The palm cup is kept. Thumb-root displacement applies only in proportion to the opposition weight. Thumb IK swings from the tracked direction.
-- **Verification.** `make checkall-ci` is green with 527 tests, including a new regression that fails on the old solver at 68–75° and passes now. The VR, AR and Keyborb browser fixtures pass on M4 Max Metal (`.local/aligned-{vr,ar,keyborb}`). Pinch bone ends render 17 mm apart. Keyborb sends one key per pinch.
+- **A2 root cause.** The layer replay (`.local/evidence/hand-retarget-1105/layers/`, with plots `layers.png`, `aligned.png` and `candidate.png`) showed that the base retarget caused the paddle, not the constraint layer. The authored rest pose sits 15–33° from Paul's tracked neutral on the fingers and **67–75° on the thumb** (authored sideways, tracked forward beside the index). Neutral-relative deltas were applied to that rest, so the thumb never left the sideways pose. The runtime palm basis matches the neutral-capture basis, and the neutral quaternion −Z matches the segment directions within 1–3°.
+- **Fix `fa3d942` on main (squash-merged, not pushed).** Each bone now applies its deltas to the rest re-aimed along the neutral joint's −Z axis, so every bone points along its tracked joint. Tracked fingers no longer blend toward the canned fist. That blend now applies only to the controller grip. The palm cup is kept. Thumb-root displacement applies only in proportion to the opposition weight. Thumb IK swings from the tracked direction.
+- **Verification.** `make checkall-ci` is green with 527 tests, including a new regression that fails on the old solver at 68–75° and passes now. The VR, AR and Keyborb browser fixtures pass on M4 Max Metal (`.local/evidence/hand-retarget-1105/aligned-{vr,ar,keyborb}`). Pinch bone ends render 17 mm apart. Keyborb sends one key per pinch.
+- **P2 check.** Across all 248 captured motion frames, the minimum finger-to-finger surface gap is 4.0 mm, with none under 2 mm (`.local/evidence/hand-retarget-1105/layers/gaps-all.ts`). The captured motion shows no merged or interpenetrating fingers, but that capture predates the rejected clip.
 - **Contract change.** The neutral hand no longer reproduces the authored Open mesh. It follows Paul's real hand. The mesh, weights and Blender file are unchanged.
 - **Still open.** Paul has to accept the result in the headset. Full-fist finger gaps measure about 12 mm (they were 6 mm when the canned fist overrode tracking). The max sampled thumb step is 32–42° against 68–72° before, still higher than the input during opposition transitions. Paul authorized Blender re-rigging on November 5 (~9:40 PM). If the thumb web creases at the new tracked angles, or the 45 mm finger-root spacing still reads as claw-like, adjust the rig or weights in `/path/to/editable-hand.blend`.
 
@@ -36,11 +37,11 @@ The overview contains open hands, curls, rotations and pinch-like poses. It is a
 | --- | --- |
 | Primary checkout | `/Users/localuser/Repos/mux-xr` |
 | Current Codex checkout | `/path/to/mux-xr` |
-| Code baseline before this documentation commit | `94bc28b9aa0461f014dc51ce7ecf2c02c75f990c` |
-| Latest runtime change | `b434bda` |
+| Code baseline | `fa3d942` (hand retarget fix; earlier baseline `94bc28b`) |
+| Latest runtime change | `fa3d942` |
 | Live frontend | `https://192.0.2.10:4240` |
-| Served build fingerprint, rechecked during handoff | `788c972c36f87dd825818e9625433cafc35c99e0f0ea8e70462d3f99bfb928b2` |
-| Frontend asset | `/assets/index-BE5JsCJN.js` |
+| Served build | rebuilt from `fa3d942` on November 5 (~9:50 PM PST) |
+| Frontend asset | `/assets/index-Cv3EhiM2.js` |
 | Live streamer par-mux session / pane | `$1019` / `%1387` |
 | Runtime handoff metadata | `/Users/localuser/Repos/mux-xr/.local/runtime.json` |
 | Main kanban item | `01a1ae0c706d72418cfb5d63c9058f38` |
