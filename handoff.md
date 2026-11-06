@@ -1,6 +1,6 @@
 # XR hand debugging handoff
 
-Updated November 5, 2026, after the approximately 9:00 PM PST Quest recording.
+Updated November 5, 2026, after the approximately 9:00 PM PST Quest recording. Progress through November 6 is recorded below.
 
 ## Progress since this handoff (November 5, ~9:45 PM PST)
 
@@ -20,6 +20,20 @@ Updated November 5, 2026, after the approximately 9:00 PM PST Quest recording.
   - **Checks.** `make checkall-ci` is green (527 tests). The VR, AR and Keyborb fixtures pass on M4 Max Metal. Across 248 captured frames the minimum finger gap is 3.2 mm (was 4.0), with none under 2 mm.
   - **Evidence.** In the primary checkout, `.local/evidence/hand-shape-1105/` holds renders1–4 and fixtures.
   - **Correction.** The 20:59:59 clip predates `fa3d942`. No Quest recording of the aligned retarget exists yet.
+
+- **precision-v5 on branch `hand-v5` (November 6), NOT merged, not pushed.** Paul's headset review of v4 (video `/Users/localuser/Movies/Quest Recordings/com.oculus.browser-20261106-070459-0.mp4`): "the tip of the thumb does not track correctly when the thumb rests on closed hand, the outside finger still has a lump in it and the fingers are still too far apart".
+  - **Where.** Worktree `/Users/localuser/Repos/mux-xr-worktrees/hand-v5`, commits `43594d2`, `b104162`, `858777b`, `d762bbb` and `b7e01c3` on top of main `55fd12f`. Asset sources, scripts and hashes are in `assets-source/hand/precision-v5/` (GLB `6f2274e0a394…`).
+  - **Thumb.** The resting thumb targets the index or middle phalanx that the tracked thumb touches, rather than the index tip. The solver aims the pad surface, because the tracked tip joint sits on the skin and the bone ends 5.4 mm inside the pad. The thumb now bends about 45° (tracked: 37–39°) and sits level with the fist top. A unit test checks that the surface tip stays within 3.5 mm of the tracked offset; it measures 2.0 mm now and 5.2–5.4 mm on the old code.
+  - **Spacing.** The index and outer digits moved 17 mm and 14 mm toward the middle finger, with a biharmonic solve for the palm. Smoothing rounds the webs and straightens the outer palm edge. Across 248 captured frames the median finger gap is 9.8 mm (v4: 23.7) and the minimum is 2.4 mm.
+  - **Weights.** The skin blends at the outer-digit root and at the thumb's last joint were widened.
+  - **Checks.** `make checkall-ci` is green (529 tests). The VR, AR and Keyborb fixtures pass on M4 Max Metal. `hand-contact-check` fails with "Held poke repeated or missed" on main as well, so that failure predates this branch.
+  - **Independent review.** Scores were 63, 76 and 73/100 against 55–57 for v4, so v5 is **below the 80 bar**. The thumb complaint is fixed and spacing is largely fixed. The outer "lump" is improved but not fixed.
+  - **Remaining defects** (runtime tracked poses):
+    - A pinch and ridge at the outer/middle web on the back of the hand.
+    - On the right fist, the middle fingertip passes through the palm and shows as a nub on the back of the hand (confirmed by a bone-colored render). This needs fingertip–palm collision handling in the runtime.
+    - A dark slit and thin strips of internal surface showing between the curled outer digit and the palm.
+  - **Evidence.** In the primary checkout, `.local/evidence/hand-shape-1106/` holds `final/` (authored renders; v5 is `v5d-*`) and `tracked-poses-2/` (tracked skeleton vs v4 vs v5). Analysis scripts are in the worktree's `.local/v5/`.
+  - **Next.** Paul decides between headset-testing `hand-v5` as it is and further iteration. Do not merge or rebuild the served frontend until he accepts it.
 
 ## Start here: the hands are still broken
 
