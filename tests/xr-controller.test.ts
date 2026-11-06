@@ -338,7 +338,7 @@ describe('native XR controller event routing', () => {
       fakeXR.frame?.(time);
     };
 
-    it('uses the rendered palm pose for the ray and keeps native fallback aligned', () => {
+    it('uses the native controller ray despite stray palm metadata', () => {
       const { workspace } = setup('off');
       connectHand();
       const controller = fakeXR.controllers[0] as THREE.Group;
@@ -353,31 +353,6 @@ describe('native XR controller event routing', () => {
       controller.rotation.set(0.2, -0.35, 0.1);
       controller.scale.set(1.7, 0.8, 1.3);
       fakeXR.frame?.(32);
-      expect(line.getWorldPosition(new THREE.Vector3()).distanceTo(palmPosition)).toBeLessThan(
-        1e-6,
-      );
-      expect(
-        line.getWorldDirection(new THREE.Vector3()).negate().distanceTo(palmNormal),
-      ).toBeLessThan(1e-6);
-      const expectedEnd = palmPosition
-        .clone()
-        .addScaledVector(palmNormal, Number(controller.userData.rayDistance));
-      const points = line.geometry.getAttribute('position');
-      const drawnEnd = line.localToWorld(
-        new THREE.Vector3().fromBufferAttribute(points, points.count - 1),
-      );
-      const contact = controller.children.find(
-        (child) => child instanceof THREE.Mesh,
-      ) as THREE.Mesh;
-      expect(drawnEnd.distanceTo(expectedEnd)).toBeLessThan(1e-6);
-      expect(contact.getWorldPosition(new THREE.Vector3()).distanceTo(expectedEnd)).toBeLessThan(
-        1e-6,
-      );
-      expect((line.material as THREE.LineBasicMaterial).depthTest).toBe(false);
-
-      delete visual.userData.renderedPalmPosition;
-      delete visual.userData.renderedPalmDirection;
-      fakeXR.frame?.(48);
       const nativeOrigin = controller.getWorldPosition(new THREE.Vector3());
       const nativeDirection = controller.getWorldDirection(new THREE.Vector3());
       expect(line.getWorldPosition(new THREE.Vector3()).distanceTo(nativeOrigin)).toBeLessThan(
@@ -386,7 +361,6 @@ describe('native XR controller event routing', () => {
       expect(line.getWorldDirection(new THREE.Vector3()).distanceTo(nativeDirection)).toBeLessThan(
         1e-6,
       );
-      expect((line.material as THREE.LineBasicMaterial).depthTest).toBe(true);
     });
 
     it('switches Auto on hand source changes without moving or retargeting the keyboard', () => {

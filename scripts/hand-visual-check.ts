@@ -311,6 +311,7 @@ async function main(): Promise<void> {
 
     for (const [name, action] of [
       ['open', 'open'],
+      ['thumb-base', 'thumb-base'],
       ['index-pinch', 'index-pinch'],
       ['upturned', 'upturned'],
       ['side-on', 'side-on'],
@@ -331,6 +332,15 @@ async function main(): Promise<void> {
             hand.joints[name].scale,
           );
           hand.joints[name].visible = true;
+        }
+        if (kind === 'thumb-base') {
+          const pivot = hand.joints['thumb-phalanx-proximal'].position.clone();
+          const turn = new T.Quaternion().setFromAxisAngle(new T.Vector3(0, 0, 1), -0.7);
+          for (const name of ['thumb-phalanx-proximal', 'thumb-phalanx-distal', 'thumb-tip']) {
+            const joint = hand.joints[name];
+            joint.position.sub(pivot).applyQuaternion(turn).add(pivot);
+            joint.quaternion.premultiply(turn);
+          }
         }
         if (kind === 'index-pinch') {
           const wrist = hand.joints.wrist.position;
@@ -470,21 +480,6 @@ async function main(): Promise<void> {
               );
               const anchor = root.userData.armAnchor as import('three').Vector3;
               const wrist = root.userData.wristPosition as import('three').Vector3;
-              const controller = w.__questControllers[root.userData.handedness === 'right' ? 0 : 1];
-              const laser = controller.children.find(
-                (child) => child instanceof w.__questThree.Line,
-              );
-              if (!laser) throw new Error('Hand laser missing');
-              const laserOrigin = laser.getWorldPosition(new w.__questThree.Vector3());
-              const laserDirection = laser
-                .localToWorld(new w.__questThree.Vector3(0, 0, -1))
-                .sub(laserOrigin)
-                .normalize();
-              if (
-                laserOrigin.distanceTo(root.userData.renderedPalmPosition) > 1e-5 ||
-                laserDirection.dot(root.userData.renderedPalmDirection) < 0.99999
-              )
-                throw new Error('Hand laser does not match rendered palm pose');
               const model = root.getObjectByName('authored-hand-root');
               if (
                 !model ||

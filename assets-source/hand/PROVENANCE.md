@@ -14,6 +14,8 @@ For each tracked bone, the renderer computes the current palm-relative rotation 
 
 Regression checks compare the rendered neutral mesh with the authored Open mesh for both hands and verify rigid thumb base motion without extra child bends. The calibrated neutral vertex error is below 0.01 mm in those fixtures. Physical Quest appearance and pinch comfort remain owner acceptance.
 
+The visible thumb starts at the palm-edge MCP joint, not the anatomical metacarpal joint inside the palm. Both `thumb_01` and `thumb_02` therefore use the tracked `thumb-phalanx-proximal` rotation and its matching neutral reference. Together they form the 39.51 mm proximal section. `thumb_03` uses `thumb-phalanx-distal`, retaining the tip hinge at x=110 mm and a 20.01 mm distal section. Independent Blender inspection confirmed the root at x=70.67 mm and strong thumb-root weights at the palm junction, so the mesh, weights and rig remain unchanged. Regressions move the proximal joint while holding the metacarpal still, reproducing the previous halfway bend on both hands before verifying the corrected palm-edge hinge.
+
 ## Refitted rig history
 
 The previous runtime hand was the refitted version in `rig-v2`. It includes the longer, slimmer fingers and a palm side depth of 0.046822 m, about 1.0785 times the thumb-tip depth. The shoulder correction and base shaping are preserved in `join-review` and `base-review`. `rig-v2/pre-rig.blend` retains the corrected editing groups and final shape before reweighting.

@@ -127,7 +127,6 @@ describe('authored rigged hand', () => {
         largestChange = Math.max(largestChange, before.distanceTo(after));
       }
       expect(largestChange).toBeLessThan(1e-5);
-      expect(hand.root.userData.renderedPalmDirection.length()).toBeCloseTo(1);
       const index = mesh.skeleton.getBoneByName('index_03') as THREE.Bone;
       const thumb = mesh.skeleton.getBoneByName('thumb_03') as THREE.Bone;
       const visibleMidpoint = index
@@ -168,6 +167,39 @@ describe('authored rigged hand', () => {
       hand.dispose();
     },
   );
+  for (const side of ['left', 'right'] as const) {
+    it.each(['proximal', 'distal'] as const)(
+      `bends the ${side} thumb at the authored %s pivot`,
+      async (part) => {
+        const hand = createRiggedHand({ loader: parsedLoader() });
+        await hand.assetReady;
+        const source = neutralSource(side);
+        const mesh = authoredMeshes(hand.root)[0];
+        const thumb = [1, 2, 3].map(
+          (index) => mesh.skeleton.getBoneByName(`thumb_0${index}`) as THREE.Bone,
+        );
+        const rest = thumb.map((bone) => bone.quaternion.clone());
+        const names =
+          part === 'proximal'
+            ? ['thumb-phalanx-proximal', 'thumb-phalanx-distal', 'thumb-tip']
+            : ['thumb-phalanx-distal', 'thumb-tip'];
+        const pivot = source.joints[names[0]].position.clone();
+        const turn = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.7);
+        for (const name of names) {
+          const joint = source.joints[name];
+          joint.position.sub(pivot).applyQuaternion(turn).add(pivot);
+          joint.quaternion.premultiply(turn);
+          joint.updateMatrix();
+          joint.matrixWorldNeedsUpdate = true;
+        }
+        hand.update(source, new THREE.PerspectiveCamera(), side, 1 / 60);
+        expect(thumb[0].quaternion.angleTo(rest[0])).toBeCloseTo(part === 'proximal' ? 0.7 : 0, 5);
+        expect(thumb[1].quaternion.angleTo(rest[1])).toBeLessThan(1e-5);
+        expect(thumb[2].quaternion.angleTo(rest[2])).toBeCloseTo(part === 'distal' ? 0.7 : 0, 5);
+        hand.dispose();
+      },
+    );
+  }
   it.each(questPoses.hands)(
     'preserves bone dimensions with recorded Quest $side joints',
     async (pose) => {
