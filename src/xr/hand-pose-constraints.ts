@@ -29,9 +29,6 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
     .getWorldPosition(new THREE.Vector3())
     .distanceTo(thumb[0].getWorldPosition(new THREE.Vector3()));
   const distalLength = Number(thumb[2].userData.restLength);
-  const knuckleLength = thumb[1]
-    .getWorldPosition(new THREE.Vector3())
-    .distanceTo(thumb[0].getWorldPosition(new THREE.Vector3()));
   const padOverhang = measurePadOverhang(mesh, thumb[2], distalLength);
   const points = Array.from({ length: 4 }, () => new THREE.Vector3());
   const directions = Array.from({ length: 3 }, () => new THREE.Vector3());
@@ -198,7 +195,6 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
     tip.addScaledVector(axis.subVectors(base, tip).normalize(), 0.017);
     target.lerp(tip, pinch / weight);
     axis.subVectors(target, base);
-    const span = axis.length();
     // The tracked tip joint sits at the skin while the bone ends inside the pad, so a folded
     // thumb aims its pad surface at the contact. The pinch offset was tuned on bone ends.
     const reach = distalLength + padOverhang * (fold / weight);
@@ -222,7 +218,7 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
     directions[0].subVectors(elbow, base).normalize();
     directions[2].subVectors(end, elbow).normalize();
     directions[1].copy(directions[0]);
-    foldThumb(hand, span, reach, fold / weight);
+    foldThumb(hand, fold / weight);
     for (let i = 0; i < 3; i++) thumb[i].getWorldQuaternion(thumbCurrent[i]);
     for (let i = 0; i < 3; i++) {
       // Swinging from the tracked direction keeps the pad roll continuous as the
@@ -239,10 +235,11 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
     }
   }
 
-  // A thumb resting on the fist keeps its tracked, nearly straight IP joint; the cartoon's
-  // longer thumb takes up the extra length at its knuckle, bending the way the tracked
-  // thumb flexes rather than curling the pad back toward the back of the hand.
-  function foldThumb(hand: HandJoints, span: number, reach: number, blend: number): void {
+  // A thumb resting on the fist lies straight along the contact axis and bends only at the
+  // pad by the tracked IP angle. The cartoon thumb is longer than the span to the contact;
+  // bending the knuckle to absorb that excess arches the thumb off the fingers, so the pad
+  // instead lands further along them.
+  function foldThumb(hand: HandJoints, blend: number): void {
     if (blend <= 0) return;
     const names = ['thumb-metacarpal', 'thumb-phalanx-proximal', 'thumb-phalanx-distal'];
     if (!names.every((name, i) => read(hand, name, tracked[i]))) return;
@@ -253,22 +250,9 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
     flex.addScaledVector(axis, -flex.dot(axis));
     if (flex.length() < 0.05) return;
     flex.normalize();
-    const second = proximalLength - knuckleLength;
-    const link = Math.sqrt(second ** 2 + reach ** 2 + 2 * second * reach * Math.cos(ip));
-    const offset = Math.atan2(reach * Math.sin(ip), second + reach * Math.cos(ip));
-    const distance = THREE.MathUtils.clamp(
-      span,
-      Math.abs(link - knuckleLength) + 0.001,
-      link + knuckleLength - 0.0005,
-    );
-    const angle = (a: number, b: number): number =>
-      Math.acos(
-        THREE.MathUtils.clamp((a ** 2 + distance ** 2 - b ** 2) / (2 * a * distance), -1, 1),
-      );
-    folded[0].copy(axis).applyAxisAngle(flex, -angle(knuckleLength, link));
-    const composite = current.copy(axis).applyAxisAngle(flex, angle(link, knuckleLength));
-    folded[1].copy(composite).applyAxisAngle(flex, -offset);
-    folded[2].copy(composite).applyAxisAngle(flex, ip - offset);
+    folded[0].copy(axis);
+    folded[1].copy(axis);
+    folded[2].copy(axis).applyAxisAngle(flex, ip);
     for (let i = 0; i < 3; i++) directions[i].lerp(folded[i], blend).normalize();
   }
 }

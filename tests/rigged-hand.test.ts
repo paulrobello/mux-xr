@@ -198,9 +198,24 @@ describe('authored rigged hand', () => {
         )
         .applyQuaternion(palm);
       // The tracked thumb rests beside the index PIP knuckle; the rendered thumb keeps that
-      // offset instead of folding across the fingers.
+      // offset instead of folding across the fingers. The cartoon thumb is longer than the
+      // tracked one and lies straight, so its pad may land further along the thumb's own
+      // direction but not off to the side of it.
+      const along = (mesh.skeleton.getBoneByName('thumb_03') as THREE.Bone)
+        .getWorldPosition(new THREE.Vector3())
+        .sub(
+          (mesh.skeleton.getBoneByName('thumb_01') as THREE.Bone).getWorldPosition(
+            new THREE.Vector3(),
+          ),
+        )
+        .applyQuaternion(palm)
+        .normalize();
+      const error = rendered.sub(tracked);
+      const overshoot = error.dot(along);
       expect(tracked.length()).toBeLessThan(0.03);
-      expect(rendered.distanceTo(tracked)).toBeLessThan(0.0035);
+      expect(overshoot).toBeGreaterThan(-0.0035);
+      expect(overshoot).toBeLessThan(0.0075);
+      expect(error.addScaledVector(along, -overshoot).length()).toBeLessThan(0.0035);
       hand.dispose();
     },
   );
@@ -225,6 +240,80 @@ describe('authored rigged hand', () => {
       // The tracked tip curls toward the palm; the rendered tip must not hyperextend away.
       expect(Math.abs(rendered.dot(normal) - tracked.dot(normal))).toBeLessThan(0.1);
       expect(THREE.MathUtils.radToDeg(rendered.angleTo(tracked))).toBeLessThan(20);
+      hand.dispose();
+    },
+  );
+  it.each(gestures.sets['captured-thumb-rest'].hands)(
+    'lays the captured $side resting thumb flat across the fist instead of arching it',
+    async (pose) => {
+      const hand = createRiggedHand({ loader: parsedLoader() });
+      await hand.assetReady;
+      const source = poseSource(pose.joints);
+      hand.update(source, new THREE.PerspectiveCamera(), pose.side, 1 / 60);
+      const mesh = authoredMeshes(hand.root)[0];
+      const skinIndex = mesh.geometry.getAttribute('skinIndex');
+      const skinWeight = mesh.geometry.getAttribute('skinWeight');
+      const owned = (prefixes: string[]): THREE.Vector3[] => {
+        const points: THREE.Vector3[] = [];
+        for (let i = 0; i < skinIndex.count; i++) {
+          let weight = 0;
+          for (let k = 0; k < 4; k++) {
+            const name = mesh.skeleton.bones[skinIndex.getComponent(i, k)].name;
+            if (prefixes.some((prefix) => name.startsWith(prefix)))
+              weight += skinWeight.getComponent(i, k);
+          }
+          if (weight > 0.8) points.push(mesh.getVertexPosition(i, new THREE.Vector3()));
+        }
+        return points;
+      };
+      const fingers = owned(['index_02', 'index_03', 'middle_02', 'middle_03']);
+      const gap = (points: THREE.Vector3[]): number =>
+        Math.min(...points.map((p) => Math.min(...fingers.map((q) => p.distanceTo(q)))));
+      const at = (name: string) => source.joints[name].getWorldPosition(new THREE.Vector3());
+      const segments = ['index', 'middle'].flatMap((digit) =>
+        ['phalanx-proximal', 'phalanx-intermediate', 'phalanx-distal', 'tip']
+          .map((joint) => at(`${digit}-finger-${joint}`))
+          .slice(0, -1)
+          .map((start, i, all) => {
+            const ends = [...all.slice(1), at(`${digit}-finger-tip`)];
+            return new THREE.Line3(start, ends[i]);
+          }),
+      );
+      const clearance = (point: THREE.Vector3): number =>
+        Math.min(
+          ...segments.map((line) =>
+            line.closestPointToPoint(point, true, new THREE.Vector3()).distanceTo(point),
+          ),
+        );
+      // The tracked thumb lies along the fingers: its shaft is no farther off them than its pad.
+      const tracked =
+        clearance(at('thumb-phalanx-distal').lerp(at('thumb-phalanx-proximal'), 0.4)) -
+        clearance(at('thumb-tip').lerp(at('thumb-phalanx-distal'), 0.3));
+      const rendered = gap(owned(['thumb_02'])) - gap(owned(['thumb_03']));
+      expect(Math.abs(rendered - tracked)).toBeLessThan(0.004);
+      hand.dispose();
+    },
+  );
+  it.each([
+    ...gestures.sets['captured-thumb-rest'].hands.map((pose) => ({ ...pose, kind: 'resting' })),
+    ...gestures.sets['captured-thumb-slide'].hands.map((pose) => ({ ...pose, kind: 'sliding' })),
+    ...gestures.sets['captured-fist'].hands.map((pose) => ({ ...pose, kind: 'fist' })),
+  ])(
+    'keeps the $side $kind thumb knuckle straight so the thumb bends only at the pad',
+    async (pose) => {
+      const hand = createRiggedHand({ loader: parsedLoader() });
+      await hand.assetReady;
+      hand.update(poseSource(pose.joints), new THREE.PerspectiveCamera(), pose.side, 1 / 60);
+      const mesh = authoredMeshes(hand.root)[0];
+      const direction = (name: string) =>
+        new THREE.Vector3(0, 1, 0).applyQuaternion(
+          (mesh.skeleton.getBoneByName(name) as THREE.Bone).getWorldQuaternion(
+            new THREE.Quaternion(),
+          ),
+        );
+      expect(
+        THREE.MathUtils.radToDeg(direction('thumb_01').angleTo(direction('thumb_02'))),
+      ).toBeLessThan(10);
       hand.dispose();
     },
   );
