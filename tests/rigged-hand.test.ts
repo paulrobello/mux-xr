@@ -153,48 +153,49 @@ describe('authored rigged hand', () => {
       hand.dispose();
     },
   );
-  it.each(gestures.sets['captured-close'].hands)(
-    'reduces the captured $side finger gaps while keeping bone dimensions',
-    async (pose) => {
-      const hand = createRiggedHand({ loader: parsedLoader() });
-      await hand.assetReady;
-      const mesh = authoredMeshes(hand.root)[0];
-      const positions = mesh.geometry.getAttribute('position');
-      const indices = mesh.geometry.getAttribute('skinIndex');
-      const weights = mesh.geometry.getAttribute('skinWeight');
-      const surfaces: number[][] = ['index', 'middle', 'outer'].map((name) => {
-        const vertices: number[] = [];
-        const root = mesh.skeleton.getBoneByName(`${name}_01`) as THREE.Bone;
-        const cutoff = root.getWorldPosition(new THREE.Vector3()).y + 0.012;
-        for (let vertex = 0; vertex < positions.count; vertex++) {
-          if (positions.getY(vertex) < cutoff) continue;
-          let influence = 0;
-          for (let part = 0; part < 4; part++)
-            if (mesh.skeleton.bones[indices.getComponent(vertex, part)].name.startsWith(`${name}_`))
-              influence += weights.getComponent(vertex, part);
-          if (influence > 0.8) vertices.push(vertex);
-        }
-        return vertices;
-      });
-      hand.update(poseSource(pose.joints), new THREE.PerspectiveCamera(), pose.side, 1 / 60);
-      const points = surfaces.map((vertices) =>
-        vertices.map((vertex) => mesh.getVertexPosition(vertex, new THREE.Vector3())),
-      );
-      for (const side of [0, 2]) {
-        let gap = Infinity;
-        for (const point of points[side])
-          for (const other of points[1]) gap = Math.min(gap, point.distanceTo(other));
-        expect(gap).toBeLessThan(pose.side === 'left' ? 0.006 : 0.018);
-        if (pose.side === 'right') expect(gap).toBeGreaterThan(0.01);
+  it.each([
+    ...gestures.sets['captured-close'].hands.map((pose) => ({ ...pose, kind: 'partial' })),
+    ...gestures.sets['captured-fist'].hands.map((pose) => ({ ...pose, kind: 'full fist' })),
+  ])('reduces the captured $side $kind finger gaps while keeping bone dimensions', async (pose) => {
+    const hand = createRiggedHand({ loader: parsedLoader() });
+    await hand.assetReady;
+    const mesh = authoredMeshes(hand.root)[0];
+    const positions = mesh.geometry.getAttribute('position');
+    const indices = mesh.geometry.getAttribute('skinIndex');
+    const weights = mesh.geometry.getAttribute('skinWeight');
+    const surfaces: number[][] = ['index', 'middle', 'outer'].map((name) => {
+      const vertices: number[] = [];
+      const root = mesh.skeleton.getBoneByName(`${name}_01`) as THREE.Bone;
+      const cutoff = root.getWorldPosition(new THREE.Vector3()).y + 0.012;
+      for (let vertex = 0; vertex < positions.count; vertex++) {
+        if (positions.getY(vertex) < cutoff) continue;
+        let influence = 0;
+        for (let part = 0; part < 4; part++)
+          if (mesh.skeleton.bones[indices.getComponent(vertex, part)].name.startsWith(`${name}_`))
+            influence += weights.getComponent(vertex, part);
+        if (influence > 0.8) vertices.push(vertex);
       }
-      for (const bone of mesh.skeleton.bones)
-        for (const axis of [0, 1, 2])
-          expect(
-            new THREE.Vector3().setFromMatrixColumn(bone.matrixWorld, axis).length(),
-          ).toBeCloseTo(1, 5);
-      hand.dispose();
-    },
-  );
+      return vertices;
+    });
+    hand.update(poseSource(pose.joints), new THREE.PerspectiveCamera(), pose.side, 1 / 60);
+    const points = surfaces.map((vertices) =>
+      vertices.map((vertex) => mesh.getVertexPosition(vertex, new THREE.Vector3())),
+    );
+    for (const side of [0, 2]) {
+      let gap = Infinity;
+      for (const point of points[side])
+        for (const other of points[1]) gap = Math.min(gap, point.distanceTo(other));
+      const rightPartial = pose.side === 'right' && pose.kind === 'partial';
+      expect(gap).toBeLessThan(rightPartial ? 0.018 : 0.006);
+      if (rightPartial) expect(gap).toBeGreaterThan(0.01);
+    }
+    for (const bone of mesh.skeleton.bones)
+      for (const axis of [0, 1, 2])
+        expect(
+          new THREE.Vector3().setFromMatrixColumn(bone.matrixWorld, axis).length(),
+        ).toBeCloseTo(1, 5);
+    hand.dispose();
+  });
   it.each(['left', 'right'] as const)(
     'matches the authored Open mesh for the calibrated %s hand',
     async (side) => {

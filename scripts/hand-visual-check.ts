@@ -329,6 +329,9 @@ async function main(): Promise<void> {
       ['captured-close-side', 'captured-close-side'],
       ['captured-pinch-opposite', 'captured-pinch-opposite'],
       ['captured-close-opposite', 'captured-close-opposite'],
+      ['captured-fist', 'captured-fist'],
+      ['captured-fist-side', 'captured-fist-side'],
+      ['captured-fist-opposite', 'captured-fist-opposite'],
       ['tracking-loss', 'tracking-loss'],
     ] as const) {
       await page.evaluate((kind) => {

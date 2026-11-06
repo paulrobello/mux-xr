@@ -22,7 +22,7 @@ A subsequent Quest video and joint capture showed that rotation transfer alone l
 
 The neutral reference includes wrist/palm-relative thumb-base positions. Root travel is bounded to 50 mm for thumb opposition, 14.5 mm for the index and 10 mm for the outer finger. Segment lengths and scales remain unchanged. Raw joint transforms and input positions are never modified. The rendered fingertip midpoint continues to guide Keyborb targeting.
 
-`tests/fixtures/quest-gesture-poses.json` contains wrist-normalized bilateral pinch and partial-closure captures. The right closure sample is not a full fist. Tests require the captured left finger surface gaps below 6 mm, near-contact rendered pinch pads for both hands through wrist rotations, and unchanged source tracking. Browser replay includes front and opposing side views. A complete physical fist and headset comfort remain owner acceptance.
+`tests/fixtures/quest-gesture-poses.json` contains wrist-normalized bilateral pinch, partial-closure and held full-fist captures. The earlier `captured-close` right-hand sample remains explicitly partial. The later `captured-fist` set averages five stable tracked frames per hand while the owner held both fists closed with the thumbs across the fingers. Tests require surface gaps below 6 mm for both full fists, near-contact rendered pinch pads through wrist rotations, and unchanged source tracking. Browser replay includes front and opposing side views. Headset appearance, continuous motion and typing comfort remain owner acceptance.
 
 ## Refitted rig history
 
