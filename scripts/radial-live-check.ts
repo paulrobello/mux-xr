@@ -362,7 +362,16 @@ async function main(): Promise<void> {
       const w = window as unknown as FixtureWindow;
       const gl = w.__questRenderer.getContext();
       const root = w.__testRadialMenu.root;
-      const actions = ['keyboard', 'commands', 'panes', 'layout', 'warp', 'widgets', 'settings'];
+      const actions = [
+        'keyboard',
+        'commands',
+        'panes',
+        'layout',
+        'warp',
+        'widgets',
+        'settings',
+        'focus',
+      ];
       const labels = ['cancel', ...actions];
       const originalRotation = root.rotation.y;
       const originalVisible = root.visible;
@@ -443,7 +452,7 @@ async function main(): Promise<void> {
         await Promise.all(pendingLabels);
         const structural: Record<string, unknown> = {};
         root.traverse((object) => {
-          if (!object.userData.labelText) return;
+          if (!object.userData.labelText || object.name === 'radial-menu-reload-update') return;
           const material = (object as import('three').Mesh).material as
             | import('three').MeshBasicMaterial
             | undefined;
@@ -472,7 +481,7 @@ async function main(): Promise<void> {
         w.__radialFreeze = originalFreeze;
       }
     });
-    assert(radialEvidence.labels.length === 8, 'Radial label set is incomplete');
+    assert(radialEvidence.labels.length === 9, 'Radial label set is incomplete');
     assert(
       Object.values(radialEvidence.structural).every(
         (value) =>

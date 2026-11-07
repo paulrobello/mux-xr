@@ -658,13 +658,13 @@ async function main(): Promise<void> {
         Number((report.keyborbLift as { raised: number }).raised) -
           Number((report.keyborbLift as { expected: number }).expected),
       ) < 0.001 &&
-      JSON.stringify(report.autoHands) === JSON.stringify({ total: 62, spherical: 62, flat: 0 }) &&
-      JSON.stringify(report.onHands) === JSON.stringify({ total: 62, spherical: 62, flat: 0 }) &&
-      JSON.stringify(report.offHands) === JSON.stringify({ total: 62, spherical: 0, flat: 62 }) &&
+      JSON.stringify(report.autoHands) === JSON.stringify({ total: 68, spherical: 68, flat: 0 }) &&
+      JSON.stringify(report.onHands) === JSON.stringify({ total: 68, spherical: 68, flat: 0 }) &&
+      JSON.stringify(report.offHands) === JSON.stringify({ total: 68, spherical: 0, flat: 68 }) &&
       JSON.stringify(report.autoControllers) ===
-        JSON.stringify({ total: 62, spherical: 0, flat: 62 }) &&
+        JSON.stringify({ total: 68, spherical: 0, flat: 68 }) &&
       JSON.stringify(report.onControllers) ===
-        JSON.stringify({ total: 62, spherical: 62, flat: 0 }) &&
+        JSON.stringify({ total: 68, spherical: 68, flat: 0 }) &&
       Array.isArray(report.controllerTriggerPoses) &&
       (report.controllerTriggerPoses as unknown[]).length === 2 &&
       report.nativeMode === 'auto' &&

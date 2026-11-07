@@ -749,8 +749,24 @@ export function createWorkspaceScene(
       position: THREE.Vector3;
       quaternion: THREE.Quaternion;
       scale: number;
+      grips: [THREE.Quaternion, THREE.Quaternion];
     }
   >();
+  // Turning both grips the same way about the line between them rolls the object. Hands get a wider
+  // dead zone because forearms pitching together during a carry twist both wrists slightly.
+  const PAIR_ROLL_DEAD_ZONE = THREE.MathUtils.degToRad(8);
+  const HAND_PAIR_ROLL_DEAD_ZONE = THREE.MathUtils.degToRad(15);
+  const pairTwist = (
+    start: THREE.Quaternion,
+    now: THREE.Quaternion,
+    swing: THREE.Quaternion,
+    axis: THREE.Vector3,
+  ): number => {
+    const change = swing.clone().invert().multiply(now).multiply(start.clone().invert());
+    if (change.w < 0) change.set(-change.x, -change.y, -change.z, -change.w);
+    const along = change.x * axis.x + change.y * axis.y + change.z * axis.z;
+    return 2 * Math.atan2(along, change.w);
+  };
   let recenterSince: number | null = null;
   let recenterLatched = false;
   const manipulationSpace = (controller: THREE.Group): THREE.Object3D => {
@@ -850,6 +866,10 @@ export function createWorkspaceScene(
       position: object.position.clone(),
       quaternion: object.quaternion.clone(),
       scale: object.scale.x,
+      grips: [
+        firstSpace.getWorldQuaternion(new THREE.Quaternion()),
+        secondSpace.getWorldQuaternion(new THREE.Quaternion()),
+      ],
     });
   };
   const availablePanes: PaneDescriptor[] = [];
@@ -882,6 +902,7 @@ export function createWorkspaceScene(
   let fpsLabel: THREE.Mesh | null = null;
   let activePaneLabel: THREE.Mesh | null = null;
   let radialTargetId: string | null = null;
+  let warpPanelEdit: { id: string; original: number } | null = null;
   let radialController: THREE.Group | null = null;
   let warpEdit: { id: string; original: number; controller: THREE.Group | null } | null = null;
   let warpReadout: THREE.Mesh | null = null;
@@ -1966,6 +1987,28 @@ export function createWorkspaceScene(
         pair.direction,
         direction.divideScalar(distance),
       );
+      const firstTwist = pairTwist(
+        pair.grips[0],
+        firstSpace.getWorldQuaternion(new THREE.Quaternion()),
+        rotation,
+        pair.direction,
+      );
+      let secondTwist = pairTwist(
+        pair.grips[1],
+        secondSpace.getWorldQuaternion(new THREE.Quaternion()),
+        rotation,
+        pair.direction,
+      );
+      if (secondTwist - firstTwist > Math.PI) secondTwist -= Math.PI * 2;
+      else if (firstTwist - secondTwist > Math.PI) secondTwist += Math.PI * 2;
+      const twist =
+        Math.sign(firstTwist) === Math.sign(secondTwist)
+          ? Math.sign(firstTwist) * Math.min(Math.abs(firstTwist), Math.abs(secondTwist))
+          : 0;
+      const deadZone =
+        activeHand(first) || activeHand(second) ? HAND_PAIR_ROLL_DEAD_ZONE : PAIR_ROLL_DEAD_ZONE;
+      const roll = Math.sign(twist) * Math.max(0, Math.abs(twist) - deadZone);
+      if (roll) rotation.multiply(new THREE.Quaternion().setFromAxisAngle(pair.direction, roll));
       object.position.copy(pair.position).add(a.add(b).multiplyScalar(0.5).sub(pair.midpoint));
       object.quaternion.copy(rotation).multiply(pair.quaternion);
       const limits = object.userData.scaleLimits as [number, number];
@@ -2422,6 +2465,7 @@ export function createWorkspaceScene(
     inputRoot.scale.setScalar(0.38);
   };
   const refreshInputRoot = (mode: InputMode): void => {
+    if (mode !== 'warp') settleWarpPanel(false);
     if (mode !== inputMode) resetHandContacts(false);
     if (mode !== 'keyboard') templateHint = null;
     inputMode = mode;
@@ -2959,6 +3003,13 @@ export function createWorkspaceScene(
         button.position.set(index ? 0.4 : -0.4, -0.36, 0);
         inputRoot.add(button);
       }
+      for (const [index, action] of (['warpCancel', 'warpDone'] as const).entries()) {
+        const button = createLabelButton(index ? 'Done' : 'Cancel', 0.7, 0.12, {
+          inputAction: action,
+        });
+        button.position.set(index ? 0.4 : -0.4, -0.54, 0);
+        inputRoot.add(button);
+      }
     } else if (mode === 'widgets') {
       for (const [index, kind] of (['digital-clock', 'analog-clock'] as const).entries()) {
         const name = kind === 'digital-clock' ? 'Digital clock' : 'Analog clock';
@@ -3428,6 +3479,7 @@ export function createWorkspaceScene(
       radialMenu.close();
       mutableState.radialOpen = false;
       if (choice === 'keyboard') toggleKeyboard();
+      else if (choice === 'focus') toggleFocusMode(radialTargetId ?? undefined);
       else if (choice === 'warp') {
         if (radialController && activeHand(radialController)) showInput('warp', radialController);
         else startWarp(radialTargetId, radialController);
@@ -3506,7 +3558,13 @@ export function createWorkspaceScene(
           action === 'curvature'
             ? Number(hit.userData.degrees)
             : getTerminalCurvature(id) + Number(hit.userData.delta),
+          warpPanelEdit?.id !== id,
         );
+      return true;
+    }
+    if (action === 'warpDone' || action === 'warpCancel') {
+      settleWarpPanel(action === 'warpDone');
+      hideInput();
       return true;
     }
     if (action === 'filterDistance') {
@@ -4440,6 +4498,10 @@ export function createWorkspaceScene(
       commandPage = 0;
       templateHint = null;
       disarmCommand();
+      if (inputMode === 'warp' && warpPanelEdit?.id !== nextId) {
+        settleWarpPanel(false);
+        if (nextId) warpPanelEdit = { id: nextId, original: getTerminalCurvature(nextId) };
+      }
       refreshInputRoot(inputMode);
     }
     for (const panel of panels.values())
@@ -4527,6 +4589,17 @@ export function createWorkspaceScene(
       saveUIPose('keyboard', inputRoot);
     for (const [kind, widget] of widgets) saveWidgetPose(kind, widget);
     rememberTerminalPlacements();
+  };
+  // The hand Warp panel previews curvature live; Done saves it and anything else restores it.
+  const settleWarpPanel = (commit: boolean): void => {
+    const edit = warpPanelEdit;
+    if (!edit) return;
+    warpPanelEdit = null;
+    const panel = panels.get(edit.id);
+    if (!panel) return;
+    if (!commit) setTerminalCurvature(edit.id, edit.original, false);
+    else if (!warpStore.set(warpKey(panel.surface), panel.curvature))
+      setNotice('Curvature could not be saved on this device');
   };
   const finishWarp = (commit: boolean): void => {
     const edit = warpEdit;
@@ -4780,6 +4853,7 @@ export function createWorkspaceScene(
       return;
     }
     if (warpEdit) finishWarp(false);
+    if (mode === 'warp' && mutableState.focusModeTerminalId) endFocusMode(true);
     keyboardResume = null;
     templateHint = null;
     if (
@@ -4799,6 +4873,10 @@ export function createWorkspaceScene(
     commandPage = 0;
     clearArmedModifiers();
     if (mode === 'panes') initializeHierarchy();
+    if (mode === 'warp' && warpPanelEdit?.id !== targetId) {
+      settleWarpPanel(false);
+      if (targetId) warpPanelEdit = { id: targetId, original: getTerminalCurvature(targetId) };
+    }
     refreshInputRoot(mode);
   };
   const toggleKeyboard = (): void => {
@@ -4825,6 +4903,7 @@ export function createWorkspaceScene(
     syncModifierVisuals();
   };
   const hideInput = (): void => {
+    settleWarpPanel(false);
     if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
       saveUIPose('keyboard', inputRoot);
     if (inputRoot)

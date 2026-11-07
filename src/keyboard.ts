@@ -74,6 +74,12 @@ const navigationRows: readonly PositionedKey[] = [
   key('←', 'ArrowLeft', 16, 5),
   key('↓', 'ArrowDown', 17, 5),
   key('→', 'ArrowRight', 18, 5),
+  key('Ins', 'Insert', 16, 2),
+  key('Home', 'Home', 17, 2),
+  key('PgUp', 'PageUp', 18, 2),
+  key('Del', 'Delete', 16, 3),
+  key('End', 'End', 17, 3),
+  key('PgDn', 'PageDown', 18, 3),
 ];
 
 export const keyboardKeys: readonly PositionedKey[] = [...mainRows.flat(), ...navigationRows];

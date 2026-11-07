@@ -69,9 +69,12 @@ export function terminalKeyBytes(
     ArrowDown: applicationCursor ? '\x1bOB' : '\x1b[B',
     ArrowRight: applicationCursor ? '\x1bOC' : '\x1b[C',
     ArrowLeft: applicationCursor ? '\x1bOD' : '\x1b[D',
+    Insert: '\x1b[2~',
     Delete: '\x1b[3~',
-    Home: '\x1b[H',
-    End: '\x1b[F',
+    Home: applicationCursor ? '\x1bOH' : '\x1b[H',
+    End: applicationCursor ? '\x1bOF' : '\x1b[F',
+    PageUp: '\x1b[5~',
+    PageDown: '\x1b[6~',
   };
   if (mod === 0) return prefix + (named[key] ?? key);
   if (key.length === 1 && modifiers.ctrl) {
@@ -84,8 +87,8 @@ export function terminalKeyBytes(
     return prefix + terminalKeyLabel(key, true);
   }
   const code = named[key];
-  if (code?.startsWith('\x1b['))
-    return key === 'Delete' ? `\x1b[3;${mod + 1}~` : `\x1b[1;${mod + 1}${code.slice(2)}`;
+  if (code?.endsWith('~')) return `${code.slice(0, -1)};${mod + 1}~`;
+  if (code?.startsWith('\x1b[')) return `\x1b[1;${mod + 1}${code.slice(2)}`;
   if (code?.startsWith('\x1bO')) return `\x1b[1;${mod + 1}${code.slice(2)}`;
   return prefix + (named[key] ?? key);
 }

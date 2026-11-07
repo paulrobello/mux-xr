@@ -123,6 +123,23 @@ describe('terminal key bytes', () => {
     expect(terminalKeyBytes('ArrowUp', { alt: true }, true)).toBe('\x1b[1;3A');
   });
 
+  it('maps navigation keys with and without modifiers', () => {
+    expect(terminalKeyBytes('PageUp')).toBe('\x1b[5~');
+    expect(terminalKeyBytes('PageDown')).toBe('\x1b[6~');
+    expect(terminalKeyBytes('Home')).toBe('\x1b[H');
+    expect(terminalKeyBytes('End')).toBe('\x1b[F');
+    expect(terminalKeyBytes('Home', {}, true)).toBe('\x1bOH');
+    expect(terminalKeyBytes('End', {}, true)).toBe('\x1bOF');
+    expect(terminalKeyBytes('End', { ctrl: true }, true)).toBe('\x1b[1;5F');
+    expect(terminalKeyBytes('Insert')).toBe('\x1b[2~');
+    expect(terminalKeyBytes('Delete')).toBe('\x1b[3~');
+    expect(terminalKeyBytes('Insert', { shift: true })).toBe('\x1b[2;2~');
+    expect(terminalKeyBytes('PageUp', { shift: true })).toBe('\x1b[5;2~');
+    expect(terminalKeyBytes('PageDown', { ctrl: true })).toBe('\x1b[6;5~');
+    expect(terminalKeyBytes('Home', { shift: true })).toBe('\x1b[1;2H');
+    expect(terminalKeyBytes('End', { ctrl: true })).toBe('\x1b[1;5F');
+  });
+
   it('labels US printable keys for the visible keyboard', () => {
     expect(terminalKeyLabel('a')).toBe('a');
     expect(terminalKeyLabel('a', true)).toBe('A');

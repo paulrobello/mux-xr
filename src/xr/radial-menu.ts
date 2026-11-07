@@ -9,6 +9,7 @@ export type RadialMenuAction =
   | 'warp'
   | 'widgets'
   | 'settings'
+  | 'focus'
   | 'cancel';
 export type RadialAction = RadialMenuAction;
 
@@ -24,7 +25,16 @@ export interface RadialMenu {
   dispose(): void;
 }
 
-const ACTIONS = ['keyboard', 'commands', 'panes', 'layout', 'warp', 'widgets', 'settings'] as const;
+const ACTIONS = [
+  'keyboard',
+  'commands',
+  'panes',
+  'layout',
+  'warp',
+  'widgets',
+  'settings',
+  'focus',
+] as const;
 const LABELS: Record<RadialMenuAction, string> = {
   keyboard: 'Keyboard',
   commands: 'Commands',
@@ -33,6 +43,7 @@ const LABELS: Record<RadialMenuAction, string> = {
   warp: 'Warp',
   widgets: 'Widgets',
   settings: 'Settings',
+  focus: 'Focus',
   cancel: 'Cancel',
 };
 const COLORS = {
@@ -165,7 +176,7 @@ export function createRadialMenu(): RadialMenu {
     mesh.userData.inputAction = 'radialAction';
     mesh.userData.radialAction = action;
     group.add(mesh);
-    const label = createScalableLabel(LABELS[action], 0.2, 0.075, {
+    const label = createScalableLabel(LABELS[action], 0.17, 0.07, {
       background: COLORS.glass,
       backplate: false,
     });

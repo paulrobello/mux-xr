@@ -36,7 +36,7 @@ function actionNodes(menu: ReturnType<typeof createRadialMenu>): THREE.Object3D[
 }
 
 describe('animated radial menu', () => {
-  it('animates from center to a clockwise, upright seven-action fan', () => {
+  it('animates from center to a clockwise, upright eight-action fan', () => {
     const menu = createRadialMenu();
     menu.root.scale.setScalar(0.8);
     menu.open();
@@ -46,7 +46,7 @@ describe('animated radial menu', () => {
       (child) => child.userData.radialAction !== 'cancel' && child.name.startsWith('radial-menu-'),
     );
     expect(new Set(targets.map((target) => target.userData.radialAction))).toEqual(
-      new Set(['keyboard', 'commands', 'panes', 'layout', 'warp', 'widgets', 'settings']),
+      new Set(['keyboard', 'commands', 'panes', 'layout', 'warp', 'widgets', 'settings', 'focus']),
     );
     expect(targets.every((target) => target.position.length() < 0.01)).toBe(true);
     menu.update(0.128);

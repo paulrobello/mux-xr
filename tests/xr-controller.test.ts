@@ -386,13 +386,13 @@ describe('native XR controller event routing', () => {
       expect(objectWithData(workspace, { key: 'a' }).userData.keyborb).toBeUndefined();
     });
 
-    it('renders all 62 spherical keys and keeps them spherical on a curved keyboard', () => {
+    it('renders all 68 spherical keys and keeps them spherical on a curved keyboard', () => {
       const { workspace, actions } = setup('on');
       workspace.showInput('keyboard');
       workspace.setKeyboardCurvature(60);
       const root = workspace.scene.getObjectByName('xr-keyboard-controls') as THREE.Group;
       const keys = root.children.filter((child) => child.userData.inputAction === 'key');
-      expect(keys).toHaveLength(62);
+      expect(keys).toHaveLength(68);
       for (const key of keys) {
         expect((key as THREE.Mesh).geometry).toBeInstanceOf(THREE.SphereGeometry);
         expect(key.userData.labelText).toBeTruthy();
@@ -1025,6 +1025,59 @@ describe('native XR controller event routing', () => {
       fakeXR.frame?.(600);
     });
 
+    it('rolls a two-hand grab when both wrists turn about the line between them', () => {
+      const { workspace } = setup();
+      const right = connectHand(0);
+      const left = connectHand(1);
+      const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+      const point = panel.getWorldPosition(new THREE.Vector3());
+      for (const [i, hand] of [right, left].entries()) {
+        const wrist = point.clone().add(new THREE.Vector3(i ? -0.12 : 0.12, -0.047, 0.02));
+        const movement = wrist.sub(hand.joints.wrist.position);
+        for (const joint of Object.values(hand.joints)) joint.position.add(movement);
+        (fakeXR.controllers[i] as THREE.Group).position.set(5, 5, 0);
+      }
+      fakeXR.frame?.(20);
+      pinch(right, true);
+      fakeXR.frame?.(40);
+      pinch(left, true);
+      fakeXR.frame?.(60);
+      const start = panel.quaternion.clone();
+      const axis = right.joints.wrist.position.clone().sub(left.joints.wrist.position).normalize();
+      const turn = (rightDegrees: number, leftDegrees: number, time: number): void => {
+        for (const [hand, degrees] of [
+          [right, rightDegrees],
+          [left, leftDegrees],
+        ] as const) {
+          const twist = new THREE.Quaternion().setFromAxisAngle(
+            axis,
+            THREE.MathUtils.degToRad(degrees),
+          );
+          const pivot = hand.joints.wrist.position.clone();
+          for (const joint of Object.values(hand.joints)) {
+            joint.position.sub(pivot).applyQuaternion(twist).add(pivot);
+            joint.quaternion.premultiply(twist);
+          }
+        }
+        fakeXR.frame?.(time);
+      };
+      turn(10, 10, 80);
+      expect(panel.quaternion.angleTo(start)).toBeLessThan(1e-6);
+      turn(20, -20, 90);
+      expect(panel.quaternion.angleTo(start)).toBeLessThan(1e-6);
+      turn(0, 10, 95);
+      expect(panel.quaternion.angleTo(start)).toBeLessThan(1e-6);
+      turn(0, 30, 100);
+      expect(THREE.MathUtils.radToDeg(panel.quaternion.angleTo(start))).toBeCloseTo(15, 0);
+      const rolled = new THREE.Quaternion()
+        .setFromAxisAngle(axis, THREE.MathUtils.degToRad(15))
+        .multiply(start);
+      expect(panel.quaternion.angleTo(rolled)).toBeLessThan(0.02);
+      pinch(right, false);
+      pinch(left, false);
+      fakeXR.frame?.(400);
+    });
+
     it('contact-grabs with both hands and rebases when one loses tracking', () => {
       const { workspace, actions } = setup();
       const right = connectHand(0);
@@ -1101,6 +1154,83 @@ describe('native XR controller event routing', () => {
       expect(workspace.state.radialOpen).toBe(true);
       hit(workspace, { inputAction: 'radialAction', radialAction: 'keyboard' });
       expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeDefined();
+    });
+
+    it('toggles Focus on the selected pane from the hand-opened radial', () => {
+      const { workspace } = setup();
+      connectHand();
+      workspace.selectTerminal('pane-b');
+      hit(workspace, { inputAction: 'toggleRadial' });
+      fakeXR.frame?.(1000);
+      hit(workspace, { inputAction: 'radialAction', radialAction: 'focus' });
+      expect(workspace.state.focusModeTerminalId).toBe('pane-b');
+      expect(workspace.state.radialOpen).toBe(false);
+      fakeXR.frame?.(1500);
+      hit(workspace, { inputAction: 'toggleRadial' });
+      fakeXR.frame?.(2500);
+      expect(workspace.state.radialOpen).toBe(true);
+      hit(workspace, { inputAction: 'radialAction', radialAction: 'focus' });
+      expect(workspace.state.focusModeTerminalId).toBeNull();
+    });
+
+    it('previews hand Warp presets and saves only on Done', () => {
+      const { workspace } = setup();
+      connectHand();
+      const saved = (): string => localStorage.getItem('mux-xr:terminal-warp:v1') ?? '';
+      const openWarp = (time: number): void => {
+        hit(workspace, { inputAction: 'toggleRadial' });
+        fakeXR.frame?.(time);
+        hit(workspace, { inputAction: 'radialAction', radialAction: 'warp' });
+        fakeXR.frame?.(time + 200);
+      };
+      const before = saved();
+      const original = workspace.getTerminalCurvature('pane-a');
+      openWarp(1000);
+      hit(workspace, { inputAction: 'curvature', degrees: 60 });
+      hit(workspace, { inputAction: 'curvatureStep', delta: 5 });
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(65);
+      expect(saved()).toBe(before);
+      hit(workspace, { inputAction: 'warpCancel' });
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(original);
+      expect(workspace.scene.getObjectByName('xr-warp-controls')).toBeUndefined();
+      expect(saved()).toBe(before);
+      openWarp(2000);
+      hit(workspace, { inputAction: 'curvature', degrees: 30 });
+      workspace.showInput('keyboard');
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(original);
+      openWarp(3000);
+      hit(workspace, { inputAction: 'curvature', degrees: 45 });
+      hit(workspace, { inputAction: 'warpDone' });
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(45);
+      expect(workspace.scene.getObjectByName('xr-warp-controls')).toBeUndefined();
+      expect(saved()).toContain('45');
+      const settled = saved();
+      openWarp(4000);
+      hit(workspace, { inputAction: 'curvature', degrees: 90 });
+      workspace.selectTerminal('pane-b');
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(45);
+      const paneB = workspace.getTerminalCurvature('pane-b');
+      hit(workspace, { inputAction: 'curvature', degrees: 60 });
+      expect(workspace.getTerminalCurvature('pane-b')).toBe(60);
+      expect(saved()).toBe(settled);
+      hit(workspace, { inputAction: 'warpCancel' });
+      expect(workspace.getTerminalCurvature('pane-b')).toBe(paneB);
+      expect(saved()).toBe(settled);
+    });
+
+    it('leaves Focus when the hand Warp panel opens', () => {
+      const { workspace } = setup();
+      connectHand();
+      hit(workspace, { inputAction: 'toggleRadial' });
+      fakeXR.frame?.(1000);
+      hit(workspace, { inputAction: 'radialAction', radialAction: 'focus' });
+      expect(workspace.state.focusModeTerminalId).toBe('pane-a');
+      fakeXR.frame?.(1500);
+      hit(workspace, { inputAction: 'toggleRadial' });
+      fakeXR.frame?.(2500);
+      hit(workspace, { inputAction: 'radialAction', radialAction: 'warp' });
+      expect(workspace.state.focusModeTerminalId).toBeNull();
+      expect(workspace.scene.getObjectByName('xr-warp-controls')).toBeDefined();
     });
 
     it('offers hand-selectable Warp presets without entering a stick-only mode', () => {

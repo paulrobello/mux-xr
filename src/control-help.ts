@@ -11,6 +11,12 @@ export function getKeyHelp(key: string): string | undefined {
     ArrowRight: 'Send Right: move the cursor right',
     Enter: 'Send Enter to run the current command',
     Backspace: 'Delete the character before the cursor',
+    Insert: 'Send Insert: toggle insert or overwrite where supported',
+    Delete: 'Delete the character under the cursor',
+    Home: 'Send Home: move to the start of the line',
+    End: 'Send End: move to the end of the line',
+    PageUp: 'Send Page Up: scroll or page back',
+    PageDown: 'Send Page Down: scroll or page forward',
     ' ': 'Type a space',
   };
   return hints[key];
@@ -21,6 +27,10 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
   switch (data.inputAction) {
     case 'wristMenu':
       return 'Open the action menu: tap this watch with your left index finger or point and press with the left controller';
+    case 'warpDone':
+      return 'Keep this curvature';
+    case 'warpCancel':
+      return 'Restore the curvature from before this Warp panel opened';
     case 'toggleRadial':
       return 'Open or close the action menu; point and pinch to choose an item';
     case 'pasteClipboard':
