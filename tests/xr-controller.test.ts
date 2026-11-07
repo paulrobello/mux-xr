@@ -272,8 +272,11 @@ describe('native XR controller event routing', () => {
       for (const cleanup of cleanups.splice(0)) cleanup();
       vi.unstubAllGlobals();
     });
-    const setup = (keyborbMode: 'off' | 'on' | 'auto' = 'off') => {
-      const value = fixture();
+    const setup = (
+      keyborbMode: 'off' | 'on' | 'auto' = 'off',
+      options?: Parameters<typeof fixture>[0],
+    ) => {
+      const value = fixture(options);
       value.workspace.setKeyborbMode(keyborbMode);
       cleanups.push(() => {
         value.workspace.dispose();
@@ -319,8 +322,15 @@ describe('native XR controller event routing', () => {
       key: string,
       depth: number,
       time: number,
+    ): void => contactControl(workspace, hand, { inputAction: 'key', key }, depth, time);
+    const contactControl = (
+      workspace: ReturnType<typeof createWorkspaceScene>,
+      hand: Hand,
+      data: Record<string, unknown>,
+      depth: number,
+      time: number,
     ): void => {
-      const button = objectWithData(workspace, { inputAction: 'key', key });
+      const button = objectWithData(workspace, data);
       const point = button.getWorldPosition(new THREE.Vector3());
       const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
         button.getWorldQuaternion(new THREE.Quaternion()),
@@ -910,6 +920,197 @@ describe('native XR controller event routing', () => {
       for (const joint of Object.values(hand.joints)) joint.position.z += 1;
       fakeXR.frame?.(120);
       expect(ray?.visible).toBe(true);
+    });
+
+    it.each(['off', 'on'] as const)(
+      'pokes the raised Close button once with Keyborb %s and ignores a hovering fingertip',
+      (keyborbMode) => {
+        const play = vi.fn();
+        const { workspace } = setup(keyborbMode, { feedback: { play, dispose: vi.fn() } });
+        workspace.showInput('keyboard');
+        const hand = connectHand(0);
+        (fakeXR.controllers[0] as THREE.Group).position.set(5, 5, 0);
+        expect(workspace.state.keyborbEnabled).toBe(keyborbMode === 'on');
+        const close = { inputAction: 'close' };
+        expect(objectWithData(workspace, close).userData.raisedButton).toBe(true);
+        contactControl(workspace, hand, close, 0.06, 20);
+        for (let frame = 0; frame < 4; frame++)
+          contactControl(workspace, hand, close, 0.025, 40 + frame * 20);
+        expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeDefined();
+        expect(play).not.toHaveBeenCalled();
+        contactControl(workspace, hand, close, 0.004, 140);
+        expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+        expect(play.mock.calls.map(([kind]) => kind)).toEqual(['select']);
+      },
+    );
+
+    it.each(['off', 'on'] as const)(
+      'toggles a raised panel button once per held poke with Keyborb %s',
+      (keyborbMode) => {
+        const { workspace, actions } = setup(keyborbMode);
+        workspace.showInput('keyboard');
+        const hand = connectHand(0);
+        (fakeXR.controllers[0] as THREE.Group).position.set(5, 5, 0);
+        const backing = { inputAction: 'keyboardBackground' };
+        contactControl(workspace, hand, backing, 0.06, 20);
+        for (let frame = 0; frame < 6; frame++)
+          contactControl(workspace, hand, backing, 0.004, 40 + frame * 20);
+        expect(workspace.state.keyboardBackgroundEnabled).toBe(false);
+        contactControl(workspace, hand, backing, 0.06, 200);
+        contactControl(workspace, hand, backing, 0.004, 220);
+        expect(workspace.state.keyboardBackgroundEnabled).toBe(true);
+        expect(actions.sendKey).not.toHaveBeenCalled();
+      },
+    );
+
+    it('keeps the press-twice confirm on a poked Keyborb strip command', () => {
+      vi.useFakeTimers();
+      try {
+        const { workspace, actions } = setup('on');
+        const risky = {
+          id: 'risky',
+          label: 'risky',
+          text: 'echo risky',
+          sendNewline: true,
+          pinned: true,
+          confirm: true,
+        };
+        workspace.setQuickCommands([risky]);
+        workspace.showInput('keyboard');
+        const hand = connectHand(0);
+        (fakeXR.controllers[0] as THREE.Group).position.set(5, 5, 0);
+        const strip = { inputAction: 'stripCommand', commandId: 'risky' };
+        contactControl(workspace, hand, strip, 0.06, 20);
+        contactControl(workspace, hand, strip, 0.004, 40);
+        expect(actions.runCommand).not.toHaveBeenCalled();
+        expect(objectWithData(workspace, strip).userData.armed).toBe(true);
+        vi.advanceTimersByTime(400);
+        contactControl(workspace, hand, strip, 0.06, 60);
+        contactControl(workspace, hand, strip, 0.004, 80);
+        expect(actions.runCommand).toHaveBeenCalledExactlyOnceWith(risky, 'pane-a');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('pokes a raised button with a controller-held hand but never pokes a Keyborb orb', () => {
+      const { workspace, actions } = setup('on');
+      connectController(0);
+      workspace.showInput('keyboard');
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      fakeXR.frame?.(10);
+      const visual = objectWithData(workspace, { handedness: 'right' });
+      const touch = (data: Record<string, unknown>, depth: number, time: number): void => {
+        const button = objectWithData(workspace, data);
+        workspace.scene.updateMatrixWorld(true);
+        const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
+          button.getWorldQuaternion(new THREE.Quaternion()),
+        );
+        const point = button.getWorldPosition(new THREE.Vector3()).addScaledVector(normal, depth);
+        controller.position.add(point.sub(visual.userData.indexTip as THREE.Vector3));
+        fakeXR.frame?.(time);
+      };
+      const key = { inputAction: 'key', key: 'a' };
+      touch(key, 0.06, 20);
+      touch(key, 0.06, 40);
+      touch(key, 0.004, 60);
+      touch(key, -0.02, 80);
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      const close = { inputAction: 'close' };
+      touch(close, 0.06, 100);
+      touch(close, 0.06, 120);
+      touch(close, 0.004, 140);
+      expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+    });
+
+    it('keeps a poked Backing button sunk across its rebuild, then eases it back', () => {
+      const { workspace } = setup('on');
+      workspace.showInput('keyboard');
+      const hand = connectHand(0);
+      (fakeXR.controllers[0] as THREE.Group).position.set(5, 5, 0);
+      const backing = { inputAction: 'keyboardBackground' };
+      const rest = objectWithData(workspace, backing).position.z;
+      contactControl(workspace, hand, backing, 0.06, 20);
+      contactControl(workspace, hand, backing, 0.004, 40);
+      expect(workspace.state.keyboardBackgroundEnabled).toBe(false);
+      fakeXR.frame?.(60);
+      const rebuilt = objectWithData(workspace, backing);
+      expect(rebuilt.position.z).toBeLessThan(rest - 0.01);
+      fakeXR.frame?.(200);
+      expect(rebuilt.position.z).toBeLessThan(rest - 0.001);
+      fakeXR.frame?.(300);
+      expect(rebuilt.position.z).toBeCloseTo(rest);
+    });
+
+    it('bends the raised walls with the face on a curved keyboard', () => {
+      const { workspace } = setup('off');
+      workspace.showInput('keyboard');
+      workspace.setKeyboardCurvature(60);
+      const paste = objectWithData(workspace, { inputAction: 'pasteClipboard' }) as THREE.Mesh;
+      const root = workspace.scene.getObjectByName('xr-keyboard-controls') as THREE.Group;
+      const merged = root.getObjectByName('xr-button-walls') as THREE.Mesh;
+      paste.geometry.computeBoundingBox();
+      const face = paste.geometry.boundingBox as THREE.Box3;
+      paste.updateMatrix();
+      const toFace = paste.matrix.clone().invert();
+      const positions = merged.geometry.getAttribute('position');
+      const point = new THREE.Vector3();
+      const walls = new THREE.Box3();
+      const halfWidth = Number(paste.userData.labelWidth) / 2 + 1e-4;
+      const halfHeight = Number(paste.userData.labelHeight) / 2 + 1e-4;
+      for (let index = 0; index < positions.count; index += 1) {
+        point.fromBufferAttribute(positions, index).applyMatrix4(toFace);
+        if (Math.abs(point.x) <= halfWidth && Math.abs(point.y) <= halfHeight && point.z > -0.05)
+          walls.expandByPoint(point);
+      }
+      expect(face.max.z).toBeGreaterThan(0.005);
+      expect(walls.max.z).toBeGreaterThan(face.max.z - 0.003);
+      expect(walls.min.z).toBeLessThan(-0.025);
+    });
+
+    it('raises keyboard panel controls with depth and keeps ray hover and select', () => {
+      const { workspace } = setup('on');
+      connectController(0);
+      workspace.showInput('keyboard');
+      for (const data of [
+        { inputAction: 'close' },
+        { inputAction: 'keyboardBackground' },
+        { inputAction: 'gazeInput' },
+        { inputAction: 'keyboardCurvature', delta: 10 },
+        { inputAction: 'pasteClipboard' },
+      ]) {
+        const button = objectWithData(workspace, data) as THREE.Mesh;
+        expect(button.userData.raisedButton, JSON.stringify(data)).toBe(true);
+        expect(button.position.z).toBeGreaterThan(0.02);
+      }
+      expect(
+        objectWithData(workspace, { inputAction: 'key', key: 'a' }).userData.raisedButton,
+      ).toBe(undefined);
+      const root = workspace.scene.getObjectByName('xr-keyboard-controls') as THREE.Group;
+      const walls: THREE.Object3D[] = [];
+      root.traverse((object) => {
+        if (object.name === 'xr-button-walls') walls.push(object);
+      });
+      expect(walls).toHaveLength(1);
+      expect(walls[0].parent).toBe(root);
+      const raycast = new THREE.Raycaster(new THREE.Vector3(0, 0, 5), new THREE.Vector3(0, 0, -1));
+      expect(raycast.intersectObject(walls[0])).toEqual([]);
+      const close = objectWithData(workspace, { inputAction: 'close' }) as THREE.Mesh;
+      aimController(fakeXR.controllers[0] as THREE.Group, close);
+      workspace.scene.updateMatrixWorld(true);
+      fakeXR.frame?.(20);
+      expect((close.material as THREE.MeshBasicMaterial).color.getHex()).not.toBe(0xffffff);
+      expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeDefined();
+      const paste = objectWithData(workspace, { inputAction: 'pasteClipboard' });
+      const rest = paste.position.z;
+      hit(workspace, { inputAction: 'pasteClipboard' });
+      expect(paste.position.z).toBeLessThan(rest - 0.01);
+      fakeXR.frame?.(400);
+      expect(paste.position.z).toBeCloseTo(rest);
+      const disposeWalls = vi.spyOn((walls[0] as THREE.Mesh).geometry, 'dispose');
+      hit(workspace, { inputAction: 'close' });
+      expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+      expect(disposeWalls).toHaveBeenCalledOnce();
     });
 
     it('keeps poke modifier holds through rebuilds and cancels held contact when retargeting', () => {
@@ -4254,6 +4455,73 @@ describe('native XR controller event routing', () => {
       expect(cues()).toEqual(['select']);
       expect(play).toHaveBeenLastCalledWith('select', gamepad);
       hit(workspace, { inputAction: 'noop' });
+      expect(cues()).toEqual(['select']);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('clicks and pulses the left controller once per wrist watch touch press', () => {
+      const { workspace, container, play, cues } = feedbackFixture();
+      connectController(0, [0, 0, 0, 0], 'right');
+      const leftPad = connectController(1, [0, 0, 0, 0], 'left');
+      const left = fakeXR.controllers[1] as THREE.Group;
+      left.position.x = -0.5;
+      fakeXR.frame?.(20);
+      const face = objectWithData(workspace, { inputAction: 'wristMenu' });
+      const visual = objectWithData(workspace, { handedness: 'left' });
+      const touch = (distance: number, time: number): void => {
+        workspace.scene.updateMatrixWorld(true);
+        const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
+          face.getWorldQuaternion(new THREE.Quaternion()),
+        );
+        const point = face.getWorldPosition(new THREE.Vector3()).addScaledVector(normal, distance);
+        left.position.add(point.sub(visual.userData.indexTip as THREE.Vector3));
+        fakeXR.frame?.(time);
+      };
+      touch(0.2, 40);
+      touch(0.03, 60);
+      expect(cues()).toEqual([]);
+      expect(workspace.state.radialOpen).toBe(false);
+      touch(0, 80);
+      expect(workspace.state.radialOpen).toBe(true);
+      expect(play.mock.calls).toEqual([['select', leftPad]]);
+      touch(0, 100);
+      fakeXR.frame?.(400);
+      expect(cues()).toEqual(['select']);
+      play.mockClear();
+      workspace.setUISounds(false);
+      touch(0.2, 420);
+      touch(0, 440);
+      expect(workspace.state.radialOpen).toBe(false);
+      expect(play).not.toHaveBeenCalled();
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('stays silent when a quick second watch touch is debounced', () => {
+      const { workspace, container, cues } = feedbackFixture();
+      connectController(0, [0, 0, 0, 0], 'right');
+      connectController(1, [0, 0, 0, 0], 'left');
+      const left = fakeXR.controllers[1] as THREE.Group;
+      left.position.x = -0.5;
+      fakeXR.frame?.(20);
+      const face = objectWithData(workspace, { inputAction: 'wristMenu' });
+      const visual = objectWithData(workspace, { handedness: 'left' });
+      const touch = (distance: number, time: number): void => {
+        workspace.scene.updateMatrixWorld(true);
+        const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
+          face.getWorldQuaternion(new THREE.Quaternion()),
+        );
+        const point = face.getWorldPosition(new THREE.Vector3()).addScaledVector(normal, distance);
+        left.position.add(point.sub(visual.userData.indexTip as THREE.Vector3));
+        fakeXR.frame?.(time);
+      };
+      touch(0.2, 40);
+      touch(0, 60);
+      expect(workspace.state.radialOpen).toBe(true);
+      touch(0.2, 80);
+      touch(0, 100);
+      expect(workspace.state.radialOpen).toBe(true);
       expect(cues()).toEqual(['select']);
       workspace.dispose();
       container.remove();

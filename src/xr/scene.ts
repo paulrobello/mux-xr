@@ -70,7 +70,7 @@ import {
   type HierarchyNavigation,
   type HierarchyNavigator,
 } from './hierarchy-navigator';
-import { curveKeyboardContent } from './keyboard-surface';
+import { createRaisedButtonWalls, curveKeyboardContent } from './keyboard-surface';
 import {
   createKeyborbGlyphs,
   createKeyborbKey,
@@ -416,6 +416,29 @@ function createLabelButton(
   });
   Object.assign(mesh.userData, data, { helpText: getControlHelp(data) });
   return mesh;
+}
+
+// Keyboard-panel units; the panel spawns at 0.38 scale, so this is about 11 mm raised, 6 mm travel.
+const BUTTON_DEPTH = 0.03;
+const BUTTON_TRAVEL = 0.016;
+const BUTTON_PRESS_MS = 140;
+const BUTTON_RELEASE_MS = 80;
+const BUTTON_GAP = 0.002;
+const BUTTON_WALL_COLOR = 0x3a5363;
+
+function raisePanelButton(mesh: THREE.Mesh): void {
+  const width = Number(mesh.userData.labelWidth);
+  const height = Number(mesh.userData.labelHeight);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+  // Hand contact identifies keys the same way, so a press can find the button's rebuilt copy.
+  const { x, y } = mesh.position;
+  mesh.userData.pressKey = `${mesh.userData.inputAction}:${mesh.userData.commandId ?? ''}:${x.toFixed(4)}:${y.toFixed(4)}`;
+  mesh.position.z += BUTTON_DEPTH;
+  Object.assign(mesh.userData, {
+    raisedButton: true,
+    buttonDepth: BUTTON_DEPTH,
+    buttonGap: BUTTON_GAP,
+  });
 }
 
 type CommandTool = 'run' | 'pin' | 'edit' | 'remove';
@@ -1010,6 +1033,31 @@ export function createWorkspaceScene(
   const pressCue = (controller: THREE.Group, action: unknown, cues: number): void => {
     if (cueCount !== cues || (action === 'bringHere' && gripActive())) return;
     cue('select', controller);
+  };
+  // Raised panel buttons sink for a moment on a ray, trigger or fingertip press.
+  const pressedButtons = new Map<THREE.Object3D, { until: number; offset: number }>();
+  // Keyed by pressKey, so a press outlives the panel rebuild its own action triggers.
+  const pressUntil = new Map<string, number>();
+  const sinkPanelButton = (object: THREE.Object3D, until: number): void => {
+    object.translateZ((pressedButtons.get(object)?.offset ?? 0) - BUTTON_TRAVEL);
+    pressedButtons.set(object, { until, offset: BUTTON_TRAVEL });
+  };
+  const pressPanelButton = (object: THREE.Object3D | undefined): void => {
+    const key = object?.userData.pressKey as string | undefined;
+    if (!object || !key) return;
+    const until = (previousRenderTime ?? performance.now()) + BUTTON_PRESS_MS;
+    pressUntil.set(key, until);
+    const current = inputRoot?.children.includes(object)
+      ? object
+      : inputRoot?.children.find((child) => child.userData.pressKey === key);
+    if (current) sinkPanelButton(current, until);
+  };
+  const restorePanelPresses = (root: THREE.Group): void => {
+    const now = previousRenderTime ?? performance.now();
+    for (const child of root.children) {
+      const until = pressUntil.get(child.userData.pressKey as string);
+      if (until !== undefined && until > now) sinkPanelButton(child, until);
+    }
   };
   const focusButtonDown = new Set<THREE.Group>();
   const disconnectedControllers = new Set<THREE.Group>();
@@ -1982,6 +2030,16 @@ export function createWorkspaceScene(
         ? 1 / 60
         : THREE.MathUtils.clamp((time - previousRenderTime) / 1000, 0, 0.05);
     previousRenderTime = time;
+    for (const [object, press] of pressedButtons) {
+      const offset =
+        time < press.until
+          ? BUTTON_TRAVEL
+          : BUTTON_TRAVEL * Math.max(0, 1 - (time - press.until) / BUTTON_RELEASE_MS);
+      object.translateZ(press.offset - offset);
+      press.offset = offset;
+      if (!offset) pressedButtons.delete(object);
+    }
+    for (const [key, until] of pressUntil) if (time >= until) pressUntil.delete(key);
     if (mutableState.toast && time >= toastDeadline) showToast(null);
     paneFocus.update(deltaSeconds);
     radialMenu.update(radialDelta);
@@ -2077,7 +2135,8 @@ export function createWorkspaceScene(
         else if (!pinching && heldControllers.has(controller))
           handGrabActions.get(controller)?.release();
       }
-      if (watchPressed && leftController) toggleWristMenu(leftController, true);
+      if (watchPressed && leftController && toggleWristMenu(leftController, true))
+        cue('select', leftController);
     } else {
       for (const visual of handVisuals.values()) visual.hide();
       wristWatch.setVisible(false);
@@ -2105,7 +2164,7 @@ export function createWorkspaceScene(
         const sample = query.sample(
           visual.root.userData.indexTip as THREE.Vector3,
           visual.root.userData.palmPosition as THREE.Vector3,
-          contactKeyboard(),
+          keyboardSurface(),
           !gripActive(),
         );
         contactSamples.set(controller, sample);
@@ -2264,7 +2323,7 @@ export function createWorkspaceScene(
     for (const [controller, press] of pendingPokes) {
       if (
         gripActive() ||
-        !contactKeyboard() ||
+        !keyboardSurface() ||
         inputMode !== press.mode ||
         mutableState.inputTargetId !== press.target
       ) {
@@ -2289,6 +2348,7 @@ export function createWorkspaceScene(
         if (press.target) void pasteClipboard(press.target);
       } else activateTarget(target);
       pressCue(controller, press.object.userData.inputAction, cues);
+      pressPanelButton(press.object);
       lastSelectSource = null;
       beginModifierPress(controller, target, before);
       pokeSources.add(controller);
@@ -2550,7 +2610,7 @@ export function createWorkspaceScene(
         controller.updateMatrixWorld(true);
         const sample = contactSamples.get(controller);
         const nearOrb = keyborbInput.hovered(controller);
-        const nearKeyboard = Boolean(nearOrb || (sample?.nearKeyboard && contactKeyboard()));
+        const nearKeyboard = Boolean(nearOrb || (sample?.nearKeyboard && keyboardSurface()));
         const nearControl = nearOrb ?? sample?.hovered;
         const rayBlocked = controllerRayBlocked(controller);
         const target: InputTarget | null = nearKeyboard
@@ -3703,6 +3763,17 @@ export function createWorkspaceScene(
       }
       stackAboveControls(inputRoot, stacked);
     }
+    if (mode === 'keyboard' || mode === 'command-editor')
+      for (const child of inputRoot.children) {
+        const action = child.userData.inputAction;
+        if (
+          (child as THREE.Mesh).isMesh &&
+          action &&
+          !['noop', 'grabInput', 'key'].includes(action) &&
+          !child.userData.keyborb
+        )
+          raisePanelButton(child as THREE.Mesh);
+      }
     inputRoot.updateMatrixWorld(true);
     const bounds = new THREE.Box3();
     for (const child of inputRoot.children) {
@@ -3744,6 +3815,9 @@ export function createWorkspaceScene(
     backing.userData.helpText = getControlHelp({ inputAction: 'grabInput' });
     inputRoot.add(backing);
     if (keyboardRadians) curveKeyboardContent(inputRoot, size.x + 0.12, keyboardRadians);
+    const walls = createRaisedButtonWalls(inputRoot, BUTTON_WALL_COLOR);
+    if (walls) inputRoot.add(walls);
+    restorePanelPresses(inputRoot);
     scene.add(inputRoot);
     syncModifierVisuals();
   };
@@ -4536,7 +4610,10 @@ export function createWorkspaceScene(
       ? { ...modifierState.active }
       : undefined;
     activateTarget(target);
-    if (clicks) pressCue(controller, action, cues);
+    if (clicks) {
+      pressCue(controller, action, cues);
+      pressPanelButton(target?.object);
+    }
     beginModifierPress(controller, target);
     if (!startMouse(controller, target, 0, modifiers)) startTextSelection(controller, target);
     showHover(null);
@@ -5332,10 +5409,10 @@ export function createWorkspaceScene(
     mutableState.radialOpen = true;
     notify();
   };
-  const toggleWristMenu = (source: THREE.Group, fromTouch = false): void => {
-    if (controllerHandedness.get(source) !== 'left') return;
+  const toggleWristMenu = (source: THREE.Group, fromTouch = false): boolean => {
+    if (controllerHandedness.get(source) !== 'left') return false;
     const stamp = previousRenderTime ?? performance.now();
-    if (stamp - wristMenuLastPressed < 250) return;
+    if (stamp - wristMenuLastPressed < 250) return false;
     wristMenuLastPressed = stamp;
     if (!fromTouch) wristWatch.updateTouch(null);
     const owner =
@@ -5343,6 +5420,7 @@ export function createWorkspaceScene(
     const wasOpen = radialMenu.isOpen;
     toggleRadialMenu(owner);
     if (!wasOpen && radialMenu.isOpen) radialTargetId = mutableState.selectedTerminalId;
+    return true;
   };
   const getTerminalCurvature = (id: string): number => panels.get(id)?.curvature ?? 0;
   const setTerminalCurvature = (id: string, degrees: number, persist = true): void => {

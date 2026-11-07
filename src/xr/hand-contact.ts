@@ -94,7 +94,8 @@ export function createHandContact(): HandContact {
       if (!mesh.isMesh) continue;
       if (mesh.name === 'input-backdrop') bodies.push(mesh);
       const action = mesh.userData.inputAction;
-      if (!action || action === 'noop' || action === 'grabInput') continue;
+      // Keyborb orbs type by pinch only, so a fingertip can poke just the panel buttons.
+      if (!action || action === 'noop' || action === 'grabInput' || mesh.userData.keyborb) continue;
       ids.set(mesh, `${keyboard.name}:${mesh.position.x.toFixed(4)}:${mesh.position.y.toFixed(4)}`);
       keys.push(mesh);
     }
