@@ -62,6 +62,7 @@ import { keepLayoutAboveFloor, workspaceFloorY } from './floor-layout';
 import { createFrameCounter } from './fps';
 import { createHandContact, type HandContact, type HandContactSample } from './hand-contact';
 import { type HandInputState, updateHandInput } from './hand-input';
+import { type HandReel, rebaseHandReel, reelOffset, startHandReel } from './hand-reel';
 import {
   createHierarchyNavigator,
   type HierarchyNavigation,
@@ -686,6 +687,7 @@ export function createWorkspaceScene(
   const keyboardProximity = new Map<THREE.Group, HandContact>();
   const keyborbInput = createKeyborbInput();
   const keyborbFlashes = new Map<number, number>();
+  let keyborbHighlighted = false;
   const priorityHandActions = new Set([
     'wristMenu',
     'toggleRadial',
@@ -732,6 +734,9 @@ export function createWorkspaceScene(
       localOffset: THREE.Vector3;
       relativeRotation: THREE.Quaternion;
       gamepad?: Gamepad;
+      reel?: HandReel;
+      far: boolean;
+      shoulder: THREE.Vector3;
     }
   >();
   const pairGrabs = new Map<
@@ -755,19 +760,58 @@ export function createWorkspaceScene(
       : undefined;
     return joints?.wrist ?? controller;
   };
-  const captureGrab = (controller: THREE.Group, object: THREE.Group): void => {
+  const headPosition = (): THREE.Vector3 => {
+    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    view.updateWorldMatrix(true, false);
+    return view.getWorldPosition(new THREE.Vector3());
+  };
+  // Reach is the wrist's level distance from an estimated shoulder that follows the head's position
+  // with the head's grab-time heading, so walking carries the object and arm sweeps around the
+  // shoulder leave its depth alone.
+  const SHOULDER_SIDE = 0.18;
+  const SHOULDER_REANCHOR = THREE.MathUtils.degToRad(15);
+  const shoulderOffset = (controller: THREE.Group): THREE.Vector3 => {
+    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(
+      view.getWorldQuaternion(new THREE.Quaternion()),
+    );
+    right.y = 0;
+    if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+    const side = controllerHandedness.get(controller) === 'left' ? -1 : 1;
+    return right.normalize().multiplyScalar(side * SHOULDER_SIDE);
+  };
+  const handReach = (space: THREE.Object3D, shoulder: THREE.Vector3): number => {
+    const offset = space.getWorldPosition(new THREE.Vector3()).sub(headPosition()).sub(shoulder);
+    return Math.hypot(offset.x, offset.z);
+  };
+  // `far` marks a ray grab; contact grabs and re-captures of a contact grab never reel.
+  const captureGrab = (controller: THREE.Group, object: THREE.Group, far?: boolean): void => {
+    const previous = dragStates.get(controller);
+    const reach = far ?? (previous?.object === object && previous.far);
     const widgetKind = object.userData.widgetKind as WidgetKind | undefined;
     if (widgetKind) touchedWidgets.add(widgetKind);
     const space = manipulationSpace(controller);
     space.updateMatrixWorld(true);
     object.updateMatrixWorld(true);
     const rotation = space.getWorldQuaternion(new THREE.Quaternion());
+    const localOffset = object
+      .getWorldPosition(new THREE.Vector3())
+      .sub(space.getWorldPosition(new THREE.Vector3()))
+      .applyQuaternion(rotation.clone().invert());
+    const shoulder = shoulderOffset(controller);
+    const handReel = reach && activeHand(controller);
+    const reachNow = handReel ? handReach(space, shoulder) : 0;
     dragStates.set(controller, {
       object,
-      localOffset: object
-        .getWorldPosition(new THREE.Vector3())
-        .sub(space.getWorldPosition(new THREE.Vector3()))
-        .applyQuaternion(rotation.clone().invert()),
+      localOffset,
+      far: reach,
+      shoulder,
+      // A re-capture keeps reeling even after the object was reeled within the far-grab threshold.
+      reel: !handReel
+        ? undefined
+        : previous?.object === object && previous.reel
+          ? rebaseHandReel(reachNow, localOffset.length())
+          : startHandReel(reachNow, localOffset.length()),
       relativeRotation: rotation
         .clone()
         .invert()
@@ -977,8 +1021,14 @@ export function createWorkspaceScene(
     if (refresh && inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
       refreshInputRoot(inputMode);
   };
-  const resetHandContact = (source: THREE.Group, refresh = true, preserveNear = false): void => {
-    keyborbInput.reset(source);
+  const resetHandContact = (
+    source: THREE.Group,
+    refresh = true,
+    preserveNear = false,
+    keepHeldKeyborb = false,
+  ): void => {
+    // A held Keyborb key outlives a brief tracking gap; Keyborb input lets go after its grace.
+    if (!keepHeldKeyborb || !keyborbInput.holding(source)) keyborbInput.reset(source);
     keyboardProximity.get(source)?.reset();
     handContacts.get(source)?.reset(preserveNear);
     contactSamples.delete(source);
@@ -1369,7 +1419,7 @@ export function createWorkspaceScene(
     if (!gesture.tracked) {
       if (!handTrackingLost.has(root)) {
         handTrackingLost.add(root);
-        resetHandContact(root);
+        resetHandContact(root, true, false, true);
         contactGripArmed.delete(root);
         pendingPaste.delete(root);
         modifierPresses.delete(root);
@@ -1489,19 +1539,27 @@ export function createWorkspaceScene(
     if (pinch) pokeSources.add(controller);
     showHover(null);
   };
+  // A Keyborb pinch types when it opens, so the press ends with the commit.
+  const commitKeyborb = (controller: THREE.Group, key: THREE.Mesh): void => {
+    pressKeyborb(controller, key);
+    pokeSources.delete(controller);
+    modifierPresses.delete(controller);
+  };
+  // The keyboard Keyborb can type on now, shared by the per-frame sample and the native release.
+  const keyborbKeyboard = (): THREE.Group | null =>
+    renderer?.xr.isPresenting &&
+    mutableState.keyborbEnabled &&
+    inputRoot?.visible &&
+    (inputMode === 'keyboard' || inputMode === 'command-editor') &&
+    !radialMenu.root.visible &&
+    !warpEdit &&
+    !gripActive()
+      ? inputRoot
+      : null;
   const updateKeyborbInput = (deltaSeconds: number): void => {
     const mode = inputMode;
     const targetId = mutableState.inputTargetId;
-    const keyboard =
-      renderer?.xr.isPresenting &&
-      mutableState.keyborbEnabled &&
-      inputRoot?.visible &&
-      (inputMode === 'keyboard' || inputMode === 'command-editor') &&
-      !radialMenu.root.visible &&
-      !warpEdit &&
-      !gripActive()
-        ? inputRoot
-        : null;
+    const keyboard = keyborbKeyboard();
     keyborbInput.begin(keyboard);
     for (const controller of controllerRoots) {
       const hand = activeHand(controller);
@@ -1510,10 +1568,11 @@ export function createWorkspaceScene(
       const ray =
         keyboard && hand && !keyboardRaysBlocked ? targetFromController(controller) : null;
       const rayKey = ray?.object?.userData.keyborb ? (ray.object as THREE.Mesh) : null;
+      const tipsTracked = visual && (!hand || gesture?.tracked);
       const sample = keyborbInput.sample(
         controller,
-        visual ? (visual.root.userData.indexTip as THREE.Vector3) : null,
-        visual ? (visual.root.userData.thumbTip as THREE.Vector3) : null,
+        tipsTracked ? (visual.root.userData.indexTip as THREE.Vector3) : null,
+        tipsTracked ? (visual.root.userData.thumbTip as THREE.Vector3) : null,
         rayKey,
         Boolean(
           keyboard &&
@@ -1525,15 +1584,17 @@ export function createWorkspaceScene(
         visual?.root.userData.keyborbPoint as THREE.Vector3 | undefined,
       );
       if (sample.released && pokeSources.delete(controller)) modifierPresses.delete(controller);
+      const key = sample.pressed?.userData.modifier ? sample.pressed : sample.committed;
       if (
-        !sample.pressed ||
+        !key ||
         !keyboard ||
         !inputRoot ||
         inputMode !== mode ||
         mutableState.inputTargetId !== targetId
       )
         continue;
-      pressKeyborb(controller, sample.pressed);
+      if (key === sample.pressed) pressKeyborb(controller, key);
+      else commitKeyborb(controller, key);
     }
     keyborbInput.animate(deltaSeconds);
   };
@@ -1692,7 +1753,7 @@ export function createWorkspaceScene(
         const visual = contactVisual(controller);
         const query = handContacts.get(controller);
         if (!visual || !query) {
-          resetHandContact(controller);
+          resetHandContact(controller, true, false, handTrackingLost.has(controller));
           if (
             !controller.visible ||
             disconnectedControllers.has(controller) ||
@@ -1943,6 +2004,23 @@ export function createWorkspaceScene(
             );
         }
       }
+      if (drag.reel && activeHand(controller)) {
+        // Turning carries the shoulder around with the head; re-anchor it in steps too small to
+        // pass the dead zone, rebasing so the held object stays put.
+        const shoulder = shoulderOffset(controller);
+        if (shoulder.angleTo(drag.shoulder) > SHOULDER_REANCHOR) {
+          const rebased = rebaseHandReel(handReach(space, shoulder), drag.localOffset.length());
+          if (rebased) {
+            drag.shoulder = shoulder;
+            drag.reel = rebased;
+          }
+        }
+        const length = drag.localOffset.length();
+        const wanted = reelOffset(drag.reel, handReach(space, drag.shoulder));
+        drag.localOffset.setLength(
+          THREE.MathUtils.lerp(length, wanted, 1 - Math.exp(-12 * Math.max(0, deltaSeconds))),
+        );
+      }
       const finalPosition = controllerPosition
         .clone()
         .add(drag.localOffset.clone().applyQuaternion(controllerQuaternion));
@@ -2040,6 +2118,7 @@ export function createWorkspaceScene(
         inputMode !== 'command-editor' &&
         dragStates.size === 0 &&
         pokeSources.size === 0 &&
+        keyborbInput.held().size === 0 &&
         mouseCaptures.size === 0 &&
         textSelection?.phase !== 'dragging' &&
         textSelection?.phase !== 'copying'
@@ -2149,16 +2228,19 @@ export function createWorkspaceScene(
     if (updateNotice)
       updateNotice.visible = mutableState.updateAvailable && Boolean(renderer?.xr.isPresenting);
     updateHoverPosition();
-    if (keyborbFlashes.size && inputRoot) {
+    const heldKeyborbs = keyborbInput.held();
+    if ((keyborbFlashes.size || heldKeyborbs.size || keyborbHighlighted) && inputRoot) {
       for (const child of inputRoot.children) {
         const slot = child.userData.keyborbSlot as number | undefined;
         if (slot === undefined) continue;
         const expires = keyborbFlashes.get(slot);
-        if (expires === undefined) continue;
-        setKeyborbPressed(child as THREE.Mesh, THREE.MathUtils.clamp((expires - time) / 90, 0, 1));
-        if (expires <= time) keyborbFlashes.delete(slot);
+        const flash =
+          expires === undefined ? 0 : THREE.MathUtils.clamp((expires - time) / 90, 0, 1);
+        setKeyborbPressed(child as THREE.Mesh, heldKeyborbs.has(child as THREE.Mesh) ? 1 : flash);
+        if (expires !== undefined && expires <= time) keyborbFlashes.delete(slot);
       }
     }
+    keyborbHighlighted = heldKeyborbs.size > 0;
     observatory.rotation.y = time * 0.00001;
     for (const panel of panels.values()) panel.surface.flush?.();
     renderer?.render(scene, camera);
@@ -3843,7 +3925,8 @@ export function createWorkspaceScene(
               root,
               target?.object?.userData.keyborb ? (target.object as THREE.Mesh) : null,
             );
-            if (key) pressKeyborb(root, key);
+            if (key?.userData.modifier) pressKeyborb(root, key);
+            else if (key) showHover(null);
             return;
           }
         }
@@ -3865,11 +3948,15 @@ export function createWorkspaceScene(
         onControllerSelect(root);
       };
       const onSelectEnd = (): void => {
-        if (activeHand(root) && !sampleHand(root)?.tracked) return;
+        const lost = Boolean(activeHand(root) && !sampleHand(root)?.tracked);
+        // The headset can report the release during a tracking gap while Keyborb still holds the key.
         if (keyborbInput.nativeRelease(root)) {
+          const key = keyborbInput.commit(root);
+          if (key && keyborbKeyboard()) commitKeyborb(root, key);
           pokeSources.delete(root);
           modifierPresses.delete(root);
         }
+        if (lost) return;
         pendingPaste.delete(root);
         if (!pokeSources.has(root)) modifierPresses.delete(root);
         if (mouseCaptures.has(root) && !gripActive()) {
@@ -3953,7 +4040,7 @@ export function createWorkspaceScene(
           const gamepad = (event as Event & { data?: { gamepad?: Gamepad } }).data?.gamepad;
           if (gamepad) controllerGamepads.set(root, gamepad);
         }
-        captureGrab(root, object);
+        captureGrab(root, object, !contactObject && Boolean(target?.object));
         if (other) {
           captureGrab(other, object);
           beginPairGrab(object, other, root);

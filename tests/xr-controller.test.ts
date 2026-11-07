@@ -433,15 +433,21 @@ describe('native XR controller event routing', () => {
       hand.joints['index-finger-tip'].position.copy(point).add(new THREE.Vector3(0.02, 0, 0));
       hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(-0.02, 0, 0));
       fakeXR.frame?.(90);
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      expect(
+        (orb as THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>).material.uniforms.pressed
+          .value,
+      ).toBe(1);
+      hand.joints['index-finger-tip'].position.copy(point).add(new THREE.Vector3(0.04, 0, 0));
+      hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(-0.04, 0, 0));
+      for (let frame = 0; frame < 4; frame++) fakeXR.frame?.(100 + frame * 16);
       expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
       const rebuiltOrb = objectWithData(workspace, { inputAction: 'key', key: 'a' }) as THREE.Mesh<
         THREE.SphereGeometry,
         THREE.ShaderMaterial
       >;
-      expect(rebuiltOrb).not.toBe(orb);
-      expect(rebuiltOrb.material.uniforms.pressed.value).toBe(1);
-      hit(workspace, { key: 'a' });
-      for (let frame = 0; frame < 20; frame++) fakeXR.frame?.(100 + frame * 16);
+      expect(rebuiltOrb.material.uniforms.pressed.value).toBeGreaterThan(0);
+      for (let frame = 0; frame < 20; frame++) fakeXR.frame?.(170 + frame * 16);
       expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
       hand.joints['index-finger-tip'].position.x += 0.08;
       fakeXR.frame?.(500);
@@ -481,6 +487,10 @@ describe('native XR controller event routing', () => {
       hand.joints['index-finger-tip'].position.copy(rawPoint).add(new THREE.Vector3(0.02, 0, 0));
       hand.joints['thumb-tip'].position.copy(rawPoint).add(new THREE.Vector3(-0.02, 0, 0));
       fakeXR.frame?.(40);
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      hand.joints['index-finger-tip'].position.copy(rawPoint).add(new THREE.Vector3(0.04, 0, 0));
+      hand.joints['thumb-tip'].position.copy(rawPoint).add(new THREE.Vector3(-0.04, 0, 0));
+      for (let frame = 0; frame < 4; frame++) fakeXR.frame?.(60 + frame * 20);
       expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('b', undefined);
     });
 
@@ -519,15 +529,99 @@ describe('native XR controller event routing', () => {
       fakeXR.frame?.(40);
       expect(actions.sendKey).not.toHaveBeenCalled();
       hit(workspace, { inputAction: 'key', key: 'a' });
-      expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
+      expect(actions.sendKey).not.toHaveBeenCalled();
       hit(workspace, { inputAction: 'key', key: 'a' });
       fakeXR.frame?.(60);
-      expect(actions.sendKey).toHaveBeenCalledTimes(1);
+      expect(actions.sendKey).not.toHaveBeenCalled();
       nativeEvent(0, 'selectend');
+      expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
       hit(workspace, { inputAction: 'key', key: 'a' });
       fakeXR.frame?.(80);
-      expect(actions.sendKey).toHaveBeenCalledTimes(1);
       nativeEvent(0, 'selectend');
+      expect(actions.sendKey).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not type a native Keyborb release while the other hand grabs a window', () => {
+      const { workspace, actions } = setup('on');
+      workspace.showInput('keyboard');
+      const hand = connectHand();
+      const point = objectWithData(workspace, { inputAction: 'key', key: 'a' }).getWorldPosition(
+        new THREE.Vector3(),
+      );
+      hand.joints['index-finger-tip'].position.copy(point);
+      hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(-0.07, 0, 0));
+      fakeXR.frame?.(20);
+      hit(workspace, { inputAction: 'key', key: 'a' });
+      const other = fakeXR.controllers[1] as THREE.Group;
+      aimController(other, objectWithData(workspace, { terminalId: 'pane-b' }));
+      other.dispatchEvent({ type: 'squeezestart' } as never);
+      nativeEvent(0, 'selectend');
+      expect(actions.sendKey).not.toHaveBeenCalled();
+    });
+
+    const holdKeyborbA = (workspace: ReturnType<typeof createWorkspaceScene>, hand: Hand) => {
+      const orb = objectWithData(workspace, { inputAction: 'key', key: 'a' });
+      const point = orb.getWorldPosition(new THREE.Vector3());
+      const spread = (gap: number): void => {
+        hand.joints['index-finger-tip'].position.copy(point).add(new THREE.Vector3(gap, 0, 0));
+        hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(-gap, 0, 0));
+      };
+      spread(0.04);
+      fakeXR.frame?.(80);
+      spread(0.02);
+      fakeXR.frame?.(90);
+      expect(
+        (orb as THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>).material.uniforms.pressed
+          .value,
+      ).toBe(1);
+      return spread;
+    };
+
+    it.each(['thumb-tip', 'index-finger-tip', 'wrist', 'middle-finger-tip'])(
+      'keeps a held Keyborb key through a brief %s tracking dropout',
+      (joint) => {
+        const { workspace, actions } = setup('auto');
+        workspace.showInput('keyboard');
+        const hand = connectHand();
+        const spread = holdKeyborbA(workspace, hand);
+        hand.joints[joint].visible = false;
+        fakeXR.frame?.(106);
+        fakeXR.frame?.(122);
+        hand.joints[joint].visible = true;
+        fakeXR.frame?.(138);
+        expect(actions.sendKey).not.toHaveBeenCalled();
+        spread(0.04);
+        for (let frame = 0; frame < 6; frame++) fakeXR.frame?.(160 + frame * 16);
+        expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
+      },
+    );
+
+    it('types a held Keyborb key when the native release lands in a tracking gap', () => {
+      const { workspace, actions } = setup('auto');
+      workspace.showInput('keyboard');
+      const hand = connectHand();
+      holdKeyborbA(workspace, hand);
+      hit(workspace, { inputAction: 'key', key: 'a' });
+      hand.joints['thumb-tip'].visible = false;
+      fakeXR.frame?.(106);
+      nativeEvent(0, 'selectend');
+      expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('a', undefined);
+      hand.joints['thumb-tip'].visible = true;
+      for (let frame = 0; frame < 6; frame++) fakeXR.frame?.(122 + frame * 16);
+      expect(actions.sendKey).toHaveBeenCalledOnce();
+    });
+
+    it('drops a held Keyborb key when tracking stays lost past the grace', () => {
+      const { workspace, actions } = setup('auto');
+      workspace.showInput('keyboard');
+      const hand = connectHand();
+      const spread = holdKeyborbA(workspace, hand);
+      hand.joints['thumb-tip'].visible = false;
+      for (let frame = 0; frame < 12; frame++) fakeXR.frame?.(106 + frame * 16);
+      hand.joints['thumb-tip'].visible = true;
+      spread(0.04);
+      for (let frame = 0; frame < 6; frame++) fakeXR.frame?.(320 + frame * 16);
+      expect(actions.sendKey).not.toHaveBeenCalled();
     });
 
     it.each(['off', 'on'] as const)(
@@ -594,12 +688,15 @@ describe('native XR controller event routing', () => {
       pose('Shift', 0.08, 900);
       pose('Shift', 0.08, 910);
       pose('b', 0.04, 930);
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      for (let frame = 0; frame < 3; frame++) pose('b', 0.08, 950 + frame * 20);
       expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('b', { shift: true });
+      pose('b', 0.04, 1020);
       workspace.selectTerminal('pane-b');
-      fakeXR.frame?.(940);
+      for (let frame = 0; frame < 3; frame++) pose('b', 0.08, 1040 + frame * 20);
       expect(actions.sendKey).toHaveBeenCalledTimes(1);
-      pose('b', 0.08, 960);
-      pose('b', 0.04, 980);
+      pose('b', 0.04, 1120);
+      for (let frame = 0; frame < 3; frame++) pose('b', 0.08, 1140 + frame * 20);
       expect(actions.sendKey).toHaveBeenLastCalledWith('b', undefined);
       expect(actions.sendKey).toHaveBeenCalledTimes(2);
       expect(workspace.state.inputTargetId).toBe('pane-b');
@@ -631,11 +728,14 @@ describe('native XR controller event routing', () => {
       fakeXR.frame?.(100);
       pose(0.04);
       fakeXR.frame?.(120);
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      pose(0.08);
+      for (let frame = 0; frame < 4; frame++) fakeXR.frame?.(140 + frame * 20);
       expect(vi.mocked(actions.sendKey).mock.calls).toEqual([
         ['a', undefined],
         ['b', undefined],
       ]);
-      fakeXR.frame?.(140);
+      fakeXR.frame?.(240);
       expect(actions.sendKey).toHaveBeenCalledTimes(2);
     });
 
@@ -791,6 +891,139 @@ describe('native XR controller event routing', () => {
         expect(actions.sendKey).not.toHaveBeenCalled();
       },
     );
+
+    it('reels a far hand-grabbed window in as the wrist pulls toward the head', () => {
+      const { workspace } = setup();
+      const hand = connectHand();
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      const panel = objectWithData(workspace, { terminalId: 'pane-a' }) as THREE.Group;
+      const head = (fakeXR.camera as THREE.Object3D).getWorldPosition(new THREE.Vector3());
+      const wrist = head.clone().add(new THREE.Vector3(0.1, -0.3, -0.45));
+      const shift = wrist.clone().sub(hand.joints.wrist.position);
+      for (const joint of Object.values(hand.joints)) joint.position.add(shift);
+      aimController(controller, panel, 2);
+      fakeXR.frame?.(10);
+      const before = panel.getWorldPosition(new THREE.Vector3()).distanceTo(head);
+      pinch(hand, true);
+      fakeXR.frame?.(20);
+      const pull = head.clone().sub(wrist).multiplyScalar(0.5);
+      for (const joint of Object.values(hand.joints)) joint.position.add(pull);
+      for (let frame = 0; frame < 40; frame++) fakeXR.frame?.(40 + frame * 16);
+      const after = panel.getWorldPosition(new THREE.Vector3()).distanceTo(head);
+      expect(after).toBeLessThan(before * 0.65);
+      pinch(hand, false);
+      fakeXR.frame?.(800);
+    });
+
+    const farHandGrab = (workspace: ReturnType<typeof createWorkspaceScene>) => {
+      const hand = connectHand();
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      const panel = objectWithData(workspace, { terminalId: 'pane-a' }) as THREE.Group;
+      const camera = fakeXR.camera as THREE.Object3D;
+      const head = camera.getWorldPosition(new THREE.Vector3());
+      const wrist = head.clone().add(new THREE.Vector3(0.1, -0.3, -0.45));
+      const shift = wrist.clone().sub(hand.joints.wrist.position);
+      for (const joint of Object.values(hand.joints)) joint.position.add(shift);
+      aimController(controller, panel, 2);
+      fakeXR.frame?.(10);
+      const before = panel.getWorldPosition(new THREE.Vector3()).distanceTo(head);
+      pinch(hand, true);
+      fakeXR.frame?.(20);
+      return { hand, controller, panel, camera, head, wrist, before };
+    };
+
+    it('carries a far hand-grabbed window at its distance while walking', () => {
+      const { workspace } = setup();
+      const { hand, controller, panel, camera, before } = farHandGrab(workspace);
+      const start = camera.position.clone();
+      cleanups.push(() => {
+        camera.position.copy(start);
+        camera.updateMatrixWorld(true);
+      });
+      const step = new THREE.Vector3(0, 0, -0.6);
+      for (const joint of Object.values(hand.joints)) joint.position.add(step);
+      controller.position.add(step);
+      camera.position.add(step);
+      camera.updateMatrixWorld(true);
+      for (let frame = 0; frame < 40; frame++) fakeXR.frame?.(40 + frame * 16);
+      const head = camera.getWorldPosition(new THREE.Vector3());
+      const after = panel.getWorldPosition(new THREE.Vector3()).distanceTo(head);
+      expect(Math.abs(after - before)).toBeLessThan(before * 0.03);
+      pinch(hand, false);
+      fakeXR.frame?.(800);
+    });
+
+    it.each([90, -90])(
+      'keeps a far hand-grabbed window distance through a %i degree body turn',
+      (degrees) => {
+        const { workspace } = setup();
+        const { hand, controller, panel, camera, head, before } = farHandGrab(workspace);
+        const start = camera.quaternion.clone();
+        cleanups.push(() => {
+          camera.quaternion.copy(start);
+          camera.updateMatrixWorld(true);
+        });
+        const axis = new THREE.Vector3(0, 1, 0);
+        const step = THREE.MathUtils.degToRad(degrees / 9);
+        const yaw = new THREE.Quaternion().setFromAxisAngle(axis, step);
+        for (let turn = 0; turn < 9; turn++) {
+          for (const object of [...Object.values(hand.joints), controller]) {
+            object.position.sub(head).applyAxisAngle(axis, step).add(head);
+            object.quaternion.premultiply(yaw);
+          }
+          camera.quaternion.premultiply(yaw);
+          camera.updateMatrixWorld(true);
+          for (let frame = 0; frame < 4; frame++) fakeXR.frame?.(40 + turn * 64 + frame * 16);
+        }
+        for (let frame = 0; frame < 30; frame++) fakeXR.frame?.(700 + frame * 16);
+        const after = panel.getWorldPosition(new THREE.Vector3()).distanceTo(head);
+        expect(Math.abs(after - before)).toBeLessThan(before * 0.03);
+        pinch(hand, false);
+        fakeXR.frame?.(1300);
+      },
+    );
+
+    it('keeps a far hand-grabbed window depth through a sideways arm sweep', () => {
+      const { workspace } = setup();
+      const { hand, panel, head, wrist } = farHandGrab(workspace);
+      const offset = panel.getWorldPosition(new THREE.Vector3()).sub(wrist).length();
+      // Sweep the wrist 25 degrees across the body around a shoulder beside the head.
+      const shoulder = head.clone().add(new THREE.Vector3(0.18, -0.25, 0));
+      const arm = wrist.clone().sub(shoulder);
+      const swept = shoulder
+        .clone()
+        .add(arm.applyAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(25)));
+      const move = swept.sub(wrist);
+      for (const joint of Object.values(hand.joints)) joint.position.add(move);
+      for (let frame = 0; frame < 40; frame++) fakeXR.frame?.(40 + frame * 16);
+      const now = panel.getWorldPosition(new THREE.Vector3()).sub(hand.joints.wrist.position);
+      expect(Math.abs(now.length() - offset)).toBeLessThan(offset * 0.05);
+      pinch(hand, false);
+      fakeXR.frame?.(800);
+    });
+
+    it('moves a contact-grabbed panel edge 1:1 without reeling it', () => {
+      const { workspace } = setup();
+      const hand = connectHand(0);
+      const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+      const point = panel.getWorldPosition(new THREE.Vector3());
+      // The left edge, over half a metre from the panel origin; the right edge meets pane-b.
+      const wrist = point.clone().add(new THREE.Vector3(-0.6, -0.047, 0.02));
+      const movement = wrist.clone().sub(hand.joints.wrist.position);
+      for (const joint of Object.values(hand.joints)) joint.position.add(movement);
+      (fakeXR.controllers[0] as THREE.Group).position.set(5, 5, 0);
+      fakeXR.frame?.(20);
+      pinch(hand, true);
+      fakeXR.frame?.(40);
+      const before = panel.position.clone();
+      const head = (fakeXR.camera as THREE.Object3D).getWorldPosition(new THREE.Vector3());
+      const pull = head.sub(hand.joints.wrist.position).setY(0).normalize().multiplyScalar(0.25);
+      for (const joint of Object.values(hand.joints)) joint.position.add(pull);
+      for (let frame = 0; frame < 20; frame++) fakeXR.frame?.(60 + frame * 16);
+      expect(panel.position.clone().sub(before).distanceTo(pull)).toBeLessThan(1e-5);
+      pinch(hand, false);
+      fakeXR.frame?.(600);
+    });
 
     it('contact-grabs with both hands and rebases when one loses tracking', () => {
       const { workspace, actions } = setup();
@@ -964,7 +1197,8 @@ describe('native XR controller event routing', () => {
       const before = panel.position.clone();
       hand.joints.wrist.position.x += 0.2;
       fakeXR.frame?.(40);
-      expect(panel.position.x - before.x).toBeCloseTo(0.2);
+      // A straight world-X sweep also lengthens the reach a little, so the far grab reels slightly.
+      expect(Math.abs(panel.position.x - before.x - 0.2)).toBeLessThan(0.02);
       expect(actions.sendKey).not.toHaveBeenCalled();
       pinch(hand, false);
       fakeXR.frame?.(60);

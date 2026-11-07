@@ -259,6 +259,127 @@ describe('Keyborb fingertip interaction', () => {
     expect(input.sample(source, index, thumb, keys[0], true).pressed).toBeNull();
   });
 
+  it('follows the hand across a production-scale row while the fingers rest curled', () => {
+    const root = new THREE.Group();
+    root.scale.setScalar(0.38);
+    const keys = [0, 1, 2, 3, 4].map((slot) => {
+      const key = new THREE.Mesh(new THREE.SphereGeometry(0.0525));
+      key.position.x = slot * 0.13;
+      Object.assign(key.userData, { keyborb: true, keyborbSlot: slot, labelWidth: 0.105 });
+      root.add(key);
+      return key;
+    });
+    const source = new THREE.Group();
+    const input = createKeyborbInput();
+    input.begin(root);
+    const target = new THREE.Vector3();
+    for (const [slot, key] of keys.entries()) {
+      target.set(slot * 0.13 * 0.38, 0, 0.03);
+      const index = target.clone().add(new THREE.Vector3(0.015, 0, 0));
+      const thumb = target.clone().add(new THREE.Vector3(-0.015, 0, 0));
+      expect(input.sample(source, index, thumb, null, true, 1 / 60, target).hovered).toBe(key);
+    }
+  });
+
+  it('highlights the orb when the pinch closes and types it only when the pinch opens', () => {
+    const { keys, source, input } = fixture();
+    const index = new THREE.Vector3(0.04, 0, 0.06);
+    const thumb = new THREE.Vector3(-0.04, 0, 0.06);
+    input.sample(source, index, thumb, null, true);
+    index.x = 0.02;
+    thumb.x = -0.02;
+    const closed = input.sample(source, index, thumb, null, true);
+    expect(closed.pressed).toBe(keys[0]);
+    expect(closed.committed).toBeNull();
+    expect(input.held().has(keys[0])).toBe(true);
+    for (let frame = 0; frame < 10; frame++)
+      expect(input.sample(source, index, thumb, null, true).committed).toBeNull();
+    index.x = 0.04;
+    thumb.x = -0.04;
+    const committed: (THREE.Mesh | null)[] = [];
+    for (let frame = 0; frame < 4; frame++)
+      committed.push(input.sample(source, index, thumb, null, true).committed);
+    expect(committed.filter(Boolean)).toEqual([keys[0]]);
+    expect(input.held().size).toBe(0);
+  });
+
+  it('types a native pinch once on release and drops a held key when tracking is lost', () => {
+    const { keys, source, input } = fixture();
+    const index = new THREE.Vector3(0, 0, 0.06);
+    const thumb = new THREE.Vector3(-0.08, 0, 0.06);
+    input.sample(source, index, thumb, null, true);
+    expect(input.nativePress(source, null)).toBe(keys[0]);
+    thumb.x = -0.02;
+    expect(input.sample(source, index, thumb, null, true).committed).toBeNull();
+    expect(input.nativeRelease(source)).toBe(true);
+    expect(input.commit(source)).toBe(keys[0]);
+    thumb.x = -0.08;
+    for (let frame = 0; frame < 4; frame++)
+      expect(input.sample(source, index, thumb, null, true).committed).toBeNull();
+    thumb.x = -0.02;
+    expect(input.sample(source, index, thumb, null, true).pressed).toBe(keys[0]);
+    for (let frame = 0; frame < 8; frame++)
+      expect(input.sample(source, null, null, null, true).committed).toBeNull();
+    expect(input.held().size).toBe(0);
+    expect(input.commit(source)).toBeNull();
+  });
+
+  it('keeps a held key through a brief tracking gap and types it on release', () => {
+    const { keys, source, input } = fixture();
+    const index = new THREE.Vector3(0.04, 0, 0.06);
+    const thumb = new THREE.Vector3(-0.04, 0, 0.06);
+    input.sample(source, index, thumb, null, true);
+    index.x = 0.02;
+    thumb.x = -0.02;
+    expect(input.sample(source, index, thumb, null, true).pressed).toBe(keys[0]);
+    for (let frame = 0; frame < 3; frame++) input.sample(source, null, null, null, true);
+    index.x = 0.04;
+    thumb.x = -0.04;
+    const committed: (THREE.Mesh | null)[] = [];
+    for (let frame = 0; frame < 4; frame++)
+      committed.push(input.sample(source, index, thumb, null, true).committed);
+    expect(committed.filter(Boolean)).toEqual([keys[0]]);
+  });
+
+  it('lets go of the key a relaxed hand curled over once it hovers another orb', () => {
+    const root = new THREE.Group();
+    root.scale.setScalar(0.38);
+    const keys = [0, 1, 2, 3].map((slot) => {
+      const key = new THREE.Mesh(new THREE.SphereGeometry(0.0525));
+      key.position.x = slot * 0.13;
+      Object.assign(key.userData, { keyborb: true, keyborbSlot: slot, labelWidth: 0.105 });
+      root.add(key);
+      return key;
+    });
+    const source = new THREE.Group();
+    const input = createKeyborbInput();
+    input.begin(root);
+    const at = (slot: number, gap: number) => {
+      const target = new THREE.Vector3(slot * 0.13 * 0.38, 0, 0.03);
+      return input.sample(
+        source,
+        target.clone().add(new THREE.Vector3(gap / 2, 0, 0)),
+        target.clone().add(new THREE.Vector3(-gap / 2, 0, 0)),
+        null,
+        true,
+        1 / 60,
+        target,
+      );
+    };
+    at(0, 0.06);
+    expect(at(0, 0.04).pressed).toBe(keys[0]);
+    for (const slot of [1, 2, 3]) expect(at(slot, 0.04).hovered).toBe(keys[slot]);
+    expect(input.held().size).toBe(0);
+    expect(input.nativePress(source, null)).toBe(keys[3]);
+    expect(input.nativeRelease(source)).toBe(true);
+    expect(input.commit(source)).toBe(keys[3]);
+    at(3, 0.04);
+    at(3, 0.06);
+    at(3, 0.06);
+    at(3, 0.06);
+    expect(input.commit(source)).toBeNull();
+  });
+
   it('tracks the closest orb independently for both hands and preserves the other hand on reset', () => {
     const { keys, source, input } = fixture();
     const other = new THREE.Group();

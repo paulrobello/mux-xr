@@ -636,11 +636,12 @@ async function main(): Promise<void> {
       Number(report.pinchFlash) > 0 &&
       persisted.join(',') === 'off,on,auto' &&
       report.contactInputs === 0 &&
-      JSON.stringify(report.pinchInputs) === JSON.stringify(['a']) &&
+      // A held pinch only highlights; the native release types it, and a raw opening types the next.
+      JSON.stringify(report.pinchInputs) === JSON.stringify([]) &&
       JSON.stringify(report.nativePinchInputs) === JSON.stringify(['a']) &&
       JSON.stringify(report.nativeRepeatInputs) === JSON.stringify([]) &&
       JSON.stringify(report.briefInputs) === JSON.stringify([]) &&
-      JSON.stringify(report.deliberateInputs) === JSON.stringify(['a']) &&
+      JSON.stringify(report.deliberateInputs) === JSON.stringify([]) &&
       JSON.stringify(report.releasedInputs) === JSON.stringify(['a', 'a']) &&
       JSON.stringify(report.recoveryBeforeNative) === JSON.stringify([]) &&
       JSON.stringify(report.recoveryAfterNative) === JSON.stringify(['a']) &&
