@@ -19,6 +19,10 @@ Updated November 5, 2026, after the approximately 9:00 PM PST Quest recording. P
     - **Sharp folds over 75°** (`fold_metric.py`, same region as v5, same tracked bake), max/p90:
       - Closed slide: right 20/19 and left 19/18, against v5's 17/15 and 18/16.
       - Thumb rest: right 20/18 and left 20/17, against v5's 5/4 and 2/1.
+    - **Web fix, after Paul's frame-167 report.** Tilting the thumb up had narrowed the thumb–index web into a V (sharpest rest edge 54°, v5 20°), so the web slit at thumb rest.
+      - **Change.** The web floor is relaxed into a U (80 passes over a 10–28 mm radius, sharpest edge now 25°). The big-knuckle crossfade is moved 12 mm outward on the web side, so the web follows the metacarpal.
+      - **Web census** (edges over 60°, `web_metric.py`): 20–25 down to 11–13 in every clip.
+      - **Thumb-region folds:** closed slide is now right 15/13 and left 14/13; thumb rest is right 16/14 and left 11/10.
     - **Not changed yet.** The GLB and the runtime still use the old chain, so do not export. The one-to-one runtime mapping is the next step.
   - **Neutral overlay** (slide frame 26). The tracked thumb MCP sits at x = 40 mm and points palmar, at 45°. The mesh thumb sits at x = 71 mm and lies flat sideways in the palm plane.
   - **Reach and knuckles.** The thumb tip reaches 137 mm from the wrist when tracked and 158 mm on the mesh. The tracked knuckles sit at z = 112 mm, and the mesh knuckles at 126–136 mm.
