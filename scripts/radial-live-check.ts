@@ -185,7 +185,7 @@ async function main(): Promise<void> {
   const errors: string[] = [];
   const commandFrames: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.routeWebSocket(/.*/, (socket: WebSocketRoute) => {
+  await page.routeWebSocket('**/ws**', (socket: WebSocketRoute) => {
     const id =
       new URL(socket.url()).searchParams.get('session')?.replace(/^pane-/, '%') ?? 'metadata';
     socket.onMessage((raw) => {

@@ -110,7 +110,7 @@ const context = await browser.newContext({
 const page = await context.newPage();
 const errors: string[] = [];
 page.on('pageerror', (error) => errors.push(error.message));
-await page.routeWebSocket(/.*/, (socket) => {
+await page.routeWebSocket('**/ws**', (socket) => {
   const id = new URL(socket.url()).searchParams.get('session')?.replace('pane-', '%');
   socket.onMessage((raw) => {
     const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), 'binary');
@@ -461,7 +461,7 @@ try {
     gripSafe: true,
     tuiMousePreserved: true,
     errors,
-    traffic: 'all WebSockets intercepted',
+    traffic: 'all app /ws WebSockets intercepted',
   };
   await writeFile(join(root, 'clipboard-result.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));

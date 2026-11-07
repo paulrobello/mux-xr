@@ -270,18 +270,16 @@ async function main(): Promise<void> {
         data: { gamepad: pad, handedness: 'right' },
       } as never);
     });
-    await face(4, true);
-    await face(4, false);
+    await openRadial(page, 'keyboard');
     const keyboardPose = await page.evaluate(() => {
       const keyboard = (window as unknown as FixtureWindow).__questScene.getObjectByName(
         'xr-keyboard-controls',
       );
-      if (!keyboard) throw new Error('A did not open keyboard');
+      if (!keyboard) throw new Error('Radial Keyboard did not open keyboard');
       keyboard.position.x += 0.07;
       return keyboard.position.toArray();
     });
-    await face(4, true);
-    await face(4, false);
+    await openRadial(page, 'keyboard');
     assert(
       await page.evaluate(
         () =>
@@ -289,16 +287,18 @@ async function main(): Promise<void> {
             'xr-keyboard-controls',
           ),
       ),
-      'A did not hide keyboard',
+      'Radial Keyboard did not hide keyboard',
     );
-    await face(4, true);
-    await face(4, false);
+    await openRadial(page, 'keyboard');
     const reopened = await page.evaluate(() =>
       (window as unknown as FixtureWindow).__questScene
         .getObjectByName('xr-keyboard-controls')
         ?.position.toArray(),
     );
-    assert(JSON.stringify(reopened) === JSON.stringify(keyboardPose), 'A lost keyboard pose');
+    assert(
+      JSON.stringify(reopened) === JSON.stringify(keyboardPose),
+      'Radial Keyboard lost keyboard pose',
+    );
     const geometry = await page.evaluate(() => {
       const w = window as unknown as FixtureWindow;
       const keys: Record<string, { x: number; y: number }> = {};
