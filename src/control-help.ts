@@ -27,6 +27,8 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
   switch (data.inputAction) {
     case 'wristMenu':
       return 'Open the action menu: tap this watch with your left index finger or point and press with the left controller';
+    case 'scrollStrip':
+      return 'Pinch and drag up or down to scroll this terminal';
     case 'warpDone':
       return 'Keep this curvature';
     case 'warpCancel':

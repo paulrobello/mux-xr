@@ -19,6 +19,8 @@ export function measurePanelBounds(root: THREE.Object3D): PanelBounds {
     // Troika creates glyph meshes below the label's plane. The plane is the
     // fitted, stable label bounds and the glyph geometry can lag its sync.
     if (object !== root && object.parent?.userData.labelTextObject === object) return;
+    // Edge controls such as the scroll strip sit outside the pane and do not change its footprint.
+    if (object.userData.excludeFromBounds) return;
 
     const mesh = object as THREE.Mesh;
     const geometry = mesh.geometry;

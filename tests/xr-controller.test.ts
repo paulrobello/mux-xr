@@ -494,6 +494,97 @@ describe('native XR controller event routing', () => {
       expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('b', undefined);
     });
 
+    it('starts and stops dictation from a pinch on the Keyborb Mic orb', () => {
+      const { workspace, actions } = setup('on');
+      const dictationAction = vi.fn();
+      actions.dictationAction = dictationAction;
+      const idle = { supported: true, status: 'idle', transcript: '', error: null } as const;
+      workspace.setDictationState(idle);
+      workspace.showInput('keyboard');
+      const hand = connectHand();
+      const pinchOrb = (start: number): void => {
+        const mic = workspace.scene.getObjectByName('keyborb-dictation') as THREE.Mesh;
+        const point = mic.getWorldPosition(new THREE.Vector3());
+        const spread = (gap: number): void => {
+          hand.joints['index-finger-tip'].position.copy(point).add(new THREE.Vector3(gap, 0, 0));
+          hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(-gap, 0, 0));
+        };
+        const before = dictationAction.mock.calls.length;
+        spread(0.04);
+        fakeXR.frame?.(start);
+        spread(0.02);
+        fakeXR.frame?.(start + 20);
+        expect(dictationAction).toHaveBeenCalledTimes(before);
+        spread(0.04);
+        for (let frame = 0; frame < 4; frame++) fakeXR.frame?.(start + 40 + frame * 20);
+      };
+      const mic = workspace.scene.getObjectByName('keyborb-dictation') as THREE.Mesh;
+      expect(mic.geometry).toBeInstanceOf(THREE.SphereGeometry);
+      expect(mic.userData.labelText).toBe('Mic');
+      pinchOrb(20);
+      expect(dictationAction).toHaveBeenCalledExactlyOnceWith('start');
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      workspace.setDictationState({ ...idle, status: 'listening' });
+      expect(
+        (workspace.scene.getObjectByName('keyborb-dictation') as THREE.Mesh).userData.labelText,
+      ).toBe('Stop');
+      pinchOrb(400);
+      expect(dictationAction).toHaveBeenLastCalledWith('stop');
+      expect(dictationAction).toHaveBeenCalledTimes(2);
+      workspace.setDictationState({ ...idle, status: 'transcribing' });
+      expect(
+        (workspace.scene.getObjectByName('keyborb-dictation') as THREE.Mesh).userData.inputAction,
+      ).toBe('noop');
+    });
+
+    it('scrolls from a hand index pinch on the edge strip and stops when Focus changes', () => {
+      const { workspace, actions } = setup('off');
+      actions.scrollTerminal = vi.fn(() => true);
+      connectHand();
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      const strip = workspace.scene
+        .getObjectByName('terminal-panel-pane-b')
+        ?.getObjectByName('terminal-scroll-strip') as THREE.Mesh<
+        THREE.BufferGeometry,
+        THREE.MeshBasicMaterial
+      >;
+      const rest = strip.material.opacity;
+      const line = 0.8 / 24;
+      const aim = (y: number, time: number): void => {
+        aimControllerAtScreen(controller, strip, new THREE.Vector3(0, y, 0));
+        fakeXR.frame?.(time);
+      };
+      aim(0, 10);
+      nativeEvent(0, 'selectstart');
+      aim(-line * 0.6, 20);
+      aim(-line * 2.7, 30);
+      expect(actions.scrollTerminal).toHaveBeenCalledExactlyOnceWith('pane-b', -2);
+      expect(strip.material.opacity).toBeGreaterThan(rest);
+      expect(workspace.state.selectedTerminalId).toBe('pane-b');
+      workspace.toggleFocusMode('pane-b');
+      aim(-line * 9, 40);
+      expect(actions.scrollTerminal).toHaveBeenCalledTimes(1);
+      expect(strip.material.opacity).toBe(rest);
+    });
+
+    it('offers the Mic orb only on a Keyborb text keyboard with speech support', () => {
+      const { workspace } = setup('off');
+      workspace.showInput('keyboard');
+      expect(workspace.scene.getObjectByName('keyborb-dictation')).toBeUndefined();
+      workspace.setDictationState({ supported: true, status: 'idle', transcript: '', error: null });
+      expect(workspace.scene.getObjectByName('keyborb-dictation')).toBeUndefined();
+      workspace.setKeyborbMode('on');
+      workspace.showInput('keyboard');
+      expect(workspace.scene.getObjectByName('keyborb-dictation')).toBeDefined();
+      workspace.setDictationState({
+        supported: false,
+        status: 'idle',
+        transcript: '',
+        error: null,
+      });
+      expect(workspace.scene.getObjectByName('keyborb-dictation')).toBeUndefined();
+    });
+
     it('changes Keyborb modes through native Settings controls', () => {
       const { workspace } = setup('off');
       workspace.showInput('settings');
@@ -1792,6 +1883,115 @@ describe('native XR controller event routing', () => {
     expect(keyboard.quaternion.angleTo(expected)).toBeLessThan(1e-6);
     workspace.dispose();
     container.remove();
+  });
+
+  describe('edge scroll strip', () => {
+    const stripOf = (
+      workspace: ReturnType<typeof createWorkspaceScene>,
+      id: string,
+    ): THREE.Mesh => {
+      const strip = workspace.scene
+        .getObjectByName(`terminal-panel-${id}`)
+        ?.getObjectByName('terminal-scroll-strip');
+      if (!(strip instanceof THREE.Mesh)) throw new Error('strip missing');
+      return strip;
+    };
+    const lineHeight = (workspace: ReturnType<typeof createWorkspaceScene>, id: string): number => {
+      const screen = workspace.scene
+        .getObjectByName(`terminal-panel-${id}`)
+        ?.getObjectByName('terminal-surface') as THREE.Mesh<THREE.PlaneGeometry>;
+      screen.geometry.computeBoundingBox();
+      const box = screen.geometry.boundingBox as THREE.Box3;
+      return (box.max.y - box.min.y) / 24;
+    };
+    const scrolled = (actions: { scrollTerminal?: unknown }): number[] =>
+      (actions.scrollTerminal as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => call[1] as number,
+      );
+
+    it('drags whole lines touch-style without selecting text, grabbing or moving the pane', () => {
+      const { workspace, actions, container, right } = fixture();
+      actions.scrollTerminal = vi.fn(() => true);
+      actions.sendMouse = vi.fn(() => false);
+      right.beginSelection = vi.fn(() => true);
+      workspace.selectTerminal('pane-a');
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      connectController(0);
+      const strip = stripOf(workspace, 'pane-b');
+      const panel = workspace.scene.getObjectByName('terminal-panel-pane-b') as THREE.Group;
+      const position = panel.position.clone();
+      const line = lineHeight(workspace, 'pane-b');
+      const aim = (y: number, time: number): void => {
+        aimControllerAtScreen(controller, strip, new THREE.Vector3(0, y, 0));
+        fakeXR.frame?.(time);
+      };
+      aim(0, 10);
+      controller.dispatchEvent({ type: 'selectstart' } as never);
+      expect(workspace.state.selectedTerminalId).toBe('pane-b');
+      aim(-line * 0.3, 20);
+      aim(-line * 0.6, 30);
+      expect(actions.scrollTerminal).not.toHaveBeenCalled();
+      aim(-line * 3.7, 40);
+      expect(scrolled(actions)).toEqual([-3]);
+      for (let step = 1; step <= 6; step += 1) aim(-line * 3.7 + line * 0.4 * step, 40 + step * 10);
+      expect(scrolled(actions).slice(1)).toEqual([1, 1]);
+      expect(actions.scrollTerminal).toHaveBeenCalledWith('pane-b', 1);
+      expect(right.beginSelection).not.toHaveBeenCalled();
+      expect(actions.sendMouse).not.toHaveBeenCalled();
+      expect(panel.position.distanceTo(position)).toBeLessThan(1e-9);
+      controller.dispatchEvent({ type: 'select' } as never);
+      controller.dispatchEvent({ type: 'selectend' } as never);
+      aim(line * 10, 200);
+      expect(actions.scrollTerminal).toHaveBeenCalledTimes(3);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('scrolls along a rolled pane and stops when a grip takes over', () => {
+      const { workspace, actions, container } = fixture();
+      actions.scrollTerminal = vi.fn(() => true);
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      connectController(0);
+      const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+      panel.rotateZ(Math.PI / 2);
+      const strip = stripOf(workspace, 'pane-a');
+      const line = lineHeight(workspace, 'pane-a');
+      aimControllerAtScreen(controller, strip, new THREE.Vector3(0, 0, 0));
+      fakeXR.frame?.(10);
+      controller.dispatchEvent({ type: 'selectstart' } as never);
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(panel.quaternion);
+      const side = new THREE.Vector3(1, 0, 0).applyQuaternion(panel.quaternion);
+      const start = controller.position.clone();
+      controller.position.copy(start).addScaledVector(side, line * 4);
+      fakeXR.frame?.(20);
+      expect(actions.scrollTerminal).not.toHaveBeenCalled();
+      controller.position.copy(start).addScaledVector(up, -line * 0.6);
+      fakeXR.frame?.(30);
+      controller.position.copy(start).addScaledVector(up, -line * 2.7);
+      fakeXR.frame?.(40);
+      expect(scrolled(actions)).toEqual([-2]);
+      controller.dispatchEvent({ type: 'squeezestart' } as never);
+      fakeXR.frame?.(50);
+      controller.position.copy(start).addScaledVector(up, -line * 8);
+      fakeXR.frame?.(60);
+      controller.dispatchEvent({ type: 'squeezeend' } as never);
+      controller.position.copy(start).addScaledVector(up, line * 8);
+      fakeXR.frame?.(70);
+      expect(actions.scrollTerminal).toHaveBeenCalledTimes(1);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('keeps the strip out of the pane footprint', () => {
+      const { workspace, container } = fixture();
+      const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+      const strip = stripOf(workspace, 'pane-a');
+      const before = measurePanelBounds(panel).size.width;
+      strip.removeFromParent();
+      expect(measurePanelBounds(panel).size.width).toBeCloseTo(before, 6);
+      workspace.dispose();
+      container.remove();
+    });
   });
 
   it('scrolls only the pointed pane while ungripped without changing selection', () => {

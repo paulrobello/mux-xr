@@ -290,6 +290,10 @@ export function routeInput(
 
 const PANEL_WIDTH = 1.42;
 const PANEL_HEIGHT = 0.8;
+const KEYBORB_DICTATION_COLUMN = 9;
+const SCROLL_STRIP_WIDTH = 0.05;
+const SCROLL_STRIP_OPACITY = 0.14;
+const SCROLL_STRIP_ACTIVE_OPACITY = 0.38;
 const ACCENT = 0x68d6ff;
 const CONTROLLER_RAY_LENGTH = 8;
 const QUALITY_RANK: Record<TerminalRenderQuality, number> = {
@@ -317,6 +321,7 @@ interface TerminalPanel {
   texture: THREE.Texture;
   textureSource: TerminalTexture;
   frame: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+  scrollStrip: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   selection: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   unsubscribe: () => void;
   defaultPosition: THREE.Vector3;
@@ -978,6 +983,12 @@ export function createWorkspaceScene(
   >();
   const radialButtonDown = new Set<THREE.Group>();
   const scrollDue = new Map<THREE.Group, number>();
+  // A pinch on a pane's edge strip scrolls it by the ray's movement along the pane's own up axis,
+  // in a plane fixed at pinch start so the ray may leave the strip mid-drag.
+  const stripScrolls = new Map<
+    THREE.Group,
+    { id: string; plane: THREE.Plane; up: THREE.Vector3; anchor: number; started: boolean }
+  >();
   let keyboardResume: {
     mode: 'keyboard' | 'command-editor';
     target: string | null;
@@ -1167,6 +1178,88 @@ export function createWorkspaceScene(
     selection.last = cell;
     selection.dragged = true;
     panel.surface.updateSelection?.(cell);
+  };
+  const stripRayHeight = (
+    source: THREE.Group,
+    drag: { plane: THREE.Plane; up: THREE.Vector3 },
+  ): number | null => {
+    source.updateMatrixWorld(true);
+    const origin = new THREE.Vector3().setFromMatrixPosition(source.matrixWorld);
+    const direction = new THREE.Vector3(0, 0, -1)
+      .applyMatrix4(new THREE.Matrix4().extractRotation(source.matrixWorld))
+      .normalize();
+    if (Math.abs(direction.dot(drag.plane.normal)) < 0.08) return null;
+    const point = new THREE.Ray(origin, direction).intersectPlane(drag.plane, new THREE.Vector3());
+    return point ? point.dot(drag.up) : null;
+  };
+  const startStripScroll = (source: THREE.Group, target: InputTarget): void => {
+    const panel = panels.get(target.terminalId);
+    if (!panel) return;
+    panel.root.updateMatrixWorld(true);
+    const up = new THREE.Vector3(0, 1, 0)
+      .applyQuaternion(panel.root.getWorldQuaternion(new THREE.Quaternion()))
+      .normalize();
+    const normal = new THREE.Vector3(0, 0, 1)
+      .applyQuaternion(panel.scrollStrip.getWorldQuaternion(new THREE.Quaternion()))
+      .normalize();
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+      normal,
+      panel.scrollStrip.getWorldPosition(new THREE.Vector3()),
+    );
+    const drag = { id: panel.id, plane, up, anchor: 0, started: false };
+    const height = stripRayHeight(source, drag);
+    if (height === null) return;
+    drag.anchor = height;
+    if (textSelection?.source === source) cancelTextSelection();
+    selectTerminal(panel.id);
+    stripScrolls.set(source, drag);
+    gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
+  };
+  const updateStripScrolls = (): void => {
+    for (const [source, drag] of stripScrolls) {
+      const panel = panels.get(drag.id);
+      if (
+        !panel ||
+        !source.visible ||
+        disconnectedControllers.has(source) ||
+        handTrackingLost.has(source) ||
+        controllerRayBlocked(source) ||
+        !isControlVisible(panel.scrollStrip) ||
+        gripActive() ||
+        warpEdit ||
+        radialMenu.root.visible
+      ) {
+        stripScrolls.delete(source);
+        continue;
+      }
+      const height = stripRayHeight(source, drag);
+      if (height === null) continue;
+      const line =
+        (panel.height / Math.max(1, panel.surface.rows)) *
+        panel.root.getWorldScale(new THREE.Vector3()).y;
+      if (!drag.started) {
+        if (Math.abs(height - drag.anchor) < line / 2) continue;
+        drag.started = true;
+        drag.anchor = height;
+        continue;
+      }
+      const lines = Math.trunc((height - drag.anchor) / line);
+      if (!lines) continue;
+      if (Math.abs(lines) > panel.surface.rows) {
+        drag.anchor = height;
+        continue;
+      }
+      drag.anchor += lines * line;
+      actions.scrollTerminal?.(panel.id, lines);
+    }
+  };
+  const syncStripOpacity = (): void => {
+    for (const panel of panels.values()) {
+      const active = [...stripScrolls.values()].some((drag) => drag.id === panel.id);
+      panel.scrollStrip.material.opacity = active
+        ? SCROLL_STRIP_ACTIVE_OPACITY
+        : SCROLL_STRIP_OPACITY;
+    }
   };
   const copyTextSelection = (source: THREE.Group): void => {
     const selection = textSelection;
@@ -1896,6 +1989,7 @@ export function createWorkspaceScene(
           disconnectedControllers.has(controller) ||
           gripActive() ||
           mouseCaptures.size ||
+          stripScrolls.has(controller) ||
           textSelection?.phase === 'dragging' ||
           textSelection?.phase === 'copying' ||
           warpEdit ||
@@ -2161,6 +2255,7 @@ export function createWorkspaceScene(
         inputMode !== 'command-editor' &&
         dragStates.size === 0 &&
         pokeSources.size === 0 &&
+        stripScrolls.size === 0 &&
         keyborbInput.held().size === 0 &&
         mouseCaptures.size === 0 &&
         textSelection?.phase !== 'dragging' &&
@@ -2180,6 +2275,9 @@ export function createWorkspaceScene(
       }
       if (dragStates.size) gazeInputState = { candidateId: null, emphasizedId: null, since: time };
     }
+    if (renderer?.xr.isPresenting) updateStripScrolls();
+    else stripScrolls.clear();
+    syncStripOpacity();
     if (renderer?.xr.isPresenting) {
       let hover: THREE.Object3D | null = null;
       let bodyHover: THREE.Object3D | null = null;
@@ -2234,10 +2332,11 @@ export function createWorkspaceScene(
         const modifierPress = modifierPresses.get(controller);
         if (modifierPress && object?.userData.modifier !== modifierPress.modifier)
           modifierPresses.delete(controller);
+        const dragging = stripScrolls.has(controller);
         if (object?.userData.labelText !== undefined) {
           controlTargeted = true;
-          if (object.userData.helpText) hover ??= object;
-        } else if (object?.userData.helpText) bodyHover ??= object;
+          if (object.userData.helpText && !dragging) hover ??= object;
+        } else if (object?.userData.helpText && !dragging) bodyHover ??= object;
         if (
           object &&
           object.userData.labelText !== undefined &&
@@ -2256,7 +2355,7 @@ export function createWorkspaceScene(
           material.color.setHex(
             (modifier && modifierState.active[modifier]) || previous.userData.activeState
               ? ACCENT
-              : 0xffffff,
+              : ((previous.userData.restColor as number | undefined) ?? 0xffffff),
           );
       }
       for (const object of allHovered) {
@@ -3110,6 +3209,35 @@ export function createWorkspaceScene(
         );
         inputRoot.add(button);
       }
+      // Keyborb panel buttons sit out of pinch reach, so dictation gets its own orb in the top row.
+      const dictation = mutableState.dictation;
+      if (mutableState.keyborbEnabled && mode === 'keyboard' && dictation.supported) {
+        const listening = dictation.status === 'listening';
+        const transcribing = dictation.status === 'transcribing';
+        const mic = createKeyborbKey(
+          transcribing ? '...' : listening ? 'Stop' : 'Mic',
+          unit - 0.025,
+        );
+        mic.name = 'keyborb-dictation';
+        Object.assign(mic.userData, {
+          keyborbSlot: keyboardKeys.length,
+          inputAction: transcribing ? 'noop' : 'dictation',
+          dictationAction: listening ? 'stop' : 'start',
+        });
+        mic.userData.helpText = transcribing
+          ? 'Transcribing your dictation'
+          : getControlHelp(mic.userData);
+        if (listening) {
+          mic.userData.restColor = 0xff7373;
+          (mic.material as THREE.Material & { color: THREE.Color }).color.setHex(0xff7373);
+        }
+        mic.position.set(
+          (KEYBORB_DICTATION_COLUMN + 0.5 - keyboardDimensions.width / 2) * unit,
+          0.48 - 0.5 * unit,
+          (unit - 0.025) / 2 + 0.003,
+        );
+        inputRoot.add(mic);
+      }
     }
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
     close.position.set(
@@ -3346,6 +3474,7 @@ export function createWorkspaceScene(
   };
   const handleInputTargetAction = (hit: THREE.Object3D): boolean => {
     const action = hit.userData.inputAction as string | undefined;
+    if (action === 'scrollStrip') return true;
     if (action === 'keyborbMode') {
       setKeyborbMode(validateKeyborbMode(hit.userData.keyborbMode));
       return true;
@@ -3938,6 +4067,11 @@ export function createWorkspaceScene(
       activateTarget(target);
       return;
     }
+    if (target?.object?.userData.inputAction === 'scrollStrip') {
+      startStripScroll(controller, target);
+      showHover(null);
+      return;
+    }
     const modifiers = Object.keys(modifierState.active).length
       ? { ...modifierState.active }
       : undefined;
@@ -4014,6 +4148,7 @@ export function createWorkspaceScene(
           pokeSources.delete(root);
           modifierPresses.delete(root);
         }
+        stripScrolls.delete(root);
         if (lost) return;
         pendingPaste.delete(root);
         if (!pokeSources.has(root)) modifierPresses.delete(root);
@@ -4270,8 +4405,12 @@ export function createWorkspaceScene(
       object.position.z = 0.02 + point.z;
       object.rotation.y = radians ? -(flatX / width) * radians : 0;
     };
+    panel.scrollStrip.geometry.dispose();
+    panel.scrollStrip.geometry = new THREE.PlaneGeometry(SCROLL_STRIP_WIDTH, height);
+    panel.scrollStrip.position.set(width / 2 + 0.0175 + 0.008 + SCROLL_STRIP_WIDTH / 2, 0, 0);
     followCurve(panel.connectionButton);
     followCurve(panel.closeButton);
+    followCurve(panel.scrollStrip);
     floorCorrectionPending = true;
   };
   const addTerminal = (surface: TerminalSurface): void => {
@@ -4313,6 +4452,34 @@ export function createWorkspaceScene(
     frame.name = 'terminal-frame';
     frame.position.z = -0.025;
     root.add(frame);
+    const scrollStrip = new THREE.Mesh(
+      new THREE.PlaneGeometry(SCROLL_STRIP_WIDTH, PANEL_HEIGHT),
+      new THREE.MeshBasicMaterial({
+        color: ACCENT,
+        transparent: true,
+        opacity: SCROLL_STRIP_OPACITY,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    scrollStrip.name = 'terminal-scroll-strip';
+    Object.assign(scrollStrip.userData, {
+      inputAction: 'scrollStrip',
+      terminalId: surface.pane.id,
+      excludeFromBounds: true,
+      helpText: getControlHelp({ inputAction: 'scrollStrip' }),
+    });
+    for (const offset of [-0.025, 0, 0.025]) {
+      const grip = new THREE.Mesh(
+        new THREE.PlaneGeometry(SCROLL_STRIP_WIDTH * 0.5, 0.006),
+        new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.7 }),
+      );
+      grip.position.set(0, offset, 0.001);
+      grip.userData.excludeFromBounds = true;
+      grip.raycast = () => undefined;
+      scrollStrip.add(grip);
+    }
+    root.add(scrollStrip);
     const selection = createSelection();
     root.userData.fontZoom = 1;
     const shortError = surface.error ? ` · ${surface.error.slice(0, 28)}` : '';
@@ -4363,6 +4530,7 @@ export function createWorkspaceScene(
       texture,
       textureSource,
       frame,
+      scrollStrip,
       selection,
       unsubscribe: () => undefined,
       defaultPosition,
@@ -4619,6 +4787,7 @@ export function createWorkspaceScene(
     floorCorrectionPending = true;
     correctTerminalFloor();
     scrollDue.clear();
+    stripScrolls.clear();
     gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
     notify();
   };
@@ -4640,6 +4809,7 @@ export function createWorkspaceScene(
     mutableState.warpTerminalId = panel.id;
     gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
     scrollDue.clear();
+    stripScrolls.clear();
     warpReadout = createLabelButton('', 1.25, 0.08, { inputAction: 'noop' });
     warpReadout.name = 'xr-warp-readout';
     warpReadout.position.set(0, panel.height / 2 + 0.22, 0.04);
@@ -5004,6 +5174,7 @@ export function createWorkspaceScene(
         state.tracked = false;
       });
       scrollDue.clear();
+      stripScrolls.clear();
       controllerGamepads.clear();
       controllerHandedness.clear();
       focusButtonDown.clear();
@@ -5120,6 +5291,7 @@ export function createWorkspaceScene(
   const toggleFocusMode = (id?: string): void => {
     if (gripActive()) return;
     releaseAllMouse();
+    stripScrolls.clear();
     closeBackgroundMenus();
     showHover(null);
     gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
@@ -5148,6 +5320,7 @@ export function createWorkspaceScene(
   const arrangeTerminals = (pattern: PanelArrangement): void => {
     if (!panels.size) return;
     endFocusMode(true);
+    stripScrolls.clear();
     const ordered = [...panels.values()];
     const bounds = ordered.map(({ root }) => measurePanelBounds(root));
     const poses = calculateArrangement(
@@ -5316,7 +5489,8 @@ export function createWorkspaceScene(
     for (const root of roots)
       root.traverse((object) => {
         const help = object.userData.helpText as string | undefined;
-        if (!help || !isControlVisible(object)) return;
+        if (!help || !isControlVisible(object) || object.userData.inputAction === 'scrollStrip')
+          return;
         const point = object.getWorldPosition(new THREE.Vector3()).project(camera);
         if (point.z < -1 || point.z > 1 || Math.abs(point.x) > 1 || Math.abs(point.y) > 1) return;
         result.push({
@@ -5384,6 +5558,7 @@ export function createWorkspaceScene(
     controllerListeners.length = 0;
     controllerRoots.length = 0;
     scrollDue.clear();
+    stripScrolls.clear();
     controllerGamepads.clear();
     controllerHandedness.clear();
     focusButtonDown.clear();
