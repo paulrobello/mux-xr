@@ -68,7 +68,6 @@ asset-check:
 	uv run --no-project python scripts/assets/check-observatory.py
 	cmp assets-source/observatory/staging/observatory.glb public/assets/observatory.glb
 	cmp assets-source/observatory/maps/planet-basecolor.png public/assets/observatory-planet.png
-	cmp assets-source/hand/authored-hand.staged.glb public/assets/hand.glb
 dev dev-start:
 	bun run dev
 preview:

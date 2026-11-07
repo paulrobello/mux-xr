@@ -1,8 +1,10 @@
 # Authored hand source and rig
 
-## long-fingers-v1 (active)
+The runtime no longer uses the authored hand. Since 2026-11-07 it renders the standard WebXR generic-hand meshes (`../xr-hands/PROVENANCE.md`), and `public/assets/hand.glb`, `src/xr/rigged-hand.ts` and its tests were removed. This folder is kept as the record of the authored hands; a later slim-v1 attempt lives on the unmerged `hand-slim-v1` branch.
 
-The active runtime hand is long-fingers-v1. The staged GLB (`authored-hand.staged.glb`), `public/assets/hand.glb` and `rig-metadata.json` are copies of `long-fingers-v1/authored-hand.staged.glb`. GLB SHA-256 is `e143187b1f577574e158286f063d77f6d00fd09e8887dd70db4190cf606f4eb6`; the runtime requests `/assets/hand.glb?v=e143187b1f57`.
+## long-fingers-v1 (last served)
+
+long-fingers-v1 was the last authored runtime hand. The staged GLB (`authored-hand.staged.glb`), the then-served `public/assets/hand.glb` and `rig-metadata.json` are copies of `long-fingers-v1/authored-hand.staged.glb`. GLB SHA-256 is `e143187b1f577574e158286f063d77f6d00fd09e8887dd70db4190cf606f4eb6`; the runtime requests `/assets/hand.glb?v=e143187b1f57`.
 
 The owner scrapped the precision line (rig-v2 through precision-v6) and returned to the first authored hand, built by `rig_hand.py` and `animate_hand.py` from his skin-modifier source mesh (see Initial rig history). Its fingers were too short and bulbous at the ends to easily use the Keyborb. At his request the 14-vertex `Hand.001` source was edited (`.local/tools/blend/long_fingers.py`: index, middle and outer chains 25% longer, every tip radius 0.95 of its mid radius, each tip moved out by the radius it lost) in `vr-cartoon-hand2-long-fingers.blend` to lengthen the fingers and thumb and narrow the tips, and approved the result in Blender. That file is copied unmodified as `long-fingers-v1/source.blend` (SHA-256 `5a98ecddd51aca6dbfe4a127dae54563d716669098a8bc9fb30f4801bdc7828e`). Its `Hand.001_original` object is an unused earlier copy.
 

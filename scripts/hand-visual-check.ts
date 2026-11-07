@@ -235,7 +235,7 @@ async function main(): Promise<void> {
           );
           return hands.length === 2 && hands.every((root) => root.userData.handAsset === 'loaded');
         }),
-      'Authored hand rigs did not load',
+      'Standard hand meshes did not load',
     );
     report.renderer = await page.evaluate(() => {
       const gl = (window as unknown as FixtureWindow).__questRenderer.getContext();
@@ -488,7 +488,9 @@ async function main(): Promise<void> {
         let maxStretch = 0;
         for (const root of w.__questScene.children) {
           if (root.name !== 'xr-cartoon-hand' || !root.visible) continue;
-          const skin = root.getObjectByName('authored-hand-skin') as import('three').SkinnedMesh;
+          const skin = root.getObjectByName(
+            `standard-hand-skin-${root.userData.handedness}`,
+          ) as import('three').SkinnedMesh;
           for (const bone of skin.skeleton.bones) {
             for (const axis of [0, 1, 2]) {
               const size = new w.__questThree.Vector3()
@@ -515,16 +517,14 @@ async function main(): Promise<void> {
             .filter((root) => root.name === 'xr-cartoon-hand')
             .map((root) => {
               const skin = root.getObjectByName(
-                'authored-hand-skin',
+                `standard-hand-skin-${root.userData.handedness}`,
               ) as import('three').SkinnedMesh;
-              const index = skin.skeleton.getBoneByName('index_03') as import('three').Bone;
-              const thumb = skin.skeleton.getBoneByName('thumb_03') as import('three').Bone;
-              const indexEnd = index.localToWorld(
-                new w.__questThree.Vector3(0, index.userData.restLength, 0),
-              );
-              const thumbEnd = thumb.localToWorld(
-                new w.__questThree.Vector3(0, thumb.userData.restLength, 0),
-              );
+              const indexEnd = (
+                skin.skeleton.getBoneByName('index-finger-tip') as import('three').Bone
+              ).getWorldPosition(new w.__questThree.Vector3());
+              const thumbEnd = (
+                skin.skeleton.getBoneByName('thumb-tip') as import('three').Bone
+              ).getWorldPosition(new w.__questThree.Vector3());
               const side = String(root.userData.handedness);
               const raw = w.__capturedGesturePoses.sets['captured-pinch'].hands.find(
                 (hand) => hand.side === side,
@@ -560,7 +560,7 @@ async function main(): Promise<void> {
               );
               const anchor = root.userData.armAnchor as import('three').Vector3;
               const wrist = root.userData.wristPosition as import('three').Vector3;
-              const model = root.getObjectByName('authored-hand-root');
+              const model = root.getObjectByName(`standard-hand-root-${root.userData.handedness}`);
               if (
                 !model ||
                 Math.abs(model.scale.x - model.scale.y) > 1e-6 ||
@@ -568,16 +568,14 @@ async function main(): Promise<void> {
               )
                 throw new Error('Tracked hand proportions are scaled unevenly');
               const skin = root.getObjectByName(
-                'authored-hand-skin',
+                `standard-hand-skin-${root.userData.handedness}`,
               ) as import('three').SkinnedMesh;
-              const index = skin.skeleton.getBoneByName('index_03') as import('three').Bone;
-              const thumb = skin.skeleton.getBoneByName('thumb_03') as import('three').Bone;
-              const indexEnd = index.localToWorld(
-                new w.__questThree.Vector3(0, index.userData.restLength, 0),
-              );
-              const thumbEnd = thumb.localToWorld(
-                new w.__questThree.Vector3(0, thumb.userData.restLength, 0),
-              );
+              const indexEnd = (
+                skin.skeleton.getBoneByName('index-finger-tip') as import('three').Bone
+              ).getWorldPosition(new w.__questThree.Vector3());
+              const thumbEnd = (
+                skin.skeleton.getBoneByName('thumb-tip') as import('three').Bone
+              ).getWorldPosition(new w.__questThree.Vector3());
               const middle = new w.__questThree.Vector3();
               for (let i = 0; i < 10; i++)
                 middle.add(new w.__questThree.Vector3().fromBufferAttribute(points, 120 + i));
@@ -617,9 +615,12 @@ async function main(): Promise<void> {
         visibility: roots.map((root) => root.visible),
         details: roots.map((root) => ({
           handedness: root.userData.handedness,
-          authored: root.userData.handAsset,
-          bones: (root.getObjectByName('authored-hand-skin') as import('three').SkinnedMesh)
-            .skeleton.bones.length,
+          asset: root.userData.handAsset,
+          bones: (
+            root.getObjectByName(
+              `standard-hand-skin-${root.userData.handedness}`,
+            ) as import('three').SkinnedMesh
+          ).skeleton.bones.length,
           finite: root.children.every((child) => {
             const g = (child as import('three').Mesh).geometry;
             const p = g?.getAttribute?.('position');
@@ -685,9 +686,13 @@ async function main(): Promise<void> {
         return w.__questScene.children
           .filter((root) => root.name === 'xr-cartoon-hand')
           .map((root) => {
-            const skin = root.getObjectByName('authored-hand-skin') as import('three').SkinnedMesh;
-            const index = skin.skeleton.bones.find((bone) => bone.name === 'index_01');
-            if (!index) throw new Error('Authored index bone missing');
+            const skin = root.getObjectByName(
+              `standard-hand-skin-${root.userData.handedness}`,
+            ) as import('three').SkinnedMesh;
+            const index = skin.skeleton.bones.find(
+              (bone) => bone.name === 'index-finger-phalanx-proximal',
+            );
+            if (!index) throw new Error('Standard hand index bone missing');
             const box = new w.__questThree.Box3();
             const point = new w.__questThree.Vector3();
             for (let vertex = 0; vertex < skin.geometry.getAttribute('position').count; vertex++) {
@@ -731,12 +736,12 @@ async function main(): Promise<void> {
     for (const side of ['left', 'right']) {
       const neutral = controllerRigs.open.find((hand) => hand.side === side);
       const trigger = controllerRigs.trigger.find((hand) => hand.side === side);
-      if (!neutral || !trigger) throw new Error('Authored controller hand missing');
+      if (!neutral || !trigger) throw new Error('Standard controller hand missing');
       const changed = distance(neutral.index, trigger.index);
       if (side === 'right' ? changed < 0.05 : changed > 0.001)
-        throw new Error(`Authored index deformation failed on ${side}: ${changed}`);
+        throw new Error(`Standard hand index deformation failed on ${side}: ${changed}`);
       if (neutral.bounds.some((size) => size < 0.01 || size > 0.3))
-        throw new Error(`Authored hand bounds invalid: ${neutral.bounds}`);
+        throw new Error(`Standard hand bounds invalid: ${neutral.bounds}`);
     }
     report.watch = await page.evaluate(async () => {
       const w = window as unknown as FixtureWindow;
@@ -862,8 +867,8 @@ async function main(): Promise<void> {
     );
     report.watchReload = true;
     report.resizes = resizes;
-    // The served asset decides the joint count: 13 for the first-hand rig, more when helper bones are present.
-    const glb = await readFile(new URL('../public/assets/hand.glb', import.meta.url));
+    // The served standard hand asset decides the joint count (25 WebXR joints).
+    const glb = await readFile(new URL('../public/assets/xr-hands/left.glb', import.meta.url));
     const gltfJson = JSON.parse(glb.subarray(20, 20 + glb.readUInt32LE(12)).toString('utf8')) as {
       skins: Array<{ joints: number[] }>;
     };
@@ -871,7 +876,7 @@ async function main(): Promise<void> {
     const meshReport = report.meshes as {
       count: number;
       visibility: boolean[];
-      details: Array<{ authored: string; bones: number; finite: boolean }>;
+      details: Array<{ asset: string; bones: number; finite: boolean }>;
     };
     report.ok =
       errors.length === 0 &&
@@ -881,7 +886,7 @@ async function main(): Promise<void> {
       meshReport.visibility[0] === false &&
       meshReport.visibility[1] === true &&
       meshReport.details.every(
-        (item) => item.authored === 'loaded' && item.bones === expectedBones && item.finite,
+        (item) => item.asset === 'loaded' && item.bones === expectedBones && item.finite,
       ) &&
       /Apple.*M4|Metal/i.test(String(report.renderer)) &&
       !/SwiftShader/i.test(String(report.renderer));

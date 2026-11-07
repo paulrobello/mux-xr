@@ -291,7 +291,7 @@ async function main(): Promise<void> {
           );
           return hands.length === 2 && hands.every((root) => root.userData.handAsset === 'loaded');
         }),
-      'Authored hand rigs did not load',
+      'Standard hand meshes did not load',
     );
     const renderer = await page.evaluate(() => {
       const gl = (window as unknown as FixtureWindow).__questRenderer.getContext();

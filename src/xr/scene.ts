@@ -74,7 +74,7 @@ import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from '
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
 import { createRadialMenu, type RadialMenuAction } from './radial-menu';
-import { createRiggedHand } from './rigged-hand';
+import { createStandardHand } from './standard-hand';
 import { terminalQualityAtDistance } from './terminal-lod';
 import {
   createTerminalMaterial,
@@ -4067,7 +4067,7 @@ export function createWorkspaceScene(
       });
       handContacts.set(root, createHandContact());
       keyboardProximity.set(root, createHandContact());
-      const visual = createRiggedHand();
+      const visual = createStandardHand();
       handVisuals.set(root, visual);
       scene.add(visual.root);
       if (typeof renderer.xr.getControllerGrip === 'function') {
