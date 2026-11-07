@@ -862,6 +862,12 @@ async function main(): Promise<void> {
     );
     report.watchReload = true;
     report.resizes = resizes;
+    // The served asset decides the joint count: 13 for the first-hand rig, more when helper bones are present.
+    const glb = await readFile(new URL('../public/assets/hand.glb', import.meta.url));
+    const gltfJson = JSON.parse(glb.subarray(20, 20 + glb.readUInt32LE(12)).toString('utf8')) as {
+      skins: Array<{ joints: number[] }>;
+    };
+    const expectedBones = gltfJson.skins[0].joints.length;
     const meshReport = report.meshes as {
       count: number;
       visibility: boolean[];
@@ -875,7 +881,7 @@ async function main(): Promise<void> {
       meshReport.visibility[0] === false &&
       meshReport.visibility[1] === true &&
       meshReport.details.every(
-        (item) => item.authored === 'loaded' && item.bones === 16 && item.finite,
+        (item) => item.authored === 'loaded' && item.bones === expectedBones && item.finite,
       ) &&
       /Apple.*M4|Metal/i.test(String(report.renderer)) &&
       !/SwiftShader/i.test(String(report.renderer));

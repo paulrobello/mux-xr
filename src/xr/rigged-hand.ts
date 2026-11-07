@@ -5,7 +5,7 @@ import type { HandContactProbe } from './hand-contact';
 import neutralReference from './hand-neutral-reference.json';
 import { createHandPoseConstraints } from './hand-pose-constraints';
 
-export const RIGGED_HAND_ASSET_URL = '/assets/hand.glb?v=baf6957fc758';
+export const RIGGED_HAND_ASSET_URL = '/assets/hand.glb?v=e143187b1f57';
 const DIGITS = ['thumb', 'index', 'middle', 'outer'] as const;
 // The cartoon's three wide fingers stand in for four real ones, so tracked spread reads as a fan.
 // Skin-only helper bones at the thumb_01 head follow a share of thumb_01's turn and root travel
