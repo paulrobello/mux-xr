@@ -5,9 +5,33 @@ import type { HandContactProbe } from './hand-contact';
 import neutralReference from './hand-neutral-reference.json';
 import { createHandPoseConstraints } from './hand-pose-constraints';
 
-export const RIGGED_HAND_ASSET_URL = '/assets/hand.glb?v=6f2274e0a394';
+export const RIGGED_HAND_ASSET_URL = '/assets/hand.glb?v=baf6957fc758';
 const DIGITS = ['thumb', 'index', 'middle', 'outer'] as const;
 // The cartoon's three wide fingers stand in for four real ones, so tracked spread reads as a fan.
+// Skin-only helper bones at the thumb_01 head follow a share of thumb_01's turn and root travel
+// from bind. The root and web helpers carry the wrist/thumb_01 band at half the turn, so no vertex
+// blends bones more than half a thumb_01 turn apart; behind the head the band and the heel follow
+// the full root travel, so an opposing thumb carries the heel inward instead of leaving a lobe.
+export const THUMB_HELPERS = {
+  thumb_root_helper: { rotation: 0.5, travel: 1 },
+  thumb_heel_helper: { rotation: 0, travel: 1 },
+  thumb_web_helper: { rotation: 0.5, travel: 0.55 },
+} as const;
+// Per-side corrective shape keys that round the closed-fist thumb root back to the precision-v5
+// outline; the runtime retarget is side-asymmetric, so each hand has its own fit. The weight rises
+// with the opposing thumb's root travel scaled by finger closure (metres), so the open palm, an
+// open-hand pinch and controller grips leave it at 0. It follows that target with a time constant
+// (seconds), and each frame the key may move its skin at most THUMB_FOLD_SKIN_RATIO times as far as
+// the skin under it moved, or THUMB_FOLD_MIN_RATE (weight per second) if that is more, so a still
+// hand still settles; tracking jitter on a still fist therefore cannot make the skin breathe. The first tracked frame
+// after a hide, a controller frame or a side change takes the target directly.
+export const THUMB_FOLD_MORPHS = { left: 'thumb_fold_left', right: 'thumb_fold_right' } as const;
+export const THUMB_FOLD_START = 0.004;
+export const THUMB_FOLD_FULL = 0.015;
+export const THUMB_FOLD_SMOOTHING = 0.085;
+export const THUMB_FOLD_SKIN_RATIO = 0.6;
+export const THUMB_FOLD_MIN_RATE = 0.12;
+const FOLD_SAMPLES = 16;
 const SPLAY_KEEP = 0.3;
 const SPLAY_INWARD = 0.05;
 const SPLAY_LIMIT = 0.35;
@@ -80,6 +104,15 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
   let authored: THREE.Group | undefined;
   let mesh: THREE.SkinnedMesh | undefined;
   let poseConstraints: ReturnType<typeof createHandPoseConstraints> | undefined;
+  const foldMorphs: {
+    side: 'left' | 'right';
+    index: number;
+    reach: number;
+    samples: number[];
+    previous: THREE.Vector3[];
+  }[] = [];
+  let foldWeight = 0;
+  let foldSide: 'left' | 'right' | undefined;
   let disposed = false;
   let controllerMode = false;
   let wristOffset = 0;
@@ -105,6 +138,14 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
   const swings = [0, 0, 0, 0].map(() => new THREE.Quaternion());
   let indexEnd: THREE.Bone | undefined;
   let thumbEnd: THREE.Bone | undefined;
+  const thumbHelpers: {
+    bone: THREE.Bone;
+    thumb: THREE.Bone;
+    rest: THREE.Quaternion;
+    restPosition: THREE.Vector3;
+    rotation: number;
+    travel: number;
+  }[] = [];
   const assetReady = (options.loader ?? new GLTFLoader())
     .loadAsync(options.assetUrl ?? RIGGED_HAND_ASSET_URL)
     .then((gltf) => {
@@ -123,7 +164,10 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
       ];
       if (
         meshes.length !== 1 ||
-        candidate.skeleton.bones.length !== names.length ||
+        candidate.skeleton.bones.length !==
+          names.length +
+            Object.keys(THUMB_HELPERS).filter((name) => candidate.skeleton.getBoneByName(name))
+              .length ||
         names.some((name) => !candidate.skeleton.bones.some((bone) => bone.name === name)) ||
         candidate.skeleton.bones.some(
           (bone) => !Number.isFinite(bone.userData.restLength) || bone.userData.restLength <= 0,
@@ -141,8 +185,47 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
       mesh.raycast = () => undefined;
       indexEnd = candidate.skeleton.getBoneByName('index_03');
       thumbEnd = candidate.skeleton.getBoneByName('thumb_03');
-      mesh.geometry.computeBoundingBox();
-      wristOffset = mesh.geometry.boundingBox?.min.y ?? 0;
+      const thumbRoot = candidate.skeleton.getBoneByName('thumb_01');
+      thumbHelpers.length = 0;
+      for (const [name, share] of Object.entries(THUMB_HELPERS)) {
+        const helper = candidate.skeleton.getBoneByName(name);
+        if (helper && thumbRoot)
+          thumbHelpers.push({
+            bone: helper,
+            thumb: thumbRoot,
+            rest: helper.quaternion.clone(),
+            restPosition: helper.position.clone(),
+            ...share,
+          });
+      }
+      foldMorphs.length = 0;
+      for (const [side, name] of Object.entries(THUMB_FOLD_MORPHS) as [
+        'left' | 'right',
+        string,
+      ][]) {
+        const index = candidate.morphTargetDictionary?.[name];
+        const target = candidate.geometry.morphAttributes.position?.[index ?? -1];
+        if (index === undefined || !target) continue;
+        // The skin motion under the key is sampled at the vertices it moves furthest.
+        const reaches = Array.from({ length: target.count }, (_, vertex) =>
+          Math.hypot(target.getX(vertex), target.getY(vertex), target.getZ(vertex)),
+        );
+        const samples = reaches
+          .map((_, vertex) => vertex)
+          .sort((a, b) => reaches[b] - reaches[a])
+          .slice(0, FOLD_SAMPLES);
+        foldMorphs.push({
+          side,
+          index,
+          reach: reaches[samples[0]],
+          samples,
+          previous: samples.map(() => new THREE.Vector3()),
+        });
+      }
+      // The thumb_fold morph widens the geometry bounding box; the wrist sits on the bind surface.
+      wristOffset = new THREE.Box3().setFromBufferAttribute(
+        mesh.geometry.getAttribute('position') as THREE.BufferAttribute,
+      ).min.y;
       const material = mesh.material as THREE.MeshStandardMaterial;
       if (material.isMeshStandardMaterial) {
         material.emissive.copy(material.color);
@@ -223,7 +306,10 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
     wristJoint.position
       .copy(fallback.root.userData.wristPosition as THREE.Vector3)
       .addScaledVector(fallback.root.userData.palmForward as THREE.Vector3, 0.003);
-    if (!authored || !mesh || !fallback.root.visible) return;
+    if (!authored || !mesh || !fallback.root.visible) {
+      foldSide = undefined;
+      return;
+    }
     forward.copy(fallback.root.userData.palmForward as THREE.Vector3);
     normal.copy(fallback.root.userData.wristBackNormal as THREE.Vector3).negate();
     across.crossVectors(forward, normal).normalize();
@@ -300,8 +386,47 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
       side,
       controllerMode ? Math.min(curls[1], curls[2], curls[3]) : undefined,
     );
+    for (const helper of thumbHelpers) {
+      const { bone, thumb } = helper;
+      bone.matrixAutoUpdate = true;
+      bone.position.lerpVectors(helper.restPosition, thumb.position, helper.travel);
+      bone.quaternion.slerpQuaternions(helper.rest, thumb.quaternion, helper.rotation);
+      bone.scale.copy(thumb.scale);
+      bone.updateWorldMatrix(false, true);
+    }
     mesh.updateWorldMatrix(true, false);
     mesh.skeleton.update();
+    const foldTarget = THREE.MathUtils.smoothstep(
+      poseConstraints?.foldTravel ?? 0,
+      THUMB_FOLD_START,
+      THUMB_FOLD_FULL,
+    );
+    const own = foldMorphs.find((morph) => morph.side === side);
+    let skinStep = 0;
+    if (own) {
+      const bind = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let k = 0; k < own.samples.length; k++) {
+        position.fromBufferAttribute(bind, own.samples[k]);
+        mesh.applyBoneTransform(own.samples[k], position);
+        skinStep = Math.max(skinStep, position.distanceTo(own.previous[k]));
+        own.previous[k].copy(position);
+      }
+    }
+    if (controllerMode || foldSide !== side) foldWeight = foldTarget;
+    else {
+      const eased =
+        (foldTarget - foldWeight) *
+        (1 - Math.exp(-Math.max(0, deltaSeconds) / THUMB_FOLD_SMOOTHING));
+      const limit = Math.max(
+        own ? (THUMB_FOLD_SKIN_RATIO * skinStep) / Math.max(own.reach, 1e-6) : 1,
+        THUMB_FOLD_MIN_RATE * Math.max(0, deltaSeconds),
+      );
+      foldWeight += THREE.MathUtils.clamp(eased, -limit, limit);
+    }
+    foldSide = controllerMode ? undefined : side;
+    if (mesh.morphTargetInfluences)
+      for (const morph of foldMorphs)
+        mesh.morphTargetInfluences[morph.index] = morph.side === side ? foldWeight : 0;
     if (indexEnd && thumbEnd) {
       indexEnd.localToWorld(visibleIndex.set(0, indexEnd.userData.restLength, 0));
       thumbEnd.localToWorld(visibleThumb.set(0, thumbEnd.userData.restLength, 0));
@@ -345,6 +470,7 @@ export function createRiggedHand(options: RiggedHandOptions = {}): RiggedHand {
     hide() {
       fallback.hide();
       curls.fill(0);
+      foldSide = undefined;
     },
     dispose() {
       if (disposed) return;

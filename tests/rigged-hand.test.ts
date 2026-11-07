@@ -3,7 +3,13 @@ import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { type GLTF, GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { describe, expect, it } from 'vitest';
-import { createRiggedHand, RIGGED_HAND_ASSET_URL } from '../src/xr/rigged-hand';
+import {
+  createRiggedHand,
+  RIGGED_HAND_ASSET_URL,
+  THUMB_FOLD_MORPHS,
+  THUMB_FOLD_SMOOTHING,
+  THUMB_HELPERS,
+} from '../src/xr/rigged-hand';
 
 const NAMES = [
   'wrist',
@@ -32,6 +38,59 @@ async function parsedAsset(): Promise<GLTF> {
 }
 function parsedLoader(): GLTFLoader {
   return { loadAsync: parsedAsset } as unknown as GLTFLoader;
+}
+// Seen from the back, the thumb-side edge of a settled pose (max x per 2 mm of y in the wrist
+// frame, every triangle sampled) from 40 mm below to `above` metres above the thumb_01 head. A knob
+// with a dip beside it shows as a gap under the edge's concave envelope; returns the largest gap.
+async function backOutlineDip(
+  pose: { side: 'left' | 'right'; joints: Record<string, { matrix: number[] }> },
+  above: number,
+): Promise<number> {
+  const bin = 0.002;
+  const hand = createRiggedHand({ loader: parsedLoader() });
+  await hand.assetReady;
+  hand.update(poseSource(pose.joints), new THREE.PerspectiveCamera(), pose.side, 1 / 60);
+  const mesh = authoredMeshes(hand.root)[0];
+  mesh.skeleton.update();
+  const { bones, boneInverses } = mesh.skeleton;
+  const wrist = bones.findIndex((bone) => bone.name === 'wrist');
+  const thumb = bones.findIndex((bone) => bone.name === 'thumb_01');
+  const head = new THREE.Vector3().setFromMatrixPosition(boneInverses[thumb].clone().invert());
+  const toWrist = new THREE.Matrix4()
+    .multiplyMatrices(bones[wrist].matrixWorld, boneInverses[wrist])
+    .premultiply(mesh.matrixWorld.clone().invert())
+    .invert();
+  const index = mesh.geometry.index as THREE.BufferAttribute;
+  const points = Array.from({ length: mesh.geometry.getAttribute('position').count }, (_, k) =>
+    mesh.getVertexPosition(k, new THREE.Vector3()).applyMatrix4(toWrist),
+  );
+  const edge = new Map<number, number>();
+  const steps = 4;
+  for (let face = 0; face < index.count; face += 3) {
+    const [a, b, c] = [0, 1, 2].map((k) => points[index.getX(face + k)]);
+    for (let u = 0; u <= steps; u++)
+      for (let v = 0; v <= steps - u; v++) {
+        const point = new THREE.Vector3()
+          .addScaledVector(a, u / steps)
+          .addScaledVector(b, v / steps)
+          .addScaledVector(c, (steps - u - v) / steps);
+        if (point.y < head.y - 0.04 || point.y > head.y + above) continue;
+        const slot = Math.floor(point.y / bin);
+        edge.set(slot, Math.max(edge.get(slot) ?? -Infinity, point.x));
+      }
+  }
+  const slots = [...edge.keys()].sort((a, b) => a - b);
+  let dip = 0;
+  for (let m = 1; m < slots.length - 1; m++)
+    for (let l = 0; l < m; l++)
+      for (let r = m + 1; r < slots.length; r++) {
+        const t = (slots[m] - slots[l]) / (slots[r] - slots[l]);
+        const envelope =
+          (edge.get(slots[l]) as number) * (1 - t) + (edge.get(slots[r]) as number) * t;
+        dip = Math.max(dip, envelope - (edge.get(slots[m]) as number));
+      }
+  hand.dispose();
+  return dip;
 }
 function authoredMeshes(root: THREE.Object3D): THREE.SkinnedMesh[] {
   const meshes: THREE.SkinnedMesh[] = [];
@@ -92,7 +151,14 @@ const neutralCapture = JSON.parse(
 const gestures = JSON.parse(readFileSync('tests/fixtures/quest-gesture-poses.json', 'utf8')) as {
   sets: Record<
     string,
-    { hands: Array<{ side: 'left' | 'right'; joints: Record<string, { matrix: number[] }> }> }
+    {
+      hands: Array<{
+        side: 'left' | 'right';
+        frame?: number;
+        stampDeltaMs?: number;
+        joints: Record<string, { matrix: number[] }>;
+      }>;
+    }
   >;
 };
 function neutralSource(
@@ -317,6 +383,486 @@ describe('authored rigged hand', () => {
       hand.dispose();
     },
   );
+  it.each(gestures.sets['captured-thumb-rest'].hands)(
+    'keeps the back of the $side thumb root free of pockets with the thumb resting on the fist',
+    async (pose) => {
+      const hand = createRiggedHand({ loader: parsedLoader() });
+      await hand.assetReady;
+      hand.update(poseSource(pose.joints), new THREE.PerspectiveCamera(), pose.side, 1 / 60);
+      const mesh = authoredMeshes(hand.root)[0];
+      mesh.skeleton.update();
+      const geometry = mesh.geometry;
+      const position = geometry.getAttribute('position');
+      const index = geometry.index as THREE.BufferAttribute;
+      // glTF splits vertices along seams; weld them so each surface point has one ring.
+      const welded = new Map<string, number>();
+      const weld = Array.from({ length: position.count }, (_, vertex) => {
+        const key = [0, 1, 2].map((k) => position.getComponent(vertex, k).toFixed(5)).join();
+        if (!welded.has(key)) welded.set(key, vertex);
+        return welded.get(key) as number;
+      });
+      const ring = Array.from({ length: position.count }, () => new Set<number>());
+      for (let face = 0; face < index.count; face += 3)
+        for (let k = 0; k < 3; k++) {
+          const a = weld[index.getX(face + k)];
+          const b = weld[index.getX(face + ((k + 1) % 3))];
+          ring[a].add(b);
+          ring[b].add(a);
+        }
+      // Back-of-hand skin around the thumb root, by bind position (glTF: +Z is the palm).
+      const region = weld.filter((target, vertex) => {
+        if (target !== vertex) return false;
+        const x = position.getX(vertex);
+        const y = position.getY(vertex);
+        return position.getZ(vertex) < -0.002 && x > 0.04 && x < 0.085 && y > 0.06 && y < 0.115;
+      });
+      const twoRing = region.map((vertex) => {
+        const around = new Set(ring[vertex]);
+        for (const next of ring[vertex]) for (const far of ring[next]) around.add(far);
+        around.delete(vertex);
+        return [...around];
+      });
+      // Depth of each vertex below the mean of its two-ring, along the outward normal.
+      const pits = (at: (vertex: number) => THREE.Vector3): number[] => {
+        const normals = new Map<number, THREE.Vector3>();
+        for (let face = 0; face < index.count; face += 3) {
+          const [a, b, c] = [0, 1, 2].map((k) => weld[index.getX(face + k)]);
+          const normal = at(b)
+            .sub(at(a))
+            .cross(at(c).sub(at(a)));
+          for (const vertex of [a, b, c])
+            normals.set(vertex, (normals.get(vertex) ?? new THREE.Vector3()).add(normal));
+        }
+        return region.map((vertex, k) => {
+          const mean = new THREE.Vector3();
+          for (const other of twoRing[k]) mean.add(at(other));
+          mean.divideScalar(twoRing[k].length);
+          return mean.sub(at(vertex)).dot((normals.get(vertex) as THREE.Vector3).normalize());
+        });
+      };
+      const rest = pits((vertex) => new THREE.Vector3().fromBufferAttribute(position, vertex));
+      const outward = [...rest].sort((a, b) => a - b)[rest.length >> 1] > 0 ? -1 : 1;
+      const posed = pits((vertex) => mesh.getVertexPosition(vertex, new THREE.Vector3()));
+      // A slit dug by the thumb root reads as a pit deeper than about 1.5 mm.
+      expect(Math.max(...[...rest, ...posed].map((pit) => pit * outward))).toBeLessThan(0.0015);
+      hand.dispose();
+    },
+  );
+  it.each([
+    ...gestures.sets['captured-thumb-slide'].hands.map((pose) => ({ ...pose, kind: 'closed' })),
+    ...gestures.sets['captured-thumb-slide-left'].hands.map((pose) => ({
+      ...pose,
+      kind: 'closed',
+    })),
+    ...gestures.sets['captured-open-palm-slide'].hands.map((pose) => ({ ...pose, kind: 'open' })),
+  ])('keeps the $side thumb root uncrimped on the $kind-hand thumb slide', async (pose) => {
+    const hand = createRiggedHand({ loader: parsedLoader() });
+    await hand.assetReady;
+    hand.update(poseSource(pose.joints), new THREE.PerspectiveCamera(), pose.side, 1 / 60);
+    const mesh = authoredMeshes(hand.root)[0];
+    mesh.skeleton.update();
+    const { bones, boneInverses } = mesh.skeleton;
+    const thumb = bones.findIndex((bone) => bone.name === 'thumb_01');
+    const wrist = bones.findIndex((bone) => bone.name === 'wrist');
+    const geometry = mesh.geometry;
+    const position = geometry.getAttribute('position');
+    const skinIndex = geometry.getAttribute('skinIndex');
+    const skinWeight = geometry.getAttribute('skinWeight');
+    const index = geometry.index as THREE.BufferAttribute;
+    // Skin-only helper bones carry part of the wrist-to-thumb blend, so they count as thumb.
+    const thumbBones = new Set(
+      bones.flatMap((bone, k) =>
+        k === thumb || (bone.name.startsWith('thumb_') && bone.name.endsWith('_helper')) ? [k] : [],
+      ),
+    );
+    const thumbWeight = (vertex: number): number => {
+      let weight = 0;
+      for (let k = 0; k < 4; k++)
+        if (thumbBones.has(skinIndex.getComponent(vertex, k)))
+          weight += skinWeight.getComponent(vertex, k);
+      return weight;
+    };
+    const skinRotation = (bone: number): THREE.Quaternion =>
+      new THREE.Quaternion().setFromRotationMatrix(
+        new THREE.Matrix4()
+          .multiplyMatrices(bones[bone].matrixWorld, boneInverses[bone])
+          .premultiply(mesh.matrixWorld.clone().invert()),
+      );
+    const wristRotation = skinRotation(wrist);
+    const thumbRotation = skinRotation(thumb);
+    const corners = (face: number, at: (vertex: number) => THREE.Vector3): THREE.Vector3[] =>
+      [0, 1, 2].map((k) => at(index.getX(face + k)));
+    const rest = (vertex: number) => new THREE.Vector3().fromBufferAttribute(position, vertex);
+    const posed = (vertex: number) => mesh.getVertexPosition(vertex, new THREE.Vector3());
+    const normal = ([a, b, c]: THREE.Vector3[]) => b.clone().sub(a).cross(c.clone().sub(a));
+    // The skin band blending wrist into thumb_01 is where linear-blend skinning crimps.
+    let flipped = 0;
+    const areaRatios: number[] = [];
+    for (let face = 0; face < index.count; face += 3) {
+      const share = [0, 1, 2].reduce((sum, k) => sum + thumbWeight(index.getX(face + k)), 0) / 3;
+      if (share <= 0.02 || share >= 0.98) continue;
+      const before = normal(corners(face, rest));
+      const after = normal(corners(face, posed));
+      areaRatios.push(after.length() / before.length());
+      const expected = [wristRotation, thumbRotation].map((rotation) =>
+        before.clone().applyQuaternion(rotation),
+      );
+      if (expected.every((direction) => after.dot(direction) < 0)) flipped++;
+    }
+    areaRatios.sort((a, b) => a - b);
+    // A crimp folds band triangles inside out; a pinched root collapses their area instead.
+    // A fixed rank, unlike a percentile, does not loosen when a wider blend enlarges the band.
+    expect(flipped).toBeLessThanOrEqual(2);
+    expect(areaRatios[9]).toBeGreaterThan(0.19);
+    hand.dispose();
+  });
+  it.each([
+    ...gestures.sets['captured-thumb-slide'].hands,
+    ...gestures.sets['captured-thumb-slide-left'].hands,
+  ])('keeps the $side closed-fist thumb root inside the precision-v5 outline', async (pose) => {
+    // Silhouette of the thumb-root region (below 10 mm above the thumb_01 head, thumb shaft
+    // excluded) in the wrist frame, sampled on every triangle, for the palm/back, thumb-side
+    // and top views. precision-v5 folds here but keeps a rounded outline; a lobe or beak
+    // shows as silhouette area outside it.
+    const views: Array<[(p: THREE.Vector3) => number, (p: THREE.Vector3) => number]> = [
+      [(p) => p.y, (p) => p.x],
+      [(p) => p.y, (p) => -p.z],
+      [(p) => p.y, (p) => p.z],
+      [(p) => p.z, (p) => p.x],
+    ];
+    const bin = 0.002;
+    const profiles = async (bytes: ArrayBuffer) => {
+      const hand = createRiggedHand({
+        loader: {
+          loadAsync: () => new GLTFLoader().parseAsync(bytes, ''),
+        } as unknown as GLTFLoader,
+      });
+      await hand.assetReady;
+      hand.update(poseSource(pose.joints), new THREE.PerspectiveCamera(), pose.side, 1 / 60);
+      const mesh = authoredMeshes(hand.root)[0];
+      mesh.skeleton.update();
+      const { bones, boneInverses } = mesh.skeleton;
+      const wrist = bones.findIndex((bone) => bone.name === 'wrist');
+      const thumb = bones.findIndex((bone) => bone.name === 'thumb_01');
+      const shaft = new Set(
+        bones.flatMap((bone, k) => (['thumb_02', 'thumb_03'].includes(bone.name) ? [k] : [])),
+      );
+      const head = new THREE.Vector3().setFromMatrixPosition(boneInverses[thumb].clone().invert());
+      const toWrist = new THREE.Matrix4()
+        .multiplyMatrices(bones[wrist].matrixWorld, boneInverses[wrist])
+        .premultiply(mesh.matrixWorld.clone().invert())
+        .invert();
+      const geometry = mesh.geometry;
+      const skinIndex = geometry.getAttribute('skinIndex');
+      const skinWeight = geometry.getAttribute('skinWeight');
+      const index = geometry.index as THREE.BufferAttribute;
+      const count = geometry.getAttribute('position').count;
+      const points = Array.from({ length: count }, (_, vertex) =>
+        mesh.getVertexPosition(vertex, new THREE.Vector3()).applyMatrix4(toWrist),
+      );
+      const kept = Array.from({ length: count }, (_, vertex) => {
+        let weight = 0;
+        for (let k = 0; k < 4; k++)
+          if (shaft.has(skinIndex.getComponent(vertex, k)))
+            weight += skinWeight.getComponent(vertex, k);
+        return weight < 0.5;
+      });
+      const result = views.map(() => new Map<number, number>());
+      const steps = 4;
+      for (let face = 0; face < index.count; face += 3) {
+        const corners = [0, 1, 2].map((k) => index.getX(face + k));
+        if (!corners.every((vertex) => kept[vertex])) continue;
+        const [a, b, c] = corners.map((vertex) => points[vertex]);
+        for (let u = 0; u <= steps; u++)
+          for (let v = 0; v <= steps - u; v++) {
+            const point = new THREE.Vector3()
+              .addScaledVector(a, u / steps)
+              .addScaledVector(b, v / steps)
+              .addScaledVector(c, (steps - u - v) / steps);
+            if (point.y > head.y + 0.01) continue;
+            for (const [k, [key, value]] of views.entries()) {
+              const slot = Math.floor(key(point) / bin);
+              result[k].set(slot, Math.max(result[k].get(slot) ?? -Infinity, value(point)));
+            }
+          }
+      }
+      hand.dispose();
+      return result;
+    };
+    const reference = await profiles(
+      new Uint8Array(readFileSync('assets-source/hand/precision-v5/hand.staged.glb')).slice()
+        .buffer,
+    );
+    const current = await profiles(assetBytes);
+    let excess = 0;
+    for (const [k, profile] of current.entries())
+      for (const [slot, value] of profile) {
+        const limit = reference[k].get(slot);
+        if (limit !== undefined && value > limit) excess += (value - limit) * bin;
+      }
+    // mm^2 outside v5: the v6b lobe and beak measured about 560-580, v10 about 110.
+    expect(excess * 1e6).toBeLessThan(250);
+  });
+  it.each(['left', 'right'] as const)(
+    'drives only the %s thumb_fold corrective, for a thumb folded over a fist',
+    async (side) => {
+      const hand = createRiggedHand({ loader: parsedLoader() });
+      await hand.assetReady;
+      const mesh = authoredMeshes(hand.root)[0];
+      const own = mesh.morphTargetDictionary?.[THUMB_FOLD_MORPHS[side]] as number;
+      const other =
+        mesh.morphTargetDictionary?.[THUMB_FOLD_MORPHS[side === 'left' ? 'right' : 'left']];
+      expect(own).toBeTypeOf('number');
+      expect(other).toBeTypeOf('number');
+      const weight = (): number => mesh.morphTargetInfluences?.[own] ?? Number.NaN;
+      const otherWeight = (): number => mesh.morphTargetInfluences?.[other as number] ?? Number.NaN;
+      const pose = (set: string) =>
+        gestures.sets[set].hands.find((entry) => entry.side === side)?.joints ?? {};
+      const camera = new THREE.PerspectiveCamera();
+      hand.update(neutralSource(side), camera, side, 1 / 60);
+      expect(weight()).toBe(0);
+      hand.update(poseSource(pose('captured-pinch')), camera, side, 1 / 60);
+      expect(weight()).toBeLessThan(0.05);
+      // The weight eases toward its target, so one 60 Hz frame of a fist moves it only a little.
+      hand.update(poseSource(pose('captured-fist')), camera, side, 1 / 60);
+      expect(weight()).toBeLessThan(0.3);
+      // A still fist moves no skin, so the weight settles at THUMB_FOLD_MIN_RATE.
+      hand.update(poseSource(pose('captured-fist')), camera, side, 10);
+      expect(weight()).toBeGreaterThan(0.85);
+      expect(otherWeight()).toBe(0);
+      const gamepad = { buttons: Array.from({ length: 6 }, () => ({ value: 1, pressed: true })) };
+      hand.updateController(new THREE.Group(), camera, side, gamepad as unknown as Gamepad, 1 / 60);
+      expect(weight()).toBe(0);
+      expect(otherWeight()).toBe(0);
+      // Leaving controller mode or tracking loss takes the next target directly, never a stale weight.
+      hand.update(poseSource(pose('captured-fist')), camera, side, 1 / 60);
+      expect(weight()).toBeGreaterThan(0.85);
+      hand.hide();
+      hand.update(neutralSource(side), camera, side, 1 / 60);
+      expect(weight()).toBe(0);
+      hand.dispose();
+    },
+  );
+  it.each(['hide', 'tracking loss', 'controller mode', 'side change'] as const)(
+    'drops a stale thumb_fold weight after %s',
+    async (reset) => {
+      const hand = createRiggedHand({ loader: parsedLoader() });
+      await hand.assetReady;
+      const mesh = authoredMeshes(hand.root)[0];
+      const camera = new THREE.PerspectiveCamera();
+      const fist = (side: 'left' | 'right') =>
+        poseSource(
+          gestures.sets['captured-fist'].hands.find((entry) => entry.side === side)?.joints ?? {},
+        );
+      const weights = () => [...(mesh.morphTargetInfluences ?? [])];
+      hand.update(fist('right'), camera, 'right', 1 / 60);
+      expect(Math.max(...weights())).toBeGreaterThan(0.85);
+      if (reset === 'hide') hand.hide();
+      if (reset === 'tracking loss') {
+        const lost = fist('right');
+        for (const joint of Object.values(lost.joints)) joint.visible = false;
+        hand.update(lost, camera, 'right', 1 / 60);
+      }
+      if (reset === 'controller mode')
+        hand.updateController(new THREE.Group(), camera, 'right', undefined, 1 / 60);
+      if (reset === 'side change') hand.update(fist('left'), camera, 'left', 1 / 60);
+      // One 60 Hz frame back at an open hand would leave an eased weight near 1; a reset takes 0.
+      hand.update(neutralSource('right'), camera, 'right', 1 / 60);
+      expect(weights()).toEqual(weights().map(() => 0));
+      hand.dispose();
+    },
+  );
+  it('keeps the thumb_fold weights of the two hands apart', async () => {
+    // The scene builds one rigged hand per side, each from its own parse of the asset.
+    const left = createRiggedHand({ loader: parsedLoader() });
+    const right = createRiggedHand({ loader: parsedLoader() });
+    await Promise.all([left.assetReady, right.assetReady]);
+    const fist = gestures.sets['captured-fist'].hands.find((entry) => entry.side === 'left');
+    left.update(poseSource(fist?.joints ?? {}), new THREE.PerspectiveCamera(), 'left', 1);
+    const [leftMesh, rightMesh] = [left, right].map((hand) => authoredMeshes(hand.root)[0]);
+    expect(leftMesh.morphTargetInfluences).not.toBe(rightMesh.morphTargetInfluences);
+    expect(
+      leftMesh.morphTargetInfluences?.[
+        leftMesh.morphTargetDictionary?.[THUMB_FOLD_MORPHS.left] as number
+      ],
+    ).toBeGreaterThan(0.85);
+    expect(rightMesh.morphTargetInfluences?.every((weight) => weight === 0)).toBe(true);
+    left.dispose();
+    right.dispose();
+  });
+  it('moves the thumb_fold key no further than the skin on a still thumb-rest fist', async () => {
+    // Replays thumb-rest frames 27-42 at their captured spacing. Per capture, the key's own skin
+    // motion (morphed minus unmorphed positions) must not outrun the unmorphed skin motion over the
+    // key's region on frames 30-40. v12, eased only, moved the key 1.4 mm under 0.7 mm of skin at
+    // frame 35.
+    const hand = createRiggedHand({ loader: parsedLoader() });
+    await hand.assetReady;
+    const mesh = authoredMeshes(hand.root)[0];
+    const slot = mesh.morphTargetDictionary?.[THUMB_FOLD_MORPHS.right] as number;
+    const influences = mesh.morphTargetInfluences as number[];
+    const target = mesh.geometry.morphAttributes.position?.[slot] as THREE.BufferAttribute;
+    const region: number[] = [];
+    for (let vertex = 0; vertex < target.count; vertex++)
+      if (Math.hypot(target.getX(vertex), target.getY(vertex), target.getZ(vertex)) > 1e-4)
+        region.push(vertex);
+    const sample = () =>
+      region.map((vertex) => mesh.getVertexPosition(vertex, new THREE.Vector3()));
+    const camera = new THREE.PerspectiveCamera();
+    let previous: { skin: THREE.Vector3[]; key: THREE.Vector3[] } | undefined;
+    const ratios: number[] = [];
+    for (const frame of gestures.sets['captured-thumb-rest-sequence'].hands) {
+      hand.update(poseSource(frame.joints), camera, 'right', (frame.stampDeltaMs ?? 0) / 1000);
+      mesh.skeleton.update();
+      const weight = influences[slot];
+      const morphed = sample();
+      influences[slot] = 0;
+      const skin = sample();
+      influences[slot] = weight;
+      const key = morphed.map((point, k) => point.clone().sub(skin[k]));
+      if (previous) {
+        let skinStep = 0;
+        let keyStep = 0;
+        for (let k = 0; k < region.length; k++) {
+          skinStep = Math.max(skinStep, skin[k].distanceTo(previous.skin[k]));
+          keyStep = Math.max(keyStep, key[k].distanceTo(previous.key[k]));
+        }
+        const index = (frame as { frame?: number }).frame ?? 0;
+        if (index >= 30 && index <= 40) ratios.push(keyStep / skinStep);
+      }
+      previous = { skin, key };
+    }
+    expect(ratios).toHaveLength(11);
+    expect(Math.max(...ratios)).toBeLessThanOrEqual(1);
+    hand.dispose();
+  });
+  it('eases the thumb_fold weight across consecutive thumb-rest captures', async () => {
+    // Thumb-rest frames 27-42 swing the fold target between about 0.2 and 1 from one capture to
+    // the next; unsmoothed (v11) the weight jumped 0.49 in one capture while the skin moved under a
+    // millimetre. Replayed at the capture cadence the eased weight steps at most about 0.25.
+    const hand = createRiggedHand({ loader: parsedLoader() });
+    await hand.assetReady;
+    const mesh = authoredMeshes(hand.root)[0];
+    const slot = mesh.morphTargetDictionary?.[THUMB_FOLD_MORPHS.right] as number;
+    const camera = new THREE.PerspectiveCamera();
+    const frames = gestures.sets['captured-thumb-rest-sequence'].hands;
+    expect(frames).toHaveLength(16);
+    const steps: number[] = [];
+    let previous: number | undefined;
+    let settled = 0;
+    for (const frame of frames) {
+      hand.update(poseSource(frame.joints), camera, 'right', 0.057);
+      const weight = mesh.morphTargetInfluences?.[slot] as number;
+      if (previous !== undefined) steps.push(Math.abs(weight - previous));
+      previous = weight;
+      settled = Math.max(settled, weight);
+    }
+    expect(THUMB_FOLD_SMOOTHING).toBeGreaterThanOrEqual(0.08);
+    expect(THUMB_FOLD_SMOOTHING).toBeLessThanOrEqual(0.12);
+    expect(Math.max(...steps)).toBeLessThan(0.3);
+    expect(settled).toBeGreaterThan(0.6);
+    hand.dispose();
+  });
+  it('catches the thumb_fold key up with a folding slide within a few captures', async () => {
+    // Slide frames 156-166 at their captured stamps: the fold target reaches full weight at frame
+    // 161. The surface lag is the settled weight minus the eased one, times the key's reach. At
+    // 100 ms easing the 8.4 mm right key lagged 3.2 mm at frame 161; 85 ms leaves 2.8.
+    const hand = createRiggedHand({ loader: parsedLoader() });
+    await hand.assetReady;
+    const mesh = authoredMeshes(hand.root)[0];
+    const slot = mesh.morphTargetDictionary?.[THUMB_FOLD_MORPHS.right] as number;
+    const key = mesh.geometry.morphAttributes.position?.[slot] as THREE.BufferAttribute;
+    let reach = 0;
+    for (let k = 0; k < key.count; k++)
+      reach = Math.max(reach, Math.hypot(key.getX(k), key.getY(k), key.getZ(k)));
+    const camera = new THREE.PerspectiveCamera();
+    const lag = new Map<number, number>();
+    for (const frame of gestures.sets['captured-thumb-slide-sequence'].hands) {
+      hand.update(poseSource(frame.joints), camera, 'right', (frame.stampDeltaMs ?? 0) / 1000);
+      const settledHand = createRiggedHand({ loader: parsedLoader() });
+      await settledHand.assetReady;
+      settledHand.update(poseSource(frame.joints), camera, 'right', 10);
+      const settled = authoredMeshes(settledHand.root)[0].morphTargetInfluences?.[slot] as number;
+      lag.set(
+        frame.frame ?? -1,
+        (settled - (mesh.morphTargetInfluences?.[slot] as number)) * reach,
+      );
+      settledHand.dispose();
+    }
+    expect(lag.size).toBe(11);
+    expect((lag.get(161) as number) * 1000).toBeLessThanOrEqual(3);
+    expect((lag.get(164) as number) * 1000).toBeLessThanOrEqual(0.5);
+    hand.dispose();
+  });
+  it.each([
+    ...gestures.sets['captured-thumb-slide'].hands,
+    ...gestures.sets['captured-thumb-slide-left'].hands,
+    ...gestures.sets['captured-thumb-rest'].hands,
+  ])('keeps the $side closed-fist thumb-side back outline convex', async (pose) => {
+    // From 40 mm below to 10 mm above the thumb_01 head: v10 dipped 2.6-3.3 mm on these poses,
+    // the thumb_fold corrective leaves 0.7-1.3 mm.
+    expect((await backOutlineDip(pose, 0.01)) * 1000).toBeLessThan(1.5);
+  });
+  it('keeps the right fist back-outline ledge above the thumb root under 4 mm', async () => {
+    // The ledge's corner sits 10-18 mm above the thumb_01 head, where the thumb-root knob meets
+    // the narrower index-base edge, so this window reaches 30 mm above the head. v12 dipped
+    // 5.7 mm here; v13's right key fills the rim toward the envelope and leaves 2.8.
+    const [pose] = gestures.sets['captured-thumb-slide'].hands;
+    expect((await backOutlineDip(pose, 0.03)) * 1000).toBeLessThan(4);
+  });
+  it.each([
+    ...gestures.sets['captured-thumb-slide-left'].hands,
+    ...gestures.sets['captured-thumb-slide'].hands,
+  ])('keeps the $side closed-fist thumb root free of a pit under the knob', async (pose) => {
+    // Umbrella residual (vertex minus the mean of its neighbours, along the vertex normal) over
+    // skin carried mostly by the thumb-root helpers and thumb_01. The left runtime pose pushes a
+    // knob out palm-side of the thumb root with a pit under it: 2.6 mm deep with the shared v11
+    // key, 1.5 mm with the left key, against 1.5-1.6 mm on the right hand.
+    const hand = createRiggedHand({ loader: parsedLoader() });
+    await hand.assetReady;
+    hand.update(poseSource(pose.joints), new THREE.PerspectiveCamera(), pose.side, 1 / 60);
+    const mesh = authoredMeshes(hand.root)[0];
+    mesh.skeleton.update();
+    const geometry = mesh.geometry;
+    const count = geometry.getAttribute('position').count;
+    const skinIndex = geometry.getAttribute('skinIndex');
+    const skinWeight = geometry.getAttribute('skinWeight');
+    const index = geometry.index as THREE.BufferAttribute;
+    const root = new Set(
+      mesh.skeleton.bones.flatMap((bone, k) =>
+        [...Object.keys(THUMB_HELPERS), 'thumb_01'].includes(bone.name) ? [k] : [],
+      ),
+    );
+    const points = Array.from({ length: count }, (_, vertex) =>
+      mesh.getVertexPosition(vertex, new THREE.Vector3()),
+    );
+    const normals = points.map(() => new THREE.Vector3());
+    const neighbours = points.map(() => new Set<number>());
+    for (let face = 0; face < index.count; face += 3) {
+      const corners = [0, 1, 2].map((k) => index.getX(face + k));
+      const [a, b, c] = corners.map((vertex) => points[vertex]);
+      const normal = new THREE.Vector3()
+        .subVectors(b, a)
+        .cross(new THREE.Vector3().subVectors(c, a));
+      for (const vertex of corners) {
+        normals[vertex].add(normal);
+        for (const other of corners) if (other !== vertex) neighbours[vertex].add(other);
+      }
+    }
+    let pit = 0;
+    for (let vertex = 0; vertex < count; vertex++) {
+      let share = 0;
+      for (let k = 0; k < 4; k++)
+        if (root.has(skinIndex.getComponent(vertex, k)))
+          share += skinWeight.getComponent(vertex, k);
+      if (share <= 0.3) continue;
+      const mean = new THREE.Vector3();
+      for (const other of neighbours[vertex]) mean.add(points[other]);
+      mean.divideScalar(neighbours[vertex].size);
+      pit = Math.min(pit, points[vertex].clone().sub(mean).dot(normals[vertex].normalize()));
+    }
+    expect(-pit * 1000).toBeLessThan(2);
+    hand.dispose();
+  });
   it.each(['left', 'right'] as const)(
     'keeps the %s index pointing forward when the other fingers curl',
     async (side) => {
@@ -601,7 +1147,8 @@ describe('authored rigged hand', () => {
           expect(Math.max(...scales) - Math.min(...scales)).toBeLessThan(1e-5);
           const localPosition = new THREE.Vector3().setFromMatrixPosition(bone.matrix);
           const rootTravel = localPosition.distanceTo(originalPositions[index]);
-          if (bone.name === 'thumb_01') expect(rootTravel).toBeLessThanOrEqual(0.050001);
+          if (bone.name === 'thumb_01' || bone.name.endsWith('_helper'))
+            expect(rootTravel).toBeLessThanOrEqual(0.050001);
           else expect(rootTravel).toBeLessThan(1e-6);
         }
         expect(hand.root.getObjectByName('authored-hand-root')?.scale.toArray()).toEqual([1, 1, 1]);
@@ -684,9 +1231,10 @@ describe('authored rigged hand', () => {
     const secondRoot = second.root.getObjectByName('authored-hand-root');
     const firstBones = firstRoot?.getObjectsByProperty('type', 'Bone') ?? [];
     const secondBones = secondRoot?.getObjectsByProperty('type', 'Bone') ?? [];
-    expect(firstBones).toHaveLength(NAMES.length);
-    expect(secondBones).toHaveLength(NAMES.length);
-    expect(firstBones.map((bone) => bone.name)).toEqual(expect.arrayContaining(NAMES));
+    const boneNames = [...NAMES, ...Object.keys(THUMB_HELPERS)];
+    expect(firstBones).toHaveLength(boneNames.length);
+    expect(secondBones).toHaveLength(boneNames.length);
+    expect(firstBones.map((bone) => bone.name)).toEqual(expect.arrayContaining(boneNames));
     expect(firstBones[0]).not.toBe(secondBones[0]);
     const firstMeshes = authoredMeshes(first.root);
     expect(firstMeshes).toHaveLength(1);

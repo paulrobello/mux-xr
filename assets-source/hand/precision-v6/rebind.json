@@ -1,0 +1,54 @@
+{
+  "neutral_residual_deg": {
+    "thumb_01": {
+      "left": 17.54,
+      "right": 18.48
+    },
+    "thumb_02": {
+      "left": 17.54,
+      "right": 18.48
+    },
+    "thumb_03": {
+      "left": 21.02,
+      "right": 22.93
+    }
+  },
+  "bind_swing_deg": {
+    "thumb_01": 70.32,
+    "thumb_02": 4.48,
+    "thumb_03": 6.78
+  },
+  "action_pose_error_deg": 0.0,
+  "bake": "dual-quaternion",
+  "pocket_fix": {
+    "passes": 10,
+    "vertices": 97,
+    "seeds": 27,
+    "max_bake_pit_mm": 0.83
+  },
+  "max_displacement_outside_thumb_m": 1.5914447131226827e-08,
+  "wrist_thumb_blend": {
+    "radius_m": 0.06,
+    "vertices": 413,
+    "iterations": 300,
+    "below_m": 1.0,
+    "max_share_change": 0.472,
+    "mean_share_change": 0.14
+  },
+  "thumb_taper": {
+    "distance_m": 0.025,
+    "vertices": 235,
+    "max_share_moved": 0.476
+  },
+  "thumb_taper_before_bake": {
+    "vertices": 193
+  },
+  "helper": {
+    "enabled": true,
+    "vertices": 432,
+    "action_keys": 24,
+    "ahead_m": 0.015,
+    "web_split_m": 0.015,
+    "heel_taper_share": 1.0
+  }
+}

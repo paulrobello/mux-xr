@@ -3,6 +3,8 @@ import neutralReference from './hand-neutral-reference.json';
 
 type HandJoints = THREE.Group & { joints?: Record<string, THREE.Object3D | undefined> };
 const CONTACT_JOINTS = ['phalanx-proximal', 'phalanx-intermediate', 'phalanx-distal', 'tip'];
+const PINCH_ROOT_TRAVEL = 0.05;
+const FOLD_ROOT_TRAVEL = 0.03;
 
 export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.Group) {
   const bone = (name: string): THREE.Bone => mesh.skeleton.getBoneByName(name) as THREE.Bone;
@@ -68,8 +70,15 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
     return true;
   };
 
+  // Root travel of a thumb opposing a closed fist this frame; drives the skin corrective.
+  let foldTravel = 0;
+
   return {
+    get foldTravel(): number {
+      return foldTravel;
+    },
     update(hand: HandJoints, side: 'left' | 'right', controllerClosure?: number): void {
+      foldTravel = 0;
       root.getWorldQuaternion(palm);
       inversePalm.copy(palm).invert();
       forward.set(0, 1, 0).applyQuaternion(palm);
@@ -171,10 +180,19 @@ export function createHandPoseConstraints(mesh: THREE.SkinnedMesh, root: THREE.G
     const weight = pinch + fold;
     if (weight <= 0) return;
     if (read(hand, 'wrist', base) && read(hand, 'thumb-phalanx-proximal', delta)) {
-      delta.sub(base).applyQuaternion(inversePalm).sub(thumbNeutral[side]).clampLength(0, 0.05);
+      delta.sub(base).applyQuaternion(inversePalm).sub(thumbNeutral[side]);
+      // Folded-thumb root travel past 30 mm shears the wrist/thumb_01 skin band into folds;
+      // pinch keeps the full travel its contact needs.
+      const travel = delta.length();
+      const reach =
+        pinch * Math.min(travel, PINCH_ROOT_TRAVEL) + fold * Math.min(travel, FOLD_ROOT_TRAVEL);
+      foldTravel = closure * reach;
       thumb[0].parent?.getWorldQuaternion(parent).invert();
       thumb[0].position.add(
-        delta.multiplyScalar(weight).applyQuaternion(palm).applyQuaternion(parent),
+        delta
+          .multiplyScalar(travel > 0 ? reach / travel : 0)
+          .applyQuaternion(palm)
+          .applyQuaternion(parent),
       );
       thumb[0].updateWorldMatrix(false, true);
     }

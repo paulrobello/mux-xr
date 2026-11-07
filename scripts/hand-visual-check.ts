@@ -875,7 +875,7 @@ async function main(): Promise<void> {
       meshReport.visibility[0] === false &&
       meshReport.visibility[1] === true &&
       meshReport.details.every(
-        (item) => item.authored === 'loaded' && item.bones === 13 && item.finite,
+        (item) => item.authored === 'loaded' && item.bones === 16 && item.finite,
       ) &&
       /Apple.*M4|Metal/i.test(String(report.renderer)) &&
       !/SwiftShader/i.test(String(report.renderer));
