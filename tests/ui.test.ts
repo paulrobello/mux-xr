@@ -266,22 +266,33 @@ describe('mux XR local UI state', () => {
     distance.dispatchEvent(new Event('input'));
     curvature.value = '25';
     curvature.dispatchEvent(new Event('input'));
+    const stripSide = root.querySelector<HTMLSelectElement>('[data-scroll-strip-side]');
+    if (!stripSide) throw new Error('Scroll strip side control missing');
+    expect(stripSide.value).toBe('right');
+    stripSide.value = 'both';
+    stripSide.dispatchEvent(new Event('change'));
     expect(ui.getSettings().windowPreferences).toEqual({
       defaultOpacity: 0.65,
       focusDistance: 2.4,
       focusCurvature: 25,
+      scrollStripSide: 'both',
     });
-    expect(changes).toEqual([0.65, 0.65, 0.65]);
-    ui.setWindowPreferences({ defaultOpacity: 0.4, focusDistance: 3, focusCurvature: 50 }, true);
+    expect(changes).toEqual([0.65, 0.65, 0.65, 0.65]);
+    ui.setWindowPreferences(
+      { defaultOpacity: 0.4, focusDistance: 3, focusCurvature: 50, scrollStripSide: 'left' },
+      true,
+    );
     expect(opacity.value).toBe('40');
     expect(distance.value).toBe('3');
     expect(curvature.value).toBe('50');
+    expect(stripSide.value).toBe('left');
     ui.destroy();
     const restored = mountWorkspaceUI(root, { onConnect: () => undefined });
     expect(restored.getSettings().windowPreferences).toEqual({
       defaultOpacity: 0.4,
       focusDistance: 3,
       focusCurvature: 50,
+      scrollStripSide: 'left',
     });
     restored.destroy();
     root.remove();

@@ -1,13 +1,19 @@
+export type ScrollStripSide = 'right' | 'left' | 'both';
+
+export const SCROLL_STRIP_SIDES: readonly ScrollStripSide[] = ['right', 'left', 'both'];
+
 export interface WindowPreferences {
   defaultOpacity: number;
   focusDistance: number;
   focusCurvature: number;
+  scrollStripSide: ScrollStripSide;
 }
 
 export const DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
   defaultOpacity: 1,
   focusDistance: 1.5,
   focusCurvature: 0,
+  scrollStripSide: 'right',
 };
 
 const clamp = (value: number, minimum: number, maximum: number, fallback: number): number =>
@@ -35,5 +41,8 @@ export function validateWindowPreferences(value: unknown): WindowPreferences {
       100,
       DEFAULT_WINDOW_PREFERENCES.focusCurvature,
     ),
+    scrollStripSide: SCROLL_STRIP_SIDES.includes(candidate.scrollStripSide as ScrollStripSide)
+      ? (candidate.scrollStripSide as ScrollStripSide)
+      : DEFAULT_WINDOW_PREFERENCES.scrollStripSide,
   };
 }

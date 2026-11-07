@@ -690,7 +690,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     const windowControls = document.createElement('div');
     windowControls.dataset.windowPreferences = 'true';
     windowControls.innerHTML =
-      '<fieldset><legend>Window and focus preferences</legend><label>New window glass opacity <span data-window-opacity-value>100%</span><input data-window-opacity type="range" min="10" max="100" step="1" aria-label="New window glass opacity percentage"><small>Applies to new windows only. Existing panes are unchanged.</small></label><label>Focus distance <span data-focus-distance-value>1.5 m</span><input data-focus-distance type="range" min="0.5" max="5" step="0.1" aria-label="Focus distance in meters"><small>Distance in front of you when focusing any window.</small></label><label>Focus warp <span data-focus-curvature-value>0°</span><input data-focus-curvature type="range" min="0" max="100" step="5" aria-label="Focus curvature in degrees"><small>Temporary focus curvature. The original curvature restores when focus ends.</small></label></fieldset>';
+      '<fieldset><legend>Window and focus preferences</legend><label>New window glass opacity <span data-window-opacity-value>100%</span><input data-window-opacity type="range" min="10" max="100" step="1" aria-label="New window glass opacity percentage"><small>Applies to new windows only. Existing panes are unchanged.</small></label><label>Focus distance <span data-focus-distance-value>1.5 m</span><input data-focus-distance type="range" min="0.5" max="5" step="0.1" aria-label="Focus distance in meters"><small>Distance in front of you when focusing any window.</small></label><label>Focus warp <span data-focus-curvature-value>0°</span><input data-focus-curvature type="range" min="0" max="100" step="5" aria-label="Focus curvature in degrees"><small>Temporary focus curvature. The original curvature restores when focus ends.</small></label><label>Scroll strip <select data-scroll-strip-side aria-label="Scroll strip side"><option value="right">Right</option><option value="left">Left</option><option value="both">Both sides</option></select><small>Pinch and drag the strip beside each pane to scroll it.</small></label></fieldset>';
     settingsPanel.insertBefore(
       windowControls,
       settingsPanel.querySelector('[data-action="passthrough"]'),
@@ -699,6 +699,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     const windowDistance = windowControls.querySelector<HTMLInputElement>('[data-focus-distance]');
     const windowCurvature =
       windowControls.querySelector<HTMLInputElement>('[data-focus-curvature]');
+    const stripSide = windowControls.querySelector<HTMLSelectElement>('[data-scroll-strip-side]');
     const windowOpacityValue = windowControls.querySelector<HTMLElement>(
       '[data-window-opacity-value]',
     );
@@ -712,6 +713,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       !windowOpacity ||
       !windowDistance ||
       !windowCurvature ||
+      !stripSide ||
       !windowOpacityValue ||
       !windowDistanceValue ||
       !windowCurvatureValue
@@ -721,6 +723,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       windowOpacity.value = String(Math.round(settings.windowPreferences.defaultOpacity * 100));
       windowDistance.value = String(settings.windowPreferences.focusDistance);
       windowCurvature.value = String(settings.windowPreferences.focusCurvature);
+      stripSide.value = settings.windowPreferences.scrollStripSide;
       windowOpacityValue.textContent = `${windowOpacity.value}%`;
       windowDistanceValue.textContent = `${windowDistance.value} m`;
       windowCurvatureValue.textContent = `${windowCurvature.value}°`;
@@ -732,6 +735,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
           defaultOpacity: Number(windowOpacity.value) / 100,
           focusDistance: Number(windowDistance.value),
           focusCurvature: Number(windowCurvature.value),
+          scrollStripSide: stripSide.value,
         }),
       };
       updateWindowPreferenceControls();
@@ -740,6 +744,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     windowOpacity.addEventListener('input', changeWindowPreferences);
     windowDistance.addEventListener('input', changeWindowPreferences);
     windowCurvature.addEventListener('input', changeWindowPreferences);
+    stripSide.addEventListener('change', changeWindowPreferences);
     updateWindowPreferenceControls();
     const grid = document.createElement('div');
     grid.dataset.gridControls = 'true';

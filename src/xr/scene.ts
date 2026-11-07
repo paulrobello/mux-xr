@@ -46,6 +46,8 @@ import { validateKeyboardCurvature } from '../workspace/keyboard-curvature';
 import { type KeyborbMode, keyborbEnabled, validateKeyborbMode } from '../workspace/keyborb';
 import {
   DEFAULT_WINDOW_PREFERENCES,
+  SCROLL_STRIP_SIDES,
+  type ScrollStripSide,
   validateWindowPreferences,
   type WindowPreferences,
 } from '../workspace/window-preferences';
@@ -303,6 +305,8 @@ const QUALITY_RANK: Record<TerminalRenderQuality, number> = {
   full: 3,
 };
 
+type ScrollStripMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+
 interface XrSessionLike {
   addEventListener(type: string, listener: () => void): void;
   end(): Promise<void>;
@@ -321,7 +325,7 @@ interface TerminalPanel {
   texture: THREE.Texture;
   textureSource: TerminalTexture;
   frame: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
-  scrollStrip: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+  scrollStrips: Record<'right' | 'left', ScrollStripMesh>;
   selection: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   unsubscribe: () => void;
   defaultPosition: THREE.Vector3;
@@ -641,6 +645,33 @@ export function createWorkspaceScene(
   scene.userData.maxAnisotropy = renderer?.capabilities.getMaxAnisotropy() ?? 1;
   let widgetRestorePending = true;
   let poseRestorePending = false;
+  // Three keeps the XR camera at the origin (or the last session's pose) until a frame reports a
+  // viewer pose, so saved poses must not be applied or captured against it before then.
+  let xrViewerPending = false;
+  // Saved poses are viewer-relative. Outside a tracked XR session they stay relative to this fixed
+  // viewer (a nominal head, then the last tracked head) so desktop camera framing never moves them.
+  const NOMINAL_VIEWER_HEIGHT = 1.52;
+  const layoutViewer = new THREE.PerspectiveCamera();
+  layoutViewer.position.set(0, NOMINAL_VIEWER_HEIGHT, 0);
+  const resetLayoutViewer = (): void => {
+    layoutViewer.position.set(0, NOMINAL_VIEWER_HEIGHT, 0);
+    layoutViewer.quaternion.identity();
+  };
+  // Three moves its XR camera from the left eye to a centre-and-back union pose during render, so
+  // saved poses use the frame's viewer transform instead whenever the frame provides one.
+  const xrHead = new THREE.PerspectiveCamera();
+  let xrHeadFromFrame = false;
+  const inXRContext = (): boolean =>
+    !!renderer &&
+    (renderer.xr.isPresenting || !!activeSession || mutableState.xrMode !== 'desktop');
+  const poseViewer = (): THREE.Camera => {
+    if (renderer && !xrViewerPending && inXRContext()) {
+      if (xrHeadFromFrame) return xrHead;
+      return renderer.xr.getCamera();
+    }
+    layoutViewer.updateMatrixWorld(true);
+    return layoutViewer;
+  };
   let keyboardPoseRestored = true;
   let filterVersion = 0;
   const paneFocus = createPaneFocus();
@@ -987,7 +1018,14 @@ export function createWorkspaceScene(
   // in a plane fixed at pinch start so the ray may leave the strip mid-drag.
   const stripScrolls = new Map<
     THREE.Group,
-    { id: string; plane: THREE.Plane; up: THREE.Vector3; anchor: number; started: boolean }
+    {
+      id: string;
+      strip: ScrollStripMesh;
+      plane: THREE.Plane;
+      up: THREE.Vector3;
+      anchor: number;
+      started: boolean;
+    }
   >();
   let keyboardResume: {
     mode: 'keyboard' | 'command-editor';
@@ -1194,19 +1232,22 @@ export function createWorkspaceScene(
   };
   const startStripScroll = (source: THREE.Group, target: InputTarget): void => {
     const panel = panels.get(target.terminalId);
-    if (!panel) return;
+    const strip = Object.values(panel?.scrollStrips ?? {}).find(
+      (candidate) => candidate === target.object,
+    );
+    if (!panel || !strip) return;
     panel.root.updateMatrixWorld(true);
     const up = new THREE.Vector3(0, 1, 0)
       .applyQuaternion(panel.root.getWorldQuaternion(new THREE.Quaternion()))
       .normalize();
     const normal = new THREE.Vector3(0, 0, 1)
-      .applyQuaternion(panel.scrollStrip.getWorldQuaternion(new THREE.Quaternion()))
+      .applyQuaternion(strip.getWorldQuaternion(new THREE.Quaternion()))
       .normalize();
     const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
       normal,
-      panel.scrollStrip.getWorldPosition(new THREE.Vector3()),
+      strip.getWorldPosition(new THREE.Vector3()),
     );
-    const drag = { id: panel.id, plane, up, anchor: 0, started: false };
+    const drag = { id: panel.id, strip, plane, up, anchor: 0, started: false };
     const height = stripRayHeight(source, drag);
     if (height === null) return;
     drag.anchor = height;
@@ -1224,7 +1265,7 @@ export function createWorkspaceScene(
         disconnectedControllers.has(source) ||
         handTrackingLost.has(source) ||
         controllerRayBlocked(source) ||
-        !isControlVisible(panel.scrollStrip) ||
+        !isControlVisible(drag.strip) ||
         gripActive() ||
         warpEdit ||
         radialMenu.root.visible
@@ -1253,13 +1294,17 @@ export function createWorkspaceScene(
       actions.scrollTerminal?.(panel.id, lines);
     }
   };
+  const showScrollStrips = (panel: TerminalPanel): void => {
+    const side = mutableState.windowPreferences.scrollStripSide;
+    panel.scrollStrips.right.visible = side !== 'left';
+    panel.scrollStrips.left.visible = side !== 'right';
+  };
   const syncStripOpacity = (): void => {
-    for (const panel of panels.values()) {
-      const active = [...stripScrolls.values()].some((drag) => drag.id === panel.id);
-      panel.scrollStrip.material.opacity = active
-        ? SCROLL_STRIP_ACTIVE_OPACITY
-        : SCROLL_STRIP_OPACITY;
-    }
+    for (const panel of panels.values())
+      for (const strip of Object.values(panel.scrollStrips)) {
+        const active = [...stripScrolls.values()].some((drag) => drag.strip === strip);
+        strip.material.opacity = active ? SCROLL_STRIP_ACTIVE_OPACITY : SCROLL_STRIP_OPACITY;
+      }
   };
   const copyTextSelection = (source: THREE.Group): void => {
     const selection = textSelection;
@@ -1739,8 +1784,20 @@ export function createWorkspaceScene(
       roots,
     );
   };
-  const render = (time = 0): void => {
+  const render = (time = 0, frame?: XRFrame): void => {
     if (disposed) return;
+    if (renderer?.xr.isPresenting) {
+      const space = frame ? renderer.xr.getReferenceSpace() : null;
+      const viewerPose = frame && space ? frame.getViewerPose(space) : undefined;
+      if (viewerPose) {
+        const { position, orientation } = viewerPose.transform;
+        xrHead.position.set(position.x, position.y, position.z);
+        xrHead.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
+        xrHead.updateMatrixWorld(true);
+        xrHeadFromFrame = true;
+      }
+      if (xrViewerPending && (!frame || viewerPose)) xrViewerPending = false;
+    }
     syncKeyborb();
     pendingPokes.clear();
     const radialDelta =
@@ -1753,32 +1810,22 @@ export function createWorkspaceScene(
     if (mutableState.toast && time >= toastDeadline) showToast(null);
     paneFocus.update(deltaSeconds);
     radialMenu.update(radialDelta);
-    if (poseRestorePending && renderer?.xr.isPresenting) {
+    if (poseRestorePending && renderer?.xr.isPresenting && !xrViewerPending) {
       const saved = poseStore.read('hud');
       if (saved && hudRoot)
-        applyUIPose(
-          hudRoot,
-          renderer.xr.getCamera(),
-          saved,
-          hudRoot.userData.scaleLimits as [number, number],
-        );
+        applyUIPose(hudRoot, poseViewer(), saved, hudRoot.userData.scaleLimits as [number, number]);
       for (const [id, pose] of terminalRestoredPoses) {
         const panel = panels.get(id);
-        if (panel) applyUIPose(panel.root, renderer.xr.getCamera(), pose, [0.3, 1.8], 100);
+        if (panel) applyUIPose(panel.root, poseViewer(), pose, [0.3, 1.8], 100);
       }
       poseRestorePending = false;
       floorCorrectionPending = true;
     }
-    if (widgetRestorePending) {
+    if (widgetRestorePending && !xrViewerPending) {
       for (const [kind, pose] of Object.entries(widgetPoseStore.read())) {
         if (touchedWidgets.has(kind as WidgetKind)) continue;
         const widget = widgets.get(kind as WidgetKind) ?? addWidget(kind as WidgetKind);
-        applyUIPose(
-          widget.root,
-          renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera,
-          pose,
-          [0.25, 2],
-        );
+        applyUIPose(widget.root, poseViewer(), pose, [0.25, 2]);
       }
       widgetRestorePending = false;
       mutableState.widgets = [...widgets.keys()];
@@ -2390,7 +2437,7 @@ export function createWorkspaceScene(
       frameHandle = window.requestAnimationFrame(render);
   };
   resize();
-  if (renderer) renderer.setAnimationLoop((time: number) => render(time));
+  if (renderer) renderer.setAnimationLoop((time: number, frame?: XRFrame) => render(time, frame));
   window.addEventListener('resize', resize);
   const onWheel = (event: WheelEvent): void => {
     if (warpEdit || renderer?.xr.isPresenting || !setPointerRay(event as unknown as PointerEvent))
@@ -2416,15 +2463,15 @@ export function createWorkspaceScene(
       panel.selection.visible = panel.id === mutableState.selectedTerminalId;
   };
   const saveUIPose = (name: UIPoseName, object: THREE.Object3D): void => {
-    if (!renderer || (!renderer.xr.isPresenting && !activeSession)) return;
-    const saved = poseStore.save(name, captureUIPose(object, renderer.xr.getCamera()));
+    if (!renderer || (!renderer.xr.isPresenting && !activeSession) || xrViewerPending) return;
+    const saved = poseStore.save(name, captureUIPose(object, poseViewer()));
     if (!saved && mutableState.notice !== 'UI position could not be saved on this device') {
       mutableState.notice = 'UI position could not be saved on this device';
       notify();
     }
   };
   const placeWidget = (widget: ClockWidget): void => {
-    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    const view = poseViewer();
     view.updateWorldMatrix(true, false);
     const eye = view.getWorldPosition(new THREE.Vector3());
     const forward = view.getWorldDirection(new THREE.Vector3());
@@ -2440,8 +2487,8 @@ export function createWorkspaceScene(
     widget.root.scale.setScalar(1);
   };
   const saveWidgetPose = (kind: WidgetKind, widget: ClockWidget): void => {
-    const view = renderer?.xr.isPresenting || activeSession ? renderer?.xr.getCamera() : camera;
-    if (view && !widgetPoseStore.save(kind, captureUIPose(widget.root, view)))
+    const view = poseViewer();
+    if (!widgetPoseStore.save(kind, captureUIPose(widget.root, view)))
       setNotice('Widget position could not be saved on this device');
   };
   const removeWidget = (kind: WidgetKind, persist = true): void => {
@@ -2598,12 +2645,16 @@ export function createWorkspaceScene(
       inputRoot.quaternion.copy(inputTransform.quaternion);
       inputRoot.scale.setScalar(inputTransform.scale);
     } else resetInputPose();
-    if (!keyboardPoseRestored && (mode === 'keyboard' || mode === 'command-editor')) {
+    if (
+      !keyboardPoseRestored &&
+      !xrViewerPending &&
+      (mode === 'keyboard' || mode === 'command-editor')
+    ) {
       const saved = poseStore.read('keyboard');
       if (saved && !previousRoot)
         applyUIPose(
           inputRoot,
-          renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera,
+          poseViewer(),
           saved,
           inputRoot.userData.scaleLimits as [number, number],
         );
@@ -2892,6 +2943,21 @@ export function createWorkspaceScene(
           inputRoot.add(button);
         }
       }
+      const stripSide = preferences.scrollStripSide;
+      const stripSideButton = createLabelButton(
+        `Scroll strip: ${stripSide === 'both' ? 'both sides' : stripSide}`,
+        1.05,
+        0.1,
+        {
+          inputAction: 'scrollStripSide',
+          scrollStripSide:
+            SCROLL_STRIP_SIDES[
+              (SCROLL_STRIP_SIDES.indexOf(stripSide) + 1) % SCROLL_STRIP_SIDES.length
+            ],
+        },
+      );
+      stripSideButton.position.set(0, -0.71, 0);
+      inputRoot.add(stripSideButton);
     } else if (mode === 'arrange') {
       const status = createLabelButton(
         panels.size
@@ -3242,7 +3308,7 @@ export function createWorkspaceScene(
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
     close.position.set(
       mode === 'panes' ? -1.2 : 0,
-      mode === 'panes' ? -0.9 : mode === 'display' ? -0.76 : -0.66,
+      mode === 'panes' ? -0.9 : mode === 'display' ? -0.89 : -0.66,
       0,
     );
     inputRoot.add(close);
@@ -3252,7 +3318,7 @@ export function createWorkspaceScene(
         inputAction: 'openInput',
         mode: mode === 'filtering' ? 'display' : 'settings',
       });
-      back.position.set(-0.22, mode === 'display' ? -0.76 : -0.66, 0);
+      back.position.set(-0.22, mode === 'display' ? -0.89 : -0.66, 0);
       inputRoot.add(back);
     }
     if (mode === 'panes') {
@@ -3622,12 +3688,22 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'windowPreference') {
-      const preference = hit.userData.preference as keyof WindowPreferences;
+      const preference = hit.userData.preference as
+        | 'defaultOpacity'
+        | 'focusDistance'
+        | 'focusCurvature';
       if (['defaultOpacity', 'focusDistance', 'focusCurvature'].includes(preference))
         setWindowPreferences({
           ...mutableState.windowPreferences,
           [preference]: mutableState.windowPreferences[preference] + Number(hit.userData.delta),
         });
+      return true;
+    }
+    if (action === 'scrollStripSide') {
+      setWindowPreferences({
+        ...mutableState.windowPreferences,
+        scrollStripSide: hit.userData.scrollStripSide as ScrollStripSide,
+      });
       return true;
     }
     if (action === 'dismissNotice') {
@@ -4405,12 +4481,15 @@ export function createWorkspaceScene(
       object.position.z = 0.02 + point.z;
       object.rotation.y = radians ? -(flatX / width) * radians : 0;
     };
-    panel.scrollStrip.geometry.dispose();
-    panel.scrollStrip.geometry = new THREE.PlaneGeometry(SCROLL_STRIP_WIDTH, height);
-    panel.scrollStrip.position.set(width / 2 + 0.0175 + 0.008 + SCROLL_STRIP_WIDTH / 2, 0, 0);
+    const stripOffset = width / 2 + 0.0175 + 0.008 + SCROLL_STRIP_WIDTH / 2;
+    for (const [side, strip] of Object.entries(panel.scrollStrips)) {
+      strip.geometry.dispose();
+      strip.geometry = new THREE.PlaneGeometry(SCROLL_STRIP_WIDTH, height);
+      strip.position.set(side === 'left' ? -stripOffset : stripOffset, 0, 0);
+      followCurve(strip);
+    }
     followCurve(panel.connectionButton);
     followCurve(panel.closeButton);
-    followCurve(panel.scrollStrip);
     floorCorrectionPending = true;
   };
   const addTerminal = (surface: TerminalSurface): void => {
@@ -4452,34 +4531,41 @@ export function createWorkspaceScene(
     frame.name = 'terminal-frame';
     frame.position.z = -0.025;
     root.add(frame);
-    const scrollStrip = new THREE.Mesh(
-      new THREE.PlaneGeometry(SCROLL_STRIP_WIDTH, PANEL_HEIGHT),
-      new THREE.MeshBasicMaterial({
-        color: ACCENT,
-        transparent: true,
-        opacity: SCROLL_STRIP_OPACITY,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      }),
-    );
-    scrollStrip.name = 'terminal-scroll-strip';
-    Object.assign(scrollStrip.userData, {
-      inputAction: 'scrollStrip',
-      terminalId: surface.pane.id,
-      excludeFromBounds: true,
-      helpText: getControlHelp({ inputAction: 'scrollStrip' }),
-    });
-    for (const offset of [-0.025, 0, 0.025]) {
-      const grip = new THREE.Mesh(
-        new THREE.PlaneGeometry(SCROLL_STRIP_WIDTH * 0.5, 0.006),
-        new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.7 }),
+    const createScrollStrip = (name: string): ScrollStripMesh => {
+      const strip = new THREE.Mesh(
+        new THREE.PlaneGeometry(SCROLL_STRIP_WIDTH, PANEL_HEIGHT),
+        new THREE.MeshBasicMaterial({
+          color: ACCENT,
+          transparent: true,
+          opacity: SCROLL_STRIP_OPACITY,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        }),
       );
-      grip.position.set(0, offset, 0.001);
-      grip.userData.excludeFromBounds = true;
-      grip.raycast = () => undefined;
-      scrollStrip.add(grip);
-    }
-    root.add(scrollStrip);
+      strip.name = name;
+      Object.assign(strip.userData, {
+        inputAction: 'scrollStrip',
+        terminalId: surface.pane.id,
+        excludeFromBounds: true,
+        helpText: getControlHelp({ inputAction: 'scrollStrip' }),
+      });
+      for (const offset of [-0.025, 0, 0.025]) {
+        const grip = new THREE.Mesh(
+          new THREE.PlaneGeometry(SCROLL_STRIP_WIDTH * 0.5, 0.006),
+          new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.7 }),
+        );
+        grip.position.set(0, offset, 0.001);
+        grip.userData.excludeFromBounds = true;
+        grip.raycast = () => undefined;
+        strip.add(grip);
+      }
+      root.add(strip);
+      return strip;
+    };
+    const scrollStrips = {
+      right: createScrollStrip('terminal-scroll-strip'),
+      left: createScrollStrip('terminal-scroll-strip-left'),
+    };
     const selection = createSelection();
     root.userData.fontZoom = 1;
     const shortError = surface.error ? ` · ${surface.error.slice(0, 28)}` : '';
@@ -4530,7 +4616,7 @@ export function createWorkspaceScene(
       texture,
       textureSource,
       frame,
-      scrollStrip,
+      scrollStrips,
       selection,
       unsubscribe: () => undefined,
       defaultPosition,
@@ -4598,6 +4684,7 @@ export function createWorkspaceScene(
       }
     });
     panels.set(panel.id, panel);
+    showScrollStrips(panel);
     floorCorrectionPending = true;
     terminalScreens.push(screen);
     scene.add(root);
@@ -4697,10 +4784,7 @@ export function createWorkspaceScene(
     scale: pose.scale,
   });
   const captureCurrentTerminalPose = (panel: TerminalPanel): SavedUIPose => {
-    const view =
-      renderer && (renderer.xr.isPresenting || activeSession || mutableState.xrMode !== 'desktop')
-        ? renderer.xr.getCamera()
-        : camera;
+    const view = poseViewer();
     const original = paneFocus.originalTransform(panel.root);
     if (!original) return captureUIPose(panel.root, view);
     const proxy = new THREE.Object3D();
@@ -4720,7 +4804,7 @@ export function createWorkspaceScene(
     if (!panel) return;
     terminalPoseCache.set(id, copyTerminalPose(pose));
     terminalRestoredPoses.set(id, copyTerminalPose(pose));
-    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    const view = poseViewer();
     applyUIPose(panel.root, view, pose, [0.3, 1.8], 100);
     floorCorrectionPending = true;
     correctTerminalFloor();
@@ -4743,7 +4827,7 @@ export function createWorkspaceScene(
     )
       return;
     floorCorrectionPending = false;
-    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    const view = poseViewer();
     const offset = keepLayoutAboveFloor(
       [...panels.values()].map((panel) => panel.root),
       workspaceFloorY(mutableState.background, mutableState.xrMode),
@@ -5112,6 +5196,8 @@ export function createWorkspaceScene(
     );
     activeSession = session;
     poseRestorePending = true;
+    xrViewerPending = true;
+    xrHeadFromFrame = false;
     widgetRestorePending = true;
     touchedWidgets.clear();
     keyboardPoseRestored = false;
@@ -5129,6 +5215,7 @@ export function createWorkspaceScene(
       await renderer.xr.setSession(session as Parameters<typeof renderer.xr.setSession>[0]);
     } catch (error) {
       activeSession = null;
+      xrViewerPending = false;
       await session.end().catch(() => undefined);
       throw error;
     }
@@ -5155,6 +5242,13 @@ export function createWorkspaceScene(
       keyboardResume = null;
       endFocusMode(true);
       releaseAllMouse();
+      if (!xrViewerPending) {
+        const head = poseViewer();
+        head.getWorldPosition(layoutViewer.position);
+        head.getWorldQuaternion(layoutViewer.quaternion);
+      }
+      xrViewerPending = false;
+      xrHeadFromFrame = false;
       activeSession = null;
       hideInput();
       inputTransform = null;
@@ -5277,7 +5371,13 @@ export function createWorkspaceScene(
     const focusChanged =
       next.focusDistance !== mutableState.windowPreferences.focusDistance ||
       next.focusCurvature !== mutableState.windowPreferences.focusCurvature;
+    const stripSideChanged =
+      next.scrollStripSide !== mutableState.windowPreferences.scrollStripSide;
     mutableState.windowPreferences = next;
+    if (stripSideChanged) {
+      stripScrolls.clear();
+      for (const panel of panels.values()) showScrollStrips(panel);
+    }
     const panel = panels.get(paneFocus.activeId ?? '');
     if (panel && focusChanged) {
       panel.focusCurvature = next.focusCurvature;
@@ -5336,7 +5436,8 @@ export function createWorkspaceScene(
           : bound.size;
       }),
     );
-    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    if (!inXRContext()) resetLayoutViewer();
+    const view = poseViewer();
     view.updateMatrixWorld(true);
     const eye = view.getWorldPosition(new THREE.Vector3());
     const forward = view.getWorldDirection(new THREE.Vector3());
@@ -5369,7 +5470,7 @@ export function createWorkspaceScene(
   const moveLayoutDepth = (direction: number): void => {
     if (!panels.size || !Number.isFinite(direction) || direction === 0) return;
     endFocusMode(true);
-    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    const view = poseViewer();
     scene.updateMatrixWorld(true);
     view.updateWorldMatrix(true, false);
     const eye = view.getWorldPosition(new THREE.Vector3());
@@ -5434,19 +5535,24 @@ export function createWorkspaceScene(
       hudRoot.quaternion.identity();
       hudRoot.scale.setScalar(0.62);
     }
+    if (!inXRContext()) resetLayoutViewer();
+    const layoutView = poseViewer();
+    layoutView.updateMatrixWorld(true);
+    const layoutEye = layoutView.getWorldPosition(new THREE.Vector3());
+    const layoutRotation = layoutView.getWorldQuaternion(new THREE.Quaternion());
+    for (const panel of panels.values()) {
+      panel.root.position
+        .copy(panel.defaultPosition)
+        .add(new THREE.Vector3(0, -NOMINAL_VIEWER_HEIGHT, 0))
+        .applyQuaternion(layoutRotation)
+        .add(layoutEye);
+      panel.root.quaternion.premultiply(layoutRotation);
+    }
     if (renderer?.xr.isPresenting) {
       const view = renderer.xr.getCamera();
       view.updateMatrixWorld(true);
       const eye = view.getWorldPosition(new THREE.Vector3());
       const rotation = view.getWorldQuaternion(new THREE.Quaternion());
-      for (const panel of panels.values()) {
-        panel.root.position
-          .copy(panel.defaultPosition)
-          .add(new THREE.Vector3(0, -1.52, 0))
-          .applyQuaternion(rotation)
-          .add(eye);
-        panel.root.quaternion.premultiply(rotation);
-      }
       if (hudRoot) {
         hudRoot.position.set(0, -0.65, -1.35).applyQuaternion(rotation).add(eye);
         hudRoot.quaternion.copy(rotation);
@@ -5457,7 +5563,7 @@ export function createWorkspaceScene(
       placeWidget(widget);
       saveWidgetPose(kind, widget);
     }
-    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    const view = poseViewer();
     keepLayoutAboveFloor(
       [...panels.values()].map((panel) => panel.root),
       workspaceFloorY(mutableState.background, mutableState.xrMode),

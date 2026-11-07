@@ -10,7 +10,7 @@ const fakeXR = vi.hoisted(() => ({
   hands: [] as unknown[],
   presenting: false,
   camera: null as unknown,
-  frame: null as ((time: number) => void) | null,
+  frame: null as ((time: number, frame?: unknown) => void) | null,
 }));
 
 vi.mock('three', async (importOriginal) => {
@@ -27,6 +27,7 @@ vi.mock('three', async (importOriginal) => {
       getHand: (index: number) => fakeXR.hands[index],
       getCamera: () => fakeXR.camera,
       setReferenceSpaceType: vi.fn(),
+      getReferenceSpace: () => ({}),
       setSession: vi.fn(async () => undefined),
     };
     capabilities = { getMaxAnisotropy: () => 1 };
@@ -1982,13 +1983,68 @@ describe('native XR controller event routing', () => {
       container.remove();
     });
 
-    it('keeps the strip out of the pane footprint', () => {
+    it('keeps both strips out of the pane footprint', () => {
       const { workspace, container } = fixture();
+      workspace.setWindowPreferences({
+        ...workspace.state.windowPreferences,
+        scrollStripSide: 'both',
+      });
       const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
-      const strip = stripOf(workspace, 'pane-a');
       const before = measurePanelBounds(panel).size.width;
-      strip.removeFromParent();
+      stripOf(workspace, 'pane-a').removeFromParent();
+      panel.getObjectByName('terminal-scroll-strip-left')?.removeFromParent();
       expect(measurePanelBounds(panel).size.width).toBeCloseTo(before, 6);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('places strips on the chosen side and scrolls from the left strip', () => {
+      const { workspace, actions, container } = fixture();
+      actions.scrollTerminal = vi.fn(() => true);
+      const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+      const right = stripOf(workspace, 'pane-a');
+      const left = panel.getObjectByName('terminal-scroll-strip-left');
+      if (!(left instanceof THREE.Mesh)) throw new Error('left strip missing');
+      expect([right.visible, left.visible]).toEqual([true, false]);
+      expect(left.position.x).toBeCloseTo(-right.position.x, 6);
+      expect(left.userData).toMatchObject({ inputAction: 'scrollStrip', excludeFromBounds: true });
+      const choose = (side: 'right' | 'left' | 'both'): void =>
+        workspace.setWindowPreferences({
+          ...workspace.state.windowPreferences,
+          scrollStripSide: side,
+        });
+      choose('both');
+      expect([right.visible, left.visible]).toEqual([true, true]);
+      choose('left');
+      expect([right.visible, left.visible]).toEqual([false, true]);
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      connectController(0);
+      const line = lineHeight(workspace, 'pane-a');
+      const aim = (y: number, time: number): void => {
+        aimControllerAtScreen(controller, left, new THREE.Vector3(0, y, 0));
+        fakeXR.frame?.(time);
+      };
+      aim(0, 10);
+      controller.dispatchEvent({ type: 'selectstart' } as never);
+      aim(-line * 0.6, 20);
+      aim(-line * 2.7, 30);
+      expect(scrolled(actions)).toEqual([-2]);
+      choose('right');
+      aim(-line * 6, 40);
+      expect(actions.scrollTerminal).toHaveBeenCalledTimes(1);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('cycles the strip side from the XR Display settings', () => {
+      const { workspace, container } = fixture();
+      workspace.showInput('display');
+      hit(workspace, { inputAction: 'scrollStripSide', scrollStripSide: 'left' });
+      expect(workspace.state.windowPreferences.scrollStripSide).toBe('left');
+      hit(workspace, { inputAction: 'scrollStripSide', scrollStripSide: 'both' });
+      expect(workspace.state.windowPreferences.scrollStripSide).toBe('both');
+      hit(workspace, { inputAction: 'scrollStripSide', scrollStripSide: 'right' });
+      expect(workspace.state.windowPreferences.scrollStripSide).toBe('right');
       workspace.dispose();
       container.remove();
     });
@@ -4435,7 +4491,12 @@ describe('native XR controller event routing', () => {
   it('uses new-window opacity without changing open panes or saved overrides', () => {
     const { workspace, container } = fixture();
     workspace.setTerminalOpacity('pane-a', 0.7);
-    workspace.setWindowPreferences({ defaultOpacity: 0.4, focusDistance: 1.5, focusCurvature: 0 });
+    workspace.setWindowPreferences({
+      defaultOpacity: 0.4,
+      focusDistance: 1.5,
+      focusCurvature: 0,
+      scrollStripSide: 'right',
+    });
     expect(workspace.getTerminalOpacity('pane-a')).toBe(0.7);
     expect(workspace.getTerminalOpacity('pane-b')).toBe(1);
     workspace.addTerminal(surface(pane('pane-c')));
@@ -4468,7 +4529,12 @@ describe('native XR controller event routing', () => {
       expect(center.distanceTo(target)).toBeLessThan(1e-5);
     };
     checkDistance(1.5);
-    workspace.setWindowPreferences({ defaultOpacity: 0.4, focusDistance: 2.2, focusCurvature: 40 });
+    workspace.setWindowPreferences({
+      defaultOpacity: 0.4,
+      focusDistance: 2.2,
+      focusCurvature: 40,
+      scrollStripSide: 'right',
+    });
     for (let frame = 20; frame < 40; frame++) fakeXR.frame?.(frame * 20);
     checkDistance(2.2);
     expect(root.userData.curvatureDegrees).toBe(40);
@@ -4529,5 +4595,187 @@ describe('native XR controller event routing', () => {
     workspace.dispose();
     container.remove();
     vi.unstubAllGlobals();
+  });
+});
+
+describe('terminal pose persistence across reloads', () => {
+  const untracked = { getViewerPose: () => null };
+  const startSession = () => {
+    const listeners: Array<() => void> = [];
+    const session = {
+      addEventListener: (_type: string, listener: () => void) => listeners.push(listener),
+      end: vi.fn(async () => {
+        fakeXR.presenting = false;
+        for (const listener of listeners) listener();
+      }),
+    };
+    vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+  };
+  const trackedHead = (head: THREE.PerspectiveCamera): void => {
+    head.position.set(0.3, 1.65, 0.2);
+    head.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 6);
+  };
+
+  afterEach(() => {
+    fakeXR.presenting = false;
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps pane distance when a reload restores panes before XR tracking starts', async () => {
+    const head = new THREE.PerspectiveCamera();
+    const original = {
+      position: [0.2, -0.05, -1.4] as [number, number, number],
+      quaternion: [0, 0, 0, 1] as [number, number, number, number],
+      scale: 1,
+    };
+    let saved = original;
+    for (let reload = 0; reload < 3; reload++) {
+      fakeXR.presenting = false;
+      startSession();
+      const { workspace, container } = fixture();
+      head.position.set(0, 0, 0);
+      head.quaternion.identity();
+      fakeXR.camera = head;
+      await workspace.enterXR('vr');
+      fakeXR.presenting = true;
+      fakeXR.frame?.(1000, untracked);
+      workspace.restoreTerminalPose('pane-a', saved);
+      fakeXR.frame?.(1016, untracked);
+      trackedHead(head);
+      for (let frame = 0; frame < 4; frame++) fakeXR.frame?.(1100 + frame * 16);
+      const root = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Object3D;
+      expect(root.getWorldPosition(new THREE.Vector3()).distanceTo(head.position)).toBeCloseTo(
+        Math.hypot(...original.position),
+        3,
+      );
+      await workspace.exitXR();
+      for (let frame = 0; frame < 3; frame++) fakeXR.frame?.(2000 + frame * 16);
+      const next = workspace.captureTerminalPose('pane-a');
+      if (!next) throw new Error('Pane A pose missing');
+      next.position.forEach((value, axis) => {
+        expect(value).toBeCloseTo(original.position[axis], 3);
+      });
+      saved = next as typeof original;
+      workspace.dispose();
+      container.remove();
+    }
+  });
+
+  it('keeps XR-relative pane poses when desktop controls recapture after XR ends', async () => {
+    startSession();
+    const { workspace, container } = fixture();
+    const head = new THREE.PerspectiveCamera();
+    trackedHead(head);
+    fakeXR.camera = head;
+    await workspace.enterXR('vr');
+    fakeXR.presenting = true;
+    fakeXR.frame?.(1000);
+    const pose = {
+      position: [-0.3, 0.1, -1.6] as [number, number, number],
+      quaternion: [0, 0, 0, 1] as [number, number, number, number],
+      scale: 1,
+    };
+    workspace.restoreTerminalPose('pane-a', pose);
+    fakeXR.frame?.(1016);
+    await workspace.exitXR();
+    workspace.selectTerminal('pane-a');
+    workspace.scaleSelectedPanel(-1);
+    for (let frame = 0; frame < 3; frame++) fakeXR.frame?.(2000 + frame * 16);
+    const saved = workspace.captureTerminalPose('pane-a');
+    if (!saved) throw new Error('Pane A pose missing');
+    saved.position.forEach((value, axis) => {
+      expect(value).toBeCloseTo(pose.position[axis], 3);
+    });
+    expect(saved.scale).toBeCloseTo(0.9, 3);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('lays out desktop Arrange and Reset from the nominal viewer after a turned session', async () => {
+    const reference = fixture();
+    reference.workspace.arrangeTerminals('row');
+    const arranged = reference.workspace.captureTerminalPose('pane-a');
+    reference.workspace.resetLayout();
+    const reset = reference.workspace.captureTerminalPose('pane-a');
+    reference.workspace.dispose();
+    reference.container.remove();
+    startSession();
+    const { workspace, container } = fixture();
+    const head = new THREE.PerspectiveCamera();
+    trackedHead(head);
+    head.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+    fakeXR.camera = head;
+    await workspace.enterXR('vr');
+    fakeXR.presenting = true;
+    fakeXR.frame?.(1000);
+    await workspace.exitXR();
+    workspace.arrangeTerminals('row');
+    const turnedArranged = workspace.captureTerminalPose('pane-a');
+    workspace.resetLayout();
+    const turnedReset = workspace.captureTerminalPose('pane-a');
+    if (!arranged || !reset || !turnedArranged || !turnedReset) throw new Error('pose missing');
+    turnedArranged.position.forEach((value, axis) => {
+      expect(value).toBeCloseTo(arranged.position[axis], 3);
+    });
+    turnedReset.position.forEach((value, axis) => {
+      expect(value).toBeCloseTo(reset.position[axis], 3);
+    });
+    expect(arranged.position[2]).toBeLessThan(-1.5);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('saves a desktop clock in front of the nominal viewer', () => {
+    localStorage.removeItem('mux-xr:widget-poses:v1');
+    const { workspace, container } = fixture();
+    workspace.showInput('widgets');
+    hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'digital-clock' });
+    const saved = JSON.parse(localStorage.getItem('mux-xr:widget-poses:v1') ?? '{}').poses?.[
+      'digital-clock'
+    ];
+    expect(saved?.position[0]).toBeCloseTo(-0.45, 3);
+    expect(saved?.position[1]).toBeCloseTo(0.3, 3);
+    expect(saved?.position[2]).toBeCloseTo(-1.25, 3);
+    workspace.dispose();
+    container.remove();
+    localStorage.removeItem('mux-xr:widget-poses:v1');
+  });
+
+  it('measures saved poses from the frame viewer pose, not the render-adjusted camera', async () => {
+    startSession();
+    const { workspace, container } = fixture();
+    const camera = new THREE.PerspectiveCamera();
+    const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 5);
+    camera.position.set(0.27, 1.65, 0.2);
+    camera.quaternion.copy(yaw);
+    fakeXR.camera = camera;
+    const tracked = {
+      getViewerPose: () => ({
+        transform: {
+          position: { x: 0.3, y: 1.65, z: 0.2, w: 1 },
+          orientation: { x: yaw.x, y: yaw.y, z: yaw.z, w: yaw.w },
+        },
+      }),
+    };
+    await workspace.enterXR('vr');
+    fakeXR.presenting = true;
+    fakeXR.frame?.(1000, tracked);
+    const pose = {
+      position: [0.1, -0.1, -1.5] as [number, number, number],
+      quaternion: [0, 0, 0, 1] as [number, number, number, number],
+      scale: 1,
+    };
+    workspace.restoreTerminalPose('pane-a', pose);
+    fakeXR.frame?.(1016, tracked);
+    camera.position.set(0.3, 1.65, 0.23);
+    await workspace.exitXR();
+    for (let frame = 0; frame < 3; frame++) fakeXR.frame?.(2000 + frame * 16);
+    const saved = workspace.captureTerminalPose('pane-a');
+    if (!saved) throw new Error('Pane A pose missing');
+    saved.position.forEach((value, axis) => {
+      expect(value).toBeCloseTo(pose.position[axis], 3);
+    });
+    workspace.dispose();
+    container.remove();
   });
 });
