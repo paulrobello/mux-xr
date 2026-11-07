@@ -336,6 +336,15 @@ interface XrSessionLike {
   end(): Promise<void>;
 }
 
+const POSE_EVENTS = [
+  'selectstart',
+  'selectend',
+  'select',
+  'squeezestart',
+  'squeezeend',
+  'squeeze',
+] as const;
+
 interface EventRoot {
   addEventListener(type: string, listener: (event: Event) => void): void;
   removeEventListener(type: string, listener: (event: Event) => void): void;
@@ -821,6 +830,7 @@ export function createWorkspaceScene(
     onSqueezeEnd: (event: Event) => void;
     onConnected: (event: Event) => void;
     onDisconnected: (event: Event) => void;
+    onPoseEvent: () => void;
   }> = [];
   const tempMatrix = new THREE.Matrix4();
   const reachPosition = new THREE.Vector3();
@@ -1838,6 +1848,10 @@ export function createWorkspaceScene(
       : null;
   const contactKeyboard = (): THREE.Group | null =>
     mutableState.keyborbEnabled ? null : keyboardSurface();
+  // The render time of each hand visual's last pose update, so the render loop's proximity checks
+  // reuse it. three updates the joints from an input event's own frame before dispatching it, so
+  // controller events clear the entry (see onPoseEvent).
+  const handPosedAt = new Map<THREE.Group, number>();
   const contactVisual = (source: THREE.Group, refresh = false): CartoonHand | undefined => {
     const visual = handVisuals.get(source);
     const side = controllerHandedness.get(source);
@@ -1850,10 +1864,11 @@ export function createWorkspaceScene(
       return undefined;
     if (refresh && renderer) {
       const hand = activeHand(source);
+      const posed = previousRenderTime !== null && handPosedAt.get(source) === previousRenderTime;
       if (hand) {
         if (!sampleHand(source)?.tracked) return undefined;
-        visual.update(hand, renderer.xr.getCamera(), side, 0);
-      } else {
+        if (!posed) visual.update(hand, renderer.xr.getCamera(), side, 0);
+      } else if (!posed) {
         const grip = controllerGrips.get(source);
         visual.updateController(
           grip?.visible ? grip : source,
@@ -2106,6 +2121,7 @@ export function createWorkspaceScene(
             deltaSeconds,
           );
         }
+        handPosedAt.set(controller, time);
         if (side === 'left') {
           leftController = controller;
           leftVisual = visual;
@@ -4858,6 +4874,11 @@ export function createWorkspaceScene(
         syncKeyborb();
       };
       const eventRoot = root as unknown as EventRoot;
+      const onPoseEvent = (): void => {
+        handPosedAt.delete(root);
+      };
+      // Registered first so every handler below sees the event's fresh hand pose.
+      for (const type of POSE_EVENTS) eventRoot.addEventListener(type, onPoseEvent);
       eventRoot.addEventListener('selectstart', onSelect);
       eventRoot.addEventListener('selectend', onSelectEnd);
       eventRoot.addEventListener('select', onSelectComplete);
@@ -4879,6 +4900,7 @@ export function createWorkspaceScene(
         onSqueezeEnd: onNativeSqueezeEnd,
         onConnected,
         onDisconnected,
+        onPoseEvent,
       });
       scene.add(root);
       handGrabActions.set(root, {
@@ -6176,8 +6198,10 @@ export function createWorkspaceScene(
       onSqueezeEnd,
       onConnected,
       onDisconnected,
+      onPoseEvent,
     } of controllerListeners) {
       const eventRoot = root as unknown as EventRoot;
+      for (const type of POSE_EVENTS) eventRoot.removeEventListener(type, onPoseEvent);
       eventRoot.removeEventListener('selectstart', onSelect);
       eventRoot.removeEventListener('selectend', onSelectEnd);
       eventRoot.removeEventListener('select', onSelectComplete);

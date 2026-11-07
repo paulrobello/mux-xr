@@ -1,7 +1,22 @@
 declare module 'troika-three-text' {
   import * as THREE from 'three';
 
-  export class Text extends THREE.Mesh {
+  /** The derived material troika renders text with. */
+  export type TroikaTextMaterial = THREE.ShaderMaterial & {
+    isTextOutlineMaterial?: boolean;
+    setMatrixTexture(texture: THREE.DataTexture): void;
+  };
+
+  export interface TextEventMap extends THREE.Object3DEventMap {
+    syncstart: object;
+    synccomplete: object;
+  }
+
+  export class Text extends THREE.Mesh<
+    THREE.BufferGeometry,
+    THREE.Material | THREE.Material[],
+    TextEventMap
+  > {
     constructor();
     text: string;
     readonly textRenderInfo: { blockBounds: [number, number, number, number] } | null;
@@ -18,11 +33,14 @@ declare module 'troika-three-text' {
     depthOffset: number;
     sync(callback?: () => void): void;
     dispose(): void;
+    _prepareForRender(material: TroikaTextMaterial): void;
   }
 
   export class BatchedText extends Text {
+    protected _dataTextures: Partial<Record<'main' | 'outline', THREE.DataTexture>>;
     addText(text: Text): void;
     removeText(text: Text): void;
+    updateBounds(): void;
   }
 
   export function configureTextBuilder(config: {

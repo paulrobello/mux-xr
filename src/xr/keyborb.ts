@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BatchedText, type Text } from 'troika-three-text';
+import { BatchedText, Text, type TroikaTextMaterial } from 'troika-three-text';
 import { createScalableLabel } from './labels';
 
 const SHELL_VERTEX = `
@@ -170,8 +170,48 @@ export function createKeyborbShells(orbs: readonly THREE.Mesh[]): KeyborbShells 
   return { mesh, update };
 }
 
+/**
+ * A troika batch that rebuilds its per-glyph data only after a glyph moved or the batch repacked.
+ * Stock BatchedText rebuilds it on every render, twice a frame in XR, and because it compares
+ * float64 values with its float32 store it re-uploads the data texture each time.
+ * Member colour, opacity, stroke, outline, clip and curve go only into that data, never through a
+ * sync, so code that changes them on a member must bump `revision`.
+ */
+export class KeyborbGlyphBatch extends BatchedText {
+  /** Bumped whenever member data must be rebuilt. */
+  revision = 0;
+  private readonly prepared = new WeakMap<TroikaTextMaterial, number>();
+  private boundsRevision = -1;
+
+  constructor() {
+    super();
+    this.addEventListener('synccomplete', () => {
+      this.revision++;
+    });
+  }
+
+  override updateBounds(): void {
+    if (this.boundsRevision === this.revision) return;
+    this.boundsRevision = this.revision;
+    super.updateBounds();
+  }
+
+  override _prepareForRender(material: TroikaTextMaterial): void {
+    const texture = this._dataTextures[material.isTextOutlineMaterial ? 'outline' : 'main'];
+    if (texture && this.prepared.get(material) === this.revision) {
+      // The outline material shares the main material's uniforms, so the flag is set per pass.
+      material.uniforms.uTroikaIsOutline.value = Boolean(material.isTextOutlineMaterial);
+      material.setMatrixTexture(texture);
+      Text.prototype._prepareForRender.call(this, material);
+      return;
+    }
+    super._prepareForRender(material);
+    this.prepared.set(material, this.revision);
+  }
+}
+
 export interface KeyborbGlyphs {
-  batch: BatchedText;
+  batch: KeyborbGlyphBatch;
   /** Places each glyph where its orb label sits, so lift and press motion carry it along. */
   update(): void;
 }
@@ -182,7 +222,7 @@ export interface KeyborbGlyphs {
  * The orbs must be direct children of the batch's parent.
  */
 export function createKeyborbGlyphs(orbs: readonly THREE.Mesh[]): KeyborbGlyphs {
-  const batch = new BatchedText();
+  const batch = new KeyborbGlyphBatch();
   batch.name = 'keyborb-glyphs';
   batch.renderOrder = 12;
   batch.depthOffset = -1;
@@ -199,21 +239,27 @@ export function createKeyborbGlyphs(orbs: readonly THREE.Mesh[]): KeyborbGlyphs 
     members.push({ orb, label, text });
   }
   const local = new THREE.Matrix4();
+  const next = new THREE.Matrix4();
   const update = (): void => {
+    let moved = false;
     for (const { orb, label, text } of members) {
       if (orb.matrixAutoUpdate) orb.updateMatrix();
       if (label.matrixAutoUpdate) label.updateMatrix();
-      if (!orb.visible || !label.visible) {
-        text.matrix.makeScale(0, 0, 0);
-        continue;
+      if (!orb.visible || !label.visible) next.makeScale(0, 0, 0);
+      else {
+        local.compose(text.position, text.quaternion, text.scale);
+        next.multiplyMatrices(orb.matrix, label.matrix).multiply(local);
       }
-      local.compose(text.position, text.quaternion, text.scale);
-      const elements = text.matrix
-        .multiplyMatrices(orb.matrix, label.matrix)
-        .multiply(local).elements;
-      // The batch stores float32; unrounded values would re-upload its texture every frame.
-      for (let i = 0; i < 16; i++) elements[i] = Math.fround(elements[i]);
+      const elements = text.matrix.elements;
+      for (let i = 0; i < 16; i++) {
+        // The batch stores float32, so compare and keep the rounded values.
+        const value = Math.fround(next.elements[i]);
+        if (elements[i] === value) continue;
+        elements[i] = value;
+        moved = true;
+      }
     }
+    if (moved) batch.revision++;
   };
   update();
   return { batch, update };

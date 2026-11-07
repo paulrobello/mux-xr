@@ -27,6 +27,15 @@ if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(baseUrl).hostname))
 const checkedBaseUrl = baseUrl;
 const checkedTestRoot = testRoot;
 const MEASURED_FRAMES = 240;
+// Quest-like defaults: a phone-class CPU and one render per eye. KEYBORB_PERF_THROTTLE=1 and
+// KEYBORB_PERF_EYES=1 give the plain desktop numbers.
+const CPU_THROTTLE = Number(process.env.KEYBORB_PERF_THROTTLE ?? 4);
+const EYES = Number(process.env.KEYBORB_PERF_EYES ?? 2);
+// Comma-separated object names hidden in the Keyborb state, to attribute its cost.
+const ABLATE = (process.env.KEYBORB_PERF_ABLATE ?? '').split(',').filter(Boolean);
+const STATES = (process.env.KEYBORB_PERF_STATES ?? 'closed,standard,keyborb').split(',') as Array<
+  'closed' | 'standard' | 'keyborb'
+>;
 
 type FixtureWindow = Window & {
   __muxXR: { getState(): { attached: string[]; scene: { xrMode: string } } };
@@ -42,6 +51,7 @@ type FixtureWindow = Window & {
     triangles: number;
     uploads: number;
     syncs: number;
+    draws: Record<string, number>;
   };
 };
 
@@ -175,11 +185,15 @@ interface StateReport {
   textureUploadsPerFrame: number;
   textSyncsPerFrame: number;
   hotspots: Array<{ fn: string; selfMs: number }>;
+  /** Every sampled function's self time per frame, for diffing states. */
+  profile: Record<string, number>;
+  /** Draw calls per frame by nearest named ancestor, largest first. */
+  draws: Array<{ name: string; perFrame: number }>;
   loadBefore: number;
   loadAfter: number;
 }
 
-async function profileHotspots(cdp: CDPSession, page: Page): Promise<StateReport['hotspots']> {
+async function profileHotspots(cdp: CDPSession, page: Page): Promise<Record<string, number>> {
   await cdp.send('Profiler.enable');
   await cdp.send('Profiler.setSamplingInterval', { interval: 200 });
   await cdp.send('Profiler.start');
@@ -187,20 +201,35 @@ async function profileHotspots(cdp: CDPSession, page: Page): Promise<StateReport
   const { profile } = await cdp.send('Profiler.stop');
   const self = new Map<string, number>();
   const byId = new Map(profile.nodes.map((node) => [node.id, node]));
+  const parents = new Map<number, number>();
+  for (const node of profile.nodes)
+    for (const child of node.children ?? []) parents.set(child, node.id);
   const deltas = profile.timeDeltas ?? [];
-  (profile.samples ?? []).forEach((id, index) => {
+  const label = (id: number): string | null => {
     const node = byId.get(id);
-    if (!node) return;
+    if (!node) return null;
     const { functionName, url, lineNumber } = node.callFrame;
-    if (!url || ['(idle)', '(program)', '(garbage collector)'].includes(functionName)) return;
+    if (!url || ['(idle)', '(program)', '(garbage collector)'].includes(functionName)) return null;
     const file = url.split('/').pop()?.split('?')[0] ?? url;
-    const key = `${functionName || '(anonymous)'} ${file}:${lineNumber + 1}`;
-    self.set(key, (self.get(key) ?? 0) + (deltas[index] ?? 0) / 1000);
+    return `${functionName || '(anonymous)'} ${file}:${lineNumber + 1}`;
+  };
+  (profile.samples ?? []).forEach((id, index) => {
+    const key = label(id);
+    if (!key) return;
+    const ms = (deltas[index] ?? 0) / 1000;
+    self.set(key, (self.get(key) ?? 0) + ms);
+    // Inclusive time, so the caller that owns an expensive subtree shows up too.
+    const seen = new Set<string>();
+    for (let at: number | undefined = id; at !== undefined; at = parents.get(at)) {
+      const frame = label(at);
+      if (!frame || seen.has(frame)) continue;
+      seen.add(frame);
+      self.set(`incl ${frame}`, (self.get(`incl ${frame}`) ?? 0) + ms);
+    }
   });
-  return [...self.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 12)
-    .map(([fn, selfMs]) => ({ fn, selfMs: Number((selfMs / MEASURED_FRAMES).toFixed(4)) }));
+  return Object.fromEntries(
+    [...self.entries()].map(([fn, selfMs]) => [fn, Number((selfMs / MEASURED_FRAMES).toFixed(4))]),
+  );
 }
 
 async function measure(
@@ -279,19 +308,39 @@ async function measure(
     });
   }
   await frames(page, 90);
-  await page.evaluate(() => {
+  await page.evaluate((eyes) => {
     const w = window as unknown as FixtureWindow;
     const renderer = w.__questRenderer;
-    const perf = { renders: 0, renderMs: 0, calls: 0, triangles: 0, uploads: 0, syncs: 0 };
+    const perf = {
+      renders: 0,
+      renderMs: 0,
+      calls: 0,
+      triangles: 0,
+      uploads: 0,
+      syncs: 0,
+      draws: {} as Record<string, number>,
+    };
     w.__perf = perf;
+    const direct = renderer.renderBufferDirect.bind(renderer);
+    renderer.renderBufferDirect = (camera, scene, geometry, material, object, group) => {
+      let named: import('three').Object3D | null = object;
+      while (named && !named.name) named = named.parent;
+      const key = `${named?.name || object.type}${named === object ? '' : ' >'}`;
+      perf.draws[key] = (perf.draws[key] ?? 0) + 1;
+      direct(camera, scene, geometry, material, object, group);
+    };
     const render = renderer.render.bind(renderer);
     renderer.render = (scene, camera) => {
       const start = performance.now();
-      render(scene, camera);
+      // Two full renders also double scene traversal and culling, which XR's ArrayCamera does once,
+      // so absolute submit time is somewhat high; per-render work such as onBeforeRender is exact.
+      for (let eye = 0; eye < eyes; eye++) {
+        render(scene, camera);
+        perf.calls += renderer.info.render.calls;
+        perf.triangles += renderer.info.render.triangles;
+      }
       perf.renderMs += performance.now() - start;
       perf.renders++;
-      perf.calls += renderer.info.render.calls;
-      perf.triangles += renderer.info.render.triangles;
     };
     const gl = renderer.getContext() as WebGL2RenderingContext;
     for (const name of ['texImage2D', 'texSubImage2D', 'texImage3D', 'texSubImage3D'] as const) {
@@ -313,7 +362,17 @@ async function measure(
         return sync.apply(this, args);
       };
     }
-  });
+  }, EYES);
+  if (state === 'keyborb' && ABLATE.length)
+    await page.evaluate((names) => {
+      const scene = (window as unknown as FixtureWindow).__questScene;
+      for (const name of names) {
+        const object = scene.getObjectByName(name);
+        if (!object) throw new Error(`Ablation target missing: ${name}`);
+        object.visible = false;
+      }
+    }, ABLATE);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: CPU_THROTTLE });
   const loadBefore = loadavg()[0];
   const before = await cdp.send('Performance.getMetrics');
   await frames(page, MEASURED_FRAMES);
@@ -342,7 +401,13 @@ async function measure(
       geometries: info.memory.geometries,
     };
   });
-  const hotspots = await profileHotspots(cdp, page);
+  const profile = await profileHotspots(cdp, page);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+  const hotspots = Object.entries(profile)
+    .filter(([fn]) => !fn.startsWith('incl '))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([fn, selfMs]) => ({ fn, selfMs }));
   const loadAfter = loadavg()[0];
   const renders = Math.max(1, counters.renders);
   return {
@@ -359,6 +424,11 @@ async function measure(
     textureUploadsPerFrame: Number((counters.uploads / MEASURED_FRAMES).toFixed(3)),
     textSyncsPerFrame: Number((counters.syncs / MEASURED_FRAMES).toFixed(3)),
     hotspots,
+    profile,
+    draws: Object.entries(counters.draws)
+      .map(([name, count]) => ({ name, perFrame: Number((count / renders).toFixed(2)) }))
+      .sort((a, b) => b.perFrame - a.perFrame)
+      .slice(0, 30),
     loadBefore,
     loadAfter,
   };
@@ -390,12 +460,19 @@ async function main(): Promise<void> {
   await cdp.send('Performance.enable');
   const states: StateReport[] = [];
   try {
-    for (const state of ['closed', 'standard', 'keyborb'] as const)
-      states.push(await measure(page, cdp, state));
+    for (const state of STATES) states.push(await measure(page, cdp, state));
   } finally {
     await browser.close();
   }
-  const report = { kind: 'keyborb-perf', frames: MEASURED_FRAMES, states, errors };
+  const report = {
+    kind: 'keyborb-perf',
+    frames: MEASURED_FRAMES,
+    cpuThrottle: CPU_THROTTLE,
+    eyes: EYES,
+    ablate: ABLATE,
+    states,
+    errors,
+  };
   await writeFile(
     join(checkedTestRoot, 'keyborb-perf.json'),
     `${JSON.stringify(report, null, 2)}\n`,

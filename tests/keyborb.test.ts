@@ -86,6 +86,51 @@ describe('Keyborb batching', () => {
     expect(texts[2].matrix.determinant()).toBe(0);
   });
 
+  it('rebuilds glyph batch data only after a glyph moves', async () => {
+    const { BatchedText, Text } = await import('troika-three-text');
+    const { root, orbs } = keyboard();
+    const glyphs = createKeyborbGlyphs(orbs);
+    root.add(glyphs.batch);
+    const revision = glyphs.batch.revision;
+    glyphs.update();
+    expect(glyphs.batch.revision).toBe(revision);
+    const rebuild = vi
+      .spyOn(BatchedText.prototype, '_prepareForRender')
+      .mockImplementation(() => {});
+    const own = vi.spyOn(Text.prototype, '_prepareForRender').mockImplementation(() => {});
+    const material = Object.assign(
+      new THREE.ShaderMaterial({ uniforms: { uTroikaIsOutline: { value: true } } }),
+      { setMatrixTexture: vi.fn() },
+    );
+    const batch = glyphs.batch as unknown as { _dataTextures: Record<string, THREE.DataTexture> };
+    batch._dataTextures.main = new THREE.DataTexture(new Float32Array(4), 1, 1);
+    for (let eye = 0; eye < 2; eye++) glyphs.batch._prepareForRender(material);
+    expect(rebuild).toHaveBeenCalledTimes(1);
+    expect(own).toHaveBeenCalledTimes(1);
+    expect(material.setMatrixTexture).toHaveBeenCalledWith(batch._dataTextures.main);
+    expect(material.uniforms.uTroikaIsOutline.value).toBe(false);
+    // troika's outline material shares the main material's uniforms.
+    const outline = Object.assign(Object.create(material) as typeof material, {
+      isTextOutlineMaterial: true,
+    });
+    batch._dataTextures.outline = new THREE.DataTexture(new Float32Array(4), 1, 1);
+    for (let pass = 0; pass < 2; pass++) glyphs.batch._prepareForRender(outline);
+    expect(material.uniforms.uTroikaIsOutline.value).toBe(true);
+    glyphs.batch._prepareForRender(material);
+    expect(material.uniforms.uTroikaIsOutline.value).toBe(false);
+    expect(rebuild).toHaveBeenCalledTimes(2);
+    orbs[1].position.y = 0.02;
+    glyphs.update();
+    expect(glyphs.batch.revision).toBe(revision + 1);
+    glyphs.batch._prepareForRender(material);
+    expect(rebuild).toHaveBeenCalledTimes(3);
+    glyphs.batch.dispatchEvent({ type: 'synccomplete' });
+    glyphs.batch._prepareForRender(material);
+    expect(rebuild).toHaveBeenCalledTimes(4);
+    rebuild.mockRestore();
+    own.mockRestore();
+  });
+
   it('keeps the batches unwarped and drawn after the shells when the keyboard curves', () => {
     const { root, orbs } = keyboard();
     const shells = createKeyborbShells(orbs);

@@ -1,7 +1,19 @@
+const handPoses = vi.hoisted(() => ({ count: 0 }));
 vi.mock('../src/xr/labels', () => import('./helpers/labels'));
-vi.mock('../src/xr/standard-hand', async () => ({
-  createStandardHand: (await import('../src/xr/cartoon-hand')).createCartoonHand,
-}));
+vi.mock('../src/xr/standard-hand', async () => {
+  const { createCartoonHand } = await import('../src/xr/cartoon-hand');
+  return {
+    createStandardHand: (...args: Parameters<typeof createCartoonHand>) => {
+      const hand = createCartoonHand(...args);
+      const update = hand.update.bind(hand);
+      hand.update = (...pose: Parameters<typeof hand.update>) => {
+        handPoses.count++;
+        update(...pose);
+      };
+      return hand;
+    },
+  };
+});
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -475,6 +487,34 @@ describe('native XR controller event routing', () => {
       workspace.setKeyborbMode('on');
       connectController(0);
       expect(workspace.state.keyborbEnabled).toBe(true);
+    });
+
+    it('poses a tracked hand once per frame however often keyboard proximity is checked', () => {
+      const { workspace } = setup('on');
+      workspace.showInput('keyboard');
+      const hand = connectHand();
+      const key = objectWithData(workspace, { inputAction: 'key', key: 'g' });
+      const point = key.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0, 0.05));
+      hand.joints['index-finger-tip'].position.copy(point).add(new THREE.Vector3(0.04, 0, 0));
+      hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(-0.04, 0, 0));
+      fakeXR.frame?.(20);
+      const before = handPoses.count;
+      fakeXR.frame?.(40);
+      expect(handPoses.count - before).toBe(1);
+      const visual = workspace.scene.children.find(
+        (object) => object.name === 'xr-cartoon-hand' && object.userData.handedness === 'right',
+      );
+      if (!visual) throw new Error('Hand visual missing');
+      const tip = (): number => (visual.userData.indexTip as THREE.Vector3).x;
+      const framed = tip();
+      // three moves the joints to the event's own frame before dispatching it.
+      hand.joints['index-finger-tip'].position.x += 0.05;
+      nativeEvent(0, 'selectstart');
+      expect(tip() - framed).toBeCloseTo(0.05, 3);
+      nativeEvent(0, 'selectend');
+      const events = handPoses.count;
+      fakeXR.frame?.(60);
+      expect(handPoses.count - events).toBe(1);
     });
 
     it('targets the rendered finger midpoint while using tracked separation for the pinch', () => {
