@@ -4,12 +4,24 @@ import type {
   PaneDescriptor,
   PanelArrangement,
   QuickCommand,
+  QuickCommandEntry,
+  QuickCommandStats,
   TerminalColorMode,
   TerminalStatus,
   WorkspaceSnapshot,
 } from '../contracts';
 import { getKeyHelp } from '../control-help';
 import { createModifierState, keyboardDimensions, keyboardKeys } from '../keyboard';
+import {
+  commandServerKey,
+  copyCommand,
+  isCommand,
+  isSharedCommand,
+  parseCommandFile,
+  previewCommandText,
+  serializeCommandFile,
+  toSharedCommands,
+} from '../quick-commands';
 import type { DictationAction, DictationState } from '../speech-input';
 import {
   DEFAULT_TERMINAL_FILTERING,
@@ -94,6 +106,7 @@ export interface WorkspaceUI {
   addCommand(command: QuickCommand): boolean;
   updateCommand(command: QuickCommand): boolean;
   removeCommand(id: string): void;
+  deleteCommand(id: string): boolean;
   reorderCommands(from: number, to: number): void;
   captureCommandTarget(): string | undefined;
   destroy(): void;
@@ -109,7 +122,9 @@ export interface WorkspaceUI {
   setPaneStatus?(paneId: string, status: TerminalStatus): void;
   setTerminalColorMode(mode: TerminalColorMode, persist?: boolean): void;
   setKeyboardBackgroundEnabled(enabled: boolean, persist?: boolean): void;
-  getCommandsForPane(paneId: string): QuickCommand[];
+  getCommandsForPane(paneId: string): QuickCommandEntry[];
+  recordCommandRun(id: string, at?: number): void;
+  setSharedCommands(commands: QuickCommand[]): void;
   setUpdateAvailable(available: boolean): void;
   setNotice(message: string | null): void;
   setToast(message: string | null): void;
@@ -126,10 +141,57 @@ export interface WorkspaceUI {
 export interface CommandStore {
   get(scopeKey: string): QuickCommand[];
   set(scopeKey: string, commands: QuickCommand[]): boolean;
+  all(): Record<string, QuickCommand[]>;
+  setAll(values: Record<string, QuickCommand[]>): boolean;
 }
 
 const SETTINGS_KEY = 'mux-xr:settings:v1';
 const COMMANDS_KEY = 'mux-xr:commands:v1';
+const COMMAND_STATS_KEY = 'mux-xr:command-stats:v1';
+
+export interface CommandStatsStore {
+  get(server: string, id: string): QuickCommandStats | undefined;
+  record(server: string, id: string, at: number): boolean;
+}
+
+export function createCommandStatsStore(
+  storage: Storage | undefined = typeof localStorage === 'undefined' ? undefined : localStorage,
+): CommandStatsStore {
+  const read = (): Record<string, QuickCommandStats> => {
+    try {
+      const parsed: unknown = JSON.parse(storage?.getItem(COMMAND_STATS_KEY) ?? '{}');
+      if (!parsed || typeof parsed !== 'object') return {};
+      const result: Record<string, QuickCommandStats> = {};
+      for (const [key, value] of Object.entries(parsed)) {
+        const entry = value as Partial<QuickCommandStats> | null;
+        if (
+          entry &&
+          Number.isFinite(entry.lastRunAt) &&
+          Number.isInteger(entry.runCount) &&
+          Number(entry.runCount) > 0
+        )
+          result[key] = { lastRunAt: Number(entry.lastRunAt), runCount: Number(entry.runCount) };
+      }
+      return result;
+    } catch {
+      return {};
+    }
+  };
+  return {
+    get: (server, id) => read()[`${server}::${id}`],
+    record(server, id, at) {
+      const values = read();
+      const key = `${server}::${id}`;
+      values[key] = { lastRunAt: at, runCount: (values[key]?.runCount ?? 0) + 1 };
+      try {
+        storage?.setItem(COMMAND_STATS_KEY, JSON.stringify(values));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  };
+}
 const DEFAULT_SETTINGS: WorkspaceSettings = {
   version: 1,
   endpoint: '',
@@ -146,7 +208,69 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
 };
 
 export function workspaceScope(endpoint: string, workspaceId: string): string {
-  return `${endpoint.trim().toLowerCase()}::${workspaceId}`;
+  return `${commandServerKey(endpoint)}::${workspaceId}`;
+}
+
+/** Every saved command for one server, with workspaceId restored from its scope key. */
+export function exportServerCommands(
+  values: Record<string, QuickCommand[]>,
+  endpoint: string,
+): QuickCommand[] {
+  const prefix = workspaceScope(endpoint, '');
+  const result: QuickCommand[] = [];
+  for (const [scope, commands] of Object.entries(values)) {
+    if (!scope.startsWith(prefix)) continue;
+    const workspaceId = scope.slice(prefix.length);
+    for (const command of commands) {
+      const { workspaceId: _ignored, ...rest } = copyCommand(command);
+      result.push(workspaceId === '*' ? rest : { ...rest, workspaceId });
+    }
+  }
+  return result;
+}
+
+/** Merges imported commands by id into one server's scopes; an imported command replaces any saved copy. */
+export function mergeImportedCommands(
+  values: Record<string, QuickCommand[]>,
+  endpoint: string,
+  imported: QuickCommand[],
+): { values: Record<string, QuickCommand[]>; added: number; updated: number; skipped: number } {
+  const prefix = workspaceScope(endpoint, '');
+  const next: Record<string, QuickCommand[]> = {};
+  for (const [scope, commands] of Object.entries(values)) next[scope] = [...commands];
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+  const seen = new Set<string>();
+  for (const command of imported) {
+    if (isSharedCommand(command) || !isCommand(command) || seen.has(command.id)) {
+      skipped++;
+      continue;
+    }
+    seen.add(command.id);
+    const scope = workspaceScope(endpoint, command.workspaceId ?? '*');
+    let existed = false;
+    for (const [key, commands] of Object.entries(next)) {
+      if (key === scope || !key.startsWith(prefix)) continue;
+      const kept = commands.filter((item) => item.id !== command.id);
+      if (kept.length !== commands.length) existed = true;
+      next[key] = kept;
+    }
+    const list = next[scope] ?? [];
+    const index = list.findIndex((item) => item.id === command.id);
+    if (index >= 0) list[index] = copyCommand(command);
+    else list.push(copyCommand(command));
+    next[scope] = list;
+    if (existed || index >= 0) updated++;
+    else added++;
+  }
+  return { values: next, added, updated, skipped };
+}
+
+function normalizeScopeKey(scope: string): string {
+  const split = scope.lastIndexOf('::');
+  if (split < 0) return scope;
+  return workspaceScope(scope.slice(0, split), scope.slice(split + 2));
 }
 
 export function reorderCommands(
@@ -204,10 +328,17 @@ export function createCommandStore(
       const parsed: unknown = JSON.parse(storage.getItem(COMMANDS_KEY) ?? '{}');
       if (!parsed || typeof parsed !== 'object') return {};
       const result: Record<string, QuickCommand[]> = {};
+      let migrated = false;
       for (const [scope, value] of Object.entries(parsed)) {
         if (!Array.isArray(value)) continue;
-        result[scope] = value.filter(isCommand).map((command) => ({ ...command }));
+        const key = normalizeScopeKey(scope);
+        if (key !== scope) migrated = true;
+        const merged = result[key] ?? [];
+        for (const command of value.filter(isCommand).map(copyCommand))
+          if (!merged.some((item) => item.id === command.id)) merged.push(command);
+        result[key] = merged;
       }
+      if (migrated) write(result);
       return result;
     } catch {
       return {};
@@ -225,9 +356,16 @@ export function createCommandStore(
     get(scopeKey) {
       return read()[scopeKey] ?? [];
     },
+    all: read,
+    setAll(values) {
+      const next: Record<string, QuickCommand[]> = {};
+      for (const [scope, commands] of Object.entries(values))
+        if (commands.length) next[scope] = commands.filter(isCommand).map(copyCommand);
+      return write(next);
+    },
     set(scopeKey, commands) {
       const values = read();
-      const next = commands.filter(isCommand).map((command) => ({ ...command }));
+      const next = commands.filter(isCommand).map(copyCommand);
       const previous = values[scopeKey];
       values[scopeKey] = next;
       if (write(values)) return true;
@@ -236,18 +374,6 @@ export function createCommandStore(
       return false;
     },
   };
-}
-
-function isCommand(value: unknown): value is QuickCommand {
-  if (!value || typeof value !== 'object') return false;
-  const command = value as Partial<QuickCommand>;
-  return (
-    typeof command.id === 'string' &&
-    typeof command.label === 'string' &&
-    typeof command.text === 'string' &&
-    typeof command.sendNewline === 'boolean' &&
-    (command.workspaceId === undefined || typeof command.workspaceId === 'string')
-  );
 }
 
 export function loadSettings(
@@ -296,6 +422,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   let attachedPaneIds: string[] = [];
   const paneStatuses = new Map<string, TerminalStatus>();
   let commands: QuickCommand[] = [];
+  let sharedCommands: QuickCommand[] = [];
   let commandScope = 'global';
   const terminalGrid = new Map<string, { cols: number; rows: number; canResize: boolean }>();
   const terminalCurvature = new Map<string, number>();
@@ -344,7 +471,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         `<button class="key" data-key="${escapeHtml(entry.key)}" data-modifier="${entry.modifier ?? ''}" style="--key-x:${entry.x};--key-y:${entry.y};--key-width:${entry.width};--key-height:${entry.height}" aria-pressed="false" aria-label="${escapeHtml(entry.key === 'Backspace' ? 'Backspace' : entry.label)}" title="${escapeHtml(keyboardTitle(entry.key))}">${escapeHtml(entry.label)}</button>`,
     )
     .join('');
-  root.innerHTML = `<style>${CSS}</style><header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. No process control.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="update-notice" data-update-notice hidden role="status"><span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button></div><div class="workspace-notice" data-notice hidden role="status"><span data-notice-text></span><button data-action="dismiss-notice" class="icon-btn" aria-label="Dismiss notice" title="Dismiss notice">×</button></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${keyboardMarkup}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Highlight the pane at the center of your view.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
+  root.innerHTML = `<style>${CSS}</style><header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. No process control.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="update-notice" data-update-notice hidden role="status"><span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button></div><div class="workspace-notice" data-notice hidden role="status"><span data-notice-text></span><button data-action="dismiss-notice" class="icon-btn" aria-label="Dismiss notice" title="Dismiss notice">×</button></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button><button data-action="pin-command" class="text-btn" title="Pin or unpin the selected quick command in XR">Pin / unpin</button><button data-action="export-commands" class="text-btn" title="Download every quick command for this server as JSON">Export</button><button data-action="import-commands" class="text-btn" title="Merge quick commands from an exported JSON file">Import</button><input type="file" accept="application/json,.json" data-command-import hidden></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${keyboardMarkup}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Highlight the pane at the center of your view.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
   const keyboardElement = root.querySelector<HTMLElement>('[data-keyboard]');
   root
     .querySelector('style')
@@ -685,7 +812,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   const editor = document.createElement('div');
   editor.className = 'command-editor';
   editor.innerHTML =
-    '<input data-command-label placeholder="Label" aria-label="Command label"><input data-command-text placeholder="Command text" aria-label="Command text"><label><input type="checkbox" data-command-newline checked> Enter</label><button data-action="save-command" title="Save the quick command">Save</button><button data-action="move-up" title="Move the selected quick command up">Up</button><button data-action="move-down" title="Move the selected quick command down">Down</button>';
+    '<input data-command-label placeholder="Label" aria-label="Command label"><input data-command-text placeholder="Command text ({{}} = type the rest)" aria-label="Command text"><label><input type="checkbox" data-command-newline checked> Enter</label><label><input type="checkbox" data-command-confirm> Confirm before running</label><button data-action="save-command" title="Save the quick command">Save</button><button data-action="move-up" title="Move the selected quick command up">Up</button><button data-action="move-down" title="Move the selected quick command down">Down</button>';
   editor.dataset.commandControls = 'true';
   root
     .querySelector<HTMLElement>('[data-drawer]')
@@ -817,15 +944,28 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
           .join('')
       : '<div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div>';
   };
+  const commandOption = (command: QuickCommand): string =>
+    `<option value="${escapeHtml(command.id)}">${escapeHtml(command.label)}${command.pinned ? ' · pinned' : ''}</option>`;
+  const targetWorkspace = (): string =>
+    snapshot.panes.find((pane) => pane.id === (capturedTarget ?? activePaneId))?.workspaceId ??
+    'default';
+  const visibleSharedCommands = (): QuickCommand[] =>
+    sharedCommands.filter((command) =>
+      commandScope === 'global'
+        ? command.workspaceId === undefined
+        : command.workspaceId === targetWorkspace(),
+    );
+  const findDrawerCommand = (id: string): QuickCommand | undefined =>
+    commands.find((item) => item.id === id) ??
+    visibleSharedCommands().find((item) => item.id === id);
   const renderCommands = (): void => {
+    const shared = visibleSharedCommands();
     qs<HTMLSelectElement>('[data-command-select]').innerHTML =
       '<option value="">Choose a quick command</option>' +
-      commands
-        .map(
-          (command) =>
-            `<option value="${escapeHtml(command.id)}">${escapeHtml(command.label)}</option>`,
-        )
-        .join('');
+      commands.map(commandOption).join('') +
+      (shared.length
+        ? `<optgroup label="Shared" data-shared-commands>${shared.map(commandOption).join('')}</optgroup>`
+        : '');
   };
   const currentScope = (): string =>
     commandScope === 'global'
@@ -1010,6 +1150,15 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       syncModifierVisuals();
       return;
     }
+    if (
+      ['move-up', 'move-down', 'pin-command', 'remove-command'].includes(
+        button.dataset.action ?? '',
+      ) &&
+      isSharedCommand({ id: qs<HTMLSelectElement>('[data-command-select]').value })
+    ) {
+      qs<HTMLElement>('[data-detail]').textContent = 'Shared commands are read-only.';
+      return;
+    }
     switch (button.dataset.action) {
       case 'connect': {
         const endpoint = qs<HTMLInputElement>('#endpoint').value.trim();
@@ -1086,6 +1235,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         qs<HTMLInputElement>('[data-command-label]').value = '';
         qs<HTMLInputElement>('[data-command-text]').value = '';
         qs<HTMLInputElement>('[data-command-newline]').checked = true;
+        qs<HTMLInputElement>('[data-command-confirm]').checked = false;
         qs<HTMLInputElement>('[data-command-label]').focus();
         break;
       case 'save-command': {
@@ -1106,6 +1256,8 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
             text,
             sendNewline: qs<HTMLInputElement>('[data-command-newline]').checked,
             ...(commandScope === 'workspace' ? { workspaceId: targetPane?.workspaceId } : {}),
+            ...(qs<HTMLInputElement>('[data-command-confirm]').checked ? { confirm: true } : {}),
+            ...(old?.pinned ? { pinned: true } : {}),
           };
           commands = old
             ? commands.map((item) => (item.id === old.id ? added : item))
@@ -1129,6 +1281,34 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         }
         break;
       }
+      case 'export-commands': {
+        const exported = exportServerCommands(store.all(), settings.endpoint);
+        const url = URL.createObjectURL(
+          new Blob([serializeCommandFile(exported)], { type: 'application/json' }),
+        );
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'mux-xr-quick-commands.json';
+        link.click();
+        URL.revokeObjectURL(url);
+        qs<HTMLElement>('[data-detail]').textContent =
+          `Exported ${exported.length} quick command${exported.length === 1 ? '' : 's'}.`;
+        break;
+      }
+      case 'import-commands':
+        qs<HTMLInputElement>('[data-command-import]').click();
+        break;
+      case 'pin-command': {
+        const select = qs<HTMLSelectElement>('[data-command-select]');
+        const selected = select.value;
+        if (!commands.some((item) => item.id === selected)) break;
+        commands = commands.map((item) =>
+          item.id === selected ? { ...copyCommand(item), pinned: !item.pinned } : item,
+        );
+        persistCommands();
+        select.value = selected;
+        break;
+      }
       case 'remove-command': {
         const selected = qs<HTMLSelectElement>('[data-command-select]').value;
         commands = commands.filter((command) => command.id !== selected);
@@ -1137,10 +1317,18 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         break;
       }
       case 'run-command': {
-        const command = commands.find(
-          (item) => item.id === qs<HTMLSelectElement>('[data-command-select]').value,
-        );
-        if (command && capturedTarget) callbacks.onRunCommand?.(command, capturedTarget);
+        const command = findDrawerCommand(qs<HTMLSelectElement>('[data-command-select]').value);
+        if (!command || !capturedTarget) break;
+        if (command.confirm) {
+          const target = snapshot.panes.find((pane) => pane.id === capturedTarget);
+          if (
+            !window.confirm(
+              `Run "${command.label}" in ${target?.title ?? capturedTarget}?\n\n${previewCommandText(command.text)}`,
+            )
+          )
+            break;
+        }
+        callbacks.onRunCommand?.(command, capturedTarget);
         break;
       }
       case 'send-text': {
@@ -1156,6 +1344,20 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   qs<HTMLSelectElement>('[data-command-scope]').addEventListener('change', (event) => {
     commandScope = (event.target as HTMLSelectElement).value;
     loadCommands();
+  });
+  qs<HTMLInputElement>('[data-command-import]').addEventListener('change', (event) => {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (file) void file.text().then(importCommands);
+  });
+  qs<HTMLSelectElement>('[data-command-select]').addEventListener('change', (event) => {
+    const selected = findDrawerCommand((event.target as HTMLSelectElement).value);
+    if (!selected) return;
+    qs<HTMLInputElement>('[data-command-label]').value = selected.label;
+    qs<HTMLInputElement>('[data-command-text]').value = selected.text;
+    qs<HTMLInputElement>('[data-command-newline]').checked = selected.sendNewline;
+    qs<HTMLInputElement>('[data-command-confirm]').checked = Boolean(selected.confirm);
   });
   qs<HTMLInputElement>('#endpoint').value = settings.endpoint;
   qs<HTMLSelectElement>('[data-background]').value = settings.background;
@@ -1243,6 +1445,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       'Resize requested. Waiting for server confirmation…';
   });
   const store = createCommandStore(storage);
+  const stats = createCommandStatsStore(storage);
   const persistCommands = (): void => {
     const scope = currentScope();
     if (!store.set(scope, commands)) {
@@ -1255,19 +1458,64 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     callbacks.onCommandsChange?.(commands, scope);
   };
   const writeCommand = (command: QuickCommand): boolean => {
-    if (!isCommand(command)) return false;
+    if (!isCommand(command) || isSharedCommand(command)) return false;
     const scope = workspaceScope(settings.endpoint, command.workspaceId ?? '*');
+    const values = withoutServerCommand(store.all(), command.id, scope);
     const saved = store.get(scope);
     const next = saved.some((item) => item.id === command.id)
-      ? saved.map((item) => (item.id === command.id ? { ...command } : item))
-      : [...saved, { ...command }];
-    if (!store.set(scope, next)) {
+      ? saved.map((item) => (item.id === command.id ? copyCommand(command) : item))
+      : [...saved, copyCommand(command)];
+    values[scope] = next;
+    if (!store.setAll(values)) {
       qs<HTMLElement>('[data-detail]').textContent = 'Commands could not be saved on this device.';
       return false;
     }
     loadCommands();
     callbacks.onCommandsChange?.(next, scope);
     return true;
+  };
+  const serverScopePrefix = (): string => workspaceScope(settings.endpoint, '');
+  const withoutServerCommand = (
+    values: Record<string, QuickCommand[]>,
+    id: string,
+    keepScope?: string,
+  ): Record<string, QuickCommand[]> => {
+    for (const [scope, saved] of Object.entries(values))
+      if (scope !== keepScope && scope.startsWith(serverScopePrefix()))
+        values[scope] = saved.filter((item) => item.id !== id);
+    return values;
+  };
+  const deleteCommand = (id: string): boolean => {
+    const values = withoutServerCommand(store.all(), id);
+    if (!store.setAll(values)) {
+      qs<HTMLElement>('[data-detail]').textContent = 'Commands could not be saved on this device.';
+      return false;
+    }
+    loadCommands();
+    callbacks.onCommandsChange?.(commands, currentScope());
+    return true;
+  };
+  const importCommands = (text: string): void => {
+    const detail = qs<HTMLElement>('[data-detail]');
+    let parsed: ReturnType<typeof parseCommandFile> = null;
+    try {
+      parsed = parseCommandFile(JSON.parse(text));
+    } catch {
+      parsed = null;
+    }
+    if (!parsed) {
+      detail.textContent = 'Import failed: not a quick command file.';
+      return;
+    }
+    const merged = mergeImportedCommands(store.all(), settings.endpoint, parsed.commands);
+    if (!store.setAll(merged.values)) {
+      detail.textContent = 'Commands could not be saved on this device.';
+      return;
+    }
+    loadCommands();
+    callbacks.onCommandsChange?.(commands, currentScope());
+    const skipped = parsed.skipped + merged.skipped;
+    detail.textContent = `Imported ${merged.added + merged.updated} quick commands: ${merged.added} new, ${merged.updated} updated${skipped ? `, ${skipped} skipped` : ''}.`;
   };
   const sceneHost = qs<HTMLElement>('[data-scene-host]');
   return {
@@ -1475,10 +1723,22 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     getCommandsForPane(paneId) {
       const pane = snapshot.panes.find((item) => item.id === paneId);
       const workspace = pane?.workspaceId ?? 'default';
+      const server = commandServerKey(settings.endpoint);
+      const shared = sharedCommands
+        .filter((command) => command.workspaceId === undefined || command.workspaceId === workspace)
+        .map((command): QuickCommandEntry => ({ ...command, shared: true }));
       return [
+        ...shared,
         ...store.get(workspaceScope(settings.endpoint, '*')),
         ...store.get(workspaceScope(settings.endpoint, workspace)),
-      ];
+      ].map((command): QuickCommandEntry => ({ ...command, ...stats.get(server, command.id) }));
+    },
+    setSharedCommands(next) {
+      sharedCommands = toSharedCommands(next.filter(isSharedCommand));
+      renderCommands();
+    },
+    recordCommandRun(id, at = Date.now()) {
+      stats.record(commandServerKey(settings.endpoint), id, at);
     },
     setUpdateAvailable,
     setNotice,
@@ -1490,6 +1750,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     getCommands: () => [...commands],
     addCommand: writeCommand,
     updateCommand: writeCommand,
+    deleteCommand,
     removeCommand(id) {
       commands = commands.filter((command) => command.id !== id);
       persistCommands();

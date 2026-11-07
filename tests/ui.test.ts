@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { QuickCommand } from '../src/contracts';
 import {
   createCommandStore,
+  exportServerCommands,
+  mergeImportedCommands,
   mountWorkspaceUI,
   reorderCommands,
   validateSettings,
@@ -640,6 +642,47 @@ describe('mux XR local UI state', () => {
     expect(store.get(firstScope).map((item) => item.id)).toEqual(['one', 'two']);
   });
 
+  it('scopes commands by server host and port regardless of scheme or path', () => {
+    const scope = workspaceScope('ws://192.0.2.10:4240/ws', '*');
+    expect(workspaceScope('wss://192.0.2.10:4240/', '*')).toBe(scope);
+    expect(workspaceScope(' HTTP://192.0.2.10:4240/stream?x=1 ', '*')).toBe(scope);
+    expect(workspaceScope('https://Example.local', 'w')).toBe(
+      workspaceScope('wss://example.local:443/ws', 'w'),
+    );
+    expect(workspaceScope('ws://example.local', 'w')).not.toBe(
+      workspaceScope('wss://example.local', 'w'),
+    );
+    expect(workspaceScope('not a url', 'w')).toBe('not a url::w');
+  });
+
+  it('migrates raw-endpoint command scopes into the server identity scope', () => {
+    const storage = new Map<string, string>([
+      [
+        'mux-xr:commands:v1',
+        JSON.stringify({
+          'ws://192.0.2.10:4240/ws::*': [command('one'), command('two')],
+          'wss://192.0.2.10:4240/::*': [command('two'), command('three')],
+          'ws://192.0.2.10:4240/::alpha': [command('a', 'alpha')],
+          scope: [command('legacy')],
+        }),
+      ],
+    ]);
+    const fakeStorage = {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
+    } as unknown as Storage;
+    const store = createCommandStore(fakeStorage);
+    const global = workspaceScope('http://192.0.2.10:4240', '*');
+    expect(store.get(global).map((item) => item.id)).toEqual(['one', 'two', 'three']);
+    expect(store.get(workspaceScope('wss://192.0.2.10:4240', 'alpha'))).toHaveLength(1);
+    expect(store.get('scope').map((item) => item.id)).toEqual(['legacy']);
+    expect(Object.keys(JSON.parse(storage.get('mux-xr:commands:v1') ?? '{}')).sort()).toEqual(
+      [global, workspaceScope('ws://192.0.2.10:4240', 'alpha'), 'scope'].sort(),
+    );
+  });
+
   it('rejects malformed persisted commands', () => {
     const storage = new Map<string, string>([
       ['mux-xr:commands:v1', JSON.stringify({ scope: [command('good'), { id: 'bad' }] })],
@@ -805,6 +848,284 @@ describe('mux XR local UI state', () => {
     ui.addCommand(command('alpha', 'alpha'));
     expect(ui.getCommandsForPane('a').map((item) => item.id)).toEqual(['global', 'alpha']);
     expect(ui.getCommandsForPane('b').map((item) => item.id)).toEqual(['global']);
+    ui.destroy();
+  });
+
+  it('moves an edited command between scopes and deletes it from any scope', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const changes = vi.fn();
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined, onCommandsChange: changes });
+    ui.update({
+      panes: [
+        {
+          id: 'a',
+          workspaceId: 'alpha',
+          workspaceName: 'Alpha',
+          sessionId: 's',
+          sessionName: 'Dev',
+          windowId: 'w',
+          windowName: 'Code',
+          title: 'A',
+        },
+      ],
+    });
+    ui.addCommand(command('moving'));
+    ui.addCommand({ ...command('moving', 'alpha'), label: 'Moved' });
+    expect(ui.getCommandsForPane('a').map((item) => item.label)).toEqual(['Moved']);
+    expect(ui.addCommand({ ...command('shared:x') })).toBe(false);
+    expect(ui.deleteCommand('moving')).toBe(true);
+    expect(ui.getCommandsForPane('a')).toEqual([]);
+    expect(changes).toHaveBeenCalled();
+    ui.destroy();
+  });
+
+  it('exports one server with scopes preserved and merges imports by id', () => {
+    const server = 'ws://host:4240/ws';
+    const values = {
+      [workspaceScope(server, '*')]: [command('g'), command('dup')],
+      [workspaceScope(server, 'alpha')]: [{ ...command('w'), workspaceId: undefined }],
+      [workspaceScope('ws://elsewhere:1', '*')]: [command('other')],
+    };
+    expect(exportServerCommands(values, 'wss://host:4240')).toEqual([
+      { id: 'g', label: 'g', text: 'echo g', sendNewline: true },
+      { id: 'dup', label: 'dup', text: 'echo dup', sendNewline: true },
+      { id: 'w', label: 'w', text: 'echo w', sendNewline: true, workspaceId: 'alpha' },
+    ]);
+    const merged = mergeImportedCommands(values, server, [
+      { ...command('dup', 'alpha'), label: 'Moved' },
+      { ...command('g'), label: 'Renamed' },
+      command('new'),
+      command('shared:nope'),
+    ]);
+    expect(merged).toMatchObject({ added: 1, updated: 2, skipped: 1 });
+    expect(merged.values[workspaceScope(server, '*')].map((item) => item.label)).toEqual([
+      'Renamed',
+      'new',
+    ]);
+    expect(merged.values[workspaceScope(server, 'alpha')].map((item) => item.label)).toEqual([
+      'w',
+      'Moved',
+    ]);
+    expect(merged.values[workspaceScope('ws://elsewhere:1', '*')]).toHaveLength(1);
+  });
+
+  it('skips repeated and empty imported ids so the first imported copy wins', () => {
+    const server = 'ws://host:4240';
+    const merged = mergeImportedCommands({}, server, [
+      { ...command('dup'), label: 'First' },
+      { ...command('dup'), label: 'Second', text: 'rm -rf /' },
+      { ...command('blank'), id: '' },
+    ]);
+    expect(merged).toMatchObject({ added: 1, updated: 0, skipped: 2 });
+    expect(merged.values[workspaceScope(server, '*')]).toEqual([
+      { id: 'dup', label: 'First', text: 'echo dup', sendNewline: true },
+    ]);
+  });
+
+  it('imports a command file from the drawer and reports counts', async () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    ui.addCommand(command('keep'));
+    ui.openInput('commands');
+    const input = query<HTMLInputElement>(root, '[data-command-import]');
+    const file = {
+      text: async () =>
+        JSON.stringify({
+          version: 1,
+          commands: [{ ...command('keep'), label: 'Kept' }, command('fresh'), { id: 'bad' }],
+        }),
+    };
+    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+    input.dispatchEvent(new Event('change'));
+    await vi.waitFor(() =>
+      expect(query<HTMLElement>(root, '[data-detail]').textContent).toBe(
+        'Imported 2 quick commands: 1 new, 1 updated, 1 skipped.',
+      ),
+    );
+    expect(ui.getCommandsForPane('none').map((item) => item.label)).toEqual(['Kept', 'fresh']);
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: [{ text: async () => '{"nope":true}' }],
+    });
+    input.dispatchEvent(new Event('change'));
+    await vi.waitFor(() =>
+      expect(query<HTMLElement>(root, '[data-detail]').textContent).toBe(
+        'Import failed: not a quick command file.',
+      ),
+    );
+    ui.destroy();
+    localStorage.clear();
+  });
+
+  it('exports the current server commands as a JSON download', async () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    ui.addCommand({ ...command('ls'), confirm: true });
+    ui.openInput('commands');
+    let blob: Blob | undefined;
+    const create = vi.fn((value: Blob) => {
+      blob = value;
+      return 'blob:commands';
+    });
+    const original = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+    URL.createObjectURL = create;
+    URL.revokeObjectURL = vi.fn();
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => undefined);
+    query<HTMLButtonElement>(root, '[data-action="export-commands"]').click();
+    expect(click).toHaveBeenCalled();
+    expect(JSON.parse((await blob?.text()) ?? '')).toEqual({
+      version: 1,
+      commands: [{ id: 'ls', label: 'ls', text: 'echo ls', sendNewline: true, confirm: true }],
+    });
+    expect(query<HTMLElement>(root, '[data-detail]').textContent).toBe('Exported 1 quick command.');
+    click.mockRestore();
+    URL.createObjectURL = original.create;
+    URL.revokeObjectURL = original.revoke;
+    ui.destroy();
+    localStorage.clear();
+  });
+
+  it('shows shared commands as a read-only Shared group ahead of local commands', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const runs: string[] = [];
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onRunCommand: (item) => runs.push(item.id),
+    });
+    ui.update({
+      panes: [
+        {
+          id: 'a',
+          workspaceId: 'alpha',
+          workspaceName: 'Alpha',
+          sessionId: 's',
+          sessionName: 'Dev',
+          windowId: 'w',
+          windowName: 'Code',
+          title: 'A',
+        },
+      ],
+    });
+    ui.addCommand(command('local'));
+    ui.setSharedCommands([
+      command('shared:all'),
+      command('shared:alpha', 'alpha'),
+      command('shared:beta', 'beta'),
+      command('not-namespaced'),
+    ]);
+    expect(ui.getCommandsForPane('a').map((item) => [item.id, item.shared ?? false])).toEqual([
+      ['shared:all', true],
+      ['shared:alpha', true],
+      ['local', false],
+    ]);
+    ui.setActivePane('a');
+    ui.openInput('commands');
+    const group = query<HTMLOptGroupElement>(root, '[data-shared-commands]');
+    expect(group.label).toBe('Shared');
+    expect([...group.querySelectorAll('option')].map((option) => option.value)).toEqual([
+      'shared:all',
+    ]);
+    const select = query<HTMLSelectElement>(root, '[data-command-select]');
+    select.value = 'shared:all';
+    for (const action of ['remove-command', 'pin-command', 'move-up']) {
+      query<HTMLButtonElement>(root, `[data-action="${action}"]`).click();
+      expect(query<HTMLElement>(root, '[data-detail]').textContent).toBe(
+        'Shared commands are read-only.',
+      );
+    }
+    select.value = 'shared:all';
+    query<HTMLButtonElement>(root, '[data-action="run-command"]').click();
+    expect(runs).toEqual(['shared:all']);
+    expect(ui.getCommandsForPane('a')).toHaveLength(3);
+    ui.destroy();
+    localStorage.clear();
+  });
+
+  it('records run stats per server without storing them on commands', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    ui.addCommand(command('ls'));
+    ui.recordCommandRun('ls', 100);
+    ui.recordCommandRun('ls', 250);
+    ui.recordCommandRun('shared:deploy', 300);
+    expect(ui.getCommandsForPane('none')).toEqual([
+      expect.objectContaining({ id: 'ls', lastRunAt: 250, runCount: 2 }),
+    ]);
+    expect(localStorage.getItem('mux-xr:commands:v1')).not.toContain('runCount');
+    const stats = JSON.parse(localStorage.getItem('mux-xr:command-stats:v1') ?? '{}');
+    expect(Object.values(stats)).toContainEqual({ lastRunAt: 300, runCount: 1 });
+    ui.destroy();
+    localStorage.clear();
+  });
+
+  it('pins and unpins the selected command from the drawer', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    ui.addCommand(command('ls'));
+    ui.openInput('commands');
+    const select = query<HTMLSelectElement>(root, '[data-command-select]');
+    select.value = 'ls';
+    query<HTMLButtonElement>(root, '[data-action="pin-command"]').click();
+    expect(ui.getCommandsForPane('none')[0].pinned).toBe(true);
+    expect(select.selectedOptions[0]?.textContent).toBe('ls · pinned');
+    query<HTMLButtonElement>(root, '[data-action="pin-command"]').click();
+    expect(ui.getCommandsForPane('none')[0].pinned).toBeUndefined();
+    ui.destroy();
+    localStorage.clear();
+  });
+
+  it('asks before running a confirm command and saves the confirm toggle', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    document.body.append(root);
+    const runs: string[] = [];
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onRunCommand: (item, paneId) => runs.push(`${item.id}@${paneId}`),
+    });
+    ui.update({
+      panes: [
+        {
+          id: 'a',
+          workspaceId: 'alpha',
+          workspaceName: 'Alpha',
+          sessionId: 's',
+          sessionName: 'Dev',
+          windowId: 'w',
+          windowName: 'Code',
+          title: 'Build box',
+        },
+      ],
+    });
+    ui.addCommand({ ...command('deploy'), text: 'make deploy\n\u001b', confirm: true });
+    ui.setActivePane('a');
+    ui.openInput('commands');
+    const select = query<HTMLSelectElement>(root, '[data-command-select]');
+    select.value = 'deploy';
+    select.dispatchEvent(new Event('change'));
+    expect(query<HTMLInputElement>(root, '[data-command-confirm]').checked).toBe(true);
+    const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    vi.stubGlobal('confirm', confirm);
+    query<HTMLButtonElement>(root, '[data-action="run-command"]').click();
+    expect(confirm).toHaveBeenLastCalledWith('Run "deploy" in Build box?\n\nmake deploy⏎␛');
+    expect(runs).toEqual([]);
+    query<HTMLButtonElement>(root, '[data-action="run-command"]').click();
+    expect(runs).toEqual(['deploy@a']);
+    query<HTMLInputElement>(root, '[data-command-confirm]').checked = false;
+    query<HTMLButtonElement>(root, '[data-action="save-command"]').click();
+    expect(ui.getCommandsForPane('a')[0].confirm).toBeUndefined();
+    query<HTMLButtonElement>(root, '[data-action="run-command"]').click();
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(runs).toEqual(['deploy@a', 'deploy@a']);
+    vi.unstubAllGlobals();
     ui.destroy();
   });
 

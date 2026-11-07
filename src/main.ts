@@ -12,6 +12,7 @@ import { createDemoSurface, demoSnapshot } from './demo';
 import { createDesktopPanels, type DesktopPanels } from './desktop/panels';
 import { loadObservatory } from './environment';
 import { createLocalSpeechRecognition, isLocalSpeechSupported } from './local-speech';
+import { executeQuickCommand, loadSharedCommands } from './quick-commands';
 import { reloadAfterXR } from './reload';
 import {
   createSpeechInput,
@@ -214,13 +215,14 @@ function sendMouse(id: string, input: TerminalMouseInput): boolean {
 }
 
 function runCommand(command: QuickCommand, paneId: string): void {
-  const surface = surfaces.get(paneId);
-  if (!surface?.sendText(command.text)) {
+  const result = executeQuickCommand(surfaces.get(paneId), command);
+  if (result === 'unavailable') {
     notice('The command target is unavailable. Select a connected terminal.');
     return;
   }
-  if (command.sendNewline && !surface.sendKey('Enter'))
-    notice('Connection lost before Enter was sent.');
+  if (result === 'enter-failed') notice('Connection lost before Enter was sent.');
+  ui.recordCommandRun(command.id);
+  syncCommands();
 }
 
 function resizeGrid(paneId: string, cols: number, rows: number): boolean {
@@ -351,6 +353,7 @@ async function connect(nextEndpoint: string): Promise<void> {
 
 const actions: WorkspaceActions = {
   saveCommand: (command) => ui.addCommand(command),
+  removeCommand: (id) => ui.deleteCommand(id),
   reloadApp: () => {
     void reloadApp();
   },
@@ -506,6 +509,13 @@ const stopPresentation = scene.subscribe((state) => {
   maybeReloadUpdate();
 });
 applySettings(ui.getSettings());
+void loadSharedCommands(new URL('quick-commands.json', window.location.href).href).then(
+  (commands) => {
+    if (!commands.length) return;
+    ui.setSharedCommands(commands);
+    syncCommands();
+  },
+);
 void loadObservatory(scene, environmentAbort.signal)
   .then((dispose) => {
     disposeEnvironment = dispose;

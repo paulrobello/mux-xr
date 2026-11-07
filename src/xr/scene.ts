@@ -6,6 +6,7 @@ import type {
   PaneDescriptor,
   PanelArrangement,
   QuickCommand,
+  QuickCommandEntry,
   TerminalCellPosition,
   TerminalColorMode,
   TerminalMouseInput,
@@ -20,6 +21,14 @@ import {
   keyboardDimensions,
   keyboardKeys,
 } from '../keyboard';
+import {
+  copyCommand,
+  isSharedCommand,
+  orderQuickCommands,
+  previewCommandText,
+  quickStripCommands,
+  splitTemplate,
+} from '../quick-commands';
 import type { DictationAction, DictationState } from '../speech-input';
 import {
   DEFAULT_TERMINAL_FILTERING,
@@ -46,6 +55,7 @@ import {
   type CommandDraft,
   commandFromDraft,
   createCommandDraft,
+  draftFromCommand,
   editCommandDraft,
 } from './command-editor';
 import { keepLayoutAboveFloor, workspaceFloorY } from './floor-layout';
@@ -175,7 +185,7 @@ export interface WorkspaceScene {
   setKeyborbMode(mode: KeyborbMode): void;
   setDictationState(state: DictationState): void;
   setAvailablePanes(panes: PaneDescriptor[]): void;
-  setQuickCommands(commands: QuickCommand[]): void;
+  setQuickCommands(commands: QuickCommandEntry[]): void;
   showInput(mode: InputMode): void;
   hideInput(): void;
   enterXR(mode: 'vr' | 'ar'): Promise<void>;
@@ -358,12 +368,65 @@ function createLabelButton(
   data: Record<string, unknown>,
 ): THREE.Mesh {
   const mesh = createScalableLabel(label, width, height, {
-    background: '#1c2a35',
+    background: typeof data.labelBackground === 'string' ? data.labelBackground : '#1c2a35',
     wrap: Boolean(data.wrap),
-    border: typeof data.key === 'string' ? '#7197a8' : undefined,
+    border:
+      typeof data.labelBorder === 'string'
+        ? data.labelBorder
+        : typeof data.key === 'string'
+          ? '#7197a8'
+          : undefined,
   });
   Object.assign(mesh.userData, data, { helpText: getControlHelp(data) });
   return mesh;
+}
+
+type CommandTool = 'run' | 'pin' | 'edit' | 'remove';
+const COMMAND_TOOLS: Array<[CommandTool, string]> = [
+  ['run', 'Run'],
+  ['pin', 'Pin'],
+  ['edit', 'Edit'],
+  ['remove', 'Remove'],
+];
+const COMMAND_TOOL_HINTS: Record<CommandTool, string> = {
+  run: '',
+  pin: 'Choose commands to pin or unpin',
+  edit: 'Choose a command to edit',
+  remove: 'Choose a command to remove',
+};
+const CONFIRM_WINDOW_MS = 3000;
+// A controller double-click lands well inside this, so it cannot arm and confirm at once.
+const CONFIRM_MIN_MS = 350;
+// The armed preview shares one 1.1-wide label line, so it is shorter than the browser prompt.
+const XR_PREVIEW_LENGTH = 60;
+// Label text is always white, so the armed amber must stay dark enough to read.
+const ARMED_STYLE = { armed: true, labelBackground: '#7a4a0c', labelBorder: '#f1b65e' };
+const PINNED_BORDER = '#66d5e7';
+
+function stackAboveControls(root: THREE.Group, rows: THREE.Mesh[][], gap = 0.03): void {
+  let top = Number.NEGATIVE_INFINITY;
+  root.updateMatrixWorld(true);
+  for (const child of root.children) {
+    const geometry = (child as THREE.Mesh).geometry;
+    if (!geometry) continue;
+    geometry.computeBoundingBox();
+    if (geometry.boundingBox)
+      top = Math.max(top, geometry.boundingBox.clone().applyMatrix4(child.matrix).max.y);
+  }
+  if (!Number.isFinite(top)) top = 0;
+  for (const row of rows) {
+    const height = Math.max(...row.map((mesh) => Number(mesh.userData.labelHeight) || 0.09));
+    const y = top + gap + height / 2;
+    const spacing = 0.04;
+    const widths = row.map((mesh) => Number(mesh.userData.labelWidth) || 0.4);
+    let x = -(widths.reduce((sum, width) => sum + width, 0) + spacing * (row.length - 1)) / 2;
+    for (const [index, mesh] of row.entries()) {
+      mesh.position.set(x + widths[index] / 2, y, 0);
+      x += widths[index] + spacing;
+      root.add(mesh);
+    }
+    top = y + height / 2;
+  }
 }
 
 function setModifierVisual(object: THREE.Object3D, armed: boolean): void {
@@ -781,12 +844,23 @@ export function createWorkspaceScene(
   let gridDraft: { target: string; cols: number; rows: number } | null = null;
   let gridRequestStatus = '';
   let gazeRetargeting = false;
-  let quickCommands: QuickCommand[] = [];
-  let menuCommands: QuickCommand[] = [];
+  let quickCommands: QuickCommandEntry[] = [];
+  let menuCommands: QuickCommandEntry[] = [];
   let commandDraft: CommandDraft | null = null;
   let commandWorkspaceId: string | undefined;
   let commandEditorMessage = '';
   let commandPage = 0;
+  let templateHint: string | null = null;
+  let commandTool: CommandTool = 'run';
+  let commandsMessage = '';
+  let stripCommands: QuickCommandEntry[] = [];
+  const snapshotMenuCommands = (): void => {
+    menuCommands = orderQuickCommands(quickCommands).map((command) => ({ ...command }));
+    stripCommands = quickStripCommands(quickCommands).map((command) => ({ ...command }));
+  };
+  let armedCommand: { id: string; action: string; kind: 'run' | 'remove'; at: number } | null =
+    null;
+  let armedTimer: ReturnType<typeof setTimeout> | undefined;
   let inputRoot: THREE.Group | null = null;
   let hierarchyNavigator: HierarchyNavigator | null = null;
   let hierarchyNavigation: HierarchyNavigation = { path: [], page: 0 };
@@ -2212,8 +2286,47 @@ export function createWorkspaceScene(
     gridDraft = null;
     gridRequestStatus = '';
     commandPage = 0;
+    templateHint = null;
+    commandTool = 'run';
+    commandsMessage = '';
+    disarmCommand();
     clearArmedModifiers();
   };
+  const disarmCommand = (): boolean => {
+    if (armedTimer !== undefined) clearTimeout(armedTimer);
+    armedTimer = undefined;
+    const wasArmed = armedCommand !== null;
+    armedCommand = null;
+    return wasArmed;
+  };
+  const armCommand = (next: { id: string; action: string; kind: 'run' | 'remove' }): void => {
+    disarmCommand();
+    armedCommand = { ...next, at: Date.now() };
+    armedTimer = setTimeout(() => {
+      armedTimer = undefined;
+      armedCommand = null;
+      if (inputRoot && !disposed) refreshInputRoot(inputMode);
+    }, CONFIRM_WINDOW_MS);
+    if (inputRoot) refreshInputRoot(inputMode);
+  };
+  const isArmed = (id: string, action: string): boolean =>
+    armedCommand?.id === id && armedCommand.action === action;
+  const confirmTooSoon = (): boolean =>
+    armedCommand !== null && Date.now() - armedCommand.at < CONFIRM_MIN_MS;
+  const armedPreview = (action: string): string | null => {
+    const armed = armedCommand;
+    if (armed?.action !== action) return null;
+    const command = [...menuCommands, ...stripCommands].find((item) => item.id === armed.id);
+    if (!command) return null;
+    const verb = armed.kind === 'remove' ? 'Removes' : 'Sends';
+    return `${verb}: ${previewCommandText(command.text, XR_PREVIEW_LENGTH)}`;
+  };
+  const commandButtonLabel = (command: QuickCommand, action: string): string =>
+    isArmed(command.id, action)
+      ? `${armedCommand?.kind === 'remove' ? 'Remove' : 'Run'} ${command.label}?`
+      : isSharedCommand(command)
+        ? `Shared · ${command.label}`
+        : command.label;
   const resetInputPose = (): void => {
     inputTransform = null;
     if (!inputRoot) return;
@@ -2228,6 +2341,7 @@ export function createWorkspaceScene(
   };
   const refreshInputRoot = (mode: InputMode): void => {
     if (mode !== inputMode) resetHandContacts(false);
+    if (mode !== 'keyboard') templateHint = null;
     inputMode = mode;
     if (
       mode !== 'keyboard' &&
@@ -2371,7 +2485,8 @@ export function createWorkspaceScene(
       : 'No target selected';
     const title = createLabelButton(
       mode === 'command-editor'
-        ? commandEditorMessage || 'New quick command'
+        ? commandEditorMessage ||
+            (commandDraft?.editing ? 'Edit quick command' : 'New quick command')
         : mode === 'widgets'
           ? 'Widgets'
           : mode === 'settings'
@@ -2435,7 +2550,14 @@ export function createWorkspaceScene(
       clear.position.set(-0.28, -0.53, 0);
       const cancel = createLabelButton('Cancel', 0.4, 0.09, { inputAction: 'commandCancel' });
       cancel.position.set(0.28, -0.53, 0);
-      inputRoot.add(scope, enter, save, clear, cancel);
+      const confirm = createLabelButton(
+        `Confirm before running: ${commandDraft.confirm ? 'on' : 'off'}`,
+        0.9,
+        0.09,
+        { inputAction: 'commandConfirm' },
+      );
+      confirm.position.set(0, 1.18, 0);
+      inputRoot.add(scope, enter, save, clear, cancel, confirm);
     }
     if (mode === 'settings') {
       for (const [index, [label, destination]] of (
@@ -2607,9 +2729,11 @@ export function createWorkspaceScene(
     } else if (mode === 'commands') {
       const commandStart = commandPage * 8;
       menuCommands.slice(commandStart, commandStart + 8).forEach((command, index) => {
-        const button = createLabelButton(command.label, 0.7, 0.11, {
+        const button = createLabelButton(commandButtonLabel(command, 'command'), 0.7, 0.11, {
           inputAction: 'command',
           commandId: command.id,
+          ...(command.pinned ? { pinned: true, labelBorder: PINNED_BORDER } : {}),
+          ...(isArmed(command.id, 'command') ? ARMED_STYLE : {}),
         });
         const row = Math.floor(index / 2);
         button.position.set(index % 2 ? 0.4 : -0.4, 0.4 - row * 0.14, 0);
@@ -2624,6 +2748,20 @@ export function createWorkspaceScene(
         );
         page.position.set(0, -0.45, 0);
         inputRoot.add(page);
+      }
+      COMMAND_TOOLS.forEach(([tool, label], index) => {
+        const button = createLabelButton(label, 0.36, 0.09, { inputAction: 'commandTool', tool });
+        button.position.set((index - (COMMAND_TOOLS.length - 1) / 2) * 0.4, -0.22, 0);
+        setModifierVisual(button, commandTool === tool);
+        inputRoot?.add(button);
+      });
+      const preview = armedPreview('command');
+      const message = preview ?? (commandsMessage || COMMAND_TOOL_HINTS[commandTool]);
+      if (message) {
+        const status = createLabelButton(message, 1.1, 0.08, { inputAction: 'noop' });
+        status.name = preview ? 'xr-command-preview' : 'xr-commands-message';
+        status.position.set(0, -0.33, 0);
+        inputRoot.add(status);
       }
     } else if (mode === 'terminal') {
       const target = mutableState.inputTargetId;
@@ -2862,6 +3000,33 @@ export function createWorkspaceScene(
       scene.add(inputRoot);
       return;
     }
+    if (mode === 'keyboard') {
+      const stacked: THREE.Mesh[][] = [];
+      if (stripCommands.length)
+        stacked.push(
+          stripCommands.map((command) =>
+            createLabelButton(commandButtonLabel(command, 'stripCommand'), 0.44, 0.09, {
+              inputAction: 'stripCommand',
+              commandId: command.id,
+              ...(isArmed(command.id, 'stripCommand') ? ARMED_STYLE : {}),
+            }),
+          ),
+        );
+      if (templateHint) {
+        const hint = createLabelButton(`Then type: ${templateHint}`, 1.4, 0.09, {
+          inputAction: 'noop',
+        });
+        hint.name = 'xr-template-hint';
+        stacked.push([hint]);
+      }
+      const preview = armedPreview('stripCommand');
+      if (preview) {
+        const line = createLabelButton(preview, 1.4, 0.09, { inputAction: 'noop' });
+        line.name = 'xr-command-preview';
+        stacked.push([line]);
+      }
+      stackAboveControls(inputRoot, stacked);
+    }
     inputRoot.updateMatrixWorld(true);
     const bounds = new THREE.Box3();
     for (const child of inputRoot.children) {
@@ -3035,6 +3200,19 @@ export function createWorkspaceScene(
   };
   const handleInputTarget = (hit: THREE.Object3D): boolean => {
     const action = hit.userData.inputAction as string | undefined;
+    const keepArmed =
+      !action ||
+      action === 'noop' ||
+      action === 'grabInput' ||
+      (armedCommand !== null && isArmed(String(hit.userData.commandId), action));
+    const root = inputRoot;
+    const disarmed = !keepArmed && disarmCommand();
+    const handled = handleInputTargetAction(hit);
+    if (disarmed && inputRoot && inputRoot === root) refreshInputRoot(inputMode);
+    return handled;
+  };
+  const handleInputTargetAction = (hit: THREE.Object3D): boolean => {
+    const action = hit.userData.inputAction as string | undefined;
     if (action === 'keyborbMode') {
       setKeyborbMode(validateKeyborbMode(hit.userData.keyborbMode));
       return true;
@@ -3085,9 +3263,14 @@ export function createWorkspaceScene(
     }
     if (
       commandDraft &&
-      ['commandField', 'commandScope', 'commandNewline', 'commandClear', 'commandSave'].includes(
-        action,
-      )
+      [
+        'commandField',
+        'commandScope',
+        'commandNewline',
+        'commandConfirm',
+        'commandClear',
+        'commandSave',
+      ].includes(action)
     ) {
       commandEditorMessage = '';
       if (action === 'commandField') {
@@ -3098,6 +3281,7 @@ export function createWorkspaceScene(
           commandDraft.scope = commandDraft.scope === 'global' ? 'workspace' : 'global';
         else commandEditorMessage = 'Select a pane for workspace scope';
       } else if (action === 'commandNewline') commandDraft.sendNewline = !commandDraft.sendNewline;
+      else if (action === 'commandConfirm') commandDraft.confirm = !commandDraft.confirm;
       else if (action === 'commandClear') {
         commandDraft[commandDraft.field] = '';
         commandDraft.cursor = 0;
@@ -3108,7 +3292,7 @@ export function createWorkspaceScene(
           commandEditorMessage = 'Could not save on this device';
         else {
           commandDraft = null;
-          menuCommands = quickCommands.map((item) => ({ ...item }));
+          snapshotMenuCommands();
           clearArmedModifiers();
           refreshInputRoot('commands');
           return true;
@@ -3412,6 +3596,18 @@ export function createWorkspaceScene(
       ['listening', 'transcribing'].includes(mutableState.dictation.status)
     )
       return true;
+    if (action === 'commandTool') {
+      const tool = hit.userData.tool as CommandTool;
+      commandTool = commandTool === tool ? 'run' : tool;
+      commandsMessage = '';
+      refreshInputRoot('commands');
+      return true;
+    }
+    if (action === 'command' && commandTool !== 'run') {
+      const command = menuCommands.find((item) => item.id === hit.userData.commandId);
+      if (command) manageCommand(command, action);
+      return true;
+    }
     const paneId = mutableState.inputTargetId;
     if (!paneId) return true;
     if (action === 'key') {
@@ -3432,9 +3628,64 @@ export function createWorkspaceScene(
       if (inputMode === 'keyboard') refreshInputRoot(inputMode);
     } else if (action === 'command') {
       const command = menuCommands.find((item) => item.id === hit.userData.commandId);
-      if (command) actions.runCommand(command, paneId);
+      if (command) activateCommand(command, paneId, action);
+    } else if (action === 'stripCommand') {
+      const command = stripCommands.find((item) => item.id === hit.userData.commandId);
+      if (command) activateCommand(command, paneId, action);
     }
     return true;
+  };
+  const manageCommand = (command: QuickCommand, action: string): void => {
+    commandsMessage = '';
+    if (isSharedCommand(command)) commandsMessage = 'Shared commands are read-only';
+    else if (commandTool === 'pin') {
+      if (actions.saveCommand?.({ ...copyCommand(command), pinned: !command.pinned }))
+        snapshotMenuCommands();
+      else commandsMessage = 'Could not save on this device';
+    } else if (commandTool === 'edit') {
+      commandDraft = draftFromCommand(command);
+      commandWorkspaceId =
+        command.workspaceId ??
+        availablePanes.find((pane) => pane.id === mutableState.inputTargetId)?.workspaceId;
+      commandEditorMessage = '';
+      commandTool = 'run';
+      clearArmedModifiers();
+      refreshInputRoot('command-editor');
+      return;
+    } else if (commandTool === 'remove') {
+      if (!isArmed(command.id, action)) {
+        armCommand({ id: command.id, action, kind: 'remove' });
+        return;
+      }
+      if (confirmTooSoon()) return;
+      disarmCommand();
+      if (actions.removeCommand?.(command.id)) {
+        snapshotMenuCommands();
+        commandPage = Math.min(commandPage, Math.max(0, Math.ceil(menuCommands.length / 8) - 1));
+        commandsMessage = `Removed ${command.label}`;
+      } else commandsMessage = 'Could not remove on this device';
+    }
+    refreshInputRoot('commands');
+  };
+  const activateCommand = (command: QuickCommand, paneId: string, action: string): void => {
+    if (command.confirm && !isArmed(command.id, action)) {
+      armCommand({ id: command.id, action, kind: 'run' });
+      return;
+    }
+    if (command.confirm && confirmTooSoon()) return;
+    const wasArmed = disarmCommand();
+    const root = inputRoot;
+    runMenuCommand(command, paneId);
+    if (wasArmed && inputRoot && inputRoot === root) refreshInputRoot(inputMode);
+  };
+  const runMenuCommand = (command: QuickCommand, paneId: string): void => {
+    actions.runCommand(command, paneId);
+    const template = splitTemplate(command.text);
+    if (!template) return;
+    templateHint = template.suffix || null;
+    clearArmedModifiers();
+    if (renderer?.xr.isPresenting) refreshInputRoot('keyboard');
+    else showInput('keyboard');
   };
   const targetFromRay = (): InputTarget | null => {
     let reach = CONTROLLER_RAY_LENGTH;
@@ -4098,8 +4349,10 @@ export function createWorkspaceScene(
       mutableState.inputTargetId = nextId;
       mutableState.inputTargetTitle =
         availablePanes.find((pane) => pane.id === nextId)?.title ?? nextId;
-      menuCommands = quickCommands.map((command) => ({ ...command }));
+      snapshotMenuCommands();
       commandPage = 0;
+      templateHint = null;
+      disarmCommand();
       refreshInputRoot(inputMode);
     }
     for (const panel of panels.values())
@@ -4431,7 +4684,7 @@ export function createWorkspaceScene(
     }
     notify();
   };
-  const setQuickCommands = (commands: QuickCommand[]): void => {
+  const setQuickCommands = (commands: QuickCommandEntry[]): void => {
     quickCommands = commands.map((command) => ({ ...command }));
   };
   const showInput = (mode: InputMode, source?: THREE.Group | null): void => {
@@ -4441,6 +4694,7 @@ export function createWorkspaceScene(
     }
     if (warpEdit) finishWarp(false);
     keyboardResume = null;
+    templateHint = null;
     if (
       !renderer?.xr.isPresenting &&
       (mode === 'commands' || mode === 'keyboard' || mode === 'command-editor')
@@ -4454,7 +4708,7 @@ export function createWorkspaceScene(
     mutableState.inputTargetId = targetId;
     mutableState.inputTargetTitle =
       availablePanes.find((pane) => pane.id === targetId)?.title ?? targetId;
-    menuCommands = quickCommands.map((command) => ({ ...command }));
+    snapshotMenuCommands();
     commandPage = 0;
     clearArmedModifiers();
     if (mode === 'panes') initializeHierarchy();
@@ -4913,6 +5167,7 @@ export function createWorkspaceScene(
   };
   const dispose = (): void => {
     if (disposed) return;
+    disarmCommand();
     resetHandContacts(false);
     handContacts.clear();
     keyboardProximity.clear();

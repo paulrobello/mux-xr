@@ -93,6 +93,17 @@ export interface QuickCommand {
   text: string;
   sendNewline: boolean;
   workspaceId?: string;
+  confirm?: boolean;
+  pinned?: boolean;
+}
+
+export interface QuickCommandStats {
+  lastRunAt: number;
+  runCount: number;
+}
+
+export interface QuickCommandEntry extends QuickCommand, Partial<QuickCommandStats> {
+  shared?: boolean;
 }
 
 export interface WorkspaceSnapshot {
@@ -117,6 +128,7 @@ export interface WorkspaceActions {
   setKeyboardBackground?(enabled: boolean): void;
   reloadApp?(): void;
   saveCommand?(command: QuickCommand): boolean;
+  removeCommand?(id: string): boolean;
   togglePaneConnection?(id: string): void;
   dictationAction?(action: import('./speech-input').DictationAction): void;
   editDictation?(text: string): void;

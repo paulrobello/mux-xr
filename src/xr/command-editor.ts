@@ -6,6 +6,9 @@ export interface CommandDraft {
   label: string;
   text: string;
   sendNewline: boolean;
+  confirm: boolean;
+  pinned?: boolean;
+  editing?: boolean;
   scope: 'global' | 'workspace';
   field: 'label' | 'text';
   cursor: number;
@@ -16,9 +19,22 @@ export const createCommandDraft = (id: string): CommandDraft => ({
   label: '',
   text: '',
   sendNewline: true,
+  confirm: false,
   scope: 'global',
   field: 'label',
   cursor: 0,
+});
+
+export const draftFromCommand = (command: QuickCommand): CommandDraft => ({
+  ...createCommandDraft(command.id),
+  label: command.label,
+  text: command.text,
+  sendNewline: command.sendNewline,
+  confirm: Boolean(command.confirm),
+  ...(command.pinned ? { pinned: true } : {}),
+  editing: true,
+  scope: command.workspaceId === undefined ? 'global' : 'workspace',
+  cursor: Array.from(command.label).length,
 });
 
 const copyDraft = (draft: CommandDraft, value: Partial<CommandDraft>): CommandDraft => ({
@@ -82,5 +98,7 @@ export const commandFromDraft = (
     text: draft.text,
     sendNewline: draft.sendNewline,
     ...(draft.scope === 'workspace' ? { workspaceId } : {}),
+    ...(draft.confirm ? { confirm: true } : {}),
+    ...(draft.pinned ? { pinned: true } : {}),
   };
 };

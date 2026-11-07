@@ -81,11 +81,15 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
     case 'newCommand':
       return 'Create a saved quick command';
     case 'commandField':
-      return 'Choose which field the keyboard edits';
+      return data.field === 'text'
+        ? 'Edit the command text; put {{}} where you will type the rest when it runs'
+        : 'Choose which field the keyboard edits';
     case 'commandScope':
       return 'Save globally or for this workspace';
     case 'commandNewline':
       return 'Append Enter when running this command';
+    case 'commandConfirm':
+      return 'Require a second press within 3 seconds to run';
     case 'commandSave':
       return 'Save on this device without running';
     case 'commandClear':
@@ -169,6 +173,16 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
       return 'Send this saved command to the input target';
     case 'commandPage':
       return 'Show the next saved commands';
+    case 'commandTool':
+      return data.tool === 'run'
+        ? 'Tap commands to run them'
+        : data.tool === 'pin'
+          ? 'Tap commands to pin or unpin them'
+          : data.tool === 'edit'
+            ? 'Tap a command to edit it'
+            : 'Tap a command twice to remove it';
+    case 'stripCommand':
+      return 'Send this pinned or frequent command to the input target';
     case 'pane':
       return 'Open or select this terminal pane';
     case 'panePage':
