@@ -100,6 +100,7 @@ import {
   terminalWarpPoint,
 } from './terminal-warp';
 import { createTerminalWarpStore } from './terminal-warp-store';
+import { createUIFeedback, type UICue, type UIFeedback } from './ui-feedback';
 import {
   applyUIPose,
   captureUIPose,
@@ -112,6 +113,7 @@ import { createWidgetPoseStore } from './widget-poses';
 import { type ClockWidget, createClockWidget, type WidgetKind } from './widgets';
 import { createWristMenuWatch } from './wrist-menu-watch';
 
+type InputKind = 'hand' | 'controller';
 type InputMode =
   | 'commands'
   | 'keyboard'
@@ -154,6 +156,7 @@ export interface WorkspaceSceneState {
   keyboardCurvature: number;
   keyborbMode: KeyborbMode;
   keyborbEnabled: boolean;
+  uiSounds: boolean;
   dictation: DictationState;
   fps: number | null;
   xrMode: 'desktop' | 'vr' | 'ar';
@@ -194,6 +197,7 @@ export interface WorkspaceScene {
   setKeyboardBackgroundEnabled(enabled: boolean): void;
   setKeyboardCurvature(degrees: number): void;
   setKeyborbMode(mode: KeyborbMode): void;
+  setUISounds(enabled: boolean): void;
   setDictationState(state: DictationState): void;
   setAvailablePanes(panes: PaneDescriptor[]): void;
   setQuickCommands(commands: QuickCommandEntry[]): void;
@@ -306,6 +310,18 @@ const SCROLL_STRIP_OPACITY = 0.14;
 const SCROLL_STRIP_ACTIVE_OPACITY = 0.38;
 const ACCENT = 0x68d6ff;
 const CONTROLLER_RAY_LENGTH = 8;
+// An XR press becomes a drag only once its hit moves past both limits, so hand and controller
+// jitter during a press stays a click.
+const DRAG_DEAD_ZONE = THREE.MathUtils.degToRad(1.5);
+const DRAG_DEAD_CELLS = 2;
+const CURSOR_RADIUS = 0.003;
+// Half of a 0.5 degree cursor diameter.
+const CURSOR_HALF_ANGLE = Math.tan(THREE.MathUtils.degToRad(0.25));
+const CURSOR_PINCH_OPEN = 0.08;
+const CURSOR_PINCH_CLOSED = 0.02;
+const cursorColor = new THREE.Color();
+const cursorRest = new THREE.Color(ACCENT);
+const cursorPinched = new THREE.Color(0xffffff);
 const QUALITY_RANK: Record<TerminalRenderQuality, number> = {
   hidden: 0,
   low: 1,
@@ -341,6 +357,7 @@ interface TerminalPanel {
   bellLabel: THREE.Mesh;
   connectionButton: THREE.Mesh;
   closeButton: THREE.Mesh;
+  bringButton: THREE.Mesh;
   width: number;
   height: number;
   revision: number;
@@ -422,6 +439,14 @@ const XR_PREVIEW_LENGTH = 60;
 // Label text is always white, so the armed amber must stay dark enough to read.
 const ARMED_STYLE = { armed: true, labelBackground: '#7a4a0c', labelBorder: '#f1b65e' };
 const PINNED_BORDER = '#66d5e7';
+const ARMED_TINT = 0xf1b65e;
+type ConfirmAction = 'exit' | 'resetLayout';
+const CONFIRM_LABELS: Record<ConfirmAction, [string, string]> = {
+  exit: ['Exit', 'Exit?'],
+  resetLayout: ['Reset layout', 'Reset?'],
+};
+// Surfaces that a select lands on without pressing a control; they get no click cue.
+const PASSIVE_ACTIONS = new Set(['noop', 'grabInput', 'grabWidget', 'grabRadial', 'scrollStrip']);
 
 function stackAboveControls(root: THREE.Group, rows: THREE.Mesh[][], gap = 0.03): void {
   let top = Number.NEGATIVE_INFINITY;
@@ -591,7 +616,9 @@ function createObservatory(scene: THREE.Scene): THREE.Group {
 export function createWorkspaceScene(
   container: HTMLElement,
   actions: WorkspaceActions,
+  options: { feedback?: UIFeedback } = {},
 ): WorkspaceScene {
+  const feedback = options.feedback ?? createUIFeedback();
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(58, 1, 0.01, 100);
   camera.position.set(0, 1.52, 0.45);
@@ -702,6 +729,7 @@ export function createWorkspaceScene(
     keyboardCurvature: 0,
     keyborbMode: 'auto',
     keyborbEnabled: false,
+    uiSounds: true,
     dictation: { supported: false, status: 'idle', transcript: '', error: null },
     fps: null,
     xrMode: 'desktop',
@@ -783,6 +811,9 @@ export function createWorkspaceScene(
       reel?: HandReel;
       far: boolean;
       shoulder: THREE.Vector3;
+      facingPitch?: number;
+      headingYaw?: number;
+      yawRecovering?: boolean;
     }
   >();
   const pairGrabs = new Map<
@@ -815,6 +846,18 @@ export function createWorkspaceScene(
   };
   let recenterSince: number | null = null;
   let recenterLatched = false;
+  // Looking straight up or down, the facing side is the head's -up or +up respectively.
+  const viewYaw = (view: THREE.Object3D): number => {
+    const rotation = view.getWorldQuaternion(new THREE.Quaternion());
+    const look = new THREE.Vector3(0, 0, -1).applyQuaternion(rotation);
+    const forward = look.clone().setY(0);
+    if (forward.lengthSq() < 1e-6)
+      forward
+        .set(0, look.y > 0 ? -1 : 1, 0)
+        .applyQuaternion(rotation)
+        .setY(0);
+    return Math.atan2(-forward.x, -forward.z);
+  };
   const manipulationSpace = (controller: THREE.Group): THREE.Object3D => {
     const hand = activeHand(controller);
     const joints = hand
@@ -822,8 +865,11 @@ export function createWorkspaceScene(
       : undefined;
     return joints?.wrist ?? controller;
   };
+  // The tracked head: the frame's viewer pose when one arrived, else the XR camera rig.
+  const trackedHead = (): THREE.Camera =>
+    renderer?.xr.isPresenting ? (xrHeadFromFrame ? xrHead : renderer.xr.getCamera()) : camera;
   const headPosition = (): THREE.Vector3 => {
-    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    const view = trackedHead();
     view.updateWorldMatrix(true, false);
     return view.getWorldPosition(new THREE.Vector3());
   };
@@ -833,7 +879,7 @@ export function createWorkspaceScene(
   const SHOULDER_SIDE = 0.18;
   const SHOULDER_REANCHOR = THREE.MathUtils.degToRad(15);
   const shoulderOffset = (controller: THREE.Group): THREE.Vector3 => {
-    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    const view = trackedHead();
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(
       view.getWorldQuaternion(new THREE.Quaternion()),
     );
@@ -846,22 +892,49 @@ export function createWorkspaceScene(
     const offset = space.getWorldPosition(new THREE.Vector3()).sub(headPosition()).sub(shoulder);
     return Math.hypot(offset.x, offset.z);
   };
+  // A far-held pane rides the ray's heading and pitch only: rolling the forearm would otherwise
+  // swing it around the wrist and tilt the text. Near vertical the heading is undefined, so the
+  // last good one holds.
+  const ROLL_FREE_VERTICAL = 0.97;
+  const rayFrame = (
+    controller: THREE.Group,
+    lastYaw?: number,
+  ): { quaternion: THREE.Quaternion; yaw: number; pitch: number; held: boolean } => {
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(
+      controller.getWorldQuaternion(new THREE.Quaternion()),
+    );
+    const held = Math.abs(forward.y) > ROLL_FREE_VERTICAL;
+    const yaw = held ? (lastYaw ?? viewYaw(trackedHead())) : Math.atan2(-forward.x, -forward.z);
+    const pitch = Math.asin(THREE.MathUtils.clamp(forward.y, -1, 1));
+    return {
+      quaternion: new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ')),
+      yaw,
+      pitch,
+      held,
+    };
+  };
   // `far` marks a ray grab; contact grabs and re-captures of a contact grab never reel.
   const captureGrab = (controller: THREE.Group, object: THREE.Group, far?: boolean): void => {
     const previous = dragStates.get(controller);
     const reach = far ?? (previous?.object === object && previous.far);
     const widgetKind = object.userData.widgetKind as WidgetKind | undefined;
     if (widgetKind) touchedWidgets.add(widgetKind);
+    if (object === inputRoot) inputPoseSpawn = null;
     const space = manipulationSpace(controller);
     space.updateMatrixWorld(true);
     object.updateMatrixWorld(true);
     const rotation = space.getWorldQuaternion(new THREE.Quaternion());
+    const handReel = reach && activeHand(controller);
+    const facing = Boolean(handReel && object.userData.terminalId);
+    const ray = facing
+      ? rayFrame(controller, previous?.object === object ? previous.headingYaw : undefined)
+      : undefined;
+    const objectQuaternion = object.getWorldQuaternion(new THREE.Quaternion());
     const localOffset = object
       .getWorldPosition(new THREE.Vector3())
       .sub(space.getWorldPosition(new THREE.Vector3()))
-      .applyQuaternion(rotation.clone().invert());
+      .applyQuaternion((ray ? ray.quaternion.clone() : rotation.clone()).invert());
     const shoulder = shoulderOffset(controller);
-    const handReel = reach && activeHand(controller);
     const reachNow = handReel ? handReach(space, shoulder) : 0;
     dragStates.set(controller, {
       object,
@@ -874,11 +947,12 @@ export function createWorkspaceScene(
         : previous?.object === object && previous.reel
           ? rebaseHandReel(reachNow, localOffset.length())
           : startHandReel(reachNow, localOffset.length()),
-      relativeRotation: rotation
-        .clone()
-        .invert()
-        .multiply(object.getWorldQuaternion(new THREE.Quaternion())),
+      relativeRotation: rotation.clone().invert().multiply(objectQuaternion),
       gamepad: controllerGamepads.get(controller),
+      facingPitch: facing
+        ? new THREE.Euler().setFromQuaternion(objectQuaternion, 'YXZ').x
+        : undefined,
+      headingYaw: ray?.yaw,
     });
   };
   const releaseGrab = (controller: THREE.Group): void => {
@@ -921,6 +995,22 @@ export function createWorkspaceScene(
   const availablePanes: PaneDescriptor[] = [];
   const controllerGamepads = new Map<THREE.Group, Gamepad>();
   const controllerHandedness = new Map<THREE.Group, string>();
+  let cueCount = 0;
+  const cue = (kind: UICue, source?: THREE.Group | number | null): void => {
+    cueCount++;
+    if (!mutableState.uiSounds) return;
+    feedback.play(
+      kind,
+      typeof source === 'object' && source ? controllerGamepads.get(source) : null,
+    );
+  };
+  // The source of the press being handled, so arming, Reset and paste errors pulse it too.
+  let lastSelectSource: THREE.Group | null = null;
+  // A press whose action played its own cue (armed, recenter) skips the click.
+  const pressCue = (controller: THREE.Group, action: unknown, cues: number): void => {
+    if (cueCount !== cues || (action === 'bringHere' && gripActive())) return;
+    cue('select', controller);
+  };
   const focusButtonDown = new Set<THREE.Group>();
   const disconnectedControllers = new Set<THREE.Group>();
   const heldControllers = new Set<THREE.Group>();
@@ -934,11 +1024,18 @@ export function createWorkspaceScene(
       modifiers?: KeyModifiers;
     }
   >();
+  // Where an XR press first hit, for the drag dead zone.
+  interface DragPress {
+    point: THREE.Vector3;
+    cell: TerminalCellPosition;
+  }
+  const mousePresses = new Map<THREE.Group, DragPress>();
   let textSelection: {
     source: THREE.Group;
     id: string;
     surface: TerminalSurface;
     last: TerminalCellPosition;
+    press: DragPress;
     dragged: boolean;
     phase: 'dragging' | 'copying' | 'retained';
   } | null = null;
@@ -972,6 +1069,8 @@ export function createWorkspaceScene(
   let armedCommand: { id: string; action: string; kind: 'run' | 'remove'; at: number } | null =
     null;
   let armedTimer: ReturnType<typeof setTimeout> | undefined;
+  let armedControl: { action: ConfirmAction; at: number } | null = null;
+  let armedControlTimer: ReturnType<typeof setTimeout> | undefined;
   let inputRoot: THREE.Group | null = null;
   let hierarchyNavigator: HierarchyNavigator | null = null;
   let hierarchyNavigation: HierarchyNavigation = { path: [], page: 0 };
@@ -1050,6 +1149,9 @@ export function createWorkspaceScene(
     quaternion: THREE.Quaternion;
     scale: number;
   } | null = null;
+  // The system spawn the input pose came from; null once the user placed it or a saved pose won.
+  // A spawn made while no input was tracked has no kind and adopts the first one without moving.
+  let inputPoseSpawn: { kind: InputKind | null; typing: boolean } | null = null;
   const pointer = new THREE.Vector2();
   const syncModifierVisuals = (): void => {
     const labels = { ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift' };
@@ -1131,8 +1233,31 @@ export function createWorkspaceScene(
     }
     keyborbFlashes.clear();
   };
+  const rayHitPoint = (source: THREE.Group): THREE.Vector3 => {
+    const origin = new THREE.Vector3().setFromMatrixPosition(source.matrixWorld);
+    const direction = new THREE.Vector3(0, 0, -1)
+      .applyMatrix4(new THREE.Matrix4().extractRotation(source.matrixWorld))
+      .normalize();
+    return origin.addScaledVector(direction, Number(source.userData.rayDistance) || 0);
+  };
+  const pastDragDeadZone = (
+    source: THREE.Group,
+    press: DragPress,
+    cell: TerminalCellPosition,
+  ): boolean => {
+    const cells = Math.max(
+      Math.abs(cell.col - press.cell.col),
+      Math.abs(cell.row - press.cell.row),
+    );
+    if (cells < DRAG_DEAD_CELLS) return false;
+    const origin = new THREE.Vector3().setFromMatrixPosition(source.matrixWorld);
+    const before = press.point.clone().sub(origin);
+    const now = rayHitPoint(source).sub(origin);
+    return before.lengthSq() > 0 && now.lengthSq() > 0 && before.angleTo(now) >= DRAG_DEAD_ZONE;
+  };
   const releaseMouse = (source: THREE.Group | number): void => {
     const capture = mouseCaptures.get(source);
+    if (typeof source === 'object') mousePresses.delete(source);
     if (!capture) return;
     mouseCaptures.delete(source);
     const panel = panels.get(capture.id);
@@ -1207,6 +1332,7 @@ export function createWorkspaceScene(
       id: panel.id,
       surface: panel.surface,
       last: cell,
+      press: { point: rayHitPoint(source), cell },
       dragged: false,
       phase: 'dragging',
     };
@@ -1223,6 +1349,7 @@ export function createWorkspaceScene(
     if (target?.object !== panel.screen || !target.uv) return;
     const cell = cellAtUV(panel, target.uv);
     if (cell.col === selection.last.col && cell.row === selection.last.row) return;
+    if (!selection.dragged && !pastDragDeadZone(source, selection.press, cell)) return;
     selection.last = cell;
     selection.dragged = true;
     panel.surface.updateSelection?.(cell);
@@ -1302,6 +1429,7 @@ export function createWorkspaceScene(
       }
       drag.anchor += lines * line;
       actions.scrollTerminal?.(panel.id, lines);
+      cue('tick', source);
     }
   };
   const showScrollStrips = (panel: TerminalPanel): void => {
@@ -1349,7 +1477,10 @@ export function createWorkspaceScene(
     }
     notify();
   };
-  const pasteClipboard = async (paneId?: string): Promise<boolean> => {
+  const pasteClipboard = async (
+    paneId?: string,
+    source: THREE.Group | null = lastSelectSource,
+  ): Promise<boolean> => {
     clipboardGeneration++;
     const id = paneId ?? mutableState.inputTargetId ?? mutableState.selectedTerminalId;
     const panel = id ? panels.get(id) : undefined;
@@ -1360,6 +1491,7 @@ export function createWorkspaceScene(
       mutableState.selectedTerminalId !== id
     ) {
       setNotice('Select a connected terminal before pasting.');
+      cue('error', source);
       return false;
     }
     const text = await clipboard.read();
@@ -1370,10 +1502,12 @@ export function createWorkspaceScene(
       panel.surface.status !== 'connected'
     ) {
       setNotice('The paste target changed. Select it and paste again.');
+      cue('error', source);
       return false;
     }
     if (text === null || text === '') {
       setNotice('Clipboard is empty or unavailable. Highlight text to copy it first.');
+      cue('error', source);
       return false;
     }
     try {
@@ -1382,6 +1516,7 @@ export function createWorkspaceScene(
       return true;
     } catch {
       setNotice('The terminal rejected the paste. Reconnect and try again.');
+      cue('error', source);
       return false;
     }
   };
@@ -1407,6 +1542,11 @@ export function createWorkspaceScene(
     };
     if (!actions.sendMouse?.(panel.id, input)) return false;
     mouseCaptures.set(source, { ...input, id: panel.id });
+    if (typeof source === 'object')
+      mousePresses.set(source, {
+        point: rayHitPoint(source),
+        cell: { col: input.col, row: input.row },
+      });
     return true;
   };
   const moveMouse = (source: THREE.Group | number, target: InputTarget | null): void => {
@@ -1426,6 +1566,11 @@ export function createWorkspaceScene(
     if (!target.uv) return;
     const cell = cellAtUV(panel, target.uv);
     if (cell.col === capture.col && cell.row === capture.row) return;
+    const press = typeof source === 'object' ? mousePresses.get(source) : undefined;
+    if (press) {
+      if (!pastDragDeadZone(source as THREE.Group, press, cell)) return;
+      mousePresses.delete(source as THREE.Group);
+    }
     capture.col = cell.col;
     capture.row = cell.row;
     actions.sendMouse?.(capture.id, { ...capture, eventType: 'move' });
@@ -1511,6 +1656,7 @@ export function createWorkspaceScene(
   };
   const onPointerDown = (event: PointerEvent): void => {
     if (renderer?.xr.isPresenting) return;
+    lastSelectSource = null;
     if (!setPointerRay(event)) return;
     const target = targetFromRay();
     const modifier = target?.object?.userData.modifier as KeyboardModifier | undefined;
@@ -1612,6 +1758,21 @@ export function createWorkspaceScene(
     if (!gesture.tracked) root.userData.rayDistance = 0;
     return gesture;
   };
+  // How far an index-thumb pinch has closed, 0 open to 1 closed; controllers report 0.
+  const pinchProgress = (root: THREE.Group): number => {
+    const joints = (
+      activeHand(root) as (THREE.Group & { joints?: Record<string, THREE.Object3D> }) | undefined
+    )?.joints;
+    const thumb = joints?.['thumb-tip'];
+    const index = joints?.['index-finger-tip'];
+    if (!thumb || !index) return 0;
+    const gap = thumb.position.distanceTo(index.position);
+    return THREE.MathUtils.clamp(
+      (CURSOR_PINCH_OPEN - gap) / (CURSOR_PINCH_OPEN - CURSOR_PINCH_CLOSED),
+      0,
+      1,
+    );
+  };
   const handSelectionAllowed = (root: THREE.Group): boolean => {
     if (!activeHand(root)) return true;
     const gesture = sampleHand(root);
@@ -1703,7 +1864,11 @@ export function createWorkspaceScene(
       terminalId: mutableState.inputTargetId ?? '',
       object: key,
     };
+    lastSelectSource = controller;
+    const cues = cueCount;
     activateTarget(target);
+    pressCue(controller, key.userData.inputAction, cues);
+    lastSelectSource = null;
     beginModifierPress(controller, target, before);
     if (pinch) pokeSources.add(controller);
     showHover(null);
@@ -1917,6 +2082,7 @@ export function createWorkspaceScene(
       for (const visual of handVisuals.values()) visual.hide();
       wristWatch.setVisible(false);
     }
+    respawnTypingForInputKind();
     suppressKeyboardRays();
     updateKeyborbInput(deltaSeconds);
     if (renderer?.xr.isPresenting) {
@@ -1961,11 +2127,12 @@ export function createWorkspaceScene(
     } else resetHandContacts();
     suppressKeyboardRays();
     if (gripActive()) modifierPresses.clear();
-    for (const press of modifierPresses.values()) {
+    for (const [source, press] of modifierPresses) {
       if (press.since === null) press.since = time;
       if (!press.locked && time - press.since >= 550) {
         press.locked = true;
         modifierState.lock(press.modifier);
+        cue('lock', source);
         if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
           refreshInputRoot(inputMode);
         syncModifierVisuals();
@@ -2085,6 +2252,7 @@ export function createWorkspaceScene(
       } else if (recenterSince === null) recenterSince = time;
       else if (!recenterLatched && time - recenterSince >= 1000) {
         resetLayout();
+        cue('recenter', controllerRoots[0]);
         recenterLatched = true;
       }
     }
@@ -2115,9 +2283,13 @@ export function createWorkspaceScene(
         terminalId: press.target ?? '',
         object: press.object,
       };
+      lastSelectSource = controller;
+      const cues = cueCount;
       if (press.object.userData.inputAction === 'pasteClipboard') {
         if (press.target) void pasteClipboard(press.target);
       } else activateTarget(target);
+      pressCue(controller, press.object.userData.inputAction, cues);
+      lastSelectSource = null;
       beginModifierPress(controller, target, before);
       pokeSources.add(controller);
       showHover(null);
@@ -2215,11 +2387,38 @@ export function createWorkspaceScene(
           THREE.MathUtils.lerp(length, wanted, 1 - Math.exp(-12 * Math.max(0, deltaSeconds))),
         );
       }
+      const facingPitch = drag.facingPitch;
+      const ray = facingPitch === undefined ? undefined : rayFrame(controller, drag.headingYaw);
+      if (ray?.held) drag.yawRecovering = true;
+      else if (ray && drag.yawRecovering && drag.headingYaw !== undefined) {
+        // Leaving the vertical band eases the held heading to the ray's instead of snapping.
+        const gap = THREE.MathUtils.euclideanModulo(
+          ray.yaw - drag.headingYaw + Math.PI,
+          2 * Math.PI,
+        );
+        const diff = gap - Math.PI;
+        if (Math.abs(diff) < 0.01) drag.yawRecovering = false;
+        else {
+          ray.yaw = drag.headingYaw + diff * (1 - Math.exp(-12 * Math.max(0, deltaSeconds)));
+          ray.quaternion.setFromEuler(new THREE.Euler(ray.pitch, ray.yaw, 0, 'YXZ'));
+        }
+      }
+      if (ray) drag.headingYaw = ray.yaw;
       const finalPosition = controllerPosition
         .clone()
-        .add(drag.localOffset.clone().applyQuaternion(controllerQuaternion));
+        .add(drag.localOffset.clone().applyQuaternion(ray ? ray.quaternion : controllerQuaternion));
       drag.object.position.copy(finalPosition);
-      drag.object.quaternion.copy(controllerQuaternion).multiply(drag.relativeRotation);
+      if (facingPitch === undefined) {
+        drag.object.quaternion.copy(controllerQuaternion).multiply(drag.relativeRotation);
+        continue;
+      }
+      const toHead = headPosition().sub(finalPosition);
+      drag.object.quaternion.slerp(
+        new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(facingPitch, Math.atan2(toHead.x, toHead.z), 0, 'YXZ'),
+        ),
+        1 - Math.exp(-12 * Math.max(0, deltaSeconds)),
+      );
     }
     correctTerminalFloor();
     if (renderer?.xr.isPresenting) {
@@ -2382,6 +2581,13 @@ export function createWorkspaceScene(
         if (contact) {
           contact.position.set(0, 0, -distance);
           contact.visible = !rayBlocked && Boolean(target?.object);
+          const pinch = pinchProgress(controller);
+          contact.scale.setScalar(
+            THREE.MathUtils.clamp((distance * CURSOR_HALF_ANGLE) / CURSOR_RADIUS, 0.5, 12) *
+              (1 + pinch * 0.8),
+          );
+          const material = contact.material as THREE.MeshBasicMaterial;
+          material.color.copy(cursorColor.lerpColors(cursorRest, cursorPinched, pinch));
         }
         const object = target?.object;
         if (radialMenu.interactive && object?.userData.radialAction)
@@ -2483,6 +2689,12 @@ export function createWorkspaceScene(
       mutableState.notice = 'UI position could not be saved on this device';
       notify();
     }
+  };
+  // Only a user-placed keyboard persists; a system spawn is re-derived from the next session's input.
+  const saveKeyboardPose = (root: THREE.Object3D): void => {
+    if (!renderer || (!renderer.xr.isPresenting && !activeSession) || xrViewerPending) return;
+    if (inputPoseSpawn) poseStore.forget('keyboard');
+    else saveUIPose('keyboard', root);
   };
   const placeWidget = (widget: ClockWidget): void => {
     const view = poseViewer();
@@ -2586,6 +2798,7 @@ export function createWorkspaceScene(
   const armCommand = (next: { id: string; action: string; kind: 'run' | 'remove' }): void => {
     disarmCommand();
     armedCommand = { ...next, at: Date.now() };
+    cue('armed', lastSelectSource);
     armedTimer = setTimeout(() => {
       armedTimer = undefined;
       armedCommand = null;
@@ -2605,23 +2818,115 @@ export function createWorkspaceScene(
     const verb = armed.kind === 'remove' ? 'Removes' : 'Sends';
     return `${verb}: ${previewCommandText(command.text, XR_PREVIEW_LENGTH)}`;
   };
+  let resetArmShown = false;
+  const syncArmedControls = (): void => {
+    const exit = hudRoot?.children.find((child) => child.userData.inputAction === 'exit') as
+      | THREE.Mesh
+      | undefined;
+    if (exit) {
+      const armed = armedControl?.action === 'exit';
+      updateLabel(exit, CONFIRM_LABELS.exit[armed ? 1 : 0]);
+      exit.userData.armed = armed || undefined;
+      exit.userData.restColor = armed ? ARMED_TINT : undefined;
+      const material = exit.material as THREE.MeshBasicMaterial;
+      if (!hoveredByController.size || ![...hoveredByController.values()].includes(exit))
+        material.color?.setHex(armed ? ARMED_TINT : 0xffffff);
+    }
+    const resetArmed = armedControl?.action === 'resetLayout';
+    if (resetArmed === resetArmShown) return;
+    resetArmShown = resetArmed;
+    if (inputRoot && inputMode === 'arrange' && !disposed) refreshInputRoot('arrange');
+  };
+  const disarmControl = (): boolean => {
+    if (armedControlTimer !== undefined) clearTimeout(armedControlTimer);
+    armedControlTimer = undefined;
+    if (!armedControl) return false;
+    armedControl = null;
+    syncArmedControls();
+    return true;
+  };
+  const disarmPresses = (): void => {
+    disarmControl();
+    if (disarmCommand() && inputRoot && !disposed) refreshInputRoot(inputMode);
+  };
+  /** First press arms `action`; a second press inside the confirm window runs it. */
+  const confirmControl = (action: ConfirmAction): boolean => {
+    if (armedControl?.action === action) {
+      if (Date.now() - armedControl.at < CONFIRM_MIN_MS) return false;
+      disarmControl();
+      return true;
+    }
+    disarmControl();
+    armedControl = { action, at: Date.now() };
+    armedControlTimer = setTimeout(() => {
+      armedControlTimer = undefined;
+      armedControl = null;
+      if (!disposed) syncArmedControls();
+    }, CONFIRM_WINDOW_MS);
+    cue('armed', lastSelectSource);
+    syncArmedControls();
+    return false;
+  };
   const commandButtonLabel = (command: QuickCommand, action: string): string =>
     isArmed(command.id, action)
       ? `${armedCommand?.kind === 'remove' ? 'Remove' : 'Run'} ${command.label}?`
       : isSharedCommand(command)
         ? `Shared · ${command.label}`
         : command.label;
+  // Spawned surfaces follow the head's heading only, so opening one while looking down or up does
+  // not bury it in the floor or tip it away.
+  const viewHeading = (view: THREE.Object3D): THREE.Quaternion =>
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), viewYaw(view));
+  // A grip can record a gamepad for a hand source, so only a non-hand gamepad means controllers.
+  // Null while neither is tracked, so a brief tracking loss does not move spawned surfaces.
+  const definiteInputKind = (): InputKind | null => {
+    if (controllerRoots.some((root) => !activeHand(root) && controllerGamepads.has(root)))
+      return 'controller';
+    return controllerRoots.some((root) => activeHand(root)) ? 'hand' : null;
+  };
+  const isTypingMode = (mode: InputMode): boolean =>
+    mode === 'keyboard' || mode === 'command-editor';
+  const HAND_KEYBOARD_OFFSET = new THREE.Vector3(0, -0.4, -0.45);
+  const HAND_KEYBOARD_TILT = THREE.MathUtils.degToRad(-30);
   const resetInputPose = (): void => {
     inputTransform = null;
     if (!inputRoot) return;
-    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    const view = trackedHead();
     view.updateMatrixWorld(true);
-    inputRoot.position
-      .copy(view.getWorldPosition(new THREE.Vector3()))
-      .addScaledVector(view.getWorldDirection(new THREE.Vector3()), 1.15);
-    inputRoot.position.y -= 0.2;
-    inputRoot.quaternion.copy(view.getWorldQuaternion(new THREE.Quaternion()));
+    const heading = viewHeading(view);
+    const typing = isTypingMode(inputMode);
+    const kind = definiteInputKind();
+    inputPoseSpawn = { kind, typing };
+    if (typing && kind === 'hand') {
+      inputRoot.position
+        .copy(HAND_KEYBOARD_OFFSET)
+        .applyQuaternion(heading)
+        .add(view.getWorldPosition(new THREE.Vector3()));
+      inputRoot.quaternion
+        .copy(heading)
+        .multiply(
+          new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), HAND_KEYBOARD_TILT),
+        );
+    } else {
+      inputRoot.position
+        .set(0, -0.2, -1.15)
+        .applyQuaternion(heading)
+        .add(view.getWorldPosition(new THREE.Vector3()));
+      inputRoot.quaternion.copy(heading);
+    }
     inputRoot.scale.setScalar(0.38);
+  };
+  const respawnTypingForInputKind = (): void => {
+    if (!inputRoot || !inputPoseSpawn?.typing || xrViewerPending) return;
+    const kind = definiteInputKind();
+    if (kind === null || kind === inputPoseSpawn.kind) return;
+    if (inputPoseSpawn.kind === null) {
+      inputPoseSpawn.kind = kind;
+      return;
+    }
+    if (pairGrabs.has(inputRoot)) return;
+    for (const drag of dragStates.values()) if (drag.object === inputRoot) return;
+    resetInputPose();
   };
   const refreshInputRoot = (mode: InputMode): void => {
     if (mode !== 'warp') settleWarpPanel(false);
@@ -2653,6 +2958,15 @@ export function createWorkspaceScene(
     inputRoot = new THREE.Group();
     inputRoot.name = `xr-${mode}-controls`;
     inputRoot.userData.scaleLimits = [0.18, 0.9];
+    if (inputPoseSpawn && !grabbedControllers.length && !previousPair) {
+      const typing = isTypingMode(mode);
+      const kind = definiteInputKind();
+      if (
+        inputPoseSpawn.typing !== typing ||
+        (typing && kind !== null && inputPoseSpawn.kind !== null && kind !== inputPoseSpawn.kind)
+      )
+        inputTransform = null;
+    }
     if (inputTransform) {
       inputRoot.position.copy(inputTransform.position);
       inputRoot.quaternion.copy(inputTransform.quaternion);
@@ -2660,8 +2974,10 @@ export function createWorkspaceScene(
     } else resetInputPose();
     if (!keyboardPoseRestored && (mode === 'keyboard' || mode === 'command-editor')) {
       const saved = poseStore.read('keyboard');
-      if (saved && !previousRoot)
+      if (saved && !previousRoot) {
         applyUIPose(inputRoot, saved, inputRoot.userData.scaleLimits as [number, number]);
+        inputPoseSpawn = null;
+      }
       keyboardPoseRestored = true;
     }
     for (const controller of grabbedControllers) {
@@ -2877,6 +3193,15 @@ export function createWorkspaceScene(
       });
       help.position.y = -0.56;
       inputRoot.add(help);
+      const sounds = createLabelButton(
+        `UI sounds: ${mutableState.uiSounds ? 'on' : 'off'}`,
+        0.7,
+        0.1,
+        { inputAction: 'uiSounds' },
+      );
+      sounds.position.y = -0.71;
+      setModifierVisual(sounds, mutableState.uiSounds);
+      inputRoot.add(sounds);
     } else if (mode === 'world') {
       const backgroundSelect = createBackgroundSelect(mutableState.background, 'input');
       backgroundSelect.position.y = 0.25;
@@ -3005,7 +3330,11 @@ export function createWorkspaceScene(
           inputRoot.add(button);
         }
       }
-      const reset = createLabelButton('Reset layout', 0.65, 0.1, { inputAction: 'resetLayout' });
+      const resetArmed = armedControl?.action === 'resetLayout';
+      const reset = createLabelButton(CONFIRM_LABELS.resetLayout[resetArmed ? 1 : 0], 0.65, 0.1, {
+        inputAction: 'resetLayout',
+        ...(resetArmed ? ARMED_STYLE : {}),
+      });
       reset.position.y = -0.45;
       inputRoot.add(reset);
     } else if (mode === 'panes') {
@@ -3328,7 +3657,7 @@ export function createWorkspaceScene(
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
     close.position.set(
       mode === 'panes' ? -1.2 : 0,
-      mode === 'panes' ? -0.9 : mode === 'display' ? -0.89 : -0.66,
+      mode === 'panes' ? -0.9 : mode === 'display' || mode === 'settings' ? -0.89 : -0.66,
       0,
     );
     inputRoot.add(close);
@@ -3553,6 +3882,7 @@ export function createWorkspaceScene(
       action === 'grabInput' ||
       (armedCommand !== null && isArmed(String(hit.userData.commandId), action));
     const root = inputRoot;
+    if (!keepArmed && armedControl && armedControl.action !== action) disarmControl();
     const disarmed = !keepArmed && disarmCommand();
     const handled = handleInputTargetAction(hit);
     if (disarmed && inputRoot && inputRoot === root) refreshInputRoot(inputMode);
@@ -3563,6 +3893,10 @@ export function createWorkspaceScene(
     if (action === 'scrollStrip') return true;
     if (action === 'keyborbMode') {
       setKeyborbMode(validateKeyborbMode(hit.userData.keyborbMode));
+      return true;
+    }
+    if (action === 'uiSounds') {
+      setUISounds(!mutableState.uiSounds);
       return true;
     }
     if (action === 'backgroundSelect') {
@@ -3586,6 +3920,15 @@ export function createWorkspaceScene(
     if (action === 'toggleConnection') {
       const paneId = hit.userData.terminalId as string | undefined;
       if (paneId) actions.togglePaneConnection?.(paneId);
+      return true;
+    }
+    if (action === 'bringHere') {
+      const paneId = hit.userData.terminalId as string | undefined;
+      if (paneId) bringTerminalHere(paneId);
+      return true;
+    }
+    if (action === 'keepHere') {
+      keepFocusPlacement();
       return true;
     }
     if (action === 'grabInput') return true;
@@ -3750,10 +4093,13 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'resetLayout') {
+      if (!confirmControl('resetLayout')) return true;
       resetLayout();
+      cue('recenter', lastSelectSource);
       return true;
     }
     if (action === 'exit') {
+      if (!confirmControl('exit')) return true;
       hideInput();
       if (activeSession) void activeSession.end();
       else actions.exitPreview?.();
@@ -4150,20 +4496,38 @@ export function createWorkspaceScene(
     }
   };
   const onControllerSelect = (controller: THREE.Group): void => {
+    try {
+      handleControllerSelect(controller);
+    } finally {
+      lastSelectSource = null;
+    }
+  };
+  const handleControllerSelect = (controller: THREE.Group): void => {
     const target = targetFromController(controller);
-    if (target?.object?.userData.inputAction === 'wristMenu') {
+    const action = target?.object?.userData.inputAction as string | undefined;
+    lastSelectSource = controller;
+    const cues = cueCount;
+    const clicks =
+      target?.object?.userData.key !== undefined || (action && !PASSIVE_ACTIONS.has(action));
+    // These controls bypass handleInputTarget, which is where other presses disarm.
+    if (action === 'wristMenu' || action === 'toggleRadial' || action === 'scrollStrip')
+      disarmPresses();
+    if (action === 'wristMenu') {
+      if (clicks) cue('select', controller);
       if (controllerHandedness.get(controller) === 'left') toggleWristMenu(controller);
       return;
     }
-    if (target?.object?.userData.inputAction === 'toggleRadial') {
+    if (action === 'toggleRadial') {
+      if (clicks) cue('select', controller);
       toggleRadialMenu(controller);
       return;
     }
     if (warpEdit) {
       activateTarget(target);
+      if (clicks) pressCue(controller, action, cues);
       return;
     }
-    if (target?.object?.userData.inputAction === 'scrollStrip') {
+    if (target && action === 'scrollStrip') {
       startStripScroll(controller, target);
       showHover(null);
       return;
@@ -4172,6 +4536,7 @@ export function createWorkspaceScene(
       ? { ...modifierState.active }
       : undefined;
     activateTarget(target);
+    if (clicks) pressCue(controller, action, cues);
     beginModifierPress(controller, target);
     if (!startMouse(controller, target, 0, modifiers)) startTextSelection(controller, target);
     showHover(null);
@@ -4189,7 +4554,7 @@ export function createWorkspaceScene(
       );
       rayLine.raycast = () => undefined;
       const contact = new THREE.Mesh(
-        new THREE.SphereGeometry(0.003, 8, 6),
+        new THREE.SphereGeometry(CURSOR_RADIUS, 8, 6),
         new THREE.MeshBasicMaterial({ color: ACCENT }),
       );
       contact.raycast = () => undefined;
@@ -4268,7 +4633,7 @@ export function createWorkspaceScene(
             id &&
             targetFromController(root)?.object?.userData.inputAction === 'pasteClipboard'
           )
-            void pasteClipboard(id);
+            void pasteClipboard(id, root);
           return;
         }
         copyTextSelection(root);
@@ -4330,6 +4695,7 @@ export function createWorkspaceScene(
           if (gamepad) controllerGamepads.set(root, gamepad);
         }
         captureGrab(root, object, !contactObject && Boolean(target?.object));
+        cue('grab', root);
         if (other) {
           captureGrab(other, object);
           beginPairGrab(object, other, root);
@@ -4340,13 +4706,14 @@ export function createWorkspaceScene(
         const object = dragStates.get(root)?.object;
         heldControllers.delete(root);
         releaseGrab(root);
+        if (object) cue('release', root);
         if (object && ![...dragStates.values()].some((drag) => drag.object === object)) {
           if (object === hudRoot) saveUIPose('hud', object);
           else if (
             object === inputRoot &&
             (inputMode === 'keyboard' || inputMode === 'command-editor')
           )
-            saveUIPose('keyboard', object);
+            saveKeyboardPose(object);
           if (object.userData.terminalId) rememberTerminalPlacements();
           if (object.userData.widgetKind) {
             const kind = object.userData.widgetKind as WidgetKind;
@@ -4494,6 +4861,8 @@ export function createWorkspaceScene(
     panel.bellLabel.position.set(0.58, height / 2 + 0.07, 0.02);
     panel.connectionButton.position.set(0.24, -(height / 2 + 0.24), 0.02);
     panel.closeButton.position.set(-0.24, -(height / 2 + 0.24), 0.02);
+    // At the pane's left edge, never closer to centre than the spot beside Close.
+    panel.bringButton.position.set(Math.min(-width / 2 + 0.18, -0.66), -(height / 2 + 0.24), 0.02);
     const followCurve = (object: THREE.Object3D): void => {
       const flatX = object.position.x;
       const point = terminalWarpPoint(flatX, span);
@@ -4510,6 +4879,7 @@ export function createWorkspaceScene(
     }
     followCurve(panel.connectionButton);
     followCurve(panel.closeButton);
+    followCurve(panel.bringButton);
     floorCorrectionPending = true;
   };
   const addTerminal = (surface: TerminalSurface): void => {
@@ -4627,7 +4997,12 @@ export function createWorkspaceScene(
       inputAction: 'closePane',
       terminalId: surface.pane.id,
     });
-    root.add(selection, titleLabel, bellLabel, connectionButton, closeButton);
+    const bringButton = createLabelButton('Bring here', 0.36, 0.08, {
+      inputAction: 'bringHere',
+      terminalId: surface.pane.id,
+      excludeFromBounds: true,
+    });
+    root.add(selection, titleLabel, bellLabel, connectionButton, closeButton, bringButton);
     const panel: TerminalPanel = {
       id: surface.pane.id,
       surface,
@@ -4644,6 +5019,7 @@ export function createWorkspaceScene(
       bellLabel,
       connectionButton,
       closeButton,
+      bringButton,
       width: PANEL_WIDTH,
       height: 0,
       revision: surface.revision,
@@ -4857,7 +5233,7 @@ export function createWorkspaceScene(
   const captureWorkspaceState = (): void => {
     if (hudRoot) saveUIPose('hud', hudRoot);
     if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
-      saveUIPose('keyboard', inputRoot);
+      saveKeyboardPose(inputRoot);
     for (const [kind, widget] of widgets) saveWidgetPose(kind, widget);
     rememberTerminalPlacements();
   };
@@ -4944,13 +5320,14 @@ export function createWorkspaceScene(
     releaseAllMouse();
     modifierPresses.clear();
     gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
-    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    const view = trackedHead();
     view.updateWorldMatrix(true, false);
+    const heading = viewHeading(view);
     radialMenu.root.position
-      .copy(view.getWorldPosition(new THREE.Vector3()))
-      .addScaledVector(view.getWorldDirection(new THREE.Vector3()), 1.05);
-    radialMenu.root.position.y -= 0.05;
-    radialMenu.root.quaternion.copy(view.getWorldQuaternion(new THREE.Quaternion()));
+      .set(0, -0.05, -1.05)
+      .applyQuaternion(heading)
+      .add(view.getWorldPosition(new THREE.Vector3()));
+    radialMenu.root.quaternion.copy(heading);
     radialMenu.open();
     mutableState.radialOpen = true;
     notify();
@@ -5073,6 +5450,12 @@ export function createWorkspaceScene(
     if (inputRoot && inputMode === 'settings') refreshInputRoot(inputMode);
     notify();
   };
+  const setUISounds = (enabled: boolean): void => {
+    if (mutableState.uiSounds === enabled) return;
+    mutableState.uiSounds = enabled;
+    if (inputRoot && inputMode === 'settings') refreshInputRoot(inputMode);
+    notify();
+  };
   const setDictationState = (state: DictationState): void => {
     const previous = mutableState.dictation;
     mutableState.dictation = { ...state };
@@ -5178,7 +5561,7 @@ export function createWorkspaceScene(
   const hideInput = (): void => {
     settleWarpPanel(false);
     if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
-      saveUIPose('keyboard', inputRoot);
+      saveKeyboardPose(inputRoot);
     if (inputRoot)
       inputTransform = {
         position: inputRoot.position.clone(),
@@ -5257,7 +5640,7 @@ export function createWorkspaceScene(
       for (const [kind, widget] of widgets) saveWidgetPose(kind, widget);
       if (hudRoot) saveUIPose('hud', hudRoot);
       if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
-        saveUIPose('keyboard', inputRoot);
+        saveKeyboardPose(inputRoot);
       keyboardResume = null;
       endFocusMode(true);
       releaseAllMouse();
@@ -5340,15 +5723,32 @@ export function createWorkspaceScene(
     paneFocus.exit(immediate);
     mutableState.focusModeTerminalId = null;
     floorCorrectionPending = true;
+    syncBringButtons();
+  };
+  const syncBringButtons = (): void => {
+    for (const panel of panels.values()) {
+      const keep = panel.id === paneFocus.activeId;
+      const action = keep ? 'keepHere' : 'bringHere';
+      if (panel.bringButton.userData.inputAction === action) continue;
+      panel.bringButton.userData.inputAction = action;
+      panel.bringButton.userData.helpText = getControlHelp(panel.bringButton.userData);
+      updateLabel(panel.bringButton, keep ? 'Keep here' : 'Bring here');
+    }
   };
   const focusPlacement = (
     panel: TerminalPanel,
+    level = false,
   ): { position: THREE.Vector3; rotation: THREE.Quaternion } => {
     const bounds = measurePanelBounds(panel.root);
-    const view = renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    const view = trackedHead();
     view.updateWorldMatrix(true, false);
     const eye = view.getWorldPosition(new THREE.Vector3());
     const forward = view.getWorldDirection(new THREE.Vector3());
+    if (level) {
+      forward.y = 0;
+      if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);
+      forward.normalize();
+    }
     const rotation = new THREE.Quaternion().setFromRotationMatrix(
       new THREE.Matrix4().lookAt(eye, eye.clone().add(forward), new THREE.Vector3(0, 1, 0)),
     );
@@ -5434,7 +5834,35 @@ export function createWorkspaceScene(
       rotation,
     );
     mutableState.focusModeTerminalId = panel.id;
+    syncBringButtons();
     notify();
+  };
+  const bringTerminalHere = (id: string): void => {
+    const panel = panels.get(id);
+    if (!panel || gripActive()) return;
+    releaseAllMouse();
+    showHover(null);
+    gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
+    if (paneFocus.activeId) endFocusMode(true);
+    stripScrolls.clear();
+    selectTerminal(panel.id);
+    const { position, rotation } = focusPlacement(panel, true);
+    panel.root.position.copy(position);
+    panel.root.quaternion.copy(rotation);
+    panel.root.updateMatrixWorld(true);
+    rememberTerminalPlacements();
+  };
+  const keepFocusPlacement = (): void => {
+    const panel = panels.get(paneFocus.activeId ?? '');
+    if (!panel) return;
+    paneFocus.keep();
+    panel.focusCurvature = null;
+    syncPanelGrid(panel);
+    mutableState.focusModeTerminalId = null;
+    floorCorrectionPending = true;
+    correctTerminalFloor();
+    syncBringButtons();
+    rememberTerminalPlacements();
   };
   const arrangeTerminals = (pattern: PanelArrangement): void => {
     if (!panels.size) return;
@@ -5633,6 +6061,8 @@ export function createWorkspaceScene(
   const dispose = (): void => {
     if (disposed) return;
     disarmCommand();
+    if (armedControlTimer !== undefined) clearTimeout(armedControlTimer);
+    armedControl = null;
     resetHandContacts(false);
     handContacts.clear();
     keyboardProximity.clear();
@@ -5643,6 +6073,7 @@ export function createWorkspaceScene(
     finishWarp(false);
     disposed = true;
     clipboard.dispose();
+    feedback.dispose();
     pendingPaste.clear();
     paneFocus.dispose();
     window.cancelAnimationFrame(frameHandle);
@@ -5750,6 +6181,7 @@ export function createWorkspaceScene(
     setKeyboardBackgroundEnabled,
     setKeyboardCurvature,
     setKeyborbMode,
+    setUISounds,
     setDictationState,
     setAvailablePanes,
     setQuickCommands,
@@ -5759,7 +6191,7 @@ export function createWorkspaceScene(
     exitXR,
     setUpdateAvailable,
     setNotice,
-    pasteClipboard,
+    pasteClipboard: (paneId?: string) => pasteClipboard(paneId, null),
     arrangeTerminals,
     toggleFocusMode,
     resetLayout,

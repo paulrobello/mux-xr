@@ -86,7 +86,7 @@ function surface(descriptor: PaneDescriptor): TerminalSurface {
   };
 }
 
-function fixture() {
+function fixture(options?: Parameters<typeof createWorkspaceScene>[2]) {
   const actions: WorkspaceActions = {
     selectPane: vi.fn(),
     closePane: vi.fn(),
@@ -104,7 +104,7 @@ function fixture() {
     saveCommand: vi.fn(() => true),
   };
   const container = document.createElement('div');
-  const workspace = createWorkspaceScene(container, actions);
+  const workspace = createWorkspaceScene(container, actions, options);
   fakeXR.camera = workspace.camera;
   const left = surface(pane('pane-a', 'A'));
   const right = surface(pane('pane-b', 'B'));
@@ -1147,6 +1147,295 @@ describe('native XR controller event routing', () => {
       fakeXR.frame?.(800);
     });
 
+    it('keeps a far hand-grabbed window level, in place and facing the head through a wrist roll', () => {
+      const { workspace } = setup();
+      const { hand, controller, panel } = farHandGrab(workspace);
+      for (let frame = 0; frame < 30; frame++) fakeXR.frame?.(40 + frame * 16);
+      const before = panel.getWorldPosition(new THREE.Vector3());
+      const roll = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 0, -1),
+        THREE.MathUtils.degToRad(40),
+      );
+      hand.joints.wrist.quaternion.multiply(roll);
+      controller.quaternion.multiply(roll);
+      for (let frame = 0; frame < 40; frame++) fakeXR.frame?.(600 + frame * 16);
+      const rotation = panel.getWorldQuaternion(new THREE.Quaternion());
+      expect(panel.getWorldPosition(new THREE.Vector3()).distanceTo(before)).toBeLessThan(0.01);
+      expect(Math.abs(new THREE.Vector3(1, 0, 0).applyQuaternion(rotation).y)).toBeLessThan(0.01);
+      const head = (fakeXR.camera as THREE.Object3D).getWorldPosition(new THREE.Vector3());
+      const toHead = head.sub(before).setY(0).normalize();
+      const front = new THREE.Vector3(0, 0, 1).applyQuaternion(rotation).setY(0).normalize();
+      expect(front.dot(toHead)).toBeGreaterThan(0.99);
+      pinch(hand, false);
+      fakeXR.frame?.(1400);
+    });
+
+    const expectLevelFacingHead = (panel: THREE.Object3D): void => {
+      const rotation = panel.getWorldQuaternion(new THREE.Quaternion());
+      expect(Math.abs(new THREE.Vector3(1, 0, 0).applyQuaternion(rotation).y)).toBeLessThan(0.01);
+      const head = (fakeXR.camera as THREE.Object3D).getWorldPosition(new THREE.Vector3());
+      const toHead = head.sub(panel.getWorldPosition(new THREE.Vector3())).setY(0).normalize();
+      const front = new THREE.Vector3(0, 0, 1).applyQuaternion(rotation).setY(0).normalize();
+      expect(front.dot(toHead)).toBeGreaterThan(0.99);
+    };
+
+    it('keeps a far hand-grabbed window on the ray while the wrist bends', () => {
+      const { workspace } = setup();
+      const { hand, panel } = farHandGrab(workspace);
+      for (let frame = 0; frame < 30; frame++) fakeXR.frame?.(40 + frame * 16);
+      const before = panel.getWorldPosition(new THREE.Vector3());
+      hand.joints.wrist.quaternion.setFromEuler(
+        new THREE.Euler(THREE.MathUtils.degToRad(35), THREE.MathUtils.degToRad(25), 0, 'YXZ'),
+      );
+      for (let frame = 0; frame < 40; frame++) fakeXR.frame?.(600 + frame * 16);
+      expect(panel.getWorldPosition(new THREE.Vector3()).distanceTo(before)).toBeLessThan(0.01);
+      pinch(hand, false);
+      fakeXR.frame?.(1400);
+    });
+
+    it('swings a far hand-grabbed window with the ray, level and facing the head', () => {
+      const { workspace } = setup();
+      const { hand, controller, panel } = farHandGrab(workspace);
+      for (let frame = 0; frame < 30; frame++) fakeXR.frame?.(40 + frame * 16);
+      const wrist = hand.joints.wrist.getWorldPosition(new THREE.Vector3());
+      const yaw = THREE.MathUtils.degToRad(20);
+      const expected = panel
+        .getWorldPosition(new THREE.Vector3())
+        .sub(wrist)
+        .applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw)
+        .add(wrist);
+      controller.quaternion.premultiply(
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw),
+      );
+      for (let frame = 0; frame < 40; frame++) fakeXR.frame?.(600 + frame * 16);
+      expect(panel.getWorldPosition(new THREE.Vector3()).distanceTo(expected)).toBeLessThan(0.02);
+      expectLevelFacingHead(panel);
+      pinch(hand, false);
+      fakeXR.frame?.(1400);
+    });
+
+    it.each([90, 100])(
+      'keeps the last heading when the grabbing ray points %d degrees up',
+      (degrees) => {
+        const { workspace } = setup();
+        const { hand, controller, panel } = farHandGrab(workspace);
+        const yaw = 0.5;
+        // Pitching about the held heading's right axis leaves the pane's sideways offset alone.
+        const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+        const wrist = hand.joints.wrist.getWorldPosition(new THREE.Vector3());
+        const sideways = (): number =>
+          panel.getWorldPosition(new THREE.Vector3()).sub(wrist).dot(right);
+        controller.quaternion.setFromEuler(new THREE.Euler(0, yaw, 0, 'YXZ'));
+        for (let frame = 0; frame < 30; frame++) fakeXR.frame?.(40 + frame * 16);
+        const before = sideways();
+        expect(Math.abs(before)).toBeGreaterThan(0.05);
+        controller.quaternion.setFromEuler(
+          new THREE.Euler(THREE.MathUtils.degToRad(degrees), yaw, 0, 'YXZ'),
+        );
+        for (let frame = 0; frame < 30; frame++) fakeXR.frame?.(600 + frame * 16);
+        expect(sideways()).toBeCloseTo(before, 2);
+        pinch(hand, false);
+        fakeXR.frame?.(1400);
+      },
+    );
+
+    it.each([
+      ['up', Math.PI / 2],
+      ['down', -Math.PI / 2],
+    ])('spawns a panel on the facing side while looking straight %s', (_label, pitch) => {
+      const { workspace } = setup();
+      const camera = fakeXR.camera as THREE.Object3D;
+      camera.rotation.set(pitch, 0.5, 0, 'YXZ');
+      camera.updateMatrixWorld(true);
+      workspace.showInput('settings');
+      const panel = workspace.scene.getObjectByName('xr-settings-controls');
+      if (!panel) throw new Error('Settings missing');
+      const heading = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.5);
+      const expected = new THREE.Vector3(0, -0.2, -1.15)
+        .applyQuaternion(heading)
+        .add(camera.getWorldPosition(new THREE.Vector3()));
+      expect(panel.position.distanceTo(expected)).toBeLessThan(1e-6);
+    });
+
+    it('spawns the hand keyboard low, near and tilted toward the user on the head heading', () => {
+      const { workspace } = setup();
+      connectHand();
+      const camera = fakeXR.camera as THREE.Object3D;
+      camera.rotation.set(-0.6, 0.5, 0, 'YXZ');
+      camera.updateMatrixWorld(true);
+      workspace.showInput('keyboard');
+      const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+      if (!keyboard) throw new Error('Keyboard missing');
+      const eye = camera.getWorldPosition(new THREE.Vector3());
+      const heading = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.5);
+      const expected = new THREE.Vector3(0, -0.4, -0.45).applyQuaternion(heading).add(eye);
+      expect(keyboard.position.distanceTo(expected)).toBeLessThan(1e-6);
+      const front = new THREE.Vector3(0, 0, 1).applyQuaternion(keyboard.quaternion);
+      expect(front.y).toBeCloseTo(0.5, 5);
+      const toEye = eye.sub(keyboard.position).setY(0).normalize();
+      expect(front.setY(0).normalize().dot(toEye)).toBeGreaterThan(0.999);
+    });
+
+    const keyboardRoot = (workspace: ReturnType<typeof createWorkspaceScene>): THREE.Object3D => {
+      const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+      if (!keyboard) throw new Error('Keyboard missing');
+      return keyboard;
+    };
+    const eyeAt = (offset: THREE.Vector3): THREE.Vector3 =>
+      (fakeXR.camera as THREE.Object3D).getWorldPosition(new THREE.Vector3()).add(offset);
+    const HAND_SPAWN = new THREE.Vector3(0, -0.4, -0.45);
+    const PANEL_SPAWN = new THREE.Vector3(0, -0.2, -1.15);
+    const tilt = (object: THREE.Object3D): number =>
+      new THREE.Vector3(0, 0, 1).applyQuaternion(object.quaternion).y;
+
+    it('re-spawns a hand keyboard at the controller pose when controllers take over', () => {
+      const { workspace } = setup();
+      connectHand();
+      workspace.showInput('keyboard');
+      expect(keyboardRoot(workspace).position.distanceTo(eyeAt(HAND_SPAWN))).toBeLessThan(1e-6);
+      connectController(0);
+      connectController(1, [0, 0, 0, 0], 'left');
+      // A controller held normally rests right where the near hand keyboard was.
+      const parked = fakeXR.controllers[1] as THREE.Group;
+      parked.position.copy(eyeAt(new THREE.Vector3(-0.05, -0.38, -0.42)));
+      for (let frame = 0; frame < 4; frame++) fakeXR.frame?.(40 + frame * 16);
+      const keyboard = keyboardRoot(workspace);
+      expect(keyboard.position.distanceTo(eyeAt(PANEL_SPAWN))).toBeLessThan(1e-6);
+      expect(tilt(keyboard)).toBeCloseTo(0, 5);
+      hit(workspace, { inputAction: 'toggleRadial' });
+      fakeXR.frame?.(1000);
+      expect(workspace.state.radialOpen).toBe(true);
+    });
+
+    it('spawns the hand keyboard near even after a far panel was open first', () => {
+      const { workspace } = setup();
+      connectHand();
+      workspace.showInput('settings');
+      workspace.showInput('keyboard');
+      const keyboard = keyboardRoot(workspace);
+      expect(keyboard.position.distanceTo(eyeAt(HAND_SPAWN))).toBeLessThan(1e-6);
+      expect(tilt(keyboard)).toBeCloseTo(0.5, 5);
+    });
+
+    it('spawns a panel far and untilted after the hand keyboard was open', () => {
+      const { workspace } = setup();
+      connectHand();
+      workspace.showInput('keyboard');
+      workspace.showInput('settings');
+      const panel = workspace.scene.getObjectByName('xr-settings-controls');
+      if (!panel) throw new Error('Settings missing');
+      expect(panel.position.distanceTo(eyeAt(PANEL_SPAWN))).toBeLessThan(1e-6);
+      expect(tilt(panel)).toBeCloseTo(0, 5);
+    });
+
+    it('leaves a user-grabbed keyboard in place when the input kind flips', () => {
+      const { workspace } = setup();
+      connectHand();
+      workspace.showInput('keyboard');
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      controller.position.copy(keyboardRoot(workspace).getWorldPosition(new THREE.Vector3()));
+      workspace.scene.updateMatrixWorld(true);
+      connectController(0);
+      controller.dispatchEvent({ type: 'squeezestart' } as never);
+      fakeXR.frame?.(20);
+      controller.position.x += 0.3;
+      fakeXR.frame?.(40);
+      controller.dispatchEvent({ type: 'squeezeend' } as never);
+      const placed = keyboardRoot(workspace).position.clone();
+      expect(placed.distanceTo(eyeAt(HAND_SPAWN))).toBeGreaterThan(0.2);
+      connectHand();
+      for (let frame = 0; frame < 4; frame++) fakeXR.frame?.(60 + frame * 16);
+      connectController(0);
+      for (let frame = 0; frame < 4; frame++) fakeXR.frame?.(200 + frame * 16);
+      expect(keyboardRoot(workspace).position.distanceTo(placed)).toBeLessThan(1e-6);
+    });
+
+    const xrSession = () => {
+      const listeners: Array<() => void> = [];
+      const session = {
+        addEventListener: (_type: string, listener: () => void) => listeners.push(listener),
+        end: async () => {
+          for (const listener of listeners.splice(0)) listener();
+        },
+      };
+      vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+      return session;
+    };
+
+    it('does not carry a spawned hand keyboard into the next controller session', async () => {
+      const { workspace } = setup();
+      connectHand();
+      let session = xrSession();
+      await workspace.enterXR('vr');
+      fakeXR.frame?.(30);
+      workspace.showInput('keyboard');
+      expect(keyboardRoot(workspace).position.distanceTo(eyeAt(HAND_SPAWN))).toBeLessThan(1e-6);
+      await session.end();
+      fakeXR.frame?.(60);
+      (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'disconnected' } as never);
+      session = xrSession();
+      await workspace.enterXR('vr');
+      connectController(0);
+      fakeXR.frame?.(90);
+      workspace.showInput('keyboard');
+      const keyboard = keyboardRoot(workspace);
+      expect(keyboard.position.distanceTo(eyeAt(PANEL_SPAWN))).toBeLessThan(1e-6);
+      expect(tilt(keyboard)).toBeCloseTo(0, 5);
+      await session.end();
+    });
+
+    it('carries a user-grabbed keyboard pose into the next session', async () => {
+      const { workspace } = setup();
+      let session = xrSession();
+      await workspace.enterXR('vr');
+      connectController(0);
+      fakeXR.frame?.(30);
+      workspace.showInput('keyboard');
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      controller.position.copy(keyboardRoot(workspace).getWorldPosition(new THREE.Vector3()));
+      workspace.scene.updateMatrixWorld(true);
+      controller.dispatchEvent({ type: 'squeezestart' } as never);
+      fakeXR.frame?.(40);
+      controller.position.x += 0.3;
+      fakeXR.frame?.(60);
+      controller.dispatchEvent({ type: 'squeezeend' } as never);
+      const placed = keyboardRoot(workspace).position.clone();
+      expect(placed.distanceTo(eyeAt(PANEL_SPAWN))).toBeGreaterThan(0.2);
+      await session.end();
+      session = xrSession();
+      await workspace.enterXR('vr');
+      fakeXR.frame?.(90);
+      workspace.showInput('keyboard');
+      expect(keyboardRoot(workspace).position.distanceTo(placed)).toBeLessThan(1e-3);
+      await session.end();
+    });
+
+    it('restores a saved keyboard pose instead of the hand keyboard spawn', async () => {
+      localStorage.setItem(
+        'mux-xr:ui-poses:v1',
+        JSON.stringify({
+          version: 1,
+          poses: {
+            keyboard: { position: [0.3, -0.1, -0.9], quaternion: [0, 0, 0, 1], scale: 0.5 },
+          },
+        }),
+      );
+      const session = { addEventListener: () => undefined, end: async () => undefined };
+      vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+      const { workspace } = setup();
+      connectHand();
+      await workspace.enterXR('vr');
+      fakeXR.frame?.(30);
+      workspace.showInput('keyboard');
+      const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+      if (!keyboard) throw new Error('Keyboard missing');
+      const eye = (fakeXR.camera as THREE.Object3D).getWorldPosition(new THREE.Vector3());
+      expect(keyboard.scale.x).toBeCloseTo(0.5);
+      expect(
+        keyboard.position.distanceTo(eye.add(new THREE.Vector3(0, -0.4, -0.45))),
+      ).toBeGreaterThan(0.1);
+    });
+
     it('moves a contact-grabbed panel edge 1:1 without reeling it', () => {
       const { workspace } = setup();
       const hand = connectHand(0);
@@ -1755,6 +2044,27 @@ describe('native XR controller event routing', () => {
       expect(left.clearSelection).toHaveBeenCalledTimes(2);
     });
 
+    it('keeps a jittered press a click that selects the pane without copying', () => {
+      const { workspace, left, controller, aimCell, start, finish, writeText } = setupSelection();
+      workspace.selectTerminal('pane-b');
+      start();
+      expect(workspace.state.selectedTerminalId).toBe('pane-a');
+      aimCell(3, 3);
+      fakeXR.frame?.(50);
+      aimCell(3, 4);
+      fakeXR.frame?.(60);
+      finish();
+      expect(left.updateSelection).not.toHaveBeenCalled();
+      expect(writeText).not.toHaveBeenCalled();
+      expect(workspace.state.toast).toBeNull();
+      start();
+      aimCell(12, 6);
+      fakeXR.frame?.(100);
+      finish();
+      expect(left.updateSelection).toHaveBeenLastCalledWith({ col: 12, row: 6 });
+      expect(writeText).toHaveBeenCalledOnce();
+    });
+
     it('cancels selection on grip, disconnect, recenter and removal without copying', () => {
       for (const action of ['grip', 'disconnect', 'reset', 'remove'] as const) {
         const { workspace, left, controller, start, drag, finish, writeText } = setupSelection();
@@ -1900,7 +2210,12 @@ describe('native XR controller event routing', () => {
     if (!hud) throw new Error('HUD missing');
     hud.position.x = 0.37;
     hud.scale.setScalar(0.7);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
     hit(workspace, { inputAction: 'exit' });
+    clock.mockReturnValue(now + 400);
+    hit(workspace, { inputAction: 'exit' });
+    clock.mockRestore();
     await Promise.resolve();
     const ended = JSON.parse(localStorage.getItem('mux-xr:ui-poses:v2') ?? '{}');
     expect(ended.poses.hud.scale).toBeCloseTo(0.7);
@@ -2306,6 +2621,45 @@ describe('native XR controller event routing', () => {
       'pane-a',
       expect.objectContaining({ col: 51, row: 12, eventType: 'release' }),
     );
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('keeps a far controller mouse press a click until the hit passes the drag dead zone', () => {
+    const { workspace, actions, container, left } = fixture();
+    Object.defineProperty(left, 'mouseTracking', { value: 'drag' });
+    const screen = workspace.scene
+      .getObjectByName('terminal-panel-pane-a')
+      ?.getObjectByName('terminal-surface');
+    if (!screen) throw new Error('Terminal surface missing');
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    connectController(0);
+    const cell = 1.42 / 80;
+    const sent = () => (actions.sendMouse as ReturnType<typeof vi.fn>).mock.calls;
+    aimControllerAtScreen(controller, screen, new THREE.Vector3(0.001, 0, 0), 3);
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    expect(sent()).toHaveLength(1);
+    // Three cells at 3 m is under 1.5 degrees of ray angle.
+    aimControllerAtScreen(controller, screen, new THREE.Vector3(0.001 + cell * 3, 0, 0), 3);
+    fakeXR.frame?.(20);
+    expect(sent()).toHaveLength(1);
+    aimControllerAtScreen(controller, screen, new THREE.Vector3(0.001 + cell * 10, 0, 0), 3);
+    fakeXR.frame?.(40);
+    expect(sent().at(-1)?.[1]).toEqual(expect.objectContaining({ col: 50, eventType: 'move' }));
+    controller.dispatchEvent({ type: 'selectend' } as never);
+    expect(sent().at(-1)?.[1]).toEqual(expect.objectContaining({ col: 50, eventType: 'release' }));
+    aimControllerAtScreen(controller, screen, new THREE.Vector3(0.001, 0, 0), 3);
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    aimControllerAtScreen(controller, screen, new THREE.Vector3(0.001 + cell * 3, 0, 0), 3);
+    controller.dispatchEvent({ type: 'selectend' } as never);
+    expect(
+      sent()
+        .slice(-2)
+        .map((call) => [call[1].col, call[1].eventType]),
+    ).toEqual([
+      [40, 'press'],
+      [40, 'release'],
+    ]);
     workspace.dispose();
     container.remove();
   });
@@ -3285,6 +3639,34 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('opens the keyboard and radial level on the head heading while looking down', () => {
+    const { workspace, container } = fixture();
+    workspace.camera.position.set(1, 1.6, 0.5);
+    workspace.camera.rotation.set(-0.7, -0.4, 0, 'YXZ');
+    workspace.camera.updateMatrixWorld(true);
+    const eye = workspace.camera.getWorldPosition(new THREE.Vector3());
+    const heading = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -0.4);
+    workspace.showInput('keyboard');
+    const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls');
+    if (!keyboard) throw new Error('Keyboard missing');
+    const keyboardAt = new THREE.Vector3(0, -0.2, -1.15).applyQuaternion(heading).add(eye);
+    expect(keyboard.position.distanceTo(keyboardAt)).toBeLessThan(1e-6);
+    expect(new THREE.Vector3(0, 0, 1).applyQuaternion(keyboard.quaternion).y).toBeCloseTo(0, 6);
+    const gamepad = connectController(1, [0, 0, 0, 0], 'right');
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(0);
+    const radial = workspace.scene.getObjectByName('radial-menu');
+    if (!radial) throw new Error('Radial missing');
+    const radialAt = new THREE.Vector3(0, -0.05, -1.05).applyQuaternion(heading).add(eye);
+    expect(radial.getWorldPosition(new THREE.Vector3()).distanceTo(radialAt)).toBeLessThan(1e-6);
+    const radialFront = new THREE.Vector3(0, 0, 1).applyQuaternion(
+      radial.getWorldQuaternion(new THREE.Quaternion()),
+    );
+    expect(radialFront.y).toBeCloseTo(0, 6);
+    workspace.dispose();
+    container.remove();
+  });
+
   it('uses the real controller event source for gamepad drag and suppresses trigger typing', () => {
     const { workspace, actions, container } = fixture();
     workspace.showInput('keyboard');
@@ -3856,6 +4238,234 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  describe('UI sounds and haptics', () => {
+    const feedbackFixture = () => {
+      const play = vi.fn();
+      const value = fixture({ feedback: { play, dispose: vi.fn() } });
+      const cues = (): string[] => play.mock.calls.map((call) => call[0] as string);
+      return { ...value, play, cues };
+    };
+
+    it('clicks and pulses the controller on control and key presses', () => {
+      const { workspace, container, play, cues } = feedbackFixture();
+      const gamepad = connectController(0);
+      workspace.showInput('keyboard');
+      hit(workspace, { inputAction: 'key', key: 'a' });
+      expect(cues()).toEqual(['select']);
+      expect(play).toHaveBeenLastCalledWith('select', gamepad);
+      hit(workspace, { inputAction: 'noop' });
+      expect(cues()).toEqual(['select']);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('cues a grab and its release once each and a held modifier lock', () => {
+      const { workspace, container, cues } = feedbackFixture();
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      connectController(0);
+      controller.position.set(0.87, 1.5, 0);
+      workspace.scene.updateMatrixWorld(true);
+      controller.dispatchEvent({ type: 'squeezestart' } as never);
+      fakeXR.frame?.(16);
+      controller.dispatchEvent({ type: 'squeezeend' } as never);
+      expect(cues()).toEqual(['grab', 'release']);
+      workspace.showInput('keyboard');
+      hit(workspace, { inputAction: 'key', key: 'Shift' });
+      fakeXR.frame?.(100);
+      fakeXR.frame?.(700);
+      expect(cues()).toEqual(['grab', 'release', 'select', 'lock']);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('ticks for each strip scroll batch and cues the both-stick recenter', () => {
+      const { workspace, actions, container, cues } = feedbackFixture();
+      actions.scrollTerminal = vi.fn(() => true);
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      connectController(0);
+      const strip = workspace.scene
+        .getObjectByName('terminal-panel-pane-a')
+        ?.getObjectByName('terminal-scroll-strip') as THREE.Mesh;
+      aimControllerAtScreen(controller, strip, new THREE.Vector3(0, 0, 0));
+      fakeXR.frame?.(10);
+      controller.dispatchEvent({ type: 'selectstart' } as never);
+      for (let step = 1; step <= 4; step += 1) {
+        aimControllerAtScreen(controller, strip, new THREE.Vector3(0, -0.1 * step, 0));
+        fakeXR.frame?.(10 + step * 50);
+      }
+      controller.dispatchEvent({ type: 'selectend' } as never);
+      const scrolls = (actions.scrollTerminal as ReturnType<typeof vi.fn>).mock.calls.length;
+      expect(scrolls).toBeGreaterThan(1);
+      expect(cues().filter((cue) => cue === 'tick')).toHaveLength(scrolls);
+      const leftPad = connectController(0);
+      const rightPad = connectController(1);
+      (leftPad.buttons as unknown as Array<{ pressed: boolean }>)[3].pressed = true;
+      (rightPad.buttons as unknown as Array<{ pressed: boolean }>)[3].pressed = true;
+      for (let frame = 0; frame <= 25; frame += 1) fakeXR.frame?.(1000 + frame * 50);
+      expect(cues().filter((cue) => cue === 'recenter')).toHaveLength(1);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('stays silent and still when UI sounds are off in XR Settings', () => {
+      const { workspace, container, play } = feedbackFixture();
+      connectController(0);
+      workspace.showInput('settings');
+      expect(objectWithData(workspace, { inputAction: 'uiSounds' }).userData.labelText).toBe(
+        'UI sounds: on',
+      );
+      const listener = vi.fn();
+      workspace.subscribe(listener);
+      hit(workspace, { inputAction: 'uiSounds' });
+      expect(workspace.state.uiSounds).toBe(false);
+      expect(listener).toHaveBeenCalled();
+      expect(objectWithData(workspace, { inputAction: 'uiSounds' }).userData.labelText).toBe(
+        'UI sounds: off',
+      );
+      play.mockClear();
+      workspace.showInput('keyboard');
+      hit(workspace, { inputAction: 'key', key: 'a' });
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      controller.position.set(0.87, 1.5, 0);
+      workspace.hideInput();
+      workspace.scene.updateMatrixWorld(true);
+      controller.dispatchEvent({ type: 'squeezestart' } as never);
+      controller.dispatchEvent({ type: 'squeezeend' } as never);
+      expect(play).not.toHaveBeenCalled();
+      workspace.setUISounds(true);
+      expect(workspace.state.uiSounds).toBe(true);
+      workspace.dispose();
+      container.remove();
+    });
+  });
+
+  describe('press-twice confirmation and ray cursor', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('pulses the pressing controller for the Reset confirm and disarms on HUD Menu', () => {
+      vi.useFakeTimers();
+      const play = vi.fn();
+      const { workspace, container } = fixture({ feedback: { play, dispose: vi.fn() } });
+      const gamepad = connectController(0);
+      workspace.showInput('arrange');
+      hit(workspace, { inputAction: 'resetLayout' });
+      expect(play.mock.calls).toEqual([['armed', gamepad]]);
+      vi.advanceTimersByTime(500);
+      hit(workspace, { inputAction: 'resetLayout' });
+      expect(play).toHaveBeenLastCalledWith('recenter', gamepad);
+      expect(play.mock.calls.map(([kind]) => kind)).toEqual(['armed', 'recenter']);
+      play.mockClear();
+      void workspace.pasteClipboard('missing-pane');
+      expect(play.mock.calls).toEqual([['error', null]]);
+      play.mockClear();
+      hit(workspace, { inputAction: 'exit' });
+      expect(objectWithData(workspace, { inputAction: 'exit' }).userData.armed).toBe(true);
+      hit(workspace, { inputAction: 'toggleRadial' });
+      expect(objectWithData(workspace, { inputAction: 'exit' }).userData.armed).toBeUndefined();
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('rebuilds Arrange only when the Reset layout arm state changes', () => {
+      vi.useFakeTimers();
+      const { workspace, container } = fixture();
+      connectController(0);
+      workspace.showInput('arrange');
+      const arrange = workspace.scene.getObjectByName('xr-arrange-controls');
+      hit(workspace, { inputAction: 'exit' });
+      vi.advanceTimersByTime(3001);
+      expect(workspace.scene.getObjectByName('xr-arrange-controls')).toBe(arrange);
+      hit(workspace, { inputAction: 'resetLayout' });
+      expect(workspace.scene.getObjectByName('xr-arrange-controls')).not.toBe(arrange);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('arms HUD Exit on the first press and exits only on a second press in the window', () => {
+      vi.useFakeTimers();
+      const play = vi.fn();
+      const { workspace, actions, container } = fixture({ feedback: { play, dispose: vi.fn() } });
+      actions.exitPreview = vi.fn();
+      const gamepad = connectController(0);
+      hit(workspace, { inputAction: 'exit' });
+      const exit = objectWithData(workspace, { inputAction: 'exit' }) as THREE.Mesh;
+      expect(actions.exitPreview).not.toHaveBeenCalled();
+      expect(exit.userData.labelText).toBe('Exit?');
+      expect(exit.userData.armed).toBe(true);
+      expect((exit.material as THREE.MeshBasicMaterial).color.getHex()).not.toBe(0xffffff);
+      expect(play.mock.calls).toEqual([['armed', gamepad]]);
+      vi.advanceTimersByTime(3001);
+      expect(exit.userData.labelText).toBe('Exit');
+      expect((exit.material as THREE.MeshBasicMaterial).color.getHex()).toBe(0xffffff);
+      hit(workspace, { inputAction: 'exit' });
+      expect(actions.exitPreview).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(100);
+      hit(workspace, { inputAction: 'exit' });
+      expect(actions.exitPreview).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(300);
+      hit(workspace, { inputAction: 'exit' });
+      expect(actions.exitPreview).toHaveBeenCalledOnce();
+      expect(exit.userData.labelText).toBe('Exit');
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('needs a second press to reset the layout and disarms on another control', () => {
+      vi.useFakeTimers();
+      const { workspace, container } = fixture();
+      workspace.showInput('arrange');
+      const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+      panel.position.x -= 0.5;
+      const moved = panel.position.clone();
+      hit(workspace, { inputAction: 'resetLayout' });
+      expect(panel.position.distanceTo(moved)).toBe(0);
+      const armed = objectWithData(workspace, { inputAction: 'resetLayout' });
+      expect(armed.userData.labelText).toBe('Reset?');
+      expect(armed.userData.armed).toBe(true);
+      vi.advanceTimersByTime(400);
+      hit(workspace, { inputAction: 'layoutDepth', direction: 1 });
+      const after = panel.position.clone();
+      expect(objectWithData(workspace, { inputAction: 'resetLayout' }).userData.labelText).toBe(
+        'Reset layout',
+      );
+      hit(workspace, { inputAction: 'resetLayout' });
+      expect(panel.position.distanceTo(after)).toBe(0);
+      vi.advanceTimersByTime(400);
+      hit(workspace, { inputAction: 'resetLayout' });
+      expect(panel.position.distanceTo(after)).toBeGreaterThan(0.1);
+      expect(objectWithData(workspace, { inputAction: 'resetLayout' }).userData.labelText).toBe(
+        'Reset layout',
+      );
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('scales the ray hit cursor with distance to about half a degree', () => {
+      const { workspace, container } = fixture();
+      connectController(0);
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      const screen = workspace.scene
+        .getObjectByName('terminal-panel-pane-a')
+        ?.getObjectByName('terminal-surface') as THREE.Mesh;
+      const cursor = controller.children.find((child) => child instanceof THREE.Mesh) as THREE.Mesh;
+      const sizeAt = (distance: number, time: number): number => {
+        aimControllerAtScreen(controller, screen, new THREE.Vector3(0, 0, 0), distance);
+        fakeXR.frame?.(time);
+        expect(cursor.visible).toBe(true);
+        return 2 * 0.003 * cursor.scale.x;
+      };
+      const far = sizeAt(4, 10);
+      expect(THREE.MathUtils.radToDeg(2 * Math.atan(far / 2 / 4))).toBeCloseTo(0.5, 2);
+      const mid = sizeAt(2, 20);
+      expect(far / mid).toBeCloseTo(2, 5);
+      expect(sizeAt(0.1, 30)).toBeCloseTo(0.003, 6);
+      workspace.dispose();
+      container.remove();
+    });
+  });
+
   it('locks a held modifier across keys and releases it on a later tap', () => {
     const { workspace, actions, container } = fixture();
     workspace.showInput('keyboard');
@@ -3994,9 +4604,15 @@ describe('native XR controller event routing', () => {
     (pad.axes as number[])[2] = 1;
     fakeXR.frame?.(1200);
     expect(workspace.getTerminalCurvature('pane-a')).toBeGreaterThan(0);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
     hit(workspace, { inputAction: 'exit' });
     expect(workspace.state.warpTerminalId).toBeNull();
     expect(workspace.getTerminalCurvature('pane-a')).toBe(0);
+    expect(actions.exitPreview).not.toHaveBeenCalled();
+    clock.mockReturnValue(now + 400);
+    hit(workspace, { inputAction: 'exit' });
+    clock.mockRestore();
     expect(actions.exitPreview).toHaveBeenCalledOnce();
     workspace.dispose();
     container.remove();
@@ -4507,6 +5123,81 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('brings a far pane level in front of the viewer at the focus distance and saves it', () => {
+    const { workspace, container } = fixture();
+    workspace.camera.position.set(1, 1.6, 0.5);
+    workspace.camera.rotation.set(-0.3, 0.4, 0, 'YXZ');
+    workspace.camera.updateMatrixWorld(true);
+    const root = workspace.scene.getObjectByName('terminal-panel-pane-b') as THREE.Group;
+    root.position.set(4, 2.5, -6);
+    root.rotation.set(0, -0.8, 0.2);
+    workspace.scene.updateMatrixWorld(true);
+    const revision = workspace.state.layoutRevision;
+    hit(workspace, { inputAction: 'bringHere', terminalId: 'pane-b' });
+    const eye = workspace.camera.getWorldPosition(new THREE.Vector3());
+    const position = root.getWorldPosition(new THREE.Vector3());
+    const front = new THREE.Vector3(0, 0, 1).applyQuaternion(
+      root.getWorldQuaternion(new THREE.Quaternion()),
+    );
+    const toEye = eye.clone().sub(position).setY(0);
+    expect(Math.abs(toEye.length() - workspace.state.windowPreferences.focusDistance)).toBeLessThan(
+      0.1,
+    );
+    expect(Math.abs(front.y)).toBeLessThan(1e-6);
+    expect(front.dot(toEye.normalize())).toBeGreaterThan(0.999);
+    expect(workspace.state.focusModeTerminalId).toBeNull();
+    expect(workspace.state.selectedTerminalId).toBe('pane-b');
+    expect(workspace.state.layoutRevision).toBeGreaterThan(revision);
+    const saved = workspace.captureTerminalPose('pane-b');
+    for (let frame = 0; frame < 10; frame += 1) fakeXR.frame?.(frame * 20);
+    expect(root.getWorldPosition(new THREE.Vector3()).distanceTo(position)).toBeLessThan(1e-6);
+    expect(workspace.captureTerminalPose('pane-b')).toEqual(saved);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('keeps Bring here at the left edge of a wide pane and left of Close', () => {
+    const { workspace, container } = fixture();
+    const wide = surface(pane('pane-w', 'W'));
+    (wide as { cols: number }).cols = 160;
+    workspace.addTerminal(wide);
+    const root = workspace.scene.getObjectByName('terminal-panel-pane-w') as THREE.Group;
+    const bring = objectWithData(workspace, { inputAction: 'bringHere', terminalId: 'pane-w' });
+    const close = objectWithData(workspace, { inputAction: 'closePane', terminalId: 'pane-w' });
+    const width = (1.42 * 160) / 80;
+    expect(bring.position.x).toBeCloseTo(-width / 2 + 0.18, 5);
+    expect(bring.position.x + 0.18).toBeLessThan(close.position.x - 0.19);
+    expect(root.children).toContain(bring);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('keeps the focused placement with Keep here instead of restoring the original pose', () => {
+    const { workspace, container } = fixture();
+    const root = workspace.scene.getObjectByName('terminal-panel-pane-b') as THREE.Group;
+    const original = root.position.clone();
+    const originalPose = workspace.captureTerminalPose('pane-b');
+    workspace.toggleFocusMode('pane-b');
+    for (let frame = 0; frame < 20; frame += 1) fakeXR.frame?.(frame * 20);
+    const focused = root.position.clone();
+    expect(focused.distanceTo(original)).toBeGreaterThan(0.1);
+    const revision = workspace.state.layoutRevision;
+    hit(workspace, { inputAction: 'keepHere', terminalId: 'pane-b' });
+    expect(workspace.state.focusModeTerminalId).toBeNull();
+    for (let frame = 20; frame < 40; frame += 1) fakeXR.frame?.(frame * 20);
+    expect(root.position.distanceTo(focused)).toBeLessThan(0.01);
+    expect(workspace.state.layoutRevision).toBeGreaterThan(revision);
+    expect(workspace.captureTerminalPose('pane-b')?.position).not.toEqual(originalPose?.position);
+    expect(
+      objectWithData(workspace, { inputAction: 'bringHere', terminalId: 'pane-b' }),
+    ).toBeDefined();
+    const other = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    expect(other?.visible).toBe(true);
+    expect(other?.userData.focusHidden).toBeFalsy();
+    workspace.dispose();
+    container.remove();
+  });
+
   it('places focus relative to the viewer once without changing scale or remote grids', () => {
     const { workspace, actions, container } = fixture();
     workspace.camera.position.set(3, 1.8, 2);
@@ -4854,5 +5545,39 @@ describe('terminal pose persistence across reloads', () => {
     adjusted.position.forEach((value, axis) => {
       expect(value).toBeCloseTo(exact.position[axis], 3);
     });
+  });
+  it('brings a pane in front of the frame viewer pose, not the render-adjusted camera', async () => {
+    startSession();
+    const { workspace, container } = fixture();
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(-0.6, 1.4, 0.8);
+    camera.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 3);
+    fakeXR.camera = camera;
+    const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 5);
+    const tracked = {
+      getViewerPose: () => ({
+        transform: {
+          position: { x: 0.3, y: 1.65, z: 0.2, w: 1 },
+          orientation: { x: yaw.x, y: yaw.y, z: yaw.z, w: yaw.w },
+        },
+      }),
+    };
+    await workspace.enterXR('vr');
+    fakeXR.presenting = true;
+    fakeXR.frame?.(1000, tracked);
+    hit(workspace, { inputAction: 'bringHere', terminalId: 'pane-b' });
+    const root = workspace.scene.getObjectByName('terminal-panel-pane-b') as THREE.Group;
+    const eye = new THREE.Vector3(0.3, 1.65, 0.2);
+    const toEye = eye.sub(root.getWorldPosition(new THREE.Vector3())).setY(0);
+    expect(Math.abs(toEye.length() - workspace.state.windowPreferences.focusDistance)).toBeLessThan(
+      0.1,
+    );
+    const front = new THREE.Vector3(0, 0, 1).applyQuaternion(
+      root.getWorldQuaternion(new THREE.Quaternion()),
+    );
+    expect(front.dot(toEye.normalize())).toBeGreaterThan(0.999);
+    await workspace.exitXR();
+    workspace.dispose();
+    container.remove();
   });
 });

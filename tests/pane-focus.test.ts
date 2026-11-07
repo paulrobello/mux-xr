@@ -29,6 +29,27 @@ describe('pane focus', () => {
     expect(root.position).toEqual(original);
     focus.dispose();
   });
+
+  it('keeps the focus placement, finishing motion, and fades siblings back', () => {
+    const focus = createPaneFocus();
+    const { root } = pane();
+    const { root: other } = pane();
+    root.position.set(3, 2, -4);
+    const target = new THREE.Vector3(0, 1.4, -1.5);
+    focus.enter('a', root, [root, other], target, new THREE.Quaternion());
+    focus.update(0.05);
+    expect(other.userData.focusHidden).toBe(true);
+    focus.keep();
+    expect(focus.activeId).toBeNull();
+    expect(root.position).toEqual(target);
+    expect(focus.originalTransform(root)).toBeNull();
+    for (let step = 0; step < 10; step++) focus.update(0.1);
+    expect(root.position).toEqual(target);
+    expect(other.visible).toBe(true);
+    expect(other.userData.focusHidden).toBeUndefined();
+    focus.dispose();
+  });
+
   it('animates the focus root and restores its exact transform', () => {
     const focus = createPaneFocus();
     const { root } = pane();

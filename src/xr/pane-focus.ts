@@ -85,6 +85,8 @@ export interface PaneFocus {
     quaternion: THREE.Quaternion,
   ): void;
   exit(immediate?: boolean): void;
+  /** End focus with the focused root left at its focus placement; other roots fade back. */
+  keep(): void;
   retarget(position: THREE.Vector3, quaternion: THREE.Quaternion): void;
   update(deltaSeconds: number): void;
   add(root: THREE.Group): void;
@@ -222,6 +224,16 @@ export function createPaneFocus(): PaneFocus {
     },
     enter,
     exit,
+    keep() {
+      if (!focusedRoot) return;
+      if (motion) {
+        focusedRoot.position.copy(motion.toPosition);
+        focusedRoot.quaternion.copy(motion.toQuaternion);
+        motion = null;
+      }
+      originals.delete(focusedRoot);
+      exit(false);
+    },
     retarget(position, quaternion) {
       if (!focusedRoot) return;
       motion = {

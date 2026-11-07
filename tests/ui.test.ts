@@ -134,6 +134,30 @@ describe('mux XR local UI state', () => {
     expect(validateSettings({ keyborbMode: 'on' }).keyborbMode).toBe('on');
   });
 
+  it('defaults UI sounds on and persists the browser and XR toggle', () => {
+    expect(validateSettings(null).uiSounds).toBe(true);
+    expect(validateSettings({ uiSounds: 'no' }).uiSounds).toBe(true);
+    expect(validateSettings({ uiSounds: false }).uiSounds).toBe(false);
+    localStorage.clear();
+    const root = document.createElement('div');
+    const changes: boolean[] = [];
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onSettingsChange: (settings) => changes.push(settings.uiSounds),
+    });
+    const checkbox = query<HTMLInputElement>(root, '[data-settings] [data-ui-sounds]');
+    expect(checkbox.checked).toBe(true);
+    checkbox.checked = false;
+    checkbox.dispatchEvent(new Event('change'));
+    expect(ui.getSettings().uiSounds).toBe(false);
+    expect(JSON.parse(localStorage.getItem('mux-xr:settings:v1') ?? '{}').uiSounds).toBe(false);
+    ui.setUISounds(true, true);
+    expect(checkbox.checked).toBe(true);
+    expect(changes).toEqual([false, true]);
+    ui.destroy();
+    localStorage.clear();
+  });
+
   it('persists and synchronizes Keyborb mode selection', () => {
     localStorage.clear();
     const root = document.createElement('div');

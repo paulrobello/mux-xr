@@ -95,6 +95,7 @@ function defaultStorage(): Storage | null {
 export function createUIPoseStore(storage: Storage | null = defaultStorage()): {
   read(name: UIPoseName): SavedUIPose | null;
   save(name: UIPoseName, pose: SavedUIPose): boolean;
+  forget(name: UIPoseName): boolean;
   clear(): boolean;
 } {
   return {
@@ -107,6 +108,18 @@ export function createUIPoseStore(storage: Storage | null = defaultStorage()): {
       if (!storage || !validPose(pose)) return false;
       const document = readDocument(storage);
       document.poses[name] = copyPose(pose);
+      try {
+        storage.setItem(STORAGE_KEY, JSON.stringify(document));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    forget(name): boolean {
+      if (!storage) return false;
+      const document = readDocument(storage);
+      if (!document.poses[name]) return true;
+      delete document.poses[name];
       try {
         storage.setItem(STORAGE_KEY, JSON.stringify(document));
         return true;

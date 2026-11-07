@@ -94,6 +94,7 @@ export interface WorkspaceSettings {
   windowPreferences: WindowPreferences;
   hierarchyStyle: HierarchyStyle;
   keyborbMode: KeyborbMode;
+  uiSounds: boolean;
 }
 
 export interface WorkspaceUI {
@@ -133,6 +134,7 @@ export interface WorkspaceUI {
   setWindowPreferences(value: WindowPreferences, persist?: boolean): void;
   setHierarchyStyle(style: HierarchyStyle, persist?: boolean): void;
   setKeyborbMode(mode: KeyborbMode, persist?: boolean): void;
+  setUISounds(enabled: boolean, persist?: boolean): void;
   setFilteringCapabilities(maxAnisotropy: number): void;
   setDictationState(state: DictationState): void;
   setKeyboardCurvature(degrees: number, persist?: boolean): void;
@@ -205,6 +207,7 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   windowPreferences: { ...DEFAULT_WINDOW_PREFERENCES },
   hierarchyStyle: DEFAULT_HIERARCHY_STYLE,
   keyborbMode: 'auto',
+  uiSounds: true,
 };
 
 export function workspaceScope(endpoint: string, workspaceId: string): string {
@@ -309,6 +312,7 @@ export function validateSettings(value: unknown): WorkspaceSettings {
     windowPreferences: validateWindowPreferences(candidate.windowPreferences),
     hierarchyStyle: validateHierarchyStyle(candidate.hierarchyStyle),
     keyborbMode: validateKeyborbMode(candidate.keyborbMode),
+    uiSounds: candidate.uiSounds !== false,
     arrangement:
       candidate.arrangement === 'row' ||
       candidate.arrangement === 'grid' ||
@@ -619,6 +623,14 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     keyborbModeSelect = keyborb.querySelector('[data-keyborb-mode]');
     if (!keyborbModeSelect) throw new Error('Keyborb control missing');
     keyborbModeSelect.value = settings.keyborbMode;
+    const uiSounds = document.createElement('label');
+    uiSounds.className = 'check';
+    uiSounds.innerHTML =
+      '<input type="checkbox" data-ui-sounds> UI sounds <span>Play short clicks in XR and pulse the controllers on presses, grabs and scrolling.</span>';
+    settingsPanel.insertBefore(
+      uiSounds,
+      settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
+    );
     const filteringControls = document.createElement('div');
     filteringControls.innerHTML =
       '<label>Terminal filtering<select data-filter-mode aria-label="Terminal filtering"><option value="nearest">Nearest pixels</option><option value="linear">Linear (sharp)</option><option value="mipmap-nearest">Mipmap bilinear</option><option value="mipmap-linear">Mipmap trilinear (smooth)</option></select></label><label data-filter-anisotropy-row>Anisotropy (mipmap modes)<select data-filter-anisotropy aria-label="Terminal anisotropy"><option value="1">Off</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option><option value="16">16x</option></select><span>Anisotropy matters for oblique minification. 8x and 16x may look the same front-facing.</span></label><label class="check"><input type="checkbox" data-filter-gaze> Sharper gazed terminal <span>Use sharp linear sampling while looking at a terminal.</span></label><label data-filter-distance-row>Gaze max distance<input data-filter-distance type="number" min="0.25" max="20" step="0.25" aria-label="Gaze maximum distance in meters"><span>Sharper gaze ignores mipmaps within this distance.</span></label>';
@@ -1371,6 +1383,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   qs<HTMLSelectElement>('[data-color-mode]').value = settings.colorMode;
   qs<HTMLInputElement>('[data-keyboard-background]').checked = settings.keyboardBackground;
   qs<HTMLInputElement>('[data-gaze-input]').checked = settings.gazeInput;
+  qs<HTMLInputElement>('[data-ui-sounds]').checked = settings.uiSounds;
   setDictationState({
     supported: false,
     status: 'idle',
@@ -1396,6 +1409,10 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       ...settings,
       keyborbMode: validateKeyborbMode((event.target as HTMLSelectElement).value),
     };
+    saveSettings();
+  });
+  qs<HTMLInputElement>('[data-ui-sounds]').addEventListener('change', (event) => {
+    settings = { ...settings, uiSounds: (event.target as HTMLInputElement).checked };
     saveSettings();
   });
   qs<HTMLInputElement>('[data-gaze-input]').addEventListener('change', (event) => {
@@ -1697,6 +1714,12 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       if (settings.keyborbMode === next) return;
       settings = { ...settings, keyborbMode: next };
       if (keyborbModeSelect) keyborbModeSelect.value = next;
+      if (persist) saveSettings();
+    },
+    setUISounds(enabled, persist = false) {
+      if (settings.uiSounds === enabled) return;
+      settings = { ...settings, uiSounds: enabled };
+      qs<HTMLInputElement>('[data-ui-sounds]').checked = enabled;
       if (persist) saveSettings();
     },
     setFilteringCapabilities(maxAnisotropy) {

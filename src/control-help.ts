@@ -113,7 +113,7 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
         ? 'Move all terminals closer; keep sizes'
         : 'Move all terminals farther; keep sizes';
     case 'resetLayout':
-      return 'Recover the workspace and UI near the current view';
+      return 'Recover the workspace and UI near the current view; press twice to confirm';
     case 'xrMode':
       return data.xrMode === 'ar'
         ? 'Leave XR, then press Enter passthrough in the browser'
@@ -132,6 +132,8 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
         : data.keyborbMode === 'on'
           ? 'Use spherical keys; trigger or pinch to type'
           : 'Use the standard keyboard';
+    case 'uiSounds':
+      return 'Turn interface clicks and controller pulses on or off';
     case 'terminalColors':
       return 'Choose terminal color presentation';
     case 'gridPreset':
@@ -168,11 +170,15 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
                         ? 'Arrange attached terminals in a spatial pattern'
                         : 'Open saved quick commands';
     case 'exit':
-      return 'Exit immersive mode or the 3D preview';
+      return 'Exit immersive mode or the 3D preview; press twice to confirm';
     case 'close':
       return 'Close this panel';
     case 'closePane':
       return 'Close this terminal view; the shell keeps running';
+    case 'bringHere':
+      return 'Bring this terminal in front of you at the Focus distance and keep it there';
+    case 'keepHere':
+      return 'End Focus and leave this terminal where it is now';
     case 'toggleConnection':
       return ['connected', 'connecting'].includes(String(data.status))
         ? 'Disconnect this terminal view without stopping the shell'
