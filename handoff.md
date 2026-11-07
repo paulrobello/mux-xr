@@ -12,6 +12,14 @@ Updated November 5, 2026, after the approximately 9:00 PM PST Quest recording. P
   - **Timeline sources.** Data comes from `.local/tools/joints-to-blend.ts`, which writes to `.local/blend-anim/`, through `.local/tools/blend/timeline.py`. The left slides use the synthetic mirrored captures.
   - **Mesh animation.** `.local/tools/blend/rig_from_tracked.py` bakes the `Capture_R` and `Capture_L` rig actions. Each bone aims along its tracked segment, the outer digit follows the ring and pinky average, and the wrist stays at rest. Paul's Fist, Open, Pointing and Thumbs Up actions now have fake users.
   - **Left hand faces the other way.** The left joints curl toward the mesh's back, because the runtime reuses the same right-hand mesh for the left hand without mirroring it.
+  - **Thumb rebuilt and saved (7:51 PM).** `.local/tools/blend/thumb_rebuild.py` always rebuilds from the hidden `AuthoredHandMesh_v5` copy, and the v5 bones are stored in `arm['v5_thumb']`.
+    - **Bones.** They sit on the tracked neutral, rotated into the palm plane so both hands swing about equally. thumb_01 is now the metacarpal, from the base joint at (26, 0, 53) mm, 32.5 mm long. thumb_02 runs from the big knuckle and is 33.8 mm. thumb_03 runs from the middle knuckle and is 19.2 mm, ending 5.4 mm inside the pad.
+    - **Size.** The visible thumb is 53 mm (59 before), and the mesh's maximum x is 97 mm (135 before).
+    - **Weights.** The palm behind the old thumb base is pulled in over 40 mm, and the fade band is relaxed. The thenar falloff goes to thumb_01, with crossfades of 10 mm at the big knuckle and 7 mm at the middle knuckle, then 20 passes of wrist/thumb weight smoothing.
+    - **Sharp folds over 75°** (`fold_metric.py`, same region as v5, same tracked bake), max/p90:
+      - Closed slide: right 20/19 and left 19/18, against v5's 17/15 and 18/16.
+      - Thumb rest: right 20/18 and left 20/17, against v5's 5/4 and 2/1.
+    - **Not changed yet.** The GLB and the runtime still use the old chain, so do not export. The one-to-one runtime mapping is the next step.
   - **Neutral overlay** (slide frame 26). The tracked thumb MCP sits at x = 40 mm and points palmar, at 45°. The mesh thumb sits at x = 71 mm and lies flat sideways in the palm plane.
   - **Reach and knuckles.** The thumb tip reaches 137 mm from the wrist when tracked and 158 mm on the mesh. The tracked knuckles sit at z = 112 mm, and the mesh knuckles at 126–136 mm.
   - **Paul's feedback, confirmed.** "Thumb too long" and "palm stretched toward the thumb" both match the overlay. Evidence is in `.local/evidence/thumb-rebuild-1106/`.
