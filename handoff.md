@@ -4,6 +4,11 @@ Updated November 5, 2026, after the approximately 9:00 PM PST Quest recording. P
 
 ## Progress since this handoff (November 5, ~9:45 PM PST)
 
+- **New direction (November 6, ~10:30 PM PST): the thumb rebuild is scrapped.** Paul returned to the first authored hand (`rig_hand.py` from his skin source; it "works really well in XR") and asked for longer fingers and narrower tips for Keyborb use.
+  - **Approved source.** `/Users/localuser/LocalAssets/Drive/blender/vr-cartoon-hand2-long-fingers.blend`, a save-as of `vr-cartoon-hand2.blend`, which is unchanged. In `Hand.001`, the index, middle and outer chains are 25% longer and every tip radius is 0.95 of its mid radius. The thumb is narrowed but not lengthened. `Hand.001_original` is the untouched comparison copy. The edit script is `.local/tools/blend/long_fingers.py`.
+  - **Shipping.** A worktree agent rebuilds through `rig_hand.py` into `assets-source/hand/long-fingers-v1/`, promotes the GLB, and runs `make checkall-ci`. Browser fixtures, the independent review (≥ 80) and serving follow.
+  - **Why the thumb rebuild was dropped.** Attempt 2 translated `thumb_01` onto the tracked base, which put the pad within 1.2 mm unopposed. But the base offset is a constant ±22–25 mm palmar, in opposite directions per side, which one symmetric mesh cannot absorb. The palm crease at the closed fist comes from the flat in-plane thenar swinging 25–69° out of plane in every clip. Neither a helper bone, a baked Corrective Smooth shape, nor dual-quaternion skinning removed it. The scrapped worktree and branch are deleted. `XR_hand-thumb-rebuild.blend` keeps the last saved rebuild state.
+
 - **Thumb rebuild in live Blender (November 6, ~7:40 PM PST).** Paul asked to rebuild the thumb rig and work in his live Blender with scrub-able actions.
   - **Working copy.** `/Users/localuser/LocalAssets/Drive/blender/XR_hand-thumb-rebuild.blend`, copied from precision-v5 `candidate.blend`. It has not been saved since the capture timeline was added. It was already dirty on first inspection, and it contains Paul's `Hand.001` and two Icospheres. Leave all three in place.
   - **MCP.** The desktop `mcp__Blender__*` tools time out because the community "MCP for Blender" add-on holds port 9876, and those tools speak the Blender Lab protocol. Drive Blender with `.local/tools/bl.py`. The guide `~/.claude/guides/blender-mcp.md` is updated.
@@ -23,6 +28,13 @@ Updated November 5, 2026, after the approximately 9:00 PM PST Quest recording. P
       - **Change.** The web floor is relaxed into a U (80 passes over a 10–28 mm radius, sharpest edge now 25°). The big-knuckle crossfade is moved 12 mm outward on the web side, so the web follows the metacarpal.
       - **Web census** (edges over 60°, `web_metric.py`): 20–25 down to 11–13 in every clip.
       - **Thumb-region folds:** closed slide is now right 15/13 and left 14/13; thumb rest is right 16/14 and left 11/10.
+    - **Runtime attempt 1 (worktree agent, branch `worktree-agent-ad2d5aa8334bb0f27`, uncommitted).**
+      - **What it did.** The GLB is exported (`6cca7410…`). `THUMB_HELPERS`, the fold-morph easing and the opposition root travel are removed.
+      - **Gate.** `make checkall-ci` failed 10 tests: crimp flips, resting-fist pad 15–16 mm short, four "knuckle straight" tests whose premise changed, and back-outline 1.55 against 1.5.
+      - **Cause.** The bind puts the thumb base at y = 0, but the tracked base sits about ±20 mm off the palm plane. The runtime copies rotations only, so the pad lands 19–32 mm off (median), almost entirely along y. That was measured with `.local/tools/runtime-bones.ts` and Blender actions `Runtime_R/L` from `.local/tools/blend/rig_from_runtime.py`.
+      - **Next.** The agent is resumed to move the `thumb_01` head onto the tracked base each frame, then re-measure and re-gate.
+      - **Weight sweeps don't help.** Seven knuckle-crossfade and web settings all leave about 10 inverted faces at the web inside the big knuckle (`flip_metric.py`), so weights are not the lever.
+      - **Live file.** It keeps the approved state, now at 24 fps, with `restLength` on the thumb bones. Saved at 8:45 PM.
     - **Not changed yet.** The GLB and the runtime still use the old chain, so do not export. The one-to-one runtime mapping is the next step.
   - **Neutral overlay** (slide frame 26). The tracked thumb MCP sits at x = 40 mm and points palmar, at 45°. The mesh thumb sits at x = 71 mm and lies flat sideways in the palm plane.
   - **Reach and knuckles.** The thumb tip reaches 137 mm from the wrist when tracked and 158 mm on the mesh. The tracked knuckles sit at z = 112 mm, and the mesh knuckles at 126–136 mm.

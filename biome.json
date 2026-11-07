@@ -9,7 +9,8 @@
       "!src/terminal/vendor",
       "!.impeccable",
       "!assets-source",
-      "!.local"
+      "!.local",
+      "!!.claude/worktrees"
     ]
   },
   "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },

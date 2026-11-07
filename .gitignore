@@ -15,3 +15,5 @@ test-results/
 .superpowers/
 .parsight/
 __pycache__/
+
+.claude/worktrees/
