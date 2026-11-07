@@ -10,6 +10,8 @@ Updated November 5, 2026, after the approximately 9:00 PM PST Quest recording. P
   - **Timeline.** `Tracked joints` collection: `TJ_R_*` and `TJ_L_*` empties, plus `TrackedSkeleton_R/L` and a linked left mesh copy at x = 0.3. The left copy uses the same unmirrored mesh, as the runtime does.
   - **Timeline markers.** open slide at 1, closed slide at 72, thumb rest at 162, pinch at 322. The scene runs at 72 fps and ends at frame 428.
   - **Timeline sources.** Data comes from `.local/tools/joints-to-blend.ts`, which writes to `.local/blend-anim/`, through `.local/tools/blend/timeline.py`. The left slides use the synthetic mirrored captures.
+  - **Mesh animation.** `.local/tools/blend/rig_from_tracked.py` bakes the `Capture_R` and `Capture_L` rig actions. Each bone aims along its tracked segment, the outer digit follows the ring and pinky average, and the wrist stays at rest. Paul's Fist, Open, Pointing and Thumbs Up actions now have fake users.
+  - **Left hand faces the other way.** The left joints curl toward the mesh's back, because the runtime reuses the same right-hand mesh for the left hand without mirroring it.
   - **Neutral overlay** (slide frame 26). The tracked thumb MCP sits at x = 40 mm and points palmar, at 45°. The mesh thumb sits at x = 71 mm and lies flat sideways in the palm plane.
   - **Reach and knuckles.** The thumb tip reaches 137 mm from the wrist when tracked and 158 mm on the mesh. The tracked knuckles sit at z = 112 mm, and the mesh knuckles at 126–136 mm.
   - **Paul's feedback, confirmed.** "Thumb too long" and "palm stretched toward the thumb" both match the overlay. Evidence is in `.local/evidence/thumb-rebuild-1106/`.
