@@ -8,11 +8,15 @@ export interface SavedUIPose {
   scale: number;
 }
 
-const STORAGE_KEY = 'mux-xr:ui-poses:v1';
-const VERSION = 1;
+const STORAGE_KEY = 'mux-xr:ui-poses:v2';
+const LEGACY_STORAGE_KEY = 'mux-xr:ui-poses:v1';
+const VERSION = 2;
+
+/** Height of the standing head that desktop layout and legacy v1 poses are measured from. */
+export const NOMINAL_VIEWER_HEIGHT = 1.52;
 
 interface PoseDocument {
-  version: 1;
+  version: 2;
   poses: Partial<Record<UIPoseName, SavedUIPose>>;
 }
 
@@ -44,15 +48,26 @@ function copyPose(pose: SavedUIPose): SavedUIPose {
   };
 }
 
+/**
+ * v1 poses were stored relative to the head's position and heading at save time. They are
+ * resolved once against the nominal standing head, which faces -Z from the floor origin.
+ */
+export function legacyPoseToWorld(pose: SavedUIPose): SavedUIPose {
+  const world = copyPose(pose);
+  world.position[1] += NOMINAL_VIEWER_HEIGHT;
+  return world;
+}
+
 function readDocument(storage: Storage): PoseDocument {
   try {
-    const raw = storage.getItem(STORAGE_KEY);
+    const current = storage.getItem(STORAGE_KEY);
+    const raw = current ?? storage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return { version: VERSION, poses: {} };
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return { version: VERSION, poses: {} };
-    const document = parsed as Partial<PoseDocument>;
+    const document = parsed as { version?: unknown; poses?: Record<string, unknown> | null };
     if (
-      document.version !== VERSION ||
+      document.version !== (current ? VERSION : 1) ||
       typeof document.poses !== 'object' ||
       document.poses === null
     ) {
@@ -60,7 +75,8 @@ function readDocument(storage: Storage): PoseDocument {
     }
     const poses: Partial<Record<UIPoseName, SavedUIPose>> = {};
     for (const name of ['keyboard', 'hud'] as const) {
-      if (validPose(document.poses[name])) poses[name] = copyPose(document.poses[name]);
+      const pose = document.poses[name];
+      if (validPose(pose)) poses[name] = current ? copyPose(pose) : legacyPoseToWorld(pose);
     }
     return { version: VERSION, poses };
   } catch {
@@ -102,6 +118,7 @@ export function createUIPoseStore(storage: Storage | null = defaultStorage()): {
       if (!storage) return false;
       try {
         storage.removeItem(STORAGE_KEY);
+        storage.removeItem(LEGACY_STORAGE_KEY);
         return true;
       } catch {
         return false;
@@ -110,54 +127,32 @@ export function createUIPoseStore(storage: Storage | null = defaultStorage()): {
   };
 }
 
-function viewerYaw(viewer: THREE.Object3D): THREE.Quaternion {
-  const worldQuaternion = viewer.getWorldQuaternion(new THREE.Quaternion());
-  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuaternion);
-  forward.y = 0;
-  if (forward.lengthSq() < 1e-8) return new THREE.Quaternion();
-  return new THREE.Quaternion().setFromUnitVectors(
-    new THREE.Vector3(0, 0, -1),
-    forward.normalize(),
-  );
-}
-
-export function captureUIPose(root: THREE.Object3D, viewer: THREE.Object3D): SavedUIPose {
-  const viewerPosition = viewer.getWorldPosition(new THREE.Vector3());
-  const yaw = viewerYaw(viewer);
-  const inverseYaw = yaw.clone().invert();
-  const rootPosition = root.getWorldPosition(new THREE.Vector3());
-  const rootQuaternion = root.getWorldQuaternion(new THREE.Quaternion());
-  const rootScale = root.getWorldScale(new THREE.Vector3());
-  const position = rootPosition.sub(viewerPosition).applyQuaternion(inverseYaw);
-  const quaternion = inverseYaw.multiply(rootQuaternion).normalize();
+/** Saved poses are world (reference-space) transforms, so they stay put relative to the room. */
+export function captureUIPose(root: THREE.Object3D): SavedUIPose {
+  const position = root.getWorldPosition(new THREE.Vector3());
+  const quaternion = root.getWorldQuaternion(new THREE.Quaternion()).normalize();
+  const scale = root.getWorldScale(new THREE.Vector3());
   return {
     position: [position.x, position.y, position.z],
     quaternion: [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
-    scale: Math.cbrt(rootScale.x * rootScale.y * rootScale.z),
+    scale: Math.cbrt(scale.x * scale.y * scale.z),
   };
 }
 
 export function applyUIPose(
   root: THREE.Object3D,
-  viewer: THREE.Object3D,
   pose: SavedUIPose,
   limits: [number, number],
   maxDistance = 20,
 ): void {
   if (!validPose(pose, maxDistance)) return;
-  const yaw = viewerYaw(viewer);
-  const viewerPosition = viewer.getWorldPosition(new THREE.Vector3());
-  const worldPosition = new THREE.Vector3(...pose.position)
-    .applyQuaternion(yaw)
-    .add(viewerPosition);
-  const worldQuaternion = yaw.multiply(new THREE.Quaternion(...pose.quaternion));
   const [low, high] = limits;
   const minimum = Number.isFinite(low) ? Math.min(low, high) : 0.2;
   const maximum = Number.isFinite(high) ? Math.max(low, high) : 3;
   const worldScale = Math.max(minimum, Math.min(maximum, pose.scale));
   const worldMatrix = new THREE.Matrix4().compose(
-    worldPosition,
-    worldQuaternion,
+    new THREE.Vector3(...pose.position),
+    new THREE.Quaternion(...pose.quaternion),
     new THREE.Vector3(worldScale, worldScale, worldScale),
   );
   if (root.parent) worldMatrix.premultiply(root.parent.matrixWorld.clone().invert());

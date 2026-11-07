@@ -1,14 +1,15 @@
-import type { SavedUIPose } from './ui-poses';
+import { legacyPoseToWorld, type SavedUIPose } from './ui-poses';
 import type { WidgetKind } from './widgets';
 
-const STORAGE_KEY = 'mux-xr:widget-poses:v1';
-const VERSION = 1;
+const STORAGE_KEY = 'mux-xr:widget-poses:v2';
+const LEGACY_STORAGE_KEY = 'mux-xr:widget-poses:v1';
+const VERSION = 2;
 const WIDGET_KINDS = ['digital-clock', 'analog-clock'] as const satisfies readonly WidgetKind[];
 
 export type WidgetPoses = Partial<Record<WidgetKind, SavedUIPose>>;
 
 interface PoseDocument {
-  version: 1;
+  version: 2;
   poses: WidgetPoses;
 }
 
@@ -48,13 +49,14 @@ function emptyDocument(): PoseDocument {
 
 function readDocument(storage: Storage): PoseDocument {
   try {
-    const raw = storage.getItem(STORAGE_KEY);
+    const current = storage.getItem(STORAGE_KEY);
+    const raw = current ?? storage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return emptyDocument();
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return emptyDocument();
-    const document = parsed as Partial<PoseDocument>;
+    const document = parsed as { version?: unknown; poses?: WidgetPoses | null };
     if (
-      document.version !== VERSION ||
+      document.version !== (current ? VERSION : 1) ||
       typeof document.poses !== 'object' ||
       document.poses === null
     ) {
@@ -63,7 +65,7 @@ function readDocument(storage: Storage): PoseDocument {
     const poses: WidgetPoses = {};
     for (const kind of WIDGET_KINDS) {
       const pose = document.poses[kind];
-      if (validPose(pose)) poses[kind] = clonePose(pose);
+      if (validPose(pose)) poses[kind] = current ? clonePose(pose) : legacyPoseToWorld(pose);
     }
     return { version: VERSION, poses };
   } catch {
@@ -121,6 +123,7 @@ export function createWidgetPoseStore(storage: Storage | null = defaultStorage()
       if (!storage) return false;
       try {
         storage.removeItem(STORAGE_KEY);
+        storage.removeItem(LEGACY_STORAGE_KEY);
         return true;
       } catch {
         return false;

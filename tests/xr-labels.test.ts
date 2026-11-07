@@ -122,6 +122,7 @@ describe('scalable XR labels', () => {
     expect(material.map).toBeNull();
     expect(material.opacity).toBe(0);
     expect(material.depthWrite).toBe(false);
+    expect(material.visible).toBe(false);
     expect(text.position.z).toBeGreaterThan(0);
     expect(root.userData.labelText).toBe('Layout');
     disposeScalableLabel(root);

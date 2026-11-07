@@ -176,6 +176,8 @@ export function createScalableLabel(
       depthWrite: false,
     }),
   ) as LabelRoot;
+  // A plane with no backplate only carries the text; skipping its draw keeps it pickable.
+  if (!backplate) root.material.visible = false;
   const textMesh = new Text();
   configureText(textMesh, label, safeWidth, safeHeight, options.wrap ?? false);
   textMesh.raycast = () => undefined;

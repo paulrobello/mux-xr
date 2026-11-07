@@ -50,13 +50,31 @@ describe('open terminal views', () => {
   it('handles malformed and quota-failing storage safely', () => {
     const storage = memoryStorage();
     const store = createOpenViewsStore(storage);
-    storage.setItem('mux-xr:open-views:v1:ws%3A%2F%2Fone%2Fws', '{bad');
+    storage.setItem('mux-xr:open-views:v2:ws%3A%2F%2Fone%2Fws', '{bad');
     expect(store.read('ws://one/ws')).toBeNull();
     const failing = memoryStorage();
     failing.setItem = () => {
       throw new Error('quota');
     };
     expect(createOpenViewsStore(failing).save('ws://one/ws', profile)).toBe(false);
+  });
+
+  it('migrates v1 viewer-relative pane poses once against the nominal standing head', () => {
+    const storage = memoryStorage();
+    const pose = {
+      position: [0.2, -0.05, -1.4] as [number, number, number],
+      quaternion: [0, 0, 0, 1] as [number, number, number, number],
+      scale: 1,
+    };
+    storage.setItem(
+      'mux-xr:open-views:v1:ws%3A%2F%2Fone%2Fws',
+      JSON.stringify({ version: 1, views: [{ ...profile.views[0], pose }], selectedId: '%1' }),
+    );
+    const store = createOpenViewsStore(storage);
+    const migrated = store.read('ws://one/ws');
+    expect(migrated?.views[0].pose?.position[1]).toBeCloseTo(1.47, 6);
+    expect(migrated && store.save('ws://one/ws', migrated)).toBe(true);
+    expect(store.read('ws://one/ws')?.views[0].pose?.position[1]).toBeCloseTo(1.47, 6);
   });
 
   it('normalizes authenticated HTTP and WebSocket endpoints to stable ws paths', () => {

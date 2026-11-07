@@ -20,6 +20,11 @@ declare module 'troika-three-text' {
     dispose(): void;
   }
 
+  export class BatchedText extends Text {
+    addText(text: Text): void;
+    removeText(text: Text): void;
+  }
+
   export function configureTextBuilder(config: {
     defaultFontURL?: string;
     useWorker?: boolean;

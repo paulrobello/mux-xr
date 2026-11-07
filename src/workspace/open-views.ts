@@ -1,5 +1,5 @@
 import type { PaneDescriptor } from '../contracts';
-import type { SavedUIPose } from '../xr/ui-poses';
+import { legacyPoseToWorld, type SavedUIPose } from '../xr/ui-poses';
 
 export interface SavedOpenView {
   paneId: string;
@@ -15,8 +15,9 @@ export interface OpenViewsProfile {
   selectedId: string | null;
 }
 
-const VERSION = 1;
-const KEY_PREFIX = 'mux-xr:open-views:v1:';
+const VERSION = 2;
+const KEY_PREFIX = 'mux-xr:open-views:v2:';
+const LEGACY_KEY_PREFIX = 'mux-xr:open-views:v1:';
 
 function validPose(value: unknown): value is SavedUIPose {
   if (!value || typeof value !== 'object') return false;
@@ -70,8 +71,8 @@ function cloneView(view: SavedOpenView): SavedOpenView {
   };
 }
 
-function storageKey(serverKey: string): string {
-  return `${KEY_PREFIX}${encodeURIComponent(serverKey)}`;
+function storageKey(serverKey: string, prefix = KEY_PREFIX): string {
+  return `${prefix}${encodeURIComponent(serverKey)}`;
 }
 
 function defaultStorage(): Storage | null {
@@ -90,19 +91,21 @@ export function createOpenViewsStore(storage: Storage | null = defaultStorage())
     read(serverKey) {
       if (!storage) return null;
       try {
-        const raw = storage.getItem(storageKey(serverKey));
+        const current = storage.getItem(storageKey(serverKey));
+        const raw = current ?? storage.getItem(storageKey(serverKey, LEGACY_KEY_PREFIX));
         if (!raw) return null;
         const parsed: unknown = JSON.parse(raw);
         if (!parsed || typeof parsed !== 'object') return null;
         const candidate = parsed as Partial<OpenViewsProfile> & { version?: unknown };
-        if (candidate.version !== VERSION || !Array.isArray(candidate.views)) return null;
+        if (candidate.version !== (current ? VERSION : 1) || !Array.isArray(candidate.views))
+          return null;
         if (!(candidate.selectedId === null || typeof candidate.selectedId === 'string'))
           return null;
         if (!candidate.views.every(validView)) return null;
-        return {
-          views: candidate.views.map(cloneView),
-          selectedId: candidate.selectedId,
-        };
+        const views = candidate.views.map(cloneView);
+        if (!current)
+          for (const view of views) if (view.pose) view.pose = legacyPoseToWorld(view.pose);
+        return { views, selectedId: candidate.selectedId };
       } catch {
         return null;
       }

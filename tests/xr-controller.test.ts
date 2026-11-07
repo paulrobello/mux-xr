@@ -245,8 +245,8 @@ function selectKeyboardViaRadial(
 describe('native XR controller event routing', () => {
   beforeEach(() => {
     fakeXR.presenting = true;
-    localStorage.removeItem('mux-xr:ui-poses:v1');
-    localStorage.removeItem('mux-xr:widget-poses:v1');
+    localStorage.removeItem('mux-xr:ui-poses:v2');
+    localStorage.removeItem('mux-xr:widget-poses:v2');
     localStorage.removeItem('mux-xr:terminal-warp:v1');
     fakeXR.controllers.forEach((controller) => {
       const object = controller as THREE.Group;
@@ -536,6 +536,59 @@ describe('native XR controller event routing', () => {
       expect(
         (workspace.scene.getObjectByName('keyborb-dictation') as THREE.Mesh).userData.inputAction,
       ).toBe('noop');
+    });
+
+    it('draws all orb shells in one instanced call that follows the orbs', () => {
+      const { workspace } = setup('on');
+      workspace.showInput('keyboard');
+      connectHand();
+      fakeXR.frame?.(16);
+      const keyboard = workspace.scene.getObjectByName('xr-keyboard-controls') as THREE.Group;
+      const orbs = keyboard.children.filter(
+        (child): child is THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> =>
+          child.userData.keyborb === true,
+      );
+      const shells = keyboard.getObjectByName('keyborb-shells') as THREE.InstancedMesh;
+      expect(orbs.length).toBeGreaterThan(60);
+      expect(shells.count).toBe(orbs.length);
+      expect(keyboard.getObjectByName('keyborb-glyphs')).toBeDefined();
+      for (const orb of orbs) expect(orb.material.visible).toBe(false);
+      const index = orbs.findIndex((orb) => orb.userData.key === 'g');
+      orbs[index].material.uniforms.pressed.value = 1;
+      fakeXR.frame?.(32);
+      const pressed = shells.geometry.getAttribute('instancePressed') as THREE.BufferAttribute;
+      expect(pressed.getX(index)).toBe(1);
+      const matrix = new THREE.Matrix4();
+      shells.getMatrixAt(index, matrix);
+      expect(
+        new THREE.Vector3().setFromMatrixPosition(matrix).distanceTo(orbs[index].position),
+      ).toBeLessThan(1e-6);
+    });
+
+    it('drops the panel Dictate button when the Keyborb Mic orb is shown', () => {
+      const idle = { supported: true, status: 'idle', transcript: '', error: null } as const;
+      const orb = setup('on');
+      orb.workspace.setDictationState(idle);
+      orb.workspace.showInput('keyboard');
+      connectHand();
+      fakeXR.frame?.(16);
+      expect(orb.workspace.scene.getObjectByName('keyborb-dictation')).toBeDefined();
+      expect(orb.workspace.scene.getObjectByName('xr-dictate-button')).toBeUndefined();
+      orb.workspace.setDictationState({ ...idle, status: 'review', transcript: 'hello' });
+      expect(orb.workspace.scene.getObjectByName('xr-dictate-button')).toBeUndefined();
+      const insert = [] as THREE.Object3D[];
+      orb.workspace.scene.traverse((object) => {
+        if (object.userData.dictationAction === 'insert') insert.push(object);
+      });
+      expect(insert).toHaveLength(1);
+      orb.workspace.dispose();
+      orb.container.remove();
+      const flat = setup('off');
+      flat.workspace.setDictationState(idle);
+      flat.workspace.showInput('keyboard');
+      expect(flat.workspace.scene.getObjectByName('xr-dictate-button')?.userData.labelText).toBe(
+        'Dictate',
+      );
     });
 
     it('scrolls from a hand index pinch on the edge strip and stops when Focus changes', () => {
@@ -1841,7 +1894,7 @@ describe('native XR controller event routing', () => {
     (fakeXR.controllers[0] as THREE.Group).position.x += 0.2;
     fakeXR.frame?.(16);
     (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
-    const saved = JSON.parse(localStorage.getItem('mux-xr:ui-poses:v1') ?? '{}');
+    const saved = JSON.parse(localStorage.getItem('mux-xr:ui-poses:v2') ?? '{}');
     expect(saved.poses.keyboard.position).toHaveLength(3);
     const hud = workspace.scene.getObjectByName('xr-workspace-hud');
     if (!hud) throw new Error('HUD missing');
@@ -1849,7 +1902,7 @@ describe('native XR controller event routing', () => {
     hud.scale.setScalar(0.7);
     hit(workspace, { inputAction: 'exit' });
     await Promise.resolve();
-    const ended = JSON.parse(localStorage.getItem('mux-xr:ui-poses:v1') ?? '{}');
+    const ended = JSON.parse(localStorage.getItem('mux-xr:ui-poses:v2') ?? '{}');
     expect(ended.poses.hud.scale).toBeCloseTo(0.7);
     expect(ended.poses.keyboard).toBeDefined();
     workspace.dispose();
@@ -2103,7 +2156,7 @@ describe('native XR controller event routing', () => {
     );
     expect(restored?.position.distanceTo(expected)).toBeLessThan(1e-6);
     hit(second.workspace, { inputAction: 'closeWidget', widgetKind: 'digital-clock' });
-    expect(JSON.parse(localStorage.getItem('mux-xr:widget-poses:v1') ?? '{}').poses).toEqual({});
+    expect(JSON.parse(localStorage.getItem('mux-xr:widget-poses:v2') ?? '{}').poses).toEqual({});
     second.workspace.dispose();
     second.container.remove();
   });
@@ -4621,15 +4674,15 @@ describe('terminal pose persistence across reloads', () => {
     vi.unstubAllGlobals();
   });
 
-  it('keeps pane distance when a reload restores panes before XR tracking starts', async () => {
+  it('keeps panes where they were in the room whatever the head pose at reload', async () => {
     const head = new THREE.PerspectiveCamera();
     const original = {
-      position: [0.2, -0.05, -1.4] as [number, number, number],
+      position: [0.2, 1.47, -1.4] as [number, number, number],
       quaternion: [0, 0, 0, 1] as [number, number, number, number],
       scale: 1,
     };
     let saved = original;
-    for (let reload = 0; reload < 3; reload++) {
+    for (const [reload, yaw] of [0, Math.PI / 6, -Math.PI / 4].entries()) {
       fakeXR.presenting = false;
       startSession();
       const { workspace, container } = fixture();
@@ -4641,13 +4694,16 @@ describe('terminal pose persistence across reloads', () => {
       fakeXR.frame?.(1000, untracked);
       workspace.restoreTerminalPose('pane-a', saved);
       fakeXR.frame?.(1016, untracked);
-      trackedHead(head);
+      head.position.set(0.3 - reload * 0.2, 1.65, 0.2);
+      head.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
       for (let frame = 0; frame < 4; frame++) fakeXR.frame?.(1100 + frame * 16);
       const root = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Object3D;
-      expect(root.getWorldPosition(new THREE.Vector3()).distanceTo(head.position)).toBeCloseTo(
-        Math.hypot(...original.position),
-        3,
-      );
+      root
+        .getWorldPosition(new THREE.Vector3())
+        .toArray()
+        .forEach((value, axis) => {
+          expect(value).toBeCloseTo(original.position[axis], 3);
+        });
       await workspace.exitXR();
       for (let frame = 0; frame < 3; frame++) fakeXR.frame?.(2000 + frame * 16);
       const next = workspace.captureTerminalPose('pane-a');
@@ -4661,7 +4717,30 @@ describe('terminal pose persistence across reloads', () => {
     }
   });
 
-  it('keeps XR-relative pane poses when desktop controls recapture after XR ends', async () => {
+  it('waits for a tracked head before lifting restored panes off the floor', async () => {
+    startSession();
+    const { workspace, container } = fixture();
+    const head = new THREE.PerspectiveCamera();
+    fakeXR.camera = head;
+    await workspace.enterXR('vr');
+    fakeXR.presenting = true;
+    fakeXR.frame?.(1000, untracked);
+    workspace.restoreTerminalPose('pane-a', {
+      position: [0, 0.1, -1.4],
+      quaternion: [0, 0, 0, 1],
+      scale: 1,
+    });
+    fakeXR.frame?.(1016, untracked);
+    const root = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Object3D;
+    expect(root.getWorldPosition(new THREE.Vector3()).y).toBeCloseTo(0.1, 3);
+    trackedHead(head);
+    for (let frame = 0; frame < 3; frame++) fakeXR.frame?.(1100 + frame * 16);
+    expect(root.getWorldPosition(new THREE.Vector3()).y).toBeGreaterThan(0.5);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('keeps XR pane poses when desktop controls recapture after XR ends', async () => {
     startSession();
     const { workspace, container } = fixture();
     const head = new THREE.PerspectiveCamera();
@@ -4671,7 +4750,7 @@ describe('terminal pose persistence across reloads', () => {
     fakeXR.presenting = true;
     fakeXR.frame?.(1000);
     const pose = {
-      position: [-0.3, 0.1, -1.6] as [number, number, number],
+      position: [-0.3, 1.62, -1.6] as [number, number, number],
       quaternion: [0, 0, 0, 1] as [number, number, number, number],
       scale: 1,
     };
@@ -4726,29 +4805,23 @@ describe('terminal pose persistence across reloads', () => {
   });
 
   it('saves a desktop clock in front of the nominal viewer', () => {
-    localStorage.removeItem('mux-xr:widget-poses:v1');
+    localStorage.removeItem('mux-xr:widget-poses:v2');
     const { workspace, container } = fixture();
     workspace.showInput('widgets');
     hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'digital-clock' });
-    const saved = JSON.parse(localStorage.getItem('mux-xr:widget-poses:v1') ?? '{}').poses?.[
+    const saved = JSON.parse(localStorage.getItem('mux-xr:widget-poses:v2') ?? '{}').poses?.[
       'digital-clock'
     ];
     expect(saved?.position[0]).toBeCloseTo(-0.45, 3);
-    expect(saved?.position[1]).toBeCloseTo(0.3, 3);
+    expect(saved?.position[1]).toBeCloseTo(1.82, 3);
     expect(saved?.position[2]).toBeCloseTo(-1.25, 3);
     workspace.dispose();
     container.remove();
-    localStorage.removeItem('mux-xr:widget-poses:v1');
+    localStorage.removeItem('mux-xr:widget-poses:v2');
   });
 
-  it('measures saved poses from the frame viewer pose, not the render-adjusted camera', async () => {
-    startSession();
-    const { workspace, container } = fixture();
-    const camera = new THREE.PerspectiveCamera();
+  it('places Reset layout from the frame viewer pose, not the render-adjusted camera', async () => {
     const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 5);
-    camera.position.set(0.27, 1.65, 0.2);
-    camera.quaternion.copy(yaw);
-    fakeXR.camera = camera;
     const tracked = {
       getViewerPose: () => ({
         transform: {
@@ -4757,25 +4830,29 @@ describe('terminal pose persistence across reloads', () => {
         },
       }),
     };
-    await workspace.enterXR('vr');
-    fakeXR.presenting = true;
-    fakeXR.frame?.(1000, tracked);
-    const pose = {
-      position: [0.1, -0.1, -1.5] as [number, number, number],
-      quaternion: [0, 0, 0, 1] as [number, number, number, number],
-      scale: 1,
+    const resetPose = async (cameraZ: number) => {
+      startSession();
+      const { workspace, container } = fixture();
+      const camera = new THREE.PerspectiveCamera();
+      camera.position.set(0.3, 1.65, cameraZ);
+      camera.quaternion.copy(yaw);
+      fakeXR.camera = camera;
+      await workspace.enterXR('vr');
+      fakeXR.presenting = true;
+      fakeXR.frame?.(1000, tracked);
+      workspace.resetLayout();
+      const pose = workspace.captureTerminalPose('pane-a');
+      await workspace.exitXR();
+      workspace.dispose();
+      container.remove();
+      fakeXR.presenting = false;
+      if (!pose) throw new Error('Pane A pose missing');
+      return pose;
     };
-    workspace.restoreTerminalPose('pane-a', pose);
-    fakeXR.frame?.(1016, tracked);
-    camera.position.set(0.3, 1.65, 0.23);
-    await workspace.exitXR();
-    for (let frame = 0; frame < 3; frame++) fakeXR.frame?.(2000 + frame * 16);
-    const saved = workspace.captureTerminalPose('pane-a');
-    if (!saved) throw new Error('Pane A pose missing');
-    saved.position.forEach((value, axis) => {
-      expect(value).toBeCloseTo(pose.position[axis], 3);
+    const exact = await resetPose(0.2);
+    const adjusted = await resetPose(0.26);
+    adjusted.position.forEach((value, axis) => {
+      expect(value).toBeCloseTo(exact.position[axis], 3);
     });
-    workspace.dispose();
-    container.remove();
   });
 });

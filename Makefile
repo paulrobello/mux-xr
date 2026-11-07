@@ -56,6 +56,9 @@ hand-contact-check:
 	bun run scripts/hand-contact-check.ts
 widgets-clarity-check:
 	bun run scripts/widgets-clarity-check.ts
+.PHONY: keyborb-perf-check
+keyborb-perf-check:
+	bun run scripts/keyborb-perf-check.ts
 terminal-shimmer-check:
 	bun run scripts/terminal-shimmer-check.ts
 terminal-capacity-check:

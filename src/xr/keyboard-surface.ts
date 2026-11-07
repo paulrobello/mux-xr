@@ -3,7 +3,8 @@ import { createCurvedTerminalGeometry, terminalWarpPoint } from './terminal-warp
 
 export function curveKeyboardContent(root: THREE.Group, width: number, radians: number): void {
   for (const child of root.children) {
-    if (child.name === 'input-backdrop') continue;
+    // The Keyborb shell and glyph batches follow their orbs, so they take no warp of their own.
+    if (['input-backdrop', 'keyborb-shells', 'keyborb-glyphs'].includes(child.name)) continue;
     const point = terminalWarpPoint(child.position.x, { width, height: 1, radians });
     const theta = Math.atan2(-point.normalX, point.normalZ);
     child.position.x = point.x;

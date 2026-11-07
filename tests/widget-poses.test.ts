@@ -43,9 +43,9 @@ describe('widget poses', () => {
   it('ignores malformed persisted entries and preserves valid entries', () => {
     const storage = memoryStorage();
     storage.setItem(
-      'mux-xr:widget-poses:v1',
+      'mux-xr:widget-poses:v2',
       JSON.stringify({
-        version: 1,
+        version: 2,
         poses: {
           'digital-clock': digitalPose,
           'analog-clock': { position: [0, 0, 0], quaternion: [0, 0, 0, 0], scale: 1 },
@@ -54,6 +54,20 @@ describe('widget poses', () => {
       }),
     );
     expect(createWidgetPoseStore(storage).read()).toEqual({ 'digital-clock': digitalPose });
+  });
+
+  it('migrates v1 viewer-relative poses once against the nominal standing head', () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      'mux-xr:widget-poses:v1',
+      JSON.stringify({ version: 1, poses: { 'digital-clock': digitalPose } }),
+    );
+    const store = createWidgetPoseStore(storage);
+    expect(store.read()['digital-clock']?.position).toEqual([1, 3.52, -3]);
+    store.save('analog-clock', analogPose);
+    const written = JSON.parse(storage.getItem('mux-xr:widget-poses:v2') ?? '{}');
+    expect(written.poses['digital-clock'].position).toEqual([1, 3.52, -3]);
+    expect(written.poses['analog-clock'].position).toEqual(analogPose.position);
   });
 
   it('removes one kind, clears its key only, and handles storage failures', () => {

@@ -71,7 +71,14 @@ import {
   type HierarchyNavigator,
 } from './hierarchy-navigator';
 import { curveKeyboardContent } from './keyboard-surface';
-import { createKeyborbKey, setKeyborbPressed } from './keyborb';
+import {
+  createKeyborbGlyphs,
+  createKeyborbKey,
+  createKeyborbShells,
+  type KeyborbGlyphs,
+  type KeyborbShells,
+  setKeyborbPressed,
+} from './keyborb';
 import { createKeyborbInput } from './keyborb-input';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import { createPaneFocus } from './pane-focus';
@@ -97,6 +104,7 @@ import {
   applyUIPose,
   captureUIPose,
   createUIPoseStore,
+  NOMINAL_VIEWER_HEIGHT,
   type SavedUIPose,
   type UIPoseName,
 } from './ui-poses';
@@ -357,6 +365,8 @@ function disposeObject(object: THREE.Object3D): void {
     return;
   }
   for (const child of [...object.children]) disposeObject(child);
+  if (object instanceof THREE.InstancedMesh) object.dispose();
+  (object.userData.disposeBatch as (() => void) | undefined)?.();
   const mesh = object as THREE.Mesh;
   mesh.geometry?.dispose();
   const materials = Array.isArray(mesh.material)
@@ -646,11 +656,11 @@ export function createWorkspaceScene(
   let widgetRestorePending = true;
   let poseRestorePending = false;
   // Three keeps the XR camera at the origin (or the last session's pose) until a frame reports a
-  // viewer pose, so saved poses must not be applied or captured against it before then.
+  // viewer pose, so placement, floor correction and HUD/keyboard saves wait for one.
   let xrViewerPending = false;
-  // Saved poses are viewer-relative. Outside a tracked XR session they stay relative to this fixed
-  // viewer (a nominal head, then the last tracked head) so desktop camera framing never moves them.
-  const NOMINAL_VIEWER_HEIGHT = 1.52;
+  // Saved poses are world transforms; placement is viewer-relative. Outside a tracked XR session
+  // placement uses this fixed viewer (a nominal head, then the last tracked head) so desktop
+  // camera framing never moves it.
   const layoutViewer = new THREE.PerspectiveCamera();
   layoutViewer.position.set(0, NOMINAL_VIEWER_HEIGHT, 0);
   const resetLayoutViewer = (): void => {
@@ -1810,22 +1820,22 @@ export function createWorkspaceScene(
     if (mutableState.toast && time >= toastDeadline) showToast(null);
     paneFocus.update(deltaSeconds);
     radialMenu.update(radialDelta);
-    if (poseRestorePending && renderer?.xr.isPresenting && !xrViewerPending) {
+    if (poseRestorePending && renderer?.xr.isPresenting) {
       const saved = poseStore.read('hud');
       if (saved && hudRoot)
-        applyUIPose(hudRoot, poseViewer(), saved, hudRoot.userData.scaleLimits as [number, number]);
+        applyUIPose(hudRoot, saved, hudRoot.userData.scaleLimits as [number, number]);
       for (const [id, pose] of terminalRestoredPoses) {
         const panel = panels.get(id);
-        if (panel) applyUIPose(panel.root, poseViewer(), pose, [0.3, 1.8], 100);
+        if (panel) applyUIPose(panel.root, pose, [0.3, 1.8], 100);
       }
       poseRestorePending = false;
       floorCorrectionPending = true;
     }
-    if (widgetRestorePending && !xrViewerPending) {
+    if (widgetRestorePending) {
       for (const [kind, pose] of Object.entries(widgetPoseStore.read())) {
         if (touchedWidgets.has(kind as WidgetKind)) continue;
         const widget = widgets.get(kind as WidgetKind) ?? addWidget(kind as WidgetKind);
-        applyUIPose(widget.root, poseViewer(), pose, [0.25, 2]);
+        applyUIPose(widget.root, pose, [0.25, 2]);
       }
       widgetRestorePending = false;
       mutableState.widgets = [...widgets.keys()];
@@ -2430,6 +2440,10 @@ export function createWorkspaceScene(
       }
     }
     keyborbHighlighted = heldKeyborbs.size > 0;
+    if (inputRoot?.visible) {
+      (inputRoot.userData.keyborbShells as KeyborbShells | undefined)?.update();
+      (inputRoot.userData.keyborbGlyphs as KeyborbGlyphs | undefined)?.update();
+    }
     observatory.rotation.y = time * 0.00001;
     for (const panel of panels.values()) panel.surface.flush?.();
     renderer?.render(scene, camera);
@@ -2464,7 +2478,7 @@ export function createWorkspaceScene(
   };
   const saveUIPose = (name: UIPoseName, object: THREE.Object3D): void => {
     if (!renderer || (!renderer.xr.isPresenting && !activeSession) || xrViewerPending) return;
-    const saved = poseStore.save(name, captureUIPose(object, poseViewer()));
+    const saved = poseStore.save(name, captureUIPose(object));
     if (!saved && mutableState.notice !== 'UI position could not be saved on this device') {
       mutableState.notice = 'UI position could not be saved on this device';
       notify();
@@ -2487,8 +2501,7 @@ export function createWorkspaceScene(
     widget.root.scale.setScalar(1);
   };
   const saveWidgetPose = (kind: WidgetKind, widget: ClockWidget): void => {
-    const view = poseViewer();
-    if (!widgetPoseStore.save(kind, captureUIPose(widget.root, view)))
+    if (!widgetPoseStore.save(kind, captureUIPose(widget.root)))
       setNotice('Widget position could not be saved on this device');
   };
   const removeWidget = (kind: WidgetKind, persist = true): void => {
@@ -2645,19 +2658,10 @@ export function createWorkspaceScene(
       inputRoot.quaternion.copy(inputTransform.quaternion);
       inputRoot.scale.setScalar(inputTransform.scale);
     } else resetInputPose();
-    if (
-      !keyboardPoseRestored &&
-      !xrViewerPending &&
-      (mode === 'keyboard' || mode === 'command-editor')
-    ) {
+    if (!keyboardPoseRestored && (mode === 'keyboard' || mode === 'command-editor')) {
       const saved = poseStore.read('keyboard');
       if (saved && !previousRoot)
-        applyUIPose(
-          inputRoot,
-          poseViewer(),
-          saved,
-          inputRoot.userData.scaleLimits as [number, number],
-        );
+        applyUIPose(inputRoot, saved, inputRoot.userData.scaleLimits as [number, number]);
       keyboardPoseRestored = true;
     }
     for (const controller of grabbedControllers) {
@@ -2703,24 +2707,28 @@ export function createWorkspaceScene(
         inputRoot.add(step);
       }
       const dictation = mutableState.dictation;
-      const dictate = createLabelButton(
-        dictation.status === 'transcribing'
-          ? 'Transcribing…'
-          : dictation.status === 'listening'
-            ? 'Stop dictation'
-            : dictation.supported
-              ? 'Dictate'
-              : 'Speech unavailable',
-        0.7,
-        0.1,
-        {
-          inputAction:
-            dictation.supported && dictation.status !== 'transcribing' ? 'dictation' : 'noop',
-          dictationAction: dictation.status === 'listening' ? 'stop' : 'start',
-        },
-      );
-      dictate.position.set(-0.42, 1.03, 0);
-      inputRoot.add(dictate);
+      // The Keyborb Mic orb starts and stops dictation, so its panel keeps only the review buttons.
+      if (!mutableState.keyborbEnabled || !dictation.supported) {
+        const dictate = createLabelButton(
+          dictation.status === 'transcribing'
+            ? 'Transcribing…'
+            : dictation.status === 'listening'
+              ? 'Stop dictation'
+              : dictation.supported
+                ? 'Dictate'
+                : 'Speech unavailable',
+          0.7,
+          0.1,
+          {
+            inputAction:
+              dictation.supported && dictation.status !== 'transcribing' ? 'dictation' : 'noop',
+            dictationAction: dictation.status === 'listening' ? 'stop' : 'start',
+          },
+        );
+        dictate.name = 'xr-dictate-button';
+        dictate.position.set(-0.42, 1.03, 0);
+        inputRoot.add(dictate);
+      }
       const paste = createLabelButton('Paste', 0.44, 0.1, { inputAction: 'pasteClipboard' });
       paste.position.set(-1, 1.03, 0);
       inputRoot.add(paste);
@@ -3303,6 +3311,18 @@ export function createWorkspaceScene(
           (unit - 0.025) / 2 + 0.003,
         );
         inputRoot.add(mic);
+      }
+      if (mutableState.keyborbEnabled) {
+        const orbs = inputRoot.children.filter(
+          (child): child is THREE.Mesh => child.userData.keyborb === true,
+        );
+        const shells = createKeyborbShells(orbs);
+        inputRoot.add(shells.mesh);
+        inputRoot.userData.keyborbShells = shells;
+        const glyphs = createKeyborbGlyphs(orbs);
+        glyphs.batch.userData.disposeBatch = () => glyphs.batch.dispose();
+        inputRoot.add(glyphs.batch);
+        inputRoot.userData.keyborbGlyphs = glyphs;
       }
     }
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
@@ -4784,15 +4804,14 @@ export function createWorkspaceScene(
     scale: pose.scale,
   });
   const captureCurrentTerminalPose = (panel: TerminalPanel): SavedUIPose => {
-    const view = poseViewer();
     const original = paneFocus.originalTransform(panel.root);
-    if (!original) return captureUIPose(panel.root, view);
+    if (!original) return captureUIPose(panel.root);
     const proxy = new THREE.Object3D();
     proxy.position.copy(original.position);
     proxy.quaternion.copy(original.quaternion);
     proxy.scale.copy(original.scale);
     proxy.parent = panel.root.parent;
-    return captureUIPose(proxy, view);
+    return captureUIPose(proxy);
   };
   const captureTerminalPose = (id: string): SavedUIPose | null => {
     const panel = panels.get(id);
@@ -4804,8 +4823,7 @@ export function createWorkspaceScene(
     if (!panel) return;
     terminalPoseCache.set(id, copyTerminalPose(pose));
     terminalRestoredPoses.set(id, copyTerminalPose(pose));
-    const view = poseViewer();
-    applyUIPose(panel.root, view, pose, [0.3, 1.8], 100);
+    applyUIPose(panel.root, pose, [0.3, 1.8], 100);
     floorCorrectionPending = true;
     correctTerminalFloor();
   };
@@ -4821,6 +4839,7 @@ export function createWorkspaceScene(
   const correctTerminalFloor = (): void => {
     if (
       !floorCorrectionPending ||
+      xrViewerPending ||
       paneFocus.activeId ||
       warpEdit ||
       [...dragStates.values()].some((drag) => drag.object.userData.terminalId)
