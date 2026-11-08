@@ -272,7 +272,7 @@ async function main(): Promise<void> {
     if (/Shader Error|GL_INVALID|Failure loading font/i.test(message.text()))
       errors.push(message.text());
   });
-  await page.routeWebSocket(/.*/, (ws: WebSocketRoute) => {
+  await page.routeWebSocket('**/ws**', (ws: WebSocketRoute) => {
     const id = new URL(ws.url()).searchParams.get('session')?.replace(/^pane-/, '%') ?? 'metadata';
     ws.onMessage((raw) => {
       const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), 'binary');
@@ -305,6 +305,10 @@ async function main(): Promise<void> {
         ),
       'Panes did not attach',
     );
+    // Contact pokes target the flat keyboard; Keyborb (auto with tracked hands) is pinch-only.
+    await page.locator('[data-action="settings"]').click();
+    await page.locator('[data-keyborb-mode]').selectOption('off');
+    await page.locator('[data-action="close-settings"]').click();
     await page.locator('[data-action="xr"]').click();
     await waitFor(
       page,

@@ -183,7 +183,7 @@ async function main(): Promise<void> {
     )
       errors.push(message.text());
   });
-  await page.routeWebSocket(/.*/, (ws: WebSocketRoute) => {
+  await page.routeWebSocket('**/ws**', (ws: WebSocketRoute) => {
     const id = new URL(ws.url()).searchParams.get('session')?.replace(/^pane-/, '%') ?? 'metadata';
     ws.onMessage((raw) => {
       const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), 'binary');
@@ -223,6 +223,10 @@ async function main(): Promise<void> {
     await page.locator('[data-command-newline]').uncheck();
     await page.locator('[data-action="save-command"]').click();
     await page.locator('[data-action="close-drawer"]').click();
+    // Hand rays target the flat keyboard; Keyborb (auto with tracked hands) is pinch-only.
+    await page.locator('[data-action="settings"]').click();
+    await page.locator('[data-keyborb-mode]').selectOption('off');
+    await page.locator('[data-action="close-settings"]').click();
     await page.locator('[data-action="xr"]').click();
     await waitFor(
       page,
@@ -254,7 +258,9 @@ async function main(): Promise<void> {
         } as never);
         const hand = w.__questHands[i];
         const wrist = hand.joints.wrist;
-        wrist.position.set(i ? -0.18 : 0.18, 1.25, -0.4);
+        // Resting low and behind the near hand keyboard (its backing reaches y 0.95, z -0.21),
+        // outside its 0.14 m near zone so the both-rays rule stays off for ray typing.
+        wrist.position.set(i ? -0.25 : 0.25, 0.7, 0.1);
         hand.joints['thumb-tip'].position
           .copy(wrist.position)
           .add(new w.__questThree.Vector3(0, 0.05, 0));

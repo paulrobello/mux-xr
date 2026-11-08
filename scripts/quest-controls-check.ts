@@ -1,3 +1,12 @@
+// Runs the real app against a private par-mux daemon and mux-enabled streamer, never the default
+// daemon. The served root must contain a copy of dist (fonts and assets), and the daemon needs two
+// separate 80x24 sessions rather than one split window, whose layout caps a pane's resize:
+//   par-mux --socket S --state-dir D start --no-attach
+//   par-mux --socket S --cmd "new-session -s a -x 80 -y 24"   (and again for -s b)
+//   cp -R dist/. ROOT && par-term-streamer --host 127.0.0.1 --port 4241 --enable-http \
+//     --web-root ROOT --mux-socket S
+//   MUX_XR_PRIVATE_TEST=1 MUX_XR_BASE_URL=http://127.0.0.1:4241 MUX_XR_TEST_ROOT=ROOT \
+//     bun run scripts/quest-controls-check.ts
 import { fromBinary } from '@bufbuild/protobuf';
 import { chromium, type Page } from 'playwright';
 import { decodeServerMessage } from '../src/terminal/protocol';
