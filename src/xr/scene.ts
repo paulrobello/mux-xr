@@ -100,6 +100,7 @@ import {
   terminalWarpPoint,
 } from './terminal-warp';
 import { createTerminalWarpStore } from './terminal-warp-store';
+import { applyUIEnvironment, createUIEnvironment, isSharedUIEnvironment } from './ui-environment';
 import { createUIFeedback, type UICue, type UIFeedback } from './ui-feedback';
 import {
   applyUIPose,
@@ -401,8 +402,17 @@ function disposeObject(object: THREE.Object3D): void {
       ? [mesh.material]
       : [];
   for (const material of materials) {
-    for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'envMap'])
-      (material as unknown as Record<string, THREE.Texture | undefined>)[key]?.dispose();
+    for (const key of [
+      'map',
+      'normalMap',
+      'roughnessMap',
+      'metalnessMap',
+      'emissiveMap',
+      'envMap',
+    ]) {
+      const texture = (material as unknown as Record<string, THREE.Texture | undefined>)[key];
+      if (!isSharedUIEnvironment(texture)) texture?.dispose();
+    }
     material.dispose();
   }
 }
@@ -679,6 +689,7 @@ export function createWorkspaceScene(
   } catch (error) {
     rendererError = error instanceof Error ? error.message : 'WebGL renderer initialization failed';
   }
+  const uiEnvironment = createUIEnvironment(renderer);
   const ambient = new THREE.AmbientLight(0x9db5c8, 0.7);
   const key = new THREE.DirectionalLight(0xb8dfff, 1.2);
   key.position.set(-2, 4, 4);
@@ -810,7 +821,7 @@ export function createWorkspaceScene(
   >();
   const controllerGrips = new Map<THREE.Group, THREE.Group>();
   const wristMenuButton = createLabelButton('Menu', 0.052, 0.035, { inputAction: 'wristMenu' });
-  const wristWatch = createWristMenuWatch(wristMenuButton);
+  const wristWatch = createWristMenuWatch(wristMenuButton, uiEnvironment.texture);
   let wristMenuLastPressed = Number.NEGATIVE_INFINITY;
   scene.add(wristWatch.root);
   const watchProbeCenter = new THREE.Vector3();
@@ -2819,7 +2830,7 @@ export function createWorkspaceScene(
   };
   const addWidget = (kind: WidgetKind): ClockWidget => {
     touchedWidgets.add(kind);
-    const widget = createClockWidget(kind);
+    const widget = createClockWidget(kind, uiEnvironment.texture);
     widget.root.traverse((object) => {
       if (!object.userData.inputAction) object.userData.inputAction = 'grabWidget';
     });
@@ -3432,6 +3443,7 @@ export function createWorkspaceScene(
         mutableState.hierarchyStyle,
         hierarchyNavigation,
         new Set(panels.keys()),
+        uiEnvironment.texture,
       );
       hierarchyNavigation = {
         path: hierarchyNavigator.root.userData.hierarchyPath as string[],
@@ -5019,12 +5031,15 @@ export function createWorkspaceScene(
     root.add(screen);
     const frame = new THREE.Mesh(
       createTerminalFrameGeometry({ width: PANEL_WIDTH, height: PANEL_HEIGHT, radians: 0 }),
-      new THREE.MeshStandardMaterial({
-        color: 0x101820,
-        roughness: 0.72,
-        metalness: 0.3,
-        side: THREE.DoubleSide,
-      }),
+      applyUIEnvironment(
+        new THREE.MeshStandardMaterial({
+          color: 0x101820,
+          roughness: 0.72,
+          metalness: 0.3,
+          side: THREE.DoubleSide,
+        }),
+        uiEnvironment.texture,
+      ),
     );
     frame.name = 'terminal-frame';
     frame.position.z = -0.025;
@@ -6261,12 +6276,14 @@ export function createWorkspaceScene(
     disposeObject(hoverHelp);
     scene.clear();
     gradientTexture?.dispose();
+    uiEnvironment.dispose();
     renderer?.dispose();
     if (canvas.parentElement === container) container.removeChild(canvas);
     listeners.clear();
   };
   setBackground('observatory');
   createHud();
+  uiEnvironment.warmPrograms(scene, camera);
   return {
     canvas,
     scene,

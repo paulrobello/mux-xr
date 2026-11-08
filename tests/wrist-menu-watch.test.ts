@@ -5,6 +5,7 @@ vi.mock('../src/xr/labels', () => import('./helpers/labels'));
 
 import type { HandContactProbe } from '../src/xr/hand-contact';
 import { createScalableLabel } from '../src/xr/labels';
+import { UI_ENV_MAP_INTENSITY } from '../src/xr/ui-environment';
 import { createWristMenuWatch, WRIST_WATCH_EXTENT } from '../src/xr/wrist-menu-watch';
 
 function makeWatch(): ReturnType<typeof createWristMenuWatch> {
@@ -164,5 +165,30 @@ describe('wrist menu watch', () => {
     expect(geometryDispose).not.toHaveBeenCalled();
     expect(materialDispose).not.toHaveBeenCalled();
     expect(watch.root.children).toHaveLength(0);
+  });
+
+  it('lights the case and strap with the shared env map but keeps the indicator emissive', () => {
+    const envMap = new THREE.Texture();
+    envMap.userData.sharedUIEnvironment = true;
+    const environmentDispose = vi.fn();
+    envMap.addEventListener('dispose', environmentDispose);
+    const watch = createWristMenuWatch(createScalableLabel('Menu', 0.052, 0.035), envMap);
+    for (const name of ['xr-wrist-menu-watch-case', 'xr-wrist-menu-watch-strap']) {
+      const material = (watch.root.getObjectByName(name) as THREE.Mesh)
+        .material as THREE.MeshStandardMaterial;
+      expect(material).toBeInstanceOf(THREE.MeshStandardMaterial);
+      expect(material.envMap).toBe(envMap);
+      expect(material.envMapIntensity).toBe(UI_ENV_MAP_INTENSITY);
+      expect(material.roughness).toBeGreaterThanOrEqual(0.7);
+    }
+    const indicator = watch.root.getObjectByName('xr-wrist-menu-update-indicator') as THREE.Mesh;
+    expect(indicator.material).toBeInstanceOf(THREE.MeshBasicMaterial);
+    watch.dispose();
+    expect(environmentDispose).not.toHaveBeenCalled();
+    const unlit = makeWatch();
+    const caseMaterial = (unlit.root.getObjectByName('xr-wrist-menu-watch-case') as THREE.Mesh)
+      .material as THREE.MeshStandardMaterial;
+    expect(caseMaterial.envMap).toBeNull();
+    unlit.dispose();
   });
 });

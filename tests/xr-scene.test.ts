@@ -1,4 +1,8 @@
 vi.mock('../src/xr/labels', () => import('./helpers/labels'));
+vi.mock('../src/xr/ui-environment', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/xr/ui-environment')>();
+  return { ...actual, createUIEnvironment: vi.fn(actual.createUIEnvironment) };
+});
 
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
@@ -13,6 +17,7 @@ import {
   routeInput,
   updateGaze,
 } from '../src/xr/scene';
+import { createUIEnvironment, UI_ENV_MAP_INTENSITY } from '../src/xr/ui-environment';
 
 describe('XR scene interaction helpers', () => {
   it('clamps physical panel scale without touching terminal grid dimensions', () => {
@@ -141,5 +146,97 @@ describe('XR scene interaction helpers', () => {
       context.mockRestore();
       log.mockRestore();
     }
+  });
+
+  it('keeps the shared UI env map alive when a panel frame is disposed', () => {
+    const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const envMap = new THREE.Texture();
+    envMap.userData.sharedUIEnvironment = true;
+    const environmentDispose = vi.fn();
+    envMap.addEventListener('dispose', environmentDispose);
+    const releaseEnvironment = vi.fn();
+    const warmPrograms = vi.fn();
+    vi.mocked(createUIEnvironment).mockReturnValueOnce({
+      texture: envMap,
+      warmPrograms,
+      dispose: releaseEnvironment,
+    });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const surface = (id: string): TerminalSurface => ({
+      canvas: document.createElement('canvas'),
+      pane: {
+        id,
+        title: `Agent ${id}`,
+        workspaceId: '+1',
+        workspaceName: 'Work',
+        sessionId: '$1',
+        sessionName: 'Dev',
+        windowId: '@1',
+        windowName: 'Shell',
+      },
+      revision: 0,
+      cols: 80,
+      rows: 24,
+      status: 'connected',
+      error: null,
+      connect() {},
+      disconnect() {},
+      sendText: () => true,
+      sendKey: () => true,
+      paste: () => true,
+      focus() {},
+      resizeGrid: () => true,
+      canResizeGrid: true,
+      setColorMode: () => undefined,
+      dispose() {},
+      subscribe: () => () => undefined,
+    });
+    const actions: WorkspaceActions = {
+      selectPane: vi.fn(),
+      closePane: vi.fn(),
+      sendText: vi.fn(),
+      sendKey: vi.fn(),
+      runCommand: vi.fn(),
+      openKeyboard: vi.fn(),
+      openCommands: vi.fn(),
+    };
+    const workspace = createWorkspaceScene(container, actions);
+    expect(warmPrograms).toHaveBeenCalledOnce();
+    expect(warmPrograms.mock.calls[0]?.[0]).toBe(workspace.scene);
+    try {
+      workspace.addTerminal(surface('%1'));
+      workspace.addTerminal(surface('%2'));
+      const frameMaterial = (id: string): THREE.MeshStandardMaterial => {
+        const frame = workspace.scene
+          .getObjectByName(`terminal-panel-${id}`)
+          ?.getObjectByName('terminal-frame') as THREE.Mesh | undefined;
+        if (!frame) throw new Error(`Frame for ${id} was not created`);
+        return frame.material as THREE.MeshStandardMaterial;
+      };
+      const survivor = frameMaterial('%2');
+      expect(frameMaterial('%1').envMap).toBe(envMap);
+      expect(survivor.envMap).toBe(envMap);
+      expect(survivor.envMapIntensity).toBe(UI_ENV_MAP_INTENSITY);
+      const watchCase = workspace.scene.getObjectByName('xr-wrist-menu-watch-case') as THREE.Mesh;
+      expect((watchCase.material as THREE.MeshStandardMaterial).envMap).toBe(envMap);
+      const screen = workspace.scene
+        .getObjectByName('terminal-panel-%2')
+        ?.getObjectByName('terminal-surface') as THREE.Mesh;
+      expect((screen.material as THREE.MeshStandardMaterial).envMap ?? null).toBeNull();
+
+      workspace.removeTerminal('%1');
+      expect(workspace.scene.getObjectByName('terminal-panel-%1')).toBeUndefined();
+      expect(environmentDispose).not.toHaveBeenCalled();
+      expect(survivor.envMap).toBe(envMap);
+    } finally {
+      workspace.dispose();
+      container.remove();
+      context.mockRestore();
+      log.mockRestore();
+    }
+    expect(environmentDispose).not.toHaveBeenCalled();
+    expect(releaseEnvironment).toHaveBeenCalledOnce();
   });
 });

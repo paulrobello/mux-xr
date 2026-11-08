@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
+import { applyUIEnvironment } from './ui-environment';
 
 export type WidgetKind = 'digital-clock' | 'analog-clock';
 
@@ -69,7 +70,10 @@ function digitalText(now: Date): string {
   return `${hour}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} ${suffix}`;
 }
 
-export function createClockWidget(kind: WidgetKind): ClockWidget {
+export function createClockWidget(
+  kind: WidgetKind,
+  envMap: THREE.Texture | null = null,
+): ClockWidget {
   const widgetId = `clock-widget-${nextWidgetId++}`;
   const root = new THREE.Group();
   root.name = widgetId;
@@ -79,12 +83,14 @@ export function createClockWidget(kind: WidgetKind): ClockWidget {
   root.userData.scaleLimits = [0.25, 2];
   setWidgetMetadata(root, widgetId, kind);
 
+  const lit = (parameters: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMaterial =>
+    applyUIEnvironment(new THREE.MeshStandardMaterial(parameters), envMap);
   const width = kind === 'digital-clock' ? 0.62 : 0.58;
   const height = kind === 'digital-clock' ? 0.24 : 0.58;
   const body = addBox(
     root,
     new THREE.BoxGeometry(width, height, 0.045),
-    new THREE.MeshStandardMaterial({ color: BODY_COLOR, roughness: 0.62, metalness: 0.32 }),
+    lit({ color: BODY_COLOR, roughness: 0.62, metalness: 0.32 }),
     'clock-body',
   );
   body.position.z = -0.012;
@@ -92,7 +98,7 @@ export function createClockWidget(kind: WidgetKind): ClockWidget {
   const face = addBox(
     root,
     new THREE.BoxGeometry(width - 0.035, height - 0.035, 0.025),
-    new THREE.MeshStandardMaterial({ color: FACE_COLOR, roughness: 0.4, metalness: 0.18 }),
+    lit({ color: FACE_COLOR, roughness: 0.65, metalness: 0.18 }),
     'clock-face',
   );
   face.position.z = 0.014;
@@ -122,7 +128,7 @@ export function createClockWidget(kind: WidgetKind): ClockWidget {
     root.add(display);
   } else {
     const radius = 0.23;
-    const markerMaterial = new THREE.MeshStandardMaterial({ color: ACCENT_COLOR, roughness: 0.5 });
+    const markerMaterial = lit({ color: ACCENT_COLOR, roughness: 0.65 });
     for (let index = 0; index < 12; index += 1) {
       const angle = (index * Math.PI * 2) / 12;
       const marker = new THREE.Mesh(
@@ -135,9 +141,9 @@ export function createClockWidget(kind: WidgetKind): ClockWidget {
       marker.userData.inputAction = 'grabWidget';
       root.add(marker);
     }
-    const handMaterial = new THREE.MeshStandardMaterial({
+    const handMaterial = lit({
       color: 0xe8f7f8,
-      roughness: 0.42,
+      roughness: 0.65,
       metalness: 0.15,
     });
     hourHand = addBox(
@@ -155,7 +161,7 @@ export function createClockWidget(kind: WidgetKind): ClockWidget {
     secondHand = addBox(
       root,
       new THREE.BoxGeometry(0.006, 0.21, 0.008),
-      new THREE.MeshStandardMaterial({ color: ACCENT_COLOR }),
+      lit({ color: ACCENT_COLOR }),
       'clock-second-hand',
     );
     for (const [index, hand] of [hourHand, minuteHand, secondHand].entries()) {

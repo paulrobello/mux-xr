@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { PaneDescriptor } from '../contracts';
 import type { HierarchyStyle } from '../workspace/hierarchy-style';
 import { createScalableLabel, disposeScalableLabel } from './labels';
+import { applyUIEnvironment } from './ui-environment';
 
 const PAGE_SIZE = 6;
 const AMBER = '#e4a84a';
@@ -154,6 +155,7 @@ export function createHierarchyNavigator(
   style: HierarchyStyle,
   navigation: HierarchyNavigation,
   attachedPaneIds: ReadonlySet<string> = new Set(),
+  envMap: THREE.Texture | null = null,
 ): HierarchyNavigator {
   const tree = buildTree(panes);
   const normalized = normalizeNavigation(tree, navigation);
@@ -238,16 +240,38 @@ export function createHierarchyNavigator(
     const existing = sharedSolidMaterials.get(color);
     if (existing) return existing;
     const value = addMaterial(
-      new THREE.MeshStandardMaterial({
-        color,
-        roughness: 0.65,
-        metalness: 0.15,
-        emissive: color,
-        emissiveIntensity: 0.08,
-        flatShading: true,
-      }),
+      applyUIEnvironment(
+        new THREE.MeshStandardMaterial({
+          color,
+          roughness: 0.65,
+          metalness: 0.15,
+          emissive: color,
+          emissiveIntensity: 0.08,
+          flatShading: true,
+        }),
+        envMap,
+      ),
     );
     sharedSolidMaterials.set(color, value);
+    return value;
+  };
+  const sharedTubeMaterial = (color: string): THREE.MeshStandardMaterial => {
+    const key = `tube:${color}`;
+    const existing = sharedSolidMaterials.get(key);
+    if (existing) return existing;
+    const value = addMaterial(
+      applyUIEnvironment(
+        new THREE.MeshStandardMaterial({
+          color,
+          roughness: 0.7,
+          metalness: 0.15,
+          emissive: color,
+          emissiveIntensity: 0.12,
+        }),
+        envMap,
+      ),
+    );
+    sharedSolidMaterials.set(key, value);
     return value;
   };
   const sphericalPosition = (index: number, count: number): THREE.Vector3 => {
@@ -432,7 +456,7 @@ export function createHierarchyNavigator(
     const curve = new THREE.CatmullRomCurve3(points);
     const tube = new THREE.Mesh(
       addGeometry(new THREE.TubeGeometry(curve, Math.max(6, points.length * 4), radius, 8, false)),
-      sharedMaterial(color, 0.86),
+      sharedTubeMaterial(color),
     );
     tube.name = name;
     tube.userData.hierarchyConnector = true;
@@ -601,6 +625,7 @@ export function createHierarchyNavigator(
         style,
         nextNavigation,
         attachedPaneIds,
+        envMap,
       ) as InternalNavigator;
       const outgoing = [...root.children];
       const incoming = [...next.root.children];

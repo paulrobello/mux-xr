@@ -27,6 +27,7 @@ vi.mock('troika-three-text', () => ({
 
 import type { PaneDescriptor } from '../src/contracts';
 import { createHierarchyNavigator } from '../src/xr/hierarchy-navigator';
+import { UI_ENV_MAP_INTENSITY } from '../src/xr/ui-environment';
 
 const pane = (
   id: string,
@@ -315,4 +316,75 @@ describe('volumetric hierarchy navigator', () => {
       navigator.dispose();
     },
   );
+
+  it('lights nodes and opaque connector tubes with the shared env map across rebuilds', () => {
+    const envMap = new THREE.Texture();
+    envMap.userData.sharedUIEnvironment = true;
+    const environmentDispose = vi.fn();
+    envMap.addEventListener('dispose', environmentDispose);
+    const panes = [pane('a'), pane('b')];
+    const navigator = createHierarchyNavigator(
+      panes,
+      'helix',
+      { path: ['workspace:ws'], page: 0 },
+      new Set(),
+      envMap,
+    );
+    const litMaterials = (): {
+      tubes: THREE.MeshStandardMaterial[];
+      nodes: THREE.MeshStandardMaterial[];
+    } => {
+      const tubes: THREE.MeshStandardMaterial[] = [];
+      const nodes: THREE.MeshStandardMaterial[] = [];
+      navigator.root.traverse((object) => {
+        const material = (object as THREE.Mesh).material as THREE.Material | undefined;
+        if (!material) return;
+        if (object.userData.hierarchyConnector) {
+          expect(material).toBeInstanceOf(THREE.MeshStandardMaterial);
+          tubes.push(material as THREE.MeshStandardMaterial);
+        } else if (material instanceof THREE.MeshStandardMaterial) nodes.push(material);
+      });
+      return { tubes, nodes };
+    };
+    const before = litMaterials();
+    expect(before.tubes.length).toBeGreaterThan(0);
+    expect(before.nodes.length).toBeGreaterThan(0);
+    for (const material of [...before.tubes, ...before.nodes]) {
+      expect(material.envMap).toBe(envMap);
+      expect(material.envMapIntensity).toBe(UI_ENV_MAP_INTENSITY);
+    }
+    for (const material of before.tubes) {
+      expect(material.transparent).toBe(false);
+      expect(material.opacity).toBe(1);
+    }
+
+    navigator.navigate({ path: [], page: 0 });
+    for (let step = 0; step < 4; step += 1) navigator.update(0.2, new THREE.PerspectiveCamera());
+    expect(navigator.transitioning).toBe(false);
+    const after = litMaterials();
+    expect(after.nodes.length).toBeGreaterThan(0);
+    for (const material of [...after.tubes, ...after.nodes]) expect(material.envMap).toBe(envMap);
+    navigator.dispose();
+    expect(environmentDispose).not.toHaveBeenCalled();
+  });
+
+  it('keeps cards, rings and navigation hit targets on basic materials', () => {
+    const envMap = new THREE.Texture();
+    const navigator = createHierarchyNavigator(
+      [pane('a')],
+      'spatial-docks',
+      { path: ['workspace:ws', 'session:ws/session'], page: 0 },
+      new Set(['a']),
+      envMap,
+    );
+    let tori = 0;
+    navigator.root.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!(mesh.geometry instanceof THREE.TorusGeometry)) return;
+      tori += 1;
+      expect(mesh.material).toBeInstanceOf(THREE.MeshBasicMaterial);
+    });
+    expect(tori).toBeGreaterThan(0);
+    navigator.dispose();
+  });
 });

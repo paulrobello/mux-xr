@@ -52,6 +52,9 @@ vi.mock('troika-three-text', () => ({
 import {
   createScalableLabel,
   disposeScalableLabel,
+  LABEL_BEVEL_HIGHLIGHT,
+  LABEL_BEVEL_ROWS,
+  LABEL_BEVEL_SHADOW,
   LABEL_FONT_URL,
   LABEL_SYMBOL_FONT_URL,
   updateScalableLabel,
@@ -90,9 +93,8 @@ describe('scalable XR labels', () => {
     const pixels = (material.map as THREE.DataTexture).image.data as Uint8Array;
     const textureWidth = (material.map as THREE.DataTexture).image.width;
     expect(textureWidth).toBe(Math.round((64 * 0.28) / 0.09));
-    expect(Array.from(pixels.slice(0, 4))).toEqual([28, 42, 53, 255]);
     expect(
-      Array.from(pixels.slice((3 * textureWidth + 3) * 4, (3 * textureWidth + 3) * 4 + 4)),
+      Array.from(pixels.slice((32 * textureWidth + 3) * 4, (32 * textureWidth + 3) * 4 + 4)),
     ).toEqual([28, 42, 53, 255]);
     expect(text.font).toBe(LABEL_FONT_URL);
     expect(text.position.z).toBeGreaterThan(0);
@@ -112,6 +114,44 @@ describe('scalable XR labels', () => {
       28, 42, 53, 255,
     ]);
     disposeScalableLabel(root);
+  });
+
+  it('bakes a soft top highlight and bottom shadow into the backplate', () => {
+    const root = createScalableLabel('Commands', 0.28, 0.09, { background: '#1c2a35' });
+    const texture = (root.material as THREE.MeshBasicMaterial).map as THREE.DataTexture;
+    const data = texture.image.data as Uint8Array;
+    const width = texture.image.width;
+    const pixel = (y: number): number[] =>
+      Array.from(data.slice((y * width + 5) * 4, (y * width + 5) * 4 + 4));
+    // Row 0 is the bottom edge of the plane.
+    expect(pixel(0)).toEqual([23, 34, 43, 255]);
+    expect(pixel(63)).toEqual([51, 63, 73, 255]);
+    for (let y = 1; y < LABEL_BEVEL_ROWS; y += 1) {
+      expect(pixel(y)[2]).toBeGreaterThanOrEqual(pixel(y - 1)[2]);
+      expect(pixel(63 - y)[2]).toBeLessThanOrEqual(pixel(64 - y)[2]);
+    }
+    for (let y = LABEL_BEVEL_ROWS; y <= 63 - LABEL_BEVEL_ROWS; y += 1) {
+      expect(pixel(y)).toEqual([28, 42, 53, 255]);
+    }
+    expect(LABEL_BEVEL_HIGHLIGHT).toBeLessThanOrEqual(0.12);
+    expect(LABEL_BEVEL_SHADOW).toBeLessThanOrEqual(0.2);
+    // The bordered key keeps its flat edge colour on every row, bevel rows included.
+    const key = createScalableLabel('Space', 0.7, 0.1, {
+      background: '#1c2a35',
+      border: '#7197a8',
+    });
+    const keyTexture = (key.material as THREE.MeshBasicMaterial).map as THREE.DataTexture;
+    const keyData = keyTexture.image.data as Uint8Array;
+    const keyWidth = keyTexture.image.width;
+    for (const y of [0, 1, 62, 63]) {
+      const offset = (y * keyWidth + 20) * 4;
+      expect(Array.from(keyData.slice(offset, offset + 4))).toEqual([113, 151, 168, 255]);
+    }
+    expect(
+      Array.from(keyData.slice((5 * keyWidth + 20) * 4, (5 * keyWidth + 20) * 4 + 3)),
+    ).not.toEqual([28, 42, 53]);
+    disposeScalableLabel(root);
+    disposeScalableLabel(key);
   });
 
   it('supports glyph-only labels without a depth-writing backplate', () => {

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { HandContactProbe } from './hand-contact';
 import { updateScalableLabel } from './labels';
+import { applyUIEnvironment } from './ui-environment';
 
 /** Surface gap at which a near hand stops counting as near. */
 export const WRIST_WATCH_NEAR_EXIT_GAP = 0.055;
@@ -23,17 +24,26 @@ export interface WristMenuWatch {
   dispose(): void;
 }
 
-export function createWristMenuWatch(button: THREE.Mesh): WristMenuWatch {
+export function createWristMenuWatch(
+  button: THREE.Mesh,
+  envMap: THREE.Texture | null = null,
+): WristMenuWatch {
   const root = new THREE.Group();
   root.name = 'xr-wrist-menu-watch';
   root.visible = false;
   const caseGeometry = new THREE.BoxGeometry(0.06, 0.044, 0.012);
-  const caseMaterial = new THREE.MeshBasicMaterial({ color: 0x0b1725 });
+  const caseMaterial = applyUIEnvironment(
+    new THREE.MeshStandardMaterial({ color: 0x0b1725, roughness: 0.7, metalness: 0.3 }),
+    envMap,
+  );
   const watchCase = new THREE.Mesh(caseGeometry, caseMaterial);
   watchCase.name = 'xr-wrist-menu-watch-case';
   watchCase.raycast = () => undefined;
   const strapGeometry = new THREE.TorusGeometry(0.022, 0.005, 8, 20);
-  const strapMaterial = new THREE.MeshBasicMaterial({ color: 0x17293a });
+  const strapMaterial = applyUIEnvironment(
+    new THREE.MeshStandardMaterial({ color: 0x17293a, roughness: 0.85, metalness: 0.1 }),
+    envMap,
+  );
   const strap = new THREE.Mesh(strapGeometry, strapMaterial);
   strap.rotation.x = Math.PI / 2;
   strap.name = 'xr-wrist-menu-watch-strap';

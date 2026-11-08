@@ -25,6 +25,7 @@ vi.mock('troika-three-text', () => ({
   configureTextBuilder: vi.fn(),
 }));
 
+import { UI_ENV_MAP_INTENSITY } from '../src/xr/ui-environment';
 import { createClockWidget } from '../src/xr/widgets';
 
 describe('clock widgets', () => {
@@ -62,4 +63,28 @@ describe('clock widgets', () => {
     expect(display?.userData.labelText).toContain('1:02:04 PM');
     digital.dispose();
   });
+
+  it.each(['digital-clock', 'analog-clock'] as const)(
+    'lights every %s body material with the shared env map and never disposes it',
+    (kind) => {
+      const envMap = new THREE.Texture();
+      envMap.userData.sharedUIEnvironment = true;
+      const environmentDispose = vi.fn();
+      envMap.addEventListener('dispose', environmentDispose);
+      const widget = createClockWidget(kind, envMap);
+      const standard = new Set<THREE.MeshStandardMaterial>();
+      widget.root.traverse((object) => {
+        const material = (object as THREE.Mesh).material;
+        if (material instanceof THREE.MeshStandardMaterial) standard.add(material);
+      });
+      expect(standard.size).toBeGreaterThanOrEqual(kind === 'digital-clock' ? 2 : 5);
+      for (const material of standard) {
+        expect(material.envMap).toBe(envMap);
+        expect(material.envMapIntensity).toBe(UI_ENV_MAP_INTENSITY);
+        expect(material.roughness).toBeGreaterThanOrEqual(0.6);
+      }
+      widget.dispose();
+      expect(environmentDispose).not.toHaveBeenCalled();
+    },
+  );
 });

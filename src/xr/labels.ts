@@ -40,6 +40,25 @@ type LabelRoot = THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> & {
   userData: LabelUserData & Record<string, unknown>;
 };
 
+export const LABEL_BEVEL_ROWS = 7;
+export const LABEL_BEVEL_HIGHLIGHT = 0.1;
+export const LABEL_BEVEL_SHADOW = 0.18;
+
+// Row 0 is the bottom edge of the plane. The highlight stays far below the near-white glyph
+// threshold that scripts/production-label-check.ts counts.
+function bevelRow(fillRgb: number[], y: number, textureSize: number): number[] {
+  const fromTop = textureSize - 1 - y;
+  if (fromTop < LABEL_BEVEL_ROWS) {
+    const amount = LABEL_BEVEL_HIGHLIGHT * (1 - fromTop / LABEL_BEVEL_ROWS);
+    return fillRgb.map((channel) => Math.round(channel + (255 - channel) * amount));
+  }
+  if (y < LABEL_BEVEL_ROWS) {
+    const amount = LABEL_BEVEL_SHADOW * (1 - y / LABEL_BEVEL_ROWS);
+    return fillRgb.map((channel) => Math.round(channel * (1 - amount)));
+  }
+  return fillRgb;
+}
+
 function backgroundTexture(
   background: string,
   width: number,
@@ -55,9 +74,10 @@ function backgroundTexture(
   const textureWidth = Math.max(8, Math.min(2048, Math.round((textureSize * width) / height)));
   const data = new Uint8Array(textureWidth * textureSize * 4);
   for (let y = 0; y < textureSize; y += 1) {
+    const rowRgb = bevelRow(fillRgb, y, textureSize);
     for (let x = 0; x < textureWidth; x += 1) {
       const edgePixel = border && (x < 2 || y < 2 || x >= textureWidth - 2 || y >= textureSize - 2);
-      data.set([...(edgePixel ? edgeRgb : fillRgb), 255], (y * textureWidth + x) * 4);
+      data.set([...(edgePixel ? edgeRgb : rowRgb), 255], (y * textureWidth + x) * 4);
     }
   }
   const texture = new THREE.DataTexture(data, textureWidth, textureSize, THREE.RGBAFormat);
