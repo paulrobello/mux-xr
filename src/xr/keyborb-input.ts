@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 
-const PINCH_CLOSE = 0.045;
-const PINCH_OPEN = 0.05;
-const NEAR_ENTER = 0.08;
-const NEAR_EXIT = 0.11;
+export const PINCH_CLOSE = 0.045;
+export const PINCH_OPEN = 0.05;
+export const NEAR_ENTER = 0.08;
+export const NEAR_EXIT = 0.11;
 const REARM_SECONDS = 0.04;
 // While a pinch latches its orb, another orb takes over only when it is this many orb diameters
 // closer, so the closing drift stays on the key without holding it across the keyboard.

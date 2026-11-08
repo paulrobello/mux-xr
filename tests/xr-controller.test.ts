@@ -367,6 +367,93 @@ describe('native XR controller event routing', () => {
       fakeXR.frame?.(time);
     };
 
+    // Index and thumb tips straddle the node; the middle finger stays clear of a grab pinch.
+    const pinchAt = (hand: Hand, point: THREE.Vector3, gap: number, time: number): void => {
+      hand.joints.wrist.position.copy(point).add(new THREE.Vector3(0, -0.12, 0.1));
+      hand.joints['index-finger-tip'].position.copy(point).add(new THREE.Vector3(0, gap / 2, 0.02));
+      hand.joints['thumb-tip'].position.copy(point).add(new THREE.Vector3(0, -gap / 2, 0.02));
+      hand.joints['middle-finger-tip'].position
+        .copy(hand.joints.wrist.position)
+        .add(new THREE.Vector3(0.05, 0.17, 0));
+      fakeXR.frame?.(time);
+    };
+
+    it('selects a hierarchy pane node with a touch pinch and swallows its native select', () => {
+      const { workspace, actions } = setup('off');
+      connectController(0);
+      workspace.showInput('panes');
+      for (const title of ['Workspace', 'Session', 'Window']) {
+        hit(workspace, { inputAction: 'hierarchyNode', originalTitle: title });
+        for (let frame = 0; frame < 40; frame++) fakeXR.frame?.(100 + frame * 16);
+      }
+      vi.mocked(actions.selectPane).mockClear();
+      const hand = connectHand();
+      const node = objectWithData(workspace, { inputAction: 'pane', paneId: 'pane-b' });
+      workspace.scene.updateMatrixWorld(true);
+      const point = node.getWorldPosition(new THREE.Vector3());
+      pinchAt(hand, point, 0.08, 1000);
+      pinchAt(hand, point, 0.08, 1016);
+      expect(workspace.scene.getObjectByName('hierarchy-touch-marker')?.visible).toBe(true);
+      pinchAt(hand, point, 0.02, 1032);
+      nativeEvent(0, 'selectstart');
+      expect(actions.selectPane).not.toHaveBeenCalled();
+      pinchAt(hand, point, 0.08, 1048);
+      nativeEvent(0, 'selectend');
+      expect(actions.selectPane).toHaveBeenCalledTimes(1);
+      expect(actions.selectPane).toHaveBeenLastCalledWith('pane-b');
+      expect(workspace.scene.getObjectByName('hierarchy-touch-marker')?.visible).toBe(false);
+    });
+
+    it('grabs the whole hierarchy with a hand closed at a non-pane node', () => {
+      const { workspace } = setup('off');
+      connectController(0);
+      workspace.showInput('panes');
+      const hand = connectHand();
+      const node = objectWithData(workspace, {
+        inputAction: 'hierarchyNode',
+        originalTitle: 'Session',
+      });
+      workspace.scene.updateMatrixWorld(true);
+      // Within pinch reach of the node but clear of the fingertip and palm contact probes.
+      const mesh = node as THREE.Mesh;
+      mesh.geometry.computeBoundingSphere();
+      const bounds = (mesh.geometry.boundingSphere as THREE.Sphere)
+        .clone()
+        .applyMatrix4(mesh.matrixWorld);
+      const point = bounds.center.clone().add(new THREE.Vector3(0, 0, bounds.radius + 0.06));
+      pinchAt(hand, point, 0.08, 1000);
+      expect(workspace.scene.getObjectByName('hierarchy-touch-marker')?.visible).toBe(true);
+      const root = workspace.scene.getObjectByName('hierarchy-navigator')?.parent;
+      const before = root?.position.clone() ?? new THREE.Vector3();
+      pinch(hand, true);
+      fakeXR.frame?.(1016);
+      expect(workspace.scene.getObjectByName('pane-pull-proxy')).toBeUndefined();
+      for (const joint of Object.values(hand.joints)) joint.position.x += 0.3;
+      for (let frame = 0; frame < 4; frame++) fakeXR.frame?.(1032 + frame * 16);
+      expect(root?.position.distanceTo(before)).toBeGreaterThan(0.2);
+    });
+
+    it('ignores a hierarchy pinch that closed away from every node', () => {
+      const { workspace, actions } = setup('off');
+      connectController(0);
+      workspace.showInput('panes');
+      const hand = connectHand();
+      const node = objectWithData(workspace, {
+        inputAction: 'hierarchyNode',
+        originalTitle: 'Session',
+      });
+      workspace.scene.updateMatrixWorld(true);
+      const point = node.getWorldPosition(new THREE.Vector3());
+      const path = workspace.scene.getObjectByName('hierarchy-navigator')?.userData.hierarchyPath;
+      pinchAt(hand, point.clone().add(new THREE.Vector3(0, 0.4, 0)), 0.02, 1000);
+      pinchAt(hand, point, 0.02, 1016);
+      pinchAt(hand, point, 0.08, 1032);
+      expect(
+        workspace.scene.getObjectByName('hierarchy-navigator')?.userData.hierarchyPath,
+      ).toEqual(path);
+      expect(actions.selectPane).not.toHaveBeenCalled();
+    });
+
     it('uses the native controller ray despite stray palm metadata', () => {
       const { workspace } = setup('off');
       connectHand();
@@ -3718,6 +3805,143 @@ describe('native XR controller event routing', () => {
       container.remove();
     },
   );
+
+  const openPaneLevel = (workspace: ReturnType<typeof createWorkspaceScene>): void => {
+    workspace.showInput('panes');
+    for (const title of ['Workspace', 'Session', 'Window']) {
+      hit(workspace, { inputAction: 'hierarchyNode', originalTitle: title });
+      settleHierarchy();
+    }
+  };
+  // main.ts attaches a missing pane's terminal, then selects it, which rebuilds the open input.
+  const selectLikeMain = (
+    workspace: ReturnType<typeof createWorkspaceScene>,
+    actions: ReturnType<typeof fixture>['actions'],
+    panes: PaneDescriptor[],
+  ): void => {
+    actions.selectPane = vi.fn((id: string) => {
+      const descriptor = panes.find((item) => item.id === id);
+      if (!descriptor) return;
+      if (!workspace.scene.getObjectByName(`terminal-panel-${id}`))
+        workspace.addTerminal(surface(descriptor));
+      workspace.selectTerminal(id);
+    });
+  };
+  const pullPane = (
+    workspace: ReturnType<typeof createWorkspaceScene>,
+    paneId: string,
+    shift: THREE.Vector3,
+  ): THREE.Vector3 => {
+    const start = objectWithData(workspace, { inputAction: 'pane', paneId }).getWorldPosition(
+      new THREE.Vector3(),
+    );
+    hit(workspace, { inputAction: 'pane', paneId }, 'squeezestart');
+    expect(workspace.scene.getObjectByName('pane-pull-proxy')).toBeDefined();
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    controller.position.add(shift);
+    settleHierarchy();
+    expect(workspace.scene.getObjectByName('pane-pull-proxy')?.scale.x).toBeGreaterThan(0.25);
+    controller.dispatchEvent({ type: 'squeezeend' } as never);
+    expect(workspace.scene.getObjectByName('pane-pull-proxy')).toBeUndefined();
+    return start.add(shift);
+  };
+  const expectDropped = (
+    workspace: ReturnType<typeof createWorkspaceScene>,
+    paneId: string,
+    at: THREE.Vector3,
+  ): void => {
+    const panel = workspace.scene.getObjectByName(`terminal-panel-${paneId}`);
+    if (!panel) throw new Error('Dropped panel missing');
+    expect(panel.visible).toBe(true);
+    expect(workspace.scene.getObjectByName('hierarchy-navigator')).toBeUndefined();
+    expect(panel.position.distanceTo(at)).toBeLessThan(1e-3);
+    const toHead = workspace.camera.getWorldPosition(new THREE.Vector3()).sub(panel.position);
+    const facing = new THREE.Vector3(0, 0, 1).applyQuaternion(panel.quaternion);
+    expect(facing.angleTo(toHead)).toBeLessThan(0.05);
+    expect(workspace.captureTerminalPose(paneId)?.position[0]).toBeCloseTo(panel.position.x);
+  };
+
+  it('pulls an attached pane node out of the hierarchy and shows it where it is released', () => {
+    const { workspace, actions, container, left, right } = fixture();
+    selectLikeMain(workspace, actions, [left.pane, right.pane]);
+    connectController(0);
+    openPaneLevel(workspace);
+    const at = pullPane(workspace, 'pane-b', new THREE.Vector3(0.6, 0.1, -0.3));
+    expect(actions.selectPane).toHaveBeenLastCalledWith('pane-b');
+    expectDropped(workspace, 'pane-b', at);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('opens an unattached pane where its node is released', () => {
+    const { workspace, actions, container, left, right } = fixture();
+    const other = pane('pane-c', 'Other');
+    selectLikeMain(workspace, actions, [left.pane, right.pane, other]);
+    workspace.setAvailablePanes([left.pane, right.pane, other]);
+    connectController(0);
+    openPaneLevel(workspace);
+    expect(workspace.scene.getObjectByName('terminal-panel-pane-c')).toBeUndefined();
+    const at = pullPane(workspace, 'pane-c', new THREE.Vector3(-0.5, 0.2, -0.4));
+    expectDropped(workspace, 'pane-c', at);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('ends Focus before dropping the focused pane so the drop survives', () => {
+    const { workspace, actions, container, left, right } = fixture();
+    selectLikeMain(workspace, actions, [left.pane, right.pane]);
+    const gamepad = connectController(0);
+    workspace.selectTerminal('pane-b');
+    pressFocusButton(gamepad, 16);
+    expect(workspace.state.focusModeTerminalId).toBe('pane-b');
+    // Let Focus fade the other pane out, so the hierarchy records it hidden.
+    for (let frame = 0; frame < 120; frame++) fakeXR.frame?.(32 + frame * 16);
+    expect(workspace.scene.getObjectByName('terminal-panel-pane-a')?.visible).toBe(false);
+    openPaneLevel(workspace);
+    const at = pullPane(workspace, 'pane-b', new THREE.Vector3(0.5, 0, -0.5));
+    expect(workspace.state.focusModeTerminalId).toBeNull();
+    expectDropped(workspace, 'pane-b', at);
+    settleHierarchy();
+    expect(workspace.scene.getObjectByName('terminal-panel-pane-a')?.visible).toBe(true);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('drops a pane pull that barely moved without selecting the pane', () => {
+    const { workspace, actions, container } = fixture();
+    connectController(0);
+    openPaneLevel(workspace);
+    vi.mocked(actions.selectPane).mockClear();
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-b');
+    const before = panel?.position.clone();
+    hit(workspace, { inputAction: 'pane', paneId: 'pane-b' }, 'squeezestart');
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    controller.position.x += 0.03;
+    settleHierarchy();
+    controller.dispatchEvent({ type: 'squeezeend' } as never);
+    expect(workspace.scene.getObjectByName('pane-pull-proxy')).toBeUndefined();
+    expect(actions.selectPane).not.toHaveBeenCalled();
+    expect(workspace.scene.getObjectByName('hierarchy-navigator')).toBeDefined();
+    expect(panel?.position.distanceTo(before ?? new THREE.Vector3())).toBeLessThan(1e-6);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('still grabs the whole hierarchy from a non-pane node', () => {
+    const { workspace, container } = fixture();
+    connectController(0);
+    workspace.showInput('panes');
+    const root = workspace.scene.getObjectByName('hierarchy-navigator')?.parent;
+    const before = root?.position.clone();
+    hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Workspace' }, 'squeezestart');
+    expect(workspace.scene.getObjectByName('pane-pull-proxy')).toBeUndefined();
+    (fakeXR.controllers[0] as THREE.Group).position.x += 0.3;
+    settleHierarchy();
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
+    expect(root?.position.distanceTo(before ?? new THREE.Vector3())).toBeGreaterThan(0.2);
+    workspace.dispose();
+    container.remove();
+  });
 
   it('keeps restored and grown panels above the authored floor', () => {
     const { workspace, left, container } = fixture();
