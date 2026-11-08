@@ -94,9 +94,10 @@ export function isSharedUIEnvironment(texture: THREE.Texture | null | undefined)
 export function applyUIEnvironment<T extends THREE.MeshStandardMaterial>(
   material: T,
   envMap: THREE.Texture | null | undefined,
+  intensity = UI_ENV_MAP_INTENSITY,
 ): T {
   if (!envMap) return material;
   material.envMap = envMap;
-  material.envMapIntensity = UI_ENV_MAP_INTENSITY;
+  material.envMapIntensity = intensity;
   return material;
 }

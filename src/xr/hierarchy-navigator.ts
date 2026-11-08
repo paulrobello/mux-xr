@@ -141,6 +141,12 @@ function setAction(object: THREE.Object3D, data: Record<string, unknown>): void 
   Object.assign(object.userData, data);
 }
 
+// Tubes only. Metal reads as sheen only with the per-material env map; without one it just
+// darkens, so tubes fall back to the matte finish. Other UI materials stay at UI_ENV_MAP_INTENSITY.
+const TUBE_GLOSS = { roughness: 0.3, metalness: 0.6 } as const;
+const TUBE_MATTE = { roughness: 0.7, metalness: 0.15 } as const;
+const TUBE_ENV_MAP_INTENSITY = 1;
+
 function material(color: string, opacity = 1): THREE.MeshBasicMaterial {
   return new THREE.MeshBasicMaterial({
     color,
@@ -263,12 +269,12 @@ export function createHierarchyNavigator(
       applyUIEnvironment(
         new THREE.MeshStandardMaterial({
           color,
-          roughness: 0.7,
-          metalness: 0.15,
+          ...(envMap ? TUBE_GLOSS : TUBE_MATTE),
           emissive: color,
           emissiveIntensity: 0.12,
         }),
         envMap,
+        TUBE_ENV_MAP_INTENSITY,
       ),
     );
     sharedSolidMaterials.set(key, value);

@@ -317,6 +317,27 @@ describe('volumetric hierarchy navigator', () => {
     },
   );
 
+  it('keeps connector tubes matte when no env map is available', () => {
+    const navigator = createHierarchyNavigator(
+      [pane('a'), pane('b')],
+      'helix',
+      { path: ['workspace:ws'], page: 0 },
+      new Set(),
+      null,
+    );
+    const tubes: THREE.MeshStandardMaterial[] = [];
+    navigator.root.traverse((object) => {
+      if (object.userData.hierarchyConnector)
+        tubes.push((object as THREE.Mesh).material as THREE.MeshStandardMaterial);
+    });
+    expect(tubes.length).toBeGreaterThan(0);
+    for (const material of tubes) {
+      expect(material.envMap).toBeNull();
+      expect(material.roughness).toBe(0.7);
+      expect(material.metalness).toBe(0.15);
+    }
+  });
+
   it('lights nodes and opaque connector tubes with the shared env map across rebuilds', () => {
     const envMap = new THREE.Texture();
     envMap.userData.sharedUIEnvironment = true;
@@ -349,14 +370,20 @@ describe('volumetric hierarchy navigator', () => {
     const before = litMaterials();
     expect(before.tubes.length).toBeGreaterThan(0);
     expect(before.nodes.length).toBeGreaterThan(0);
-    for (const material of [...before.tubes, ...before.nodes]) {
-      expect(material.envMap).toBe(envMap);
+    for (const material of [...before.tubes, ...before.nodes]) expect(material.envMap).toBe(envMap);
+    for (const material of before.nodes)
       expect(material.envMapIntensity).toBe(UI_ENV_MAP_INTENSITY);
-    }
     for (const material of before.tubes) {
       expect(material.transparent).toBe(false);
       expect(material.opacity).toBe(1);
+      expect(material.envMapIntensity).toBe(1);
+      expect(material.roughness).toBe(0.3);
+      expect(material.metalness).toBe(0.6);
+      expect(material.emissive.getHex()).toBe(material.color.getHex());
+      expect(before.nodes).not.toContain(material);
     }
+    const tubeColors = new Set(before.tubes.map((material) => material.color.getHexString()));
+    expect(tubeColors.size).toBeGreaterThan(1);
 
     navigator.navigate({ path: [], page: 0 });
     for (let step = 0; step < 4; step += 1) navigator.update(0.2, new THREE.PerspectiveCamera());
