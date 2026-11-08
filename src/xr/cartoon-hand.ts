@@ -7,6 +7,7 @@ type HandJoints = THREE.Group & { joints?: Record<string, THREE.Object3D | undef
 
 export interface CartoonHand {
   root: THREE.Group;
+  /** Current only for the latest pose: read it again after each update, never keep it. */
   readonly contactProbes: readonly HandContactProbe[];
   update(hand: THREE.Group, camera: THREE.Object3D, side: HandSide, deltaSeconds: number): void;
   updateController(

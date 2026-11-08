@@ -2,6 +2,14 @@ import * as THREE from 'three';
 import type { HandContactProbe } from './hand-contact';
 import { updateScalableLabel } from './labels';
 
+/** Surface gap at which a near hand stops counting as near. */
+export const WRIST_WATCH_NEAR_EXIT_GAP = 0.055;
+/** Distance from the watch origin to its farthest touch surface, the band. */
+export const WRIST_WATCH_EXTENT = 0.06;
+// A palm at least this far from the watch origin cannot bring any probe within the near-exit
+// gap, provided every probe (with its radius) stays within 0.185 m of the palm.
+export const WRIST_WATCH_PROBE_REACH = 0.3;
+
 export interface WristMenuWatch {
   root: THREE.Group;
   update(wrist: THREE.Vector3, forward: THREE.Vector3, backNormal: THREE.Vector3): void;
@@ -9,6 +17,8 @@ export interface WristMenuWatch {
   setUpdateAvailable(available: boolean): void;
   setVisible(visible: boolean): void;
   updateTouch(probes: readonly HandContactProbe[] | null): boolean;
+  /** Records a hand too far from the watch to touch it, without sampling its probes. */
+  touchOutOfReach(): void;
   readonly near: boolean;
   dispose(): void;
 }
@@ -127,11 +137,16 @@ export function createWristMenuWatch(button: THREE.Mesh): WristMenuWatch {
         bandDistance - probe.radius,
       );
     }
-    near = nearestSurfaceGap <= (near ? 0.055 : 0.045);
+    near = nearestSurfaceGap <= (near ? WRIST_WATCH_NEAR_EXIT_GAP : 0.045);
     if (nearestSurfaceGap >= 0.025) armed = true;
     if (!armed || nearestSurfaceGap > 0.004) return false;
     armed = false;
     return true;
+  };
+  // A hand too far to touch: the gap state updateTouch would reach from probes beyond 25 mm.
+  const touchOutOfReach = (): void => {
+    near = false;
+    armed = !disposed && root.visible;
   };
   const dispose = (): void => {
     if (disposed) return;
@@ -156,6 +171,7 @@ export function createWristMenuWatch(button: THREE.Mesh): WristMenuWatch {
     setUpdateAvailable,
     setVisible,
     updateTouch,
+    touchOutOfReach,
     get near() {
       return near;
     },

@@ -111,7 +111,7 @@ import {
 } from './ui-poses';
 import { createWidgetPoseStore } from './widget-poses';
 import { type ClockWidget, createClockWidget, type WidgetKind } from './widgets';
-import { createWristMenuWatch } from './wrist-menu-watch';
+import { createWristMenuWatch, WRIST_WATCH_PROBE_REACH } from './wrist-menu-watch';
 
 type InputKind = 'hand' | 'controller';
 type InputMode =
@@ -813,6 +813,7 @@ export function createWorkspaceScene(
   const wristWatch = createWristMenuWatch(wristMenuButton);
   let wristMenuLastPressed = Number.NEGATIVE_INFINITY;
   scene.add(wristWatch.root);
+  const watchProbeCenter = new THREE.Vector3();
   const handInputStates = new Map<THREE.Group, HandInputState>();
   const handTrackingLost = new Set<THREE.Group>();
   const handGrabActions = new Map<
@@ -2136,9 +2137,17 @@ export function createWorkspaceScene(
           rightVisual.root.userData.wristBackNormal as THREE.Vector3,
         );
       const watchWasNear = wristWatch.near;
-      const watchPressed = wristWatch.updateTouch(
-        leftVisual?.root.visible ? leftVisual.contactProbes : null,
-      );
+      let watchPressed = false;
+      if (!leftVisual?.root.visible || !wristWatch.root.visible) wristWatch.updateTouch(null);
+      else if (
+        wristWatch.root
+          .getWorldPosition(watchProbeCenter)
+          .distanceTo(leftVisual.root.userData.palmPosition as THREE.Vector3) >=
+        WRIST_WATCH_PROBE_REACH
+      )
+        // Reading contactProbes skins the hand's probe vertices, which cannot touch from here.
+        wristWatch.touchOutOfReach();
+      else watchPressed = wristWatch.updateTouch(leftVisual.contactProbes);
       if (leftController && wristWatch.near && !watchWasNear) {
         releaseMouse(leftController);
         if (textSelection?.source === leftController && textSelection.phase === 'dragging')

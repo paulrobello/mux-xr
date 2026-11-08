@@ -5,7 +5,7 @@ vi.mock('../src/xr/labels', () => import('./helpers/labels'));
 
 import type { HandContactProbe } from '../src/xr/hand-contact';
 import { createScalableLabel } from '../src/xr/labels';
-import { createWristMenuWatch } from '../src/xr/wrist-menu-watch';
+import { createWristMenuWatch, WRIST_WATCH_EXTENT } from '../src/xr/wrist-menu-watch';
 
 function makeWatch(): ReturnType<typeof createWristMenuWatch> {
   return createWristMenuWatch(createScalableLabel('Menu', 0.052, 0.035));
@@ -38,6 +38,43 @@ describe('wrist menu watch', () => {
     expect(watch.updateTouch(touch)).toBe(false);
     expect(watch.updateTouch(far)).toBe(false);
     expect(watch.updateTouch(touch)).toBe(true);
+    watch.dispose();
+  });
+
+  it('keeps every touch surface within its published extent of the watch origin', () => {
+    const watch = makeWatch();
+    watch.update(new THREE.Vector3(), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1));
+    watch.root.updateMatrixWorld(true);
+    const origin = watch.root.getWorldPosition(new THREE.Vector3());
+    const vertex = new THREE.Vector3();
+    let farthest = 0;
+    for (const name of ['xr-wrist-menu-watch-case', 'xr-wrist-menu-watch-strap']) {
+      const mesh = watch.root.getObjectByName(name) as THREE.Mesh;
+      const positions = mesh.geometry.getAttribute('position');
+      for (let index = 0; index < positions.count; index++) {
+        vertex.fromBufferAttribute(positions, index).applyMatrix4(mesh.matrixWorld);
+        farthest = Math.max(farthest, vertex.distanceTo(origin));
+      }
+    }
+    expect(farthest).toBeGreaterThan(WRIST_WATCH_EXTENT - 0.01);
+    expect(farthest).toBeLessThanOrEqual(WRIST_WATCH_EXTENT);
+    watch.dispose();
+  });
+
+  it('treats an out-of-reach hand as withdrawn, and a hidden watch as never armed', () => {
+    const watch = makeWatch();
+    watch.update(new THREE.Vector3(), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1));
+    watch.setVisible(true);
+    const touch = [probe(watch, new THREE.Vector3(0, 0, 0.01))];
+    expect(watch.updateTouch(touch)).toBe(false);
+    expect(watch.near).toBe(true);
+    watch.touchOutOfReach();
+    expect(watch.near).toBe(false);
+    expect(watch.updateTouch(touch)).toBe(true);
+    watch.setVisible(false);
+    watch.touchOutOfReach();
+    watch.setVisible(true);
+    expect(watch.updateTouch(touch)).toBe(false);
     watch.dispose();
   });
 

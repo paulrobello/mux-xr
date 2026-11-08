@@ -70,6 +70,7 @@ interface SideModel {
   bones: Map<string, THREE.Bone>;
   probeVertices: number[];
   probes: HandContactProbe[];
+  probesStale: boolean;
 }
 interface PoseTransform {
   position: THREE.Vector3;
@@ -184,7 +185,7 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
       probes.push({ point: new THREE.Vector3(), radius: 0.012 });
     }
     scene.visible = false;
-    return { root: scene, mesh, bones, probeVertices, probes };
+    return { root: scene, mesh, bones, probeVertices, probes, probesStale: true };
   };
 
   const assetReady = Promise.allSettled(
@@ -295,18 +296,27 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
       pinchPoint.addVectors(tip, thumbTip).multiplyScalar(0.5);
       userData.keyborbPoint = pinchPoint;
     } else userData.keyborbPoint = undefined;
+    model.probesStale = true;
+  };
+
+  // CPU skinning reads each bone's live matrixWorld, so probes skinned on first read after a
+  // pose match skinning them inside update().
+  const skinProbes = (model: SideModel): HandContactProbe[] => {
+    if (!model.probesStale) return model.probes;
+    model.probesStale = false;
     for (let index = 0; index < model.probeVertices.length; index++) {
       const point = model.probes[index].point;
       model.mesh.getVertexPosition(model.probeVertices[index], point);
       point.applyMatrix4(model.mesh.matrixWorld);
     }
+    return model.probes;
   };
 
   return {
     root: fallback.root,
     get contactProbes() {
       const model = models[(fallback.root.userData.handedness as HandSide) ?? 'left'];
-      return loaded && model && fallback.root.visible ? model.probes : fallback.contactProbes;
+      return loaded && model && fallback.root.visible ? skinProbes(model) : fallback.contactProbes;
     },
     assetReady,
     update: fallback.update,

@@ -2,12 +2,17 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createStandardHand,
   STANDARD_HAND_ASSET_URLS,
   STANDARD_HAND_JOINTS,
 } from '../src/xr/standard-hand';
+import {
+  WRIST_WATCH_EXTENT,
+  WRIST_WATCH_NEAR_EXIT_GAP,
+  WRIST_WATCH_PROBE_REACH,
+} from '../src/xr/wrist-menu-watch';
 
 type Side = 'left' | 'right';
 type Capture = { side: Side; joints: Record<string, { matrix: number[] }> };
@@ -136,6 +141,74 @@ describe('standard XR hand', () => {
     }
     hand.dispose();
   });
+
+  it('skins contact probes only when they are read after a new pose', async () => {
+    const hand = createStandardHand({ loader: parsedLoader() });
+    await hand.assetReady;
+    const capture = neutral.hands[1];
+    const source = poseSource(capture);
+    const skinned = vi.spyOn(THREE.SkinnedMesh.prototype, 'getVertexPosition');
+    try {
+      hand.update(source, new THREE.PerspectiveCamera(), capture.side, 1 / 60);
+      expect(skinned).not.toHaveBeenCalled();
+      const count = hand.contactProbes.length;
+      expect(skinned).toHaveBeenCalledTimes(count);
+      const before = hand.contactProbes[0].point.clone();
+      expect(skinned).toHaveBeenCalledTimes(count);
+      source.position.x += 0.1;
+      source.updateMatrixWorld(true);
+      hand.update(source, new THREE.PerspectiveCamera(), capture.side, 1 / 60);
+      expect(hand.contactProbes[0].point.x - before.x).toBeCloseTo(0.1, 6);
+      expect(skinned).toHaveBeenCalledTimes(count * 2);
+    } finally {
+      skinned.mockRestore();
+      hand.dispose();
+    }
+  });
+
+  it.each([
+    ['standard', parsedLoader],
+    ['cartoon fallback', failingLoader],
+  ] as const)(
+    'keeps every %s hand contact probe within the wrist watch reach of the palm',
+    async (_, loader) => {
+      const hand = createStandardHand({ loader: loader() });
+      await hand.assetReady;
+      let farthest = 0;
+      const measure = (): void => {
+        const palm = hand.root.userData.palmPosition as THREE.Vector3;
+        for (const probe of hand.contactProbes)
+          farthest = Math.max(farthest, probe.point.distanceTo(palm) + probe.radius);
+      };
+      const captures = [
+        ...neutral.hands,
+        ...Object.values(gestures.sets).flatMap((set) => set.hands),
+      ];
+      for (const capture of captures) {
+        hand.update(poseSource(capture), new THREE.PerspectiveCamera(), capture.side, 1 / 60);
+        measure();
+      }
+      const pose = new THREE.Group();
+      pose.position.set(0.1, 1.2, -0.4);
+      pose.rotation.set(0.5, -0.3, 0.2);
+      pose.updateMatrixWorld(true);
+      for (const value of [0, 0.5, 1]) {
+        const gamepad = {
+          buttons: Array.from({ length: 6 }, () => ({ value, pressed: value > 0 })),
+        } as unknown as Gamepad;
+        for (const side of ['left', 'right'] as const)
+          for (let frame = 0; frame < 60; frame++) {
+            hand.updateController(pose, new THREE.PerspectiveCamera(), side, gamepad, 1 / 30);
+            measure();
+          }
+      }
+      expect(farthest).toBeGreaterThan(0.05);
+      expect(farthest).toBeLessThan(
+        WRIST_WATCH_PROBE_REACH - WRIST_WATCH_EXTENT - WRIST_WATCH_NEAR_EXIT_GAP,
+      );
+      hand.dispose();
+    },
+  );
 
   it('shows only the model for the side it is updated as and hides on tracking loss', async () => {
     const hand = createStandardHand({ loader: parsedLoader() });

@@ -33,6 +33,9 @@ const CPU_THROTTLE = Number(process.env.KEYBORB_PERF_THROTTLE ?? 4);
 const EYES = Number(process.env.KEYBORB_PERF_EYES ?? 2);
 // Comma-separated object names hidden in the Keyborb state, to attribute its cost.
 const ABLATE = (process.env.KEYBORB_PERF_ABLATE ?? '').split(',').filter(Boolean);
+// The left hand: 'far' at rest beside the body, 'watch' hovering by the right wrist watch, or
+// 'none' for the right hand alone.
+const LEFT_HAND = (process.env.KEYBORB_PERF_LEFT ?? 'far') as 'far' | 'watch' | 'none';
 const STATES = (process.env.KEYBORB_PERF_STATES ?? 'closed,standard,keyborb').split(',') as Array<
   'closed' | 'standard' | 'keyborb'
 >;
@@ -266,23 +269,26 @@ async function measure(
       ),
     'XR did not start',
   );
-  await page.evaluate(() => {
+  await page.evaluate((left) => {
     const w = window as unknown as FixtureWindow;
     const names = ['wrist', 'thumb-tip', 'middle-finger-tip', 'index-finger-tip'];
-    w.__questControllers[0].dispatchEvent({
-      type: 'connected',
-      data: {
-        handedness: 'right',
-        hand: new Map(names.map((name) => [name, { jointName: name }])),
-      },
-    } as never);
-    const hand = w.__questHands[0];
-    hand.joints.wrist.position.set(0.2, 1.2, -0.4);
-    hand.joints['thumb-tip'].position.set(0.26, 1.24, -0.4);
-    hand.joints['index-finger-tip'].position.set(0.2, 1.32, -0.4);
-    hand.joints['middle-finger-tip'].position.set(0.2, 1.37, -0.4);
-    for (const joint of Object.values(hand.joints)) joint.visible = true;
-  });
+    const connect = (index: number, handedness: 'left' | 'right', x: number): void => {
+      w.__questControllers[index].dispatchEvent({
+        type: 'connected',
+        data: { handedness, hand: new Map(names.map((name) => [name, { jointName: name }])) },
+      } as never);
+      const hand = w.__questHands[index];
+      const thumb = handedness === 'right' ? 0.06 : -0.06;
+      hand.joints.wrist.position.set(x, 1.2, -0.4);
+      hand.joints['thumb-tip'].position.set(x + thumb, 1.24, -0.4);
+      hand.joints['index-finger-tip'].position.set(x, 1.32, -0.4);
+      hand.joints['middle-finger-tip'].position.set(x, 1.37, -0.4);
+      for (const joint of Object.values(hand.joints)) joint.visible = true;
+    };
+    connect(0, 'right', 0.2);
+    // About 0.1 m from the right wrist, inside the watch's probe reach.
+    if (left !== 'none') connect(1, 'left', left === 'watch' ? 0.1 : -0.2);
+  }, LEFT_HAND);
   await frames(page, 10);
   if (state !== 'closed') {
     await openKeyboard(page);
@@ -470,6 +476,7 @@ async function main(): Promise<void> {
     cpuThrottle: CPU_THROTTLE,
     eyes: EYES,
     ablate: ABLATE,
+    leftHand: LEFT_HAND,
     states,
     errors,
   };

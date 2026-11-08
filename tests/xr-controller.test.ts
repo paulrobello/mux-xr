@@ -1,4 +1,4 @@
-const handPoses = vi.hoisted(() => ({ count: 0 }));
+const handPoses = vi.hoisted(() => ({ count: 0, probeReads: 0 }));
 vi.mock('../src/xr/labels', () => import('./helpers/labels'));
 vi.mock('../src/xr/standard-hand', async () => {
   const { createCartoonHand } = await import('../src/xr/cartoon-hand');
@@ -10,7 +10,13 @@ vi.mock('../src/xr/standard-hand', async () => {
         handPoses.count++;
         update(...pose);
       };
-      return hand;
+      const probes = hand.contactProbes;
+      return Object.defineProperty(hand, 'contactProbes', {
+        get: () => {
+          handPoses.probeReads++;
+          return probes;
+        },
+      });
     },
   };
 });
@@ -4534,6 +4540,28 @@ describe('native XR controller event routing', () => {
       touch(0, 440);
       expect(workspace.state.radialOpen).toBe(false);
       expect(play).not.toHaveBeenCalled();
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('reads the left hand contact probes only within reach of the wrist watch', () => {
+      const { workspace, container } = feedbackFixture();
+      connectController(0, [0, 0, 0, 0], 'right');
+      connectController(1, [0, 0, 0, 0], 'left');
+      const left = fakeXR.controllers[1] as THREE.Group;
+      left.position.x = -0.5;
+      fakeXR.frame?.(20);
+      const reads = handPoses.probeReads;
+      fakeXR.frame?.(40);
+      fakeXR.frame?.(60);
+      expect(handPoses.probeReads).toBe(reads);
+      const face = objectWithData(workspace, { inputAction: 'wristMenu' });
+      const visual = objectWithData(workspace, { handedness: 'left' });
+      workspace.scene.updateMatrixWorld(true);
+      const point = face.getWorldPosition(new THREE.Vector3());
+      left.position.add(point.sub(visual.userData.palmPosition as THREE.Vector3)).x -= 0.1;
+      fakeXR.frame?.(80);
+      expect(handPoses.probeReads).toBeGreaterThan(reads);
       workspace.dispose();
       container.remove();
     });
