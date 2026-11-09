@@ -5459,6 +5459,34 @@ describe('native XR controller event routing', () => {
     second.container.remove();
   });
 
+  it('fades the frame between the outline and the text with the glass opacity', () => {
+    const { workspace, container } = fixture();
+    const frame = workspace.scene
+      .getObjectByName('terminal-panel-pane-a')
+      ?.getObjectByName('terminal-frame') as THREE.Mesh<
+      THREE.BufferGeometry,
+      THREE.MeshStandardMaterial
+    >;
+    expect(frame.material.transparent).toBe(false);
+    expect(frame.material.depthWrite).toBe(true);
+    const opaqueVersion = frame.material.version;
+    workspace.setTerminalOpacity('pane-a', 0.3);
+    expect(frame.material.version).toBeGreaterThan(opaqueVersion);
+    expect(frame.material.opacity).toBeCloseTo(0.3);
+    expect(frame.material.transparent).toBe(true);
+    expect(frame.material.depthWrite).toBe(false);
+    const version = frame.material.version;
+    workspace.setTerminalOpacity('pane-a', 0.4);
+    expect(frame.material.opacity).toBeCloseTo(0.4);
+    expect(frame.material.version).toBe(version);
+    workspace.setTerminalOpacity('pane-a', 1);
+    expect(frame.material.opacity).toBe(1);
+    expect(frame.material.transparent).toBe(false);
+    expect(frame.material.depthWrite).toBe(true);
+    workspace.dispose();
+    container.remove();
+  });
+
   it('moves an entire layout without changing its geometry, input or grids', () => {
     const { workspace, actions, container } = fixture();
     workspace.arrangeTerminals('sphere');

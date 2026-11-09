@@ -5511,6 +5511,13 @@ export function createWorkspaceScene(
   };
   const applyTerminalOpacity = (panel: TerminalPanel): void => {
     setTerminalBackgroundOpacity(panel.screen.material, panel.opacity);
+    const frame = panel.frame.material;
+    const transparent = panel.opacity < 1;
+    frame.opacity = panel.opacity;
+    if (frame.transparent === transparent) return;
+    frame.transparent = transparent;
+    frame.depthWrite = !transparent;
+    frame.needsUpdate = true;
   };
   const getTerminalOpacity = (id: string): number => panels.get(id)?.opacity ?? 1;
   const setTerminalOpacity = (id: string, value: number): void => {
