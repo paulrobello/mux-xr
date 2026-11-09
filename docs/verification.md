@@ -418,3 +418,11 @@ Browser and XR **New terminal** controls send core `pane_create_request` over a 
 
 Run both checks only with `MUX_XR_PRIVATE_TEST=1` against an isolated daemon and a loopback streamer. The `created` cases add real default-shell windows to that daemon.
 
+## Agent roster
+
+The roster comes from core `AgentRoster` (sent on every connect, including `/ws?metadata=1`) and `AgentStateChanged` deltas, which the streamer has pushed in mux mode since core 0.58. A read-only probe of the LAN streamer (0.78.1, against the real default daemon) received `AgentRoster` entries such as pane `228` in workspace `+4`, and the tree listed `%228` in workspace `+4`, which confirms the `%N` join. No input, resize or state change was sent to that daemon.
+
+`make agent-roster-app-check` ran the built app in headless Chromium against a private par-mux 0.80.0 daemon (its own `--socket` and `--state-dir`) and the 0.78.1 mux streamer on loopback port 4241. Stand-in `claude` and `codex` processes ran in the private panes, and agent states were set with `pane.report_agent` hook reports. The working state arrived in the connect snapshot. Blocked and question changes arrived as live deltas without a reload. Clicking the question row attached that pane, marked the row selected and sent zero resize messages. After `kill-pane`, the row left the list. There were no page errors. With `MUX_XR_REASON_ONLY=1`, after a fresh private streamer start, the row showed the reason "pick a plan". Load average was 89 to 97, so these are functional checks, not timing measurements, and no fleet window was booked. Evidence is under `.local/evidence/agent-roster`.
+
+The same runs exposed three core faults, filed on the core board (card 01a1c28e). The streamer roster drops `report-state` claims (`source=self`). Live deltas carry no reason, and the cached entry loses it, so later snapshots omit it too. A killed pane can stay in the streamer's roster cache. The app hides that ghost by listing only panes the hierarchy has. XR dispatch is covered by `tests/xr-controller.test.ts` and `tests/hierarchy-navigator.test.ts`. Physical Quest use remains an owner check.
+

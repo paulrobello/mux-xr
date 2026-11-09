@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import type { PaneDescriptor } from '../contracts';
+import {
+  type AgentRosterRow,
+  type AgentStateTone,
+  agentStateTone,
+} from '../workspace/agent-roster';
 import type { HierarchyStyle } from '../workspace/hierarchy-style';
 import type { PaneCreationState } from '../workspace/pane-create';
 import { createScalableLabel, disposeScalableLabel } from './labels';
@@ -11,6 +16,14 @@ const IVORY = '#dce7ed';
 const TEAL = '#3c91a0';
 const MUTED_TEAL = '#1d4c59';
 const DARK = '#102832';
+const AGENTS_KEY = 'agents:roster';
+const AGENT_TONE_COLORS: Record<AgentStateTone, string> = {
+  attention: '#f0785a',
+  working: '#66d5e7',
+  idle: IVORY,
+  done: '#6ecfa8',
+  unknown: '#9aabb6',
+};
 
 export interface HierarchyNavigation {
   path: string[];
@@ -29,10 +42,13 @@ type InternalNavigator = HierarchyNavigator & { disposeResources(): void };
 
 interface Node {
   key: string;
-  kind: 'workspace' | 'session' | 'window' | 'pane';
+  kind: 'agents' | 'workspace' | 'session' | 'window' | 'pane';
   title: string;
   children: Node[];
   pane?: PaneDescriptor;
+  /** Set on agent-roster pane nodes; colours the node by agent state. */
+  tone?: AgentStateTone;
+  helpText?: string;
 }
 
 interface DrawnNode {
@@ -50,7 +66,34 @@ function keyFor(kind: Node['kind'], scope: string[]): string {
   return `${kind}:${scope.map(keyPart).join('/')}`;
 }
 
-function buildTree(panes: readonly PaneDescriptor[]): Node[] {
+function agentsNode(
+  panes: readonly PaneDescriptor[],
+  agents: readonly AgentRosterRow[],
+): Node | undefined {
+  const byId = new Map(panes.map((pane) => [pane.id, pane]));
+  const children: Node[] = [];
+  for (const row of agents) {
+    const pane = byId.get(row.paneId);
+    if (!pane) continue;
+    const state = row.stalled ? `${row.state} · stalled` : row.state;
+    children.push({
+      key: `agent:${keyPart(row.paneId)}`,
+      kind: 'pane',
+      title: `${row.agent} · ${state}`,
+      children: [],
+      pane,
+      tone: agentStateTone(row.state),
+      helpText: `${row.agent} · ${state} · ${row.title}${row.reason ? ` · ${row.reason}` : ''} · Open pane`,
+    });
+  }
+  if (!children.length) return undefined;
+  return { key: AGENTS_KEY, kind: 'agents', title: `Agents (${children.length})`, children };
+}
+
+function buildTree(
+  panes: readonly PaneDescriptor[],
+  agents: readonly AgentRosterRow[] = [],
+): Node[] {
   const workspaces = new Map<string, Node>();
   for (const pane of panes) {
     let workspace = workspaces.get(pane.workspaceId);
@@ -101,7 +144,9 @@ function buildTree(panes: readonly PaneDescriptor[]): Node[] {
     for (const node of nodes) sort(node.children);
     return nodes;
   };
-  return sort([...workspaces.values()]);
+  const tree = sort([...workspaces.values()]);
+  const roster = agentsNode(panes, agents);
+  return roster ? [roster, ...tree] : tree;
 }
 
 function descendants(node: Node, path: string[]): Node | undefined {
@@ -167,9 +212,11 @@ export function createHierarchyNavigator(
     available: true,
     pending: false,
   },
+  agentSource: readonly AgentRosterRow[] | (() => readonly AgentRosterRow[]) = [],
 ): HierarchyNavigator {
   const creation = typeof creationSource === 'function' ? creationSource() : creationSource;
-  const tree = buildTree(panes);
+  const agents = typeof agentSource === 'function' ? agentSource() : agentSource;
+  const tree = buildTree(panes, agents);
   const normalized = normalizeNavigation(tree, navigation);
   const root = new THREE.Group();
   root.name = 'hierarchy-navigator';
@@ -311,16 +358,18 @@ export function createHierarchyNavigator(
         nextPath.length === normalized.path.length &&
         node.key === normalized.path.at(-1)
         ? AMBER
-        : node.kind === 'pane'
-          ? IVORY
-          : breadcrumb
-            ? MUTED_TEAL
-            : TEAL,
+        : node.tone
+          ? AGENT_TONE_COLORS[node.tone]
+          : node.kind === 'pane'
+            ? IVORY
+            : breadcrumb
+              ? MUTED_TEAL
+              : TEAL,
     );
     const geometry =
       node.kind === 'pane'
         ? sharedGeometry('pane-cartridge', () => new THREE.OctahedronGeometry(0.105, 0))
-        : node.kind === 'workspace'
+        : node.kind === 'workspace' || node.kind === 'agents'
           ? sharedGeometry('node-workspace', () => new THREE.IcosahedronGeometry(0.2, 0))
           : node.kind === 'session'
             ? sharedGeometry('node-session', () => new THREE.DodecahedronGeometry(0.15, 0))
@@ -331,7 +380,9 @@ export function createHierarchyNavigator(
       inputAction: action,
       hierarchyPath: nextPath,
       hierarchyPage: action === 'pane' ? undefined : 0,
-      helpText: `${node.title} · ${node.kind === 'pane' ? 'Open pane' : `Open ${node.kind}`}`,
+      helpText:
+        node.helpText ??
+        `${node.title} · ${node.kind === 'pane' ? 'Open pane' : `Open ${node.kind}`}`,
       originalTitle: node.title,
       ...(node.pane ? { paneId: node.pane.id } : {}),
     });
@@ -339,8 +390,8 @@ export function createHierarchyNavigator(
     if (nextPath.length === normalized.path.length + 1) rotatingBodies.push(mesh);
     const label = createScalableLabel(
       node.title,
-      node.kind === 'workspace' ? 0.62 : 0.48,
-      node.kind === 'workspace' ? 0.13 : 0.105,
+      node.kind === 'workspace' || node.kind === 'agents' ? 0.62 : 0.48,
+      node.kind === 'workspace' || node.kind === 'agents' ? 0.13 : 0.105,
       { background: DARK },
     );
     label.position.set(0, -0.22, 0.2);
@@ -361,7 +412,9 @@ export function createHierarchyNavigator(
       inputAction: action,
       hierarchyPath: nextPath,
       hierarchyPage: action === 'pane' ? undefined : 0,
-      helpText: `${node.title} · ${node.kind === 'pane' ? 'Open pane' : `Open ${node.kind}`}`,
+      helpText:
+        node.helpText ??
+        `${node.title} · ${node.kind === 'pane' ? 'Open pane' : `Open ${node.kind}`}`,
       originalTitle: node.title,
       ...(node.pane ? { paneId: node.pane.id } : {}),
     });
@@ -612,6 +665,23 @@ export function createHierarchyNavigator(
       ready ? TEAL : MUTED_TEAL,
     );
   }
+  const rosterNode = tree[0]?.key === AGENTS_KEY ? tree[0] : undefined;
+  if (rosterNode && normalized.path.length > 0 && normalized.path[0] !== AGENTS_KEY) {
+    const attention = rosterNode.children.some((node) => node.tone === 'attention');
+    addNavigationControl(
+      rosterNode.title,
+      [AGENTS_KEY],
+      new THREE.Vector3(1.25, 0.9, 0.12),
+      {
+        inputAction: 'hierarchyNode',
+        hierarchyPath: [AGENTS_KEY],
+        hierarchyPage: 0,
+        helpText: attention ? 'An agent needs attention · Open agents' : 'Open agents',
+        originalTitle: rosterNode.title,
+      },
+      attention ? AGENT_TONE_COLORS.attention : TEAL,
+    );
+  }
   for (const item of drawn) {
     if (item.path.length === 0) continue;
     const parentKey = item.path[item.path.length - 1];
@@ -659,6 +729,7 @@ export function createHierarchyNavigator(
         attachedPaneIds,
         envMap,
         creationSource,
+        agentSource,
       ) as InternalNavigator;
       const outgoing = [...root.children];
       const incoming = [...next.root.children];

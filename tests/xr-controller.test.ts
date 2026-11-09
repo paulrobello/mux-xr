@@ -3827,6 +3827,58 @@ describe('native XR controller event routing', () => {
     },
   );
 
+  it('opens an agent pane from the coalesced live Agents shortcut in the hierarchy', () => {
+    vi.useFakeTimers();
+    try {
+      const { workspace, actions, left, right, container } = fixture();
+      const target = pane('pane-c', 'Agent shell');
+      workspace.setAvailablePanes([left.pane, right.pane, target]);
+      workspace.showInput('panes');
+      settleHierarchy();
+      const row = (state: string) => ({
+        paneId: 'pane-c',
+        agent: 'claude',
+        state,
+        reason: state === 'question' ? 'Pick a plan' : '',
+        workspace: 'workspace',
+        project: '',
+        paneLabel: '',
+        stalled: false,
+        lastActivityAt: 0,
+        workspaceName: 'Workspace',
+        title: 'Agent shell',
+      });
+      expect(() => objectWithData(workspace, { originalTitle: 'Agents (1)' })).toThrow();
+      // A burst of state flips rebuilds the menu once, with the latest rows.
+      workspace.setAgentRoster([row('working')]);
+      workspace.setAgentRoster([row('question')]);
+      expect(() => objectWithData(workspace, { originalTitle: 'Agents (1)' })).toThrow();
+      vi.advanceTimersByTime(400);
+      expect(objectWithData(workspace, { originalTitle: 'Agents (1)' }).userData.helpText).toBe(
+        'An agent needs attention · Open agents',
+      );
+      const timers = vi.getTimerCount();
+      workspace.setAgentRoster([{ ...row('question'), lastActivityAt: 99 }]);
+      expect(vi.getTimerCount()).toBe(timers);
+      hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Agents (1)' });
+      settleHierarchy();
+      expect(
+        objectWithData(workspace, { inputAction: 'pane', paneId: 'pane-c' }).userData.originalTitle,
+      ).toBe('claude · question');
+      hit(workspace, { inputAction: 'pane', paneId: 'pane-c' });
+      expect(actions.selectPane).toHaveBeenLastCalledWith('pane-c');
+      workspace.showInput('panes');
+      settleHierarchy();
+      workspace.setAgentRoster([]);
+      vi.advanceTimersByTime(400);
+      expect(() => objectWithData(workspace, { originalTitle: 'claude · question' })).toThrow();
+      workspace.dispose();
+      container.remove();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('creates a terminal from the session hierarchy and explains refusals', () => {
     const { workspace, actions, container } = fixture();
     const createPane = vi.fn();

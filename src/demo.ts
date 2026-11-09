@@ -4,6 +4,7 @@ import type {
   TerminalSurface,
   WorkspaceSnapshot,
 } from './contracts';
+import type { AgentRosterEntry } from './workspace/agent-roster';
 
 export const demoSnapshot: WorkspaceSnapshot = {
   panes: [
@@ -33,6 +34,21 @@ export const demoSnapshot: WorkspaceSnapshot = {
     },
   ],
 };
+
+/** Synthetic roster for the demo preview: one agent waiting on a question. */
+export const demoAgents: AgentRosterEntry[] = [
+  {
+    paneId: 'demo-2',
+    agent: 'claude',
+    state: 'question',
+    reason: 'Approve the build plan?',
+    workspace: 'demo-work',
+    project: 'mux-xr',
+    paneLabel: 'Agent activity',
+    stalled: false,
+    lastActivityAt: 0,
+  },
+];
 
 export function createDemoSurface(pane: PaneDescriptor): TerminalSurface {
   const canvas = document.createElement('canvas');

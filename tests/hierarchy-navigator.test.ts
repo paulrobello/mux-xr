@@ -1,3 +1,4 @@
+import { create } from '@bufbuild/protobuf';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -26,6 +27,8 @@ vi.mock('troika-three-text', () => ({
 }));
 
 import type { PaneDescriptor } from '../src/contracts';
+import { AgentEntrySchema } from '../src/terminal/vendor/terminal_pb';
+import { agentRosterRows, normalizeAgentEntry } from '../src/workspace/agent-roster';
 import { createHierarchyNavigator } from '../src/xr/hierarchy-navigator';
 import { UI_ENV_MAP_INTENSITY } from '../src/xr/ui-environment';
 
@@ -442,5 +445,70 @@ describe('volumetric hierarchy navigator', () => {
     expect(disabled.every((object) => object.userData.createAvailable === false)).toBe(true);
     expect(disabled[0].userData.helpText).toBe('Terminal creation is turned off.');
     off.dispose();
+  });
+
+  it('groups agent panes under an Agents node that opens them through the pane action', () => {
+    const panes = [pane('%2', 'ws'), pane('%3', 'ws'), pane('%4', 'ws')];
+    const rows = agentRosterRows(
+      [
+        normalizeAgentEntry(
+          create(AgentEntrySchema, { paneId: 2, agent: 'claude', state: 'idle' }),
+        ),
+        normalizeAgentEntry(
+          create(AgentEntrySchema, {
+            paneId: 3,
+            agent: 'codex',
+            state: 'blocked',
+            reason: 'needs approval',
+          }),
+        ),
+        normalizeAgentEntry(create(AgentEntrySchema, { paneId: 9, agent: 'gone', state: 'idle' })),
+      ],
+      panes,
+    );
+    const home = createHierarchyNavigator(
+      panes,
+      'helix',
+      { path: [], page: 0 },
+      new Set(),
+      null,
+      undefined,
+      rows,
+    );
+    const group = nodeMeshes(home).find(
+      (object) =>
+        object.userData.inputAction === 'hierarchyNode' &&
+        object.userData.hierarchyPath?.[0] === 'agents:roster',
+    );
+    expect(group?.userData.originalTitle).toBe('Agents (2)');
+    home.dispose();
+    let roster = rows;
+    const opened = createHierarchyNavigator(
+      panes,
+      'helix',
+      { path: ['agents:roster'], page: 0 },
+      new Set(['%3']),
+      null,
+      undefined,
+      () => roster,
+    );
+    const agentPanes = nodeMeshes(opened).filter(
+      (object) => object.userData.inputAction === 'pane' && object.type === 'Mesh',
+    );
+    expect([...new Set(agentPanes.map((object) => object.userData.paneId))]).toEqual(['%2', '%3']);
+    const blockedPane = agentPanes.find((object) => object.userData.paneId === '%3');
+    expect(blockedPane?.userData.originalTitle).toBe('codex · blocked');
+    expect(blockedPane?.userData.helpText).toContain('needs approval');
+    const blockedColor = (blockedPane as THREE.Mesh).material as THREE.MeshStandardMaterial;
+    const idlePane = agentPanes.find((object) => object.userData.paneId === '%2');
+    const idleColor = (idlePane as THREE.Mesh).material as THREE.MeshStandardMaterial;
+    expect(blockedColor.color.getHexString()).not.toBe(idleColor.color.getHexString());
+    const attached = opened.root.children.filter((object) => object.userData.attachedRing);
+    expect(attached).toHaveLength(1);
+    roster = [];
+    opened.navigate({ path: ['agents:roster'], page: 0 });
+    opened.update(1, new THREE.PerspectiveCamera());
+    expect(opened.root.userData.hierarchyPath).toEqual([]);
+    opened.dispose();
   });
 });

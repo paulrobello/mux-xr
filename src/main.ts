@@ -8,7 +8,7 @@ import type {
   WorkspaceActions,
   WorkspaceSnapshot,
 } from './contracts';
-import { createDemoSurface, demoSnapshot } from './demo';
+import { createDemoSurface, demoAgents, demoSnapshot } from './demo';
 import { createDesktopPanels, type DesktopPanels } from './desktop/panels';
 import { loadObservatory } from './environment';
 import { createLocalSpeechRecognition, isLocalSpeechSupported } from './local-speech';
@@ -24,6 +24,7 @@ import { createTerminalSurface } from './terminal';
 import { mountWorkspaceUI, type WorkspaceSettings, type WorkspaceUI } from './ui';
 import { createUpdateChecker, type UpdateChecker } from './update-check';
 import { shouldAutoReload } from './update-policy';
+import { agentRosterRows, createAgentRosterStore } from './workspace/agent-roster';
 import { initialPaneSelection } from './workspace/initial';
 import {
   createOpenViewsStore,
@@ -54,6 +55,7 @@ let stopMetadata: (() => void) | undefined;
 let refreshMetadata: (() => void) | undefined;
 let autoAttachPending = true;
 const openViewsStore = createOpenViewsStore();
+const agentRoster = createAgentRosterStore();
 let pendingOpenViews: OpenViewsProfile | null = null;
 let pauseViewPersistence = 0;
 let lastLayoutRevision = 0;
@@ -91,6 +93,12 @@ const paneCreator = createPaneCreator({
   notify: (message) => scene?.setNotice(message),
   onChange: (state) => publishPaneCreation(demo ? DEMO_CREATION : state),
 });
+
+function syncAgentRoster(): void {
+  const rows = agentRosterRows(demo ? demoAgents : agentRoster.entries(), snapshot.panes);
+  ui?.setAgentRoster(rows);
+  scene?.setAgentRoster(rows);
+}
 
 function publishPaneCreation(state: PaneCreationState): void {
   ui?.setPaneCreation(state);
@@ -307,6 +315,7 @@ function applySnapshot(next: WorkspaceSnapshot, authoritative = true): void {
   withoutViewPersistence(() => {
     snapshot = next;
     ui.update(next);
+    syncAgentRoster();
     scene.setAvailablePanes(next.panes);
     const valid = new Set(next.panes.map((pane) => pane.id));
     for (const id of [...surfaces.keys()]) if (!valid.has(id)) closePane(id);
@@ -347,6 +356,7 @@ function startDemo(): void {
   pendingOpenViews = null;
   pendingRestoreNotice = null;
   demo = true;
+  agentRoster.clear();
   autoAttachPending = true;
   paneCreator.reset();
   ui.setDemoMode(true);
@@ -359,6 +369,7 @@ async function connect(nextEndpoint: string): Promise<void> {
   const current = ++generation;
   withoutViewPersistence(detachAll);
   demo = false;
+  agentRoster.clear();
   autoAttachPending = true;
   pendingRestoreNotice = null;
   endpoint = nextEndpoint;
@@ -380,6 +391,14 @@ async function connect(nextEndpoint: string): Promise<void> {
       },
       (message) => {
         if (current === generation) notice(message);
+      },
+      {
+        replace: (entries) => {
+          if (current === generation) agentRoster.replace(entries);
+        },
+        apply: (entry, released) => {
+          if (current === generation) agentRoster.apply(entry, released);
+        },
       },
     );
     if (current !== generation) connection.disconnect();
@@ -481,6 +500,7 @@ ui = mountWorkspaceUI(app, {
 });
 scene = createWorkspaceScene(ui.sceneHost, actions);
 publishPaneCreation(paneCreator.state);
+agentRoster.subscribe(syncAgentRoster);
 speechInput = createSpeechInput({
   recognitionFactory: isLocalSpeechSupported()
     ? () => {

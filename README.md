@@ -102,6 +102,12 @@ Controllers show the same hands. Trigger pressure curls the index finger, grip p
 
 Tracking loss hides the hand and arm, releases manipulation and cancels in-flight input. Open both pinches after tracking returns before starting another gesture. Desktop/browser hand fixtures verify software behavior only. Gesture comfort, occlusion recovery and typing precision still need real Quest 3 hand testing.
 
+### Agent roster
+
+When the streamer runs against a par-mux daemon it pushes the agent roster (core `AgentRoster` on connect, `AgentStateChanged` as states change) on the hierarchy socket. The browser sidebar lists it under **Agents**, above the workspace tree: rows stay in pane order, and each shows the state (question and blocked in amber, working in cyan, done in green), the agent kind, the pane title, the pane id and its workspace, plus the blocked or question reason when the streamer has one. The app redraws only when a shown field changes, and XR coalesces bursts of state changes into one rebuild. Click a row to attach and focus that pane, exactly like choosing it in the tree. In XR, the Panes hierarchy has an **Agents** group at Home, and an **Agents** shortcut next to Up on deeper levels that turns coral when an agent needs attention; its pane nodes are coloured by state and open the pane like any pane node. Rows only list panes the hierarchy currently has.
+
+Core streamers up to at least 0.80 drop `report-state` claims (`source=self`), send live updates without the reason, and can keep a killed pane in their roster cache, so a reason may appear only after the streamer restarts. These are tracked upstream.
+
 ### Mux hierarchy navigation
 
 The XR **Panes** surface presents the workspace/session/window/pane hierarchy as real 3D geometry. The default **Helix Navigator** arranges nodes around a compact helix; **Spatial Docks** places the same hierarchy in spatial dock groups. Choose **Hierarchy style** in browser Workspace settings, or use the native **Settings → Display → Mux tree** control. The choice is saved locally and stays synchronized between browser and native settings.
@@ -197,6 +203,7 @@ Arrangements keep the full terminal bounds above the Observatory deck or passthr
 - `MUX_XR_PRIVATE_TEST=1 MUX_XR_TEST_ROOT=/path/to/private/dist make hierarchy-check`: private loopback GPU check for both hierarchy styles, browser/native synchronization, navigation, screenshots and reload persistence.
 - `MUX_XR_PRIVATE_TEST=1 MUX_XR_TEST_ROOT=/path/to/private/dist make input-refinement-check`: private loopback Metal-GPU check for hierarchy, keyboard curvature, warped rims and injected fake speech recognition. It does not prove microphone, transcription service or physical Quest voice support.
 - `make e2e`: local native-GPU browser tests with explicitly synthetic protocol fixtures.
+- `MUX_XR_PRIVATE_TEST=1 MUX_XR_MUX_SOCKET=/private/par-mux.sock make agent-roster-app-check`: built app on a private loopback streamer; reports hook agent states, checks live roster rows, attaching a pane from its row with no resize, and removal of a killed pane. `MUX_XR_REASON_ONLY=1` instead checks the reason shown after a fresh streamer start. Its panes need running `claude`/`codex` processes so the daemon keeps the claims.
 - `make real-app-check`: actual built app against a private compatible core pair, requiring `MUX_XR_PRIVATE_TEST=1` and `MUX_XR_BASE_URL`. It issues two harmless marker commands, so use isolated test panes.
 - `MUX_XR_BASE_URL=http://127.0.0.1:4241 bun run scripts/xr-visual-check.ts`: native GPU rendering of the spatial keyboard using an explicit test XR camera/controller. This requires a Vite development server and does not replace headset testing.
 - `make live-check`: real-streamer terminal-adapter diagnostic; requires `MUX_XR_STREAMER` and two `MUX_XR_PANES`. This is separate from full hierarchy and headset acceptance.

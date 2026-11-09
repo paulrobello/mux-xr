@@ -2,6 +2,7 @@ import { create } from '@bufbuild/protobuf';
 import type { PaneDescriptor, WorkspaceSnapshot } from '../contracts';
 import { decodeServerMessage, encodeClientMessage } from '../terminal/protocol';
 import {
+  type AgentEntry,
   ClientMessageSchema,
   MuxTreeRequestSchema,
   type MuxTreeSnapshot,
@@ -47,10 +48,17 @@ export function hierarchyURL(endpoint: string): string {
   return url.toString();
 }
 
+/** Receives the par-mux agent roster the streamer pushes on the metadata socket. */
+export interface RosterHandlers {
+  replace(entries: readonly AgentEntry[]): void;
+  apply(entry: AgentEntry | undefined, released: boolean): void;
+}
+
 export async function connectHierarchy(
   endpoint: string,
   onSnapshot: (snapshot: WorkspaceSnapshot) => void,
   onError: (message: string) => void,
+  onRoster?: RosterHandlers,
 ): Promise<{ disconnect(): void; refresh(): void }> {
   const url = hierarchyURL(endpoint);
   let socket: WebSocket | undefined;
@@ -88,7 +96,11 @@ export async function connectHierarchy(
           clearTimeout(timer);
           attempts = 0;
           onSnapshot(normalizeTree(message.message.value));
-        } else if (message.message.case === 'error') onError(message.message.value.message);
+        } else if (message.message.case === 'agentRoster')
+          onRoster?.replace(message.message.value.agents);
+        else if (message.message.case === 'agentStateChanged')
+          onRoster?.apply(message.message.value.agent, message.message.value.released);
+        else if (message.message.case === 'error') onError(message.message.value.message);
       } catch {
         onError('The streamer sent an unsupported message. Check its protocol version.');
         current.close();

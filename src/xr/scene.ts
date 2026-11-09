@@ -37,6 +37,7 @@ import {
   validateTerminalFiltering,
 } from '../terminal/filtering';
 import { terminalKeyLabel } from '../terminal/protocol';
+import { type AgentRosterRow, agentRowsSignature } from '../workspace/agent-roster';
 import {
   DEFAULT_HIERARCHY_STYLE,
   type HierarchyStyle,
@@ -204,6 +205,8 @@ export interface WorkspaceScene {
   setDictationState(state: DictationState): void;
   setAvailablePanes(panes: PaneDescriptor[]): void;
   setPaneCreation(state: PaneCreationState): void;
+  /** Feed the agent roster; the panes menu shows it as an Agents group. */
+  setAgentRoster(rows: readonly AgentRosterRow[]): void;
   setQuickCommands(commands: QuickCommandEntry[]): void;
   showInput(mode: InputMode): void;
   hideInput(): void;
@@ -1149,6 +1152,9 @@ export function createWorkspaceScene(
   let hierarchyNavigator: HierarchyNavigator | null = null;
   let hierarchyNavigation: HierarchyNavigation = { path: [], page: 0 };
   let paneCreation: PaneCreationState = { available: true, pending: false };
+  const AGENT_ROSTER_COALESCE_MS = 400;
+  let agentRoster: AgentRosterRow[] = [];
+  let agentRosterSignature = '';
   let hierarchyOpened = false;
   let dictationCursor = 0;
   const dictationCaption = (): string => {
@@ -3668,6 +3674,7 @@ export function createWorkspaceScene(
         new Set(panels.keys()),
         uiEnvironment.texture,
         () => paneCreation,
+        () => agentRoster,
       );
       hierarchyNavigation = {
         path: hierarchyNavigator.root.userData.hierarchyPath as string[],
@@ -5878,6 +5885,27 @@ export function createWorkspaceScene(
     }
     refreshInputRoot('panes');
   };
+  let agentRosterRetry: ReturnType<typeof setTimeout> | undefined;
+  const refreshAgentRoster = (attempt = 0): void => {
+    clearTimeout(agentRosterRetry);
+    agentRosterRetry = undefined;
+    if (!inputRoot || inputMode !== 'panes') return;
+    // Same bounded wait as pane creation: never rebuild mid-transition.
+    if (hierarchyNavigator?.transitioning) {
+      if (attempt < 40) agentRosterRetry = setTimeout(() => refreshAgentRoster(attempt + 1), 100);
+      return;
+    }
+    refreshInputRoot('panes');
+  };
+  const setAgentRoster = (rows: readonly AgentRosterRow[]): void => {
+    const signature = agentRowsSignature(rows);
+    if (signature === agentRosterSignature) return;
+    agentRosterSignature = signature;
+    agentRoster = [...rows];
+    // Coalesce bursts of state flips into one rebuild so nodes do not churn under a reach.
+    if (agentRosterRetry === undefined && inputRoot && inputMode === 'panes')
+      agentRosterRetry = setTimeout(() => refreshAgentRoster(), AGENT_ROSTER_COALESCE_MS);
+  };
   const setAvailablePanes = (panes: PaneDescriptor[]): void => {
     availablePanes.splice(0, availablePanes.length, ...panes);
     for (const pane of panes) {
@@ -5889,6 +5917,8 @@ export function createWorkspaceScene(
     }
     if (inputRoot && inputMode === 'panes') {
       initializeHierarchy();
+      clearTimeout(agentRosterRetry);
+      agentRosterRetry = undefined;
       refreshInputRoot('panes');
     }
     notify();
@@ -6455,6 +6485,7 @@ export function createWorkspaceScene(
     if (disposed) return;
     disarmCommand();
     clearTimeout(paneCreationRetry);
+    clearTimeout(agentRosterRetry);
     if (armedControlTimer !== undefined) clearTimeout(armedControlTimer);
     armedControl = null;
     resetHandContacts(false);
@@ -6586,6 +6617,7 @@ export function createWorkspaceScene(
     setDictationState,
     setAvailablePanes,
     setPaneCreation,
+    setAgentRoster,
     setQuickCommands,
     showInput,
     hideInput,
