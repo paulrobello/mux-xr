@@ -3827,6 +3827,56 @@ describe('native XR controller event routing', () => {
     },
   );
 
+  it('creates a terminal from the session hierarchy and explains refusals', () => {
+    const { workspace, actions, container } = fixture();
+    const createPane = vi.fn();
+    actions.createPane = createPane;
+    workspace.showInput('panes');
+    hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Workspace' });
+    settleHierarchy();
+    hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Session' });
+    settleHierarchy();
+    hit(workspace, { inputAction: 'createPane', sessionId: 'session' });
+    expect(createPane).toHaveBeenCalledWith('session');
+    workspace.setPaneCreation({
+      available: false,
+      pending: false,
+      reason: 'Terminal creation is turned off on this streamer.',
+    });
+    settleHierarchy();
+    hit(workspace, { inputAction: 'createPane', createAvailable: false });
+    expect(createPane).toHaveBeenCalledTimes(1);
+    expect(workspace.state.notice).toBe('Terminal creation is turned off on this streamer.');
+    expect(actions.resizeGrid).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('applies a creation state change that arrives during a hierarchy transition', () => {
+    vi.useFakeTimers();
+    try {
+      const { workspace, container } = fixture();
+      workspace.showInput('panes');
+      hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Workspace' });
+      settleHierarchy();
+      hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Session' });
+      workspace.setPaneCreation({ available: true, pending: true, reason: 'Creating a terminal…' });
+      settleHierarchy();
+      workspace.setPaneCreation({ available: false, pending: false, reason: 'Turned off.' });
+      hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Window' });
+      workspace.setPaneCreation({ available: true, pending: false });
+      settleHierarchy();
+      vi.advanceTimersByTime(4000);
+      const control = objectWithData(workspace, { inputAction: 'createPane' });
+      expect(control.userData.createAvailable).toBe(true);
+      expect(control.userData.originalTitle).toBe('New terminal');
+      workspace.dispose();
+      container.remove();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   const openPaneLevel = (workspace: ReturnType<typeof createWorkspaceScene>): void => {
     workspace.showInput('panes');
     for (const title of ['Workspace', 'Session', 'Window']) {

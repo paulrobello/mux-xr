@@ -37,6 +37,7 @@ import {
 import { validateKeyboardCurvature } from '../workspace/keyboard-curvature';
 import type { KeyborbMode } from '../workspace/keyborb';
 import { validateKeyborbMode } from '../workspace/keyborb';
+import type { PaneCreationState } from '../workspace/pane-create';
 import {
   DEFAULT_WINDOW_PREFERENCES,
   validateWindowPreferences,
@@ -68,6 +69,7 @@ export interface UICallbacks {
   onDemo?(): void;
   onCommandsChange?(commands: QuickCommand[], scopeKey: string): void;
   onRefresh?(): void;
+  onCreatePane?(sessionId: string): void;
   onKeyboardBackgroundChange?(enabled: boolean): void;
   onResizeGrid?(paneId: string, cols: number, rows: number): boolean;
   onTerminalCurvature?(paneId: string, degrees: number): void;
@@ -101,6 +103,7 @@ export interface WorkspaceUI {
   update(snapshot: WorkspaceSnapshot): void;
   setConnection(status: TerminalStatus | 'idle', detail?: string): void;
   setDemoMode(enabled: boolean): void;
+  setPaneCreation(state: PaneCreationState): void;
   setActivePane(id: string | undefined): void;
   getSettings(): WorkspaceSettings;
   getCommands(): QuickCommand[];
@@ -424,6 +427,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   let snapshot: WorkspaceSnapshot = { panes: [] };
   let activePaneId: string | undefined;
   let attachedPaneIds: string[] = [];
+  let paneCreation: PaneCreationState = { available: true, pending: false };
   const paneStatuses = new Map<string, TerminalStatus>();
   let commands: QuickCommand[] = [];
   let sharedCommands: QuickCommand[] = [];
@@ -475,7 +479,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         `<button class="key" data-key="${escapeHtml(entry.key)}" data-modifier="${entry.modifier ?? ''}" style="--key-x:${entry.x};--key-y:${entry.y};--key-width:${entry.width};--key-height:${entry.height}" aria-pressed="false" aria-label="${escapeHtml(entry.key === 'Backspace' ? 'Backspace' : entry.label)}" title="${escapeHtml(keyboardTitle(entry.key))}">${escapeHtml(entry.label)}</button>`,
     )
     .join('');
-  root.innerHTML = `<style>${CSS}</style><header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. No process control.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="update-notice" data-update-notice hidden role="status"><span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button></div><div class="workspace-notice" data-notice hidden role="status"><span data-notice-text></span><button data-action="dismiss-notice" class="icon-btn" aria-label="Dismiss notice" title="Dismiss notice">×</button></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button><button data-action="pin-command" class="text-btn" title="Pin or unpin the selected quick command in XR">Pin / unpin</button><button data-action="export-commands" class="text-btn" title="Download every quick command for this server as JSON">Export</button><button data-action="import-commands" class="text-btn" title="Merge quick commands from an exported JSON file">Import</button><input type="file" accept="application/json,.json" data-command-import hidden></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${keyboardMarkup}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Highlight the pane at the center of your view.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
+  root.innerHTML = `<style>${CSS}</style><header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. Creates default-shell terminals only when the streamer allows it.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="update-notice" data-update-notice hidden role="status"><span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button></div><div class="workspace-notice" data-notice hidden role="status"><span data-notice-text></span><button data-action="dismiss-notice" class="icon-btn" aria-label="Dismiss notice" title="Dismiss notice">×</button></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button><button data-action="pin-command" class="text-btn" title="Pin or unpin the selected quick command in XR">Pin / unpin</button><button data-action="export-commands" class="text-btn" title="Download every quick command for this server as JSON">Export</button><button data-action="import-commands" class="text-btn" title="Merge quick commands from an exported JSON file">Import</button><input type="file" accept="application/json,.json" data-command-import hidden></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${keyboardMarkup}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Highlight the pane at the center of your view.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
   const keyboardElement = root.querySelector<HTMLElement>('[data-keyboard]');
   root
     .querySelector('style')
@@ -913,9 +917,20 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       for (const pane of panes) groups.set(pane[field], [...(groups.get(pane[field]) ?? []), pane]);
       return [...groups.values()];
     };
+    const createLabel = paneCreation.pending
+      ? 'Creating terminal…'
+      : paneCreation.available
+        ? 'New terminal'
+        : 'Creation unavailable';
+    const createButton = (sessionId: string, sessionName: string): string =>
+      `<button class="tree-create" data-create-session="${escapeHtml(sessionId)}" ${paneCreation.available && !paneCreation.pending ? '' : 'disabled'} aria-label="Create a new default-shell terminal in ${escapeHtml(sessionName)}" title="${escapeHtml(paneCreation.reason ?? `Create a new default-shell terminal in ${sessionName}`)}">${icon('plus')} ${createLabel}</button>`;
+    const createNote =
+      paneCreation.reason && (paneCreation.pending || !paneCreation.available)
+        ? `<div class="tree-create-note" role="status">${escapeHtml(paneCreation.reason)}</div>`
+        : '';
     const branch = (id: string, label: string, content: string): string =>
       `<details data-branch="${escapeHtml(id)}" ${expanded.get(id) !== false ? 'open' : ''}><summary>${escapeHtml(label)}</summary>${content}</details>`;
-    tree.innerHTML = `<div class="tree-daemon">Connected computer</div>${grouped(
+    tree.innerHTML = `<div class="tree-daemon">Connected computer</div>${createNote}${grouped(
       snapshot.panes,
       'workspaceId',
     )
@@ -941,7 +956,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
                         .join(''),
                     ),
                   )
-                  .join(''),
+                  .join('') + createButton(session[0].sessionId, session[0].sessionName),
               ),
             )
             .join(''),
@@ -1099,6 +1114,11 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     const target = event.target as HTMLElement;
     const button = target.closest<HTMLElement>('button');
     if (!button) return;
+    if (button.dataset.createSession) {
+      if (!(button as HTMLButtonElement).disabled)
+        callbacks.onCreatePane?.(button.dataset.createSession);
+      return;
+    }
     const paneId = button.dataset.pane ?? button.dataset.select;
     if (paneId) {
       selectPane(paneId);
@@ -1561,6 +1581,10 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       if (paneStatuses.get(paneId) === status) return;
       paneStatuses.set(paneId, status);
       renderPanes();
+    },
+    setPaneCreation(state) {
+      paneCreation = { ...state };
+      renderTree();
     },
     setDemoMode(enabled) {
       qs<HTMLElement>('.demo-badge').hidden = !enabled;

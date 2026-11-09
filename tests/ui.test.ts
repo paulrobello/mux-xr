@@ -1236,4 +1236,42 @@ describe('mux XR local UI state', () => {
     expect(ui.getCommands().map((item) => item.id)).toContain('keep');
     ui.destroy();
   });
+
+  it('creates terminals per session and shows why creation is unavailable', () => {
+    const root = document.createElement('div');
+    const created: string[] = [];
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onCreatePane: (sessionId) => created.push(sessionId),
+    });
+    const makePane = (id: string, sessionId: string) => ({
+      id,
+      workspaceId: 'w',
+      workspaceName: 'W',
+      sessionId,
+      sessionName: `Session ${sessionId}`,
+      windowId: `win-${id}`,
+      windowName: 'Win',
+      title: id,
+    });
+    ui.update({ panes: [makePane('%1', '$1'), makePane('%2', '$2')] });
+    const buttons = () => [...root.querySelectorAll<HTMLButtonElement>('[data-create-session]')];
+    expect(buttons().map((button) => button.dataset.createSession)).toEqual(['$1', '$2']);
+    buttons()[1].click();
+    expect(created).toEqual(['$2']);
+    ui.setPaneCreation({ available: true, pending: true, reason: 'Creating a terminal…' });
+    expect(buttons().every((button) => button.disabled)).toBe(true);
+    ui.setPaneCreation({
+      available: false,
+      pending: false,
+      reason: 'Terminal creation is turned off on this streamer.',
+    });
+    buttons()[0].click();
+    expect(created).toEqual(['$2']);
+    expect(buttons()[0].textContent).toContain('Creation unavailable');
+    expect(root.querySelector('.tree-create-note')?.textContent).toContain('turned off');
+    ui.setPaneCreation({ available: true, pending: false });
+    expect(root.querySelector('.tree-create-note')).toBeNull();
+    expect(buttons()[0].disabled).toBe(false);
+  });
 });

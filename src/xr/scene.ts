@@ -44,6 +44,7 @@ import {
 } from '../workspace/hierarchy-style';
 import { validateKeyboardCurvature } from '../workspace/keyboard-curvature';
 import { type KeyborbMode, keyborbEnabled, validateKeyborbMode } from '../workspace/keyborb';
+import type { PaneCreationState } from '../workspace/pane-create';
 import {
   DEFAULT_WINDOW_PREFERENCES,
   SCROLL_STRIP_SIDES,
@@ -202,6 +203,7 @@ export interface WorkspaceScene {
   setUISounds(enabled: boolean): void;
   setDictationState(state: DictationState): void;
   setAvailablePanes(panes: PaneDescriptor[]): void;
+  setPaneCreation(state: PaneCreationState): void;
   setQuickCommands(commands: QuickCommandEntry[]): void;
   showInput(mode: InputMode): void;
   hideInput(): void;
@@ -1146,6 +1148,7 @@ export function createWorkspaceScene(
   let inputRoot: THREE.Group | null = null;
   let hierarchyNavigator: HierarchyNavigator | null = null;
   let hierarchyNavigation: HierarchyNavigation = { path: [], page: 0 };
+  let paneCreation: PaneCreationState = { available: true, pending: false };
   let hierarchyOpened = false;
   let dictationCursor = 0;
   const dictationCaption = (): string => {
@@ -2030,7 +2033,8 @@ export function createWorkspaceScene(
       const action = object.userData.inputAction;
       if (
         (object as THREE.Mesh).isMesh &&
-        (action === 'pane' || (!paneOnly && action === 'hierarchyNode'))
+        (action === 'pane' ||
+          (!paneOnly && (action === 'hierarchyNode' || action === 'createPane')))
       )
         targets.push(object);
       for (const child of object.children) collect(child);
@@ -3663,6 +3667,7 @@ export function createWorkspaceScene(
         hierarchyNavigation,
         new Set(panels.keys()),
         uiEnvironment.texture,
+        () => paneCreation,
       );
       hierarchyNavigation = {
         path: hierarchyNavigator.root.userData.hierarchyPath as string[],
@@ -4562,6 +4567,19 @@ export function createWorkspaceScene(
         panel.texture.needsUpdate = true;
         if (inputRoot && inputMode === 'terminal') refreshInputRoot('terminal');
       }
+      return true;
+    }
+    if (action === 'createPane') {
+      if (hierarchyNavigator?.transitioning) return true;
+      if (!hit.userData.createAvailable) {
+        setNotice(
+          typeof hit.userData.helpText === 'string'
+            ? hit.userData.helpText
+            : 'Terminal creation is unavailable.',
+        );
+        return true;
+      }
+      if (typeof hit.userData.sessionId === 'string') actions.createPane?.(hit.userData.sessionId);
       return true;
     }
     if (action === 'pane') {
@@ -5847,6 +5865,19 @@ export function createWorkspaceScene(
     hierarchyNavigation = { path: [`workspace:${encodeURIComponent(workspaceId)}`], page: 0 };
     hierarchyOpened = true;
   };
+  let paneCreationRetry: ReturnType<typeof setTimeout> | undefined;
+  const setPaneCreation = (state: PaneCreationState, attempt = 0): void => {
+    paneCreation = { ...state };
+    clearTimeout(paneCreationRetry);
+    if (!inputRoot || inputMode !== 'panes') return;
+    // A rebuild mid-transition would cut the animation; retry until it settles (bounded).
+    if (hierarchyNavigator?.transitioning) {
+      if (attempt < 40)
+        paneCreationRetry = setTimeout(() => setPaneCreation(paneCreation, attempt + 1), 100);
+      return;
+    }
+    refreshInputRoot('panes');
+  };
   const setAvailablePanes = (panes: PaneDescriptor[]): void => {
     availablePanes.splice(0, availablePanes.length, ...panes);
     for (const pane of panes) {
@@ -6423,6 +6454,7 @@ export function createWorkspaceScene(
   const dispose = (): void => {
     if (disposed) return;
     disarmCommand();
+    clearTimeout(paneCreationRetry);
     if (armedControlTimer !== undefined) clearTimeout(armedControlTimer);
     armedControl = null;
     resetHandContacts(false);
@@ -6553,6 +6585,7 @@ export function createWorkspaceScene(
     setUISounds,
     setDictationState,
     setAvailablePanes,
+    setPaneCreation,
     setQuickCommands,
     showInput,
     hideInput,

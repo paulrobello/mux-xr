@@ -227,3 +227,39 @@ textarea {
     font-size: 10px;
   }
 }
+.mux-ui .tree-create {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 6px 9px;
+  padding: 6px 9px;
+  border: 1px dashed #3b5464;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cyan);
+  font-size: 12px;
+}
+.mux-ui .tree-create svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+.mux-ui .tree-create:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: #5c8790;
+}
+.mux-ui .tree-create:disabled {
+  color: #71818b;
+  cursor: default;
+}
+.mux-ui .tree-create-note {
+  margin: 0 5px 8px;
+  padding: 7px 8px;
+  border-left: 2px solid var(--amber);
+  color: #c9b48f;
+  font-size: 11px;
+  line-height: 1.4;
+}

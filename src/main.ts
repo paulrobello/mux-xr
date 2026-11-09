@@ -31,6 +31,11 @@ import {
   type OpenViewsProfile,
   resolveOpenViews,
 } from './workspace/open-views';
+import {
+  createPaneCreator,
+  type PaneCreationState,
+  requestPaneCreate,
+} from './workspace/pane-create';
 import { createWorkspaceScene, type WorkspaceScene } from './xr';
 import { createXREntryController, type XrEntryController } from './xr/entry';
 
@@ -66,6 +71,39 @@ let enteringXR = false;
 let xrEntryMode: 'vr' | 'ar' = 'vr';
 let xrEntry: XrEntryController;
 let speechInput: SpeechInput | undefined;
+const DEMO_CREATION: PaneCreationState = {
+  available: false,
+  pending: false,
+  reason: 'The demo preview cannot create terminals. Connect to a streamer.',
+};
+const paneCreator = createPaneCreator({
+  request: (anchorPaneId, sessionId, token, signal) => {
+    const current = generation;
+    return requestPaneCreate(endpoint, anchorPaneId, sessionId, {
+      signal,
+      onLateReply: (outcome) => {
+        if (current === generation) paneCreator.lateReply(outcome, token);
+      },
+    });
+  },
+  refreshTree: () => refreshMetadata?.(),
+  attach: (paneId) => selectPane(paneId),
+  notify: (message) => scene?.setNotice(message),
+  onChange: (state) => publishPaneCreation(demo ? DEMO_CREATION : state),
+});
+
+function publishPaneCreation(state: PaneCreationState): void {
+  ui?.setPaneCreation(state);
+  scene?.setPaneCreation(state);
+}
+
+function createPane(sessionId: string): void {
+  if (demo) {
+    scene.setNotice(DEMO_CREATION.reason ?? null);
+    return;
+  }
+  paneCreator.create(sessionId, snapshot.panes);
+}
 
 function maybeReloadUpdate(): void {
   if (shouldAutoReload(updateAvailable, scene.state.xrMode, enteringXR)) void reloadApp();
@@ -272,6 +310,7 @@ function applySnapshot(next: WorkspaceSnapshot, authoritative = true): void {
     scene.setAvailablePanes(next.panes);
     const valid = new Set(next.panes.map((pane) => pane.id));
     for (const id of [...surfaces.keys()]) if (!valid.has(id)) closePane(id);
+    if (authoritative && !demo) paneCreator.observeSnapshot(next.panes);
     if (autoAttachPending && authoritative && (next.panes.length || pendingOpenViews !== null)) {
       autoAttachPending = false;
       if (!demo && pendingOpenViews !== null) {
@@ -309,6 +348,7 @@ function startDemo(): void {
   pendingRestoreNotice = null;
   demo = true;
   autoAttachPending = true;
+  paneCreator.reset();
   ui.setDemoMode(true);
   applySnapshot(demoSnapshot);
   ui.setConnection('connected', 'Demo preview · synthetic terminals');
@@ -322,6 +362,7 @@ async function connect(nextEndpoint: string): Promise<void> {
   autoAttachPending = true;
   pendingRestoreNotice = null;
   endpoint = nextEndpoint;
+  paneCreator.reset();
   try {
     pendingOpenViews = openViewsStore.read(normalizeOpenViewsServer(endpoint));
   } catch {
@@ -360,6 +401,7 @@ const actions: WorkspaceActions = {
   },
   selectPane,
   closePane,
+  createPane,
   togglePaneConnection,
   sendText: (text) => {
     if (selectedId) sendText(selectedId, text);
@@ -396,6 +438,7 @@ ui = mountWorkspaceUI(app, {
   },
   onRefresh: () => refreshMetadata?.(),
   onSelectPane: (pane) => selectPane(pane.id),
+  onCreatePane: createPane,
   onClosePane: (pane) => closePane(pane.id),
   onTogglePaneConnection: (pane) => togglePaneConnection(pane.id),
   onSendText: sendText,
@@ -437,6 +480,7 @@ ui = mountWorkspaceUI(app, {
   onDictationDraftChange: (text) => speechInput?.editDraft(text),
 });
 scene = createWorkspaceScene(ui.sceneHost, actions);
+publishPaneCreation(paneCreator.state);
 speechInput = createSpeechInput({
   recognitionFactory: isLocalSpeechSupported()
     ? () => {

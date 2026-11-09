@@ -24,7 +24,13 @@ Browser checks need the Chromium revision pinned by Playwright. Install it with 
 
 ## Connect Real Panes
 
-The computer must run a compatible mux-enabled par-term-streamer against the desired par-mux socket. Configure the streamer endpoint in the sidebar. This app reuses core protobuf/zlib streaming and does not create or kill pane processes. Physical panel size and local zoom do not change terminal rows/columns.
+The computer must run a compatible mux-enabled par-term-streamer against the desired par-mux socket. Configure the streamer endpoint in the sidebar. This app reuses core protobuf/zlib streaming and never kills pane processes. Physical panel size and local zoom do not change terminal rows/columns.
+
+### Create terminals
+
+Each session in the browser workspace tree has a **New terminal** button. In XR, open Panes, choose a workspace and then a session, and select **New terminal** between Home and Up. Either control asks the streamer for one new default-shell window in that session (core `pane_create_request`, available since core 0.77.0). There is no command or name field. The new pane is attached once the hierarchy lists it. Existing panes and views are not replaced, resized or sent input.
+
+Creation is off unless the streamer runs with `--allow-pane-create`; enabling it on a running streamer means restarting it with that flag. The streamer does not advertise this setting, so the control starts enabled and learns from the first refusal. Refusals are shown in the workspace notice and keep the control disabled for that connection: creation turned off (`pane_create_disabled`), a read-only connection, or a streamer without a par-mux daemon. The request is never retried automatically. A daemon failure (`pane_create_failed`) or an unknown error can follow a window that was already created. So can a missing reply, which is what a streamer older than core 0.77.0 gives. In each of these cases the app keeps the control locked while it re-reads the hierarchy, for a few seconds or, after a timeout, for the 20 seconds a late reply is still accepted. It reports any new pane in that session without opening it. Otherwise it allows another attempt after a daemon failure, and disables creation until you reconnect after a missing reply.
 
 Full hierarchy browsing requires `mux_tree_request` / `mux_tree_snapshot` and `/ws?metadata=1`. Use the mux-enabled streamer and daemon from [core 0.78.1](https://github.com/paulrobello/par-term-emu-core-rust/releases/tag/v0.78.1) or a verified compatible build. Both official macOS ARM64 release binaries passed the real-app check. The plain streamer build lacks mux support, and a version string alone does not establish hierarchy support.
 

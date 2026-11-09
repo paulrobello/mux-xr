@@ -114,6 +114,8 @@ export interface WorkspaceSnapshot {
 export interface WorkspaceActions {
   selectPane(id: string): void;
   closePane(id: string): void;
+  /** Ask the streamer for one new default-shell terminal in a mux session. */
+  createPane?(sessionId: string): void;
   sendText(text: string): void;
   sendKey(key: string, modifiers?: KeyModifiers): void;
   sendMouse?(paneId: string, input: TerminalMouseInput): boolean;

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { PaneDescriptor } from '../contracts';
 import type { HierarchyStyle } from '../workspace/hierarchy-style';
+import type { PaneCreationState } from '../workspace/pane-create';
 import { createScalableLabel, disposeScalableLabel } from './labels';
 import { applyUIEnvironment } from './ui-environment';
 
@@ -162,7 +163,12 @@ export function createHierarchyNavigator(
   navigation: HierarchyNavigation,
   attachedPaneIds: ReadonlySet<string> = new Set(),
   envMap: THREE.Texture | null = null,
+  creationSource: PaneCreationState | (() => PaneCreationState) = {
+    available: true,
+    pending: false,
+  },
 ): HierarchyNavigator {
+  const creation = typeof creationSource === 'function' ? creationSource() : creationSource;
   const tree = buildTree(panes);
   const normalized = normalizeNavigation(tree, navigation);
   const root = new THREE.Group();
@@ -488,42 +494,37 @@ export function createHierarchyNavigator(
     }
   };
 
-  const addNavigationControl = (title: string, path: string[], position: THREE.Vector3): void => {
+  const addNavigationControl = (
+    title: string,
+    path: string[],
+    position: THREE.Vector3,
+    actionData?: Record<string, unknown>,
+    color = AMBER,
+  ): void => {
+    const data = actionData ?? {
+      inputAction: 'hierarchyNode',
+      hierarchyPath: path.slice(),
+      hierarchyPage: 0,
+      helpText: title,
+      originalTitle: title,
+    };
     const control = new THREE.Group();
-    control.name = `hierarchy-control-${title.toLowerCase()}`;
+    control.name = `hierarchy-control-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
     const hitDisc = new THREE.Mesh(
       sharedGeometry('navigation-control-hit', () => new THREE.CircleGeometry(0.118, 24)),
       navigationHitMaterial(),
     );
     hitDisc.position.z = -0.001;
-    setAction(hitDisc, {
-      inputAction: 'hierarchyNode',
-      hierarchyPath: path.slice(),
-      hierarchyPage: 0,
-      helpText: title,
-      originalTitle: title,
-    });
+    setAction(hitDisc, { ...data });
     control.add(hitDisc);
     const mesh = new THREE.Mesh(
       sharedGeometry('navigation-control', () => new THREE.TorusGeometry(0.1, 0.018, 8, 20)),
-      sharedMaterial(AMBER, 0.9),
+      sharedMaterial(color, 0.9),
     );
-    setAction(mesh, {
-      inputAction: 'hierarchyNode',
-      hierarchyPath: path.slice(),
-      hierarchyPage: 0,
-      helpText: title,
-      originalTitle: title,
-    });
+    setAction(mesh, { ...data });
     control.add(mesh);
     const label = createScalableLabel(title, 0.32, 0.08, { background: DARK, backplate: false });
-    setAction(label, {
-      inputAction: 'hierarchyNode',
-      hierarchyPath: path.slice(),
-      hierarchyPage: 0,
-      helpText: title,
-      originalTitle: title,
-    });
+    setAction(label, { ...data });
     label.traverse((child) => setAction(child, label.userData));
     control.add(label);
     labels.push(label);
@@ -586,6 +587,31 @@ export function createHierarchyNavigator(
     addNavigationControl('Home', [], new THREE.Vector3(-1.25, 1.2, 0.12));
     addNavigationControl('Up', normalized.path.slice(0, -1), new THREE.Vector3(1.25, 1.2, 0.12));
   }
+  const sessionNode =
+    normalized.path.length >= 2
+      ? descendants(
+          { key: '', kind: 'workspace', title: '', children: tree },
+          normalized.path.slice(0, 2),
+        )
+      : undefined;
+  const sessionPane = sessionNode?.children[0]?.children[0]?.pane;
+  if (sessionNode?.kind === 'session' && sessionPane) {
+    const ready = creation.available && !creation.pending;
+    const title = creation.pending ? 'Creating' : ready ? 'New terminal' : 'Unavailable';
+    addNavigationControl(
+      title,
+      normalized.path,
+      new THREE.Vector3(0, 1.2, 0.12),
+      {
+        inputAction: 'createPane',
+        sessionId: sessionPane.sessionId,
+        createAvailable: ready,
+        helpText: creation.reason ?? `Create a new default-shell terminal in ${sessionNode.title}`,
+        originalTitle: title,
+      },
+      ready ? TEAL : MUTED_TEAL,
+    );
+  }
   for (const item of drawn) {
     if (item.path.length === 0) continue;
     const parentKey = item.path[item.path.length - 1];
@@ -632,6 +658,7 @@ export function createHierarchyNavigator(
         nextNavigation,
         attachedPaneIds,
         envMap,
+        creationSource,
       ) as InternalNavigator;
       const outgoing = [...root.children];
       const incoming = [...next.root.children];

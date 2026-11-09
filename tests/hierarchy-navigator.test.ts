@@ -414,4 +414,33 @@ describe('volumetric hierarchy navigator', () => {
     expect(tori).toBeGreaterThan(0);
     navigator.dispose();
   });
+
+  it('offers terminal creation only inside a session and reflects availability', () => {
+    const panes = [pane('a', 'ws', '$2')];
+    const createControls = (navigator: ReturnType<typeof createHierarchyNavigator>) =>
+      nodeMeshes(navigator).filter((object) => object.userData.inputAction === 'createPane');
+    const top = createHierarchyNavigator(panes, 'helix', { path: ['workspace:ws'], page: 0 });
+    expect(createControls(top)).toHaveLength(0);
+    top.dispose();
+    const sessionPath = ['workspace:ws', 'session:ws/%242'];
+    const ready = createHierarchyNavigator(panes, 'helix', { path: sessionPath, page: 0 });
+    const controls = createControls(ready);
+    expect(controls.length).toBeGreaterThan(0);
+    expect(controls.every((object) => object.userData.sessionId === '$2')).toBe(true);
+    expect(controls.every((object) => object.userData.createAvailable === true)).toBe(true);
+    ready.dispose();
+    const off = createHierarchyNavigator(
+      panes,
+      'helix',
+      { path: [...sessionPath, 'window:ws/%242/window'], page: 0 },
+      new Set(),
+      null,
+      { available: false, pending: false, reason: 'Terminal creation is turned off.' },
+    );
+    const disabled = createControls(off);
+    expect(disabled.length).toBeGreaterThan(0);
+    expect(disabled.every((object) => object.userData.createAvailable === false)).toBe(true);
+    expect(disabled[0].userData.helpText).toBe('Terminal creation is turned off.');
+    off.dispose();
+  });
 });
