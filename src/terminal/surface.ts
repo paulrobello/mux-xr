@@ -10,7 +10,7 @@ import type {
   TerminalStatus,
   TerminalSurface,
 } from '../contracts';
-import { createTerminalPainter } from './painter';
+import { createTerminalPainter, type TerminalDamageHint } from './painter';
 import {
   createFocusMessage,
   createInputMessage,
@@ -143,6 +143,8 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   let readonly = false;
   let colorMode: TerminalColorMode = 'comfort';
   let generation = 0;
+  // Bumped when the grid changes size or resets; hints computed before that no longer address its rows.
+  let gridEpoch = 0;
   let bellPending = false;
   let bellAckEpoch = 0;
   type WriteContext = { generation: number; ackEpoch: number; liveOutput: boolean };
@@ -184,19 +186,29 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       notify();
     }
   };
-  const writeTerminal = (data: Uint8Array, token: number, liveOutput: boolean): void => {
+  const writeTerminal = (
+    data: Uint8Array,
+    token: number,
+    liveOutput: boolean,
+    damage: TerminalDamageHint | null = null,
+  ): void => {
     const context: WriteContext = { generation: token, ackEpoch: bellAckEpoch, liveOutput };
+    const epoch = gridEpoch;
     writeContexts.push(context);
     parsingContext = context;
     terminal.write(data, () => {
       const index = writeContexts.indexOf(context);
       if (index >= 0) writeContexts.splice(index, 1);
       if (parsingContext === context) parsingContext = null;
+      // Damage describes the screen after these bytes, so it lands once xterm has parsed them.
+      painter.noteOutput(token === generation && epoch === gridEpoch ? damage : null);
       queuePaint(() => token === generation);
     });
     if (parsingContext === context) parsingContext = null;
   };
-  const painter = createTerminalPainter(canvas, terminal);
+  const painter = createTerminalPainter(canvas, terminal, {
+    audit: (globalThis as { __muxXRDamageAudit?: boolean }).__muxXRDamageAudit === true,
+  });
   const paint = (emit = true): void => {
     if (renderQuality === 'hidden') return;
     pendingPaint = false;
@@ -371,8 +383,10 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
               cols = connected.cols;
               rows = connected.rows;
             }
+            gridEpoch += 1;
             terminal.resize(cols, rows);
             terminal.reset();
+            painter.resetDamage();
             invalidateSelection();
             const current = (): boolean => token === generation;
             if (connected.initialScreen?.length)
@@ -381,9 +395,16 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             setStatus('connected');
             break;
           }
-          case 'output':
-            writeTerminal(msg.message.value.data, token, true);
+          case 'output': {
+            const output = msg.message.value;
+            // Both fields absent means unknown damage; a resync frame arrives this way.
+            const damage =
+              output.damageGeneration === undefined
+                ? null
+                : { generation: output.damageGeneration, ranges: output.damage };
+            writeTerminal(output.data, token, true, damage);
             break;
+          }
           case 'bell':
             markBell(token, true);
             break;
@@ -391,7 +412,10 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             if (!validGrid(msg.message.value.cols, msg.message.value.rows)) break;
             cols = msg.message.value.cols;
             rows = msg.message.value.rows;
+            gridEpoch += 1;
             terminal.resize(cols, rows);
+            // A reflow moves rows, so the previous chunk's seam rows no longer apply.
+            painter.noteOutput(null);
             invalidateSelection();
             cancelPaint();
             queuePaint();
@@ -462,6 +486,9 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     },
     get dirtyRows() {
       return painter.dirtyRows;
+    },
+    get damageStats() {
+      return painter.damageStats;
     },
     get cols() {
       return cols;

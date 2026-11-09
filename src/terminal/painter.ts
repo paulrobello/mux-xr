@@ -1,5 +1,5 @@
 import type { IBufferCell, IBufferLine, Terminal } from '@xterm/xterm';
-import type { TerminalColorMode } from '../contracts';
+import type { TerminalColorMode, TerminalDamageStats } from '../contracts';
 import { terminalColor } from './colors';
 
 const CELL_WIDTH = 11;
@@ -8,6 +8,7 @@ const FONT_SIZE = 18;
 const DEFAULT_FOREGROUND = '#d8e1ef';
 const CANVAS_BACKGROUND = '#05070b';
 const MONOCHROME_BACKGROUND = '#070707';
+const MAX_PENDING_RANGES = 256;
 
 type SelectionPosition = { start: { x: number; y: number }; end: { x: number; y: number } } | null;
 type TerminalLike = Pick<Terminal, 'buffer'> & {
@@ -15,8 +16,20 @@ type TerminalLike = Pick<Terminal, 'buffer'> & {
 };
 type PainterContext = CanvasRenderingContext2D;
 
+/** Rows one output chunk changed, as the streamer reports them (inclusive, viewport-relative). */
+export interface TerminalDamageHint {
+  generation: bigint;
+  ranges: ReadonlyArray<{ startRow: number; endRow: number }>;
+}
+
+export interface TerminalPainterOptions {
+  /** Shadow-scan every row after a hinted paint and count rows the hint missed. */
+  audit?: boolean;
+}
+
 export interface TerminalPainter {
   readonly dirtyRows: Uint8Array;
+  readonly damageStats: TerminalDamageStats;
   paint(
     cols: number,
     rows: number,
@@ -24,11 +37,16 @@ export interface TerminalPainter {
     resolutionScale?: number,
   ): boolean;
   invalidate(): void;
+  /** Record one parsed output chunk; `null` means its damage is unknown. */
+  noteOutput(hint: TerminalDamageHint | null): void;
+  /** Forget damage tracking, as on a fresh connection; scans fully until the next hint. */
+  resetDamage(): void;
 }
 
 export function createTerminalPainter(
   canvas: HTMLCanvasElement,
   terminal: TerminalLike,
+  options: TerminalPainterOptions = {},
 ): TerminalPainter {
   let cachedCols = 0;
   let cachedRows = 0;
@@ -48,6 +66,40 @@ export function createTerminalPainter(
   let previousCursorX = -1;
   let previousSelectionKey = '';
   let previousViewportY = 0;
+  let previousBaseY = 0;
+  let previousBufferType: string | undefined;
+  // Damage tracking stays off until a valid hint arrives, so sources without
+  // hints (demo content, older streamers) keep scanning every row.
+  let tracking = false;
+  let forceFullScan = true;
+  let lastGeneration: bigint | undefined;
+  let pendingRanges: Array<[number, number]> = [];
+  // A glyph split at a relay chunk seam lands one chunk after its row was
+  // reported, so each chunk also rescans the previous chunk's rows; null means
+  // the previous chunk's rows are unknown.
+  let previousChunk: Array<[number, number]> | null = [];
+  let scanRows = new Uint8Array(0);
+  const damageStats: TerminalDamageStats = {
+    damageScans: 0,
+    fullScans: 0,
+    rowsScanned: 0,
+    rejectedHints: 0,
+    auditMisses: 0,
+    fullScanReasons: {},
+  };
+
+  const validRanges = (hint: TerminalDamageHint): Array<[number, number]> | null => {
+    if (lastGeneration !== undefined && hint.generation < lastGeneration) return null;
+    const ranges: Array<[number, number]> = [];
+    let previousEnd = -1;
+    for (const { startRow, endRow } of hint.ranges) {
+      if (!Number.isInteger(startRow) || !Number.isInteger(endRow)) return null;
+      if (startRow <= previousEnd || endRow < startRow) return null;
+      ranges.push([startRow, endRow]);
+      previousEnd = endRow;
+    }
+    return ranges;
+  };
 
   const selectionKey = (selection: SelectionPosition | undefined): string => {
     return selection
@@ -84,6 +136,15 @@ export function createTerminalPainter(
     cachedBgValue = new Int32Array(length);
     cachedFlags = new Uint8Array(length);
     dirtyRows = new Uint8Array(rows);
+    scanRows = new Uint8Array(rows);
+  };
+
+  const markRanges = (ranges: Array<[number, number]>, rows: number): boolean => {
+    for (const [start, end] of ranges) {
+      if (end >= rows) return false;
+      scanRows.fill(1, start, end + 1);
+    }
+    return true;
   };
 
   const setFillStyle = (ctx: PainterContext, value: string): void => {
@@ -238,12 +299,60 @@ export function createTerminalPainter(
         markSelectionRows(currentSelectionKey, active.viewportY);
       }
       const cell = active.getNullCell();
-      for (let row = 0; row < rows; row += 1) {
+      // Hints describe the live screen, so a scrolled-back view, a local
+      // scroll or a buffer switch rescans everything.
+      const reason = !tracking
+        ? 'untracked'
+        : forceFullScan
+          ? 'unhinted'
+          : full
+            ? 'invalidated'
+            : active.viewportY !== active.baseY
+              ? 'viewport'
+              : active.baseY !== previousBaseY
+                ? 'scrolled'
+                : active.viewportY !== previousViewportY
+                  ? 'viewport'
+                  : active.type !== previousBufferType
+                    ? 'buffer'
+                    : null;
+      scanRows.fill(0);
+      let scanAll = reason !== null;
+      if (!scanAll && !markRanges(pendingRanges, rows)) scanAll = true;
+      const fullReason = reason ?? (scanAll ? 'bounds' : null);
+      if (fullReason)
+        damageStats.fullScanReasons[fullReason] =
+          (damageStats.fullScanReasons[fullReason] ?? 0) + 1;
+      if (!scanAll) {
+        for (const row of [previousCursorRow, cursorRow])
+          if (row >= 0 && row < rows) scanRows[row] = 1;
+      }
+      const scanRow = (row: number): boolean => {
         const line = active.getLine(active.viewportY + row);
+        let changed = false;
         for (let col = 0; col < cols; col += 1) {
-          if (readCell(line?.getCell(col, cell), row * cols + col)) dirtyRows[row] = 1;
+          if (readCell(line?.getCell(col, cell), row * cols + col)) changed = true;
+        }
+        return changed;
+      };
+      for (let row = 0; row < rows; row += 1) {
+        if (!scanAll && !scanRows[row]) continue;
+        damageStats.rowsScanned += 1;
+        if (scanRow(row)) dirtyRows[row] = 1;
+      }
+      if (scanAll) damageStats.fullScans += 1;
+      else {
+        damageStats.damageScans += 1;
+        if (options.audit) {
+          for (let row = 0; row < rows; row += 1) {
+            if (scanRows[row] || !scanRow(row)) continue;
+            damageStats.auditMisses += 1;
+            dirtyRows[row] = 1;
+          }
         }
       }
+      pendingRanges = [];
+      forceFullScan = false;
       const cursorChanged = cursorRow !== previousCursorRow || active.cursorX !== previousCursorX;
       if (cursorChanged && previousCursorRow >= 0 && previousCursorRow < rows)
         dirtyRows[previousCursorRow] = 1;
@@ -275,10 +384,47 @@ export function createTerminalPainter(
       previousCursorX = active.cursorX;
       previousSelectionKey = currentSelectionKey;
       previousViewportY = active.viewportY;
+      previousBaseY = active.baseY;
+      previousBufferType = active.type;
       return changed;
     },
     invalidate(): void {
       invalidated = true;
+    },
+    get damageStats(): TerminalDamageStats {
+      return damageStats;
+    },
+    noteOutput(hint): void {
+      const ranges = hint ? validRanges(hint) : null;
+      if (!hint || !ranges) {
+        if (hint) damageStats.rejectedHints += 1;
+        forceFullScan = true;
+        previousChunk = null;
+        return;
+      }
+      tracking = true;
+      lastGeneration = hint.generation;
+      const seam = previousChunk;
+      previousChunk = ranges;
+      if (forceFullScan || seam === null) {
+        forceFullScan = true;
+        return;
+      }
+      // A hidden pane still parses output but does not paint; past this many
+      // queued ranges a full scan is cheaper than replaying them.
+      if (pendingRanges.length + seam.length + ranges.length > MAX_PENDING_RANGES) {
+        forceFullScan = true;
+        pendingRanges = [];
+        return;
+      }
+      pendingRanges.push(...seam, ...ranges);
+    },
+    resetDamage(): void {
+      tracking = false;
+      forceFullScan = true;
+      lastGeneration = undefined;
+      pendingRanges = [];
+      previousChunk = [];
     },
   };
 }

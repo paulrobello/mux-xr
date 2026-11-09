@@ -48,12 +48,28 @@ export interface TerminalCellPosition {
   row: number;
 }
 
+export interface TerminalDamageStats {
+  /** Paints that scanned only hinted rows. */
+  damageScans: number;
+  /** Paints that scanned every row. */
+  fullScans: number;
+  /** Rows read cell by cell, across all paints. */
+  rowsScanned: number;
+  /** Hints refused as invalid, each forcing a full scan. */
+  rejectedHints: number;
+  /** Audit mode only: rows that changed outside the hinted scan set. */
+  auditMisses: number;
+  /** Full scans by cause: untracked, unhinted, invalidated, viewport, scrolled, buffer, bounds. */
+  fullScanReasons: Record<string, number>;
+}
+
 export interface TerminalSurface {
   readonly serverId?: string;
   readonly canvas: HTMLCanvasElement;
   readonly pane: PaneDescriptor;
   readonly revision: number;
   readonly dirtyRows?: Uint8Array;
+  readonly damageStats?: Readonly<TerminalDamageStats>;
   readonly cols: number;
   readonly rows: number;
   readonly status: TerminalStatus;

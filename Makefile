@@ -63,6 +63,9 @@ terminal-shimmer-check:
 	bun run scripts/terminal-shimmer-check.ts
 terminal-capacity-check:
 	bun run scripts/terminal-capacity-check.ts
+.PHONY: damage-audit-check
+damage-audit-check:
+	bun run scripts/damage-audit-check.ts
 live-check:
 	bun run scripts/live-terminal-check.ts
 real-app-check:

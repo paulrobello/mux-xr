@@ -19,6 +19,8 @@ let fakeViewportY = 0;
 let selectionChanged: (() => void) | undefined;
 let fakeMarker: { line: number; dispose(): void } | undefined;
 let fakeBufferType = 'normal';
+// When set, write callbacks wait here as xterm's parse queue would.
+let deferredWrites: Array<() => void> | null = null;
 function basicFakeCell(chars: string): Record<string, unknown> {
   return {
     getWidth: () => 1,
@@ -81,7 +83,8 @@ vi.mock('@xterm/xterm', () => ({
     }
     public write(data: Uint8Array, callback?: () => void): void {
       fakeWrites.push(data);
-      callback?.();
+      if (deferredWrites && callback) deferredWrites.push(callback);
+      else callback?.();
     }
     public focus(): void {}
     public blur(): void {}
@@ -155,6 +158,7 @@ beforeEach(() => {
   selectionChanged = undefined;
   fakeMarker = undefined;
   fakeBufferType = 'normal';
+  deferredWrites = null;
   MockSocket.instances.length = 0;
   (globalThis as Record<string, unknown>).WebSocket = MockSocket;
   (globalThis as Record<string, unknown>).document = {
@@ -321,6 +325,112 @@ describe('terminal surface lifecycle', () => {
     expect(fakeWrites).toHaveLength(2);
     vi.runAllTimers();
     expect(surface.revision).toBe(revision + 1);
+    surface.dispose();
+    vi.useRealTimers();
+  });
+
+  it('passes streamed damage to the painter and full-scans damage-less frames', async () => {
+    vi.useFakeTimers();
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    surface.connect();
+    const ws = MockSocket.instances[0];
+    ws.open();
+    const connected = frame(
+      create(ServerMessageSchema, {
+        message: { case: 'connected', value: create(ConnectedSchema, { cols: 80, rows: 24 }) },
+      }),
+    );
+    const output = (damage?: { generation: bigint; rows: [number, number] }) =>
+      frame(
+        create(ServerMessageSchema, {
+          message: {
+            case: 'output',
+            value: create(OutputSchema, {
+              data: new TextEncoder().encode('x'),
+              ...(damage && {
+                damageGeneration: damage.generation,
+                damage: [{ startRow: damage.rows[0], endRow: damage.rows[1] }],
+              }),
+            }),
+          },
+        }),
+      );
+    ws.message(connected);
+    vi.runAllTimers();
+    const stats = surface.damageStats as NonNullable<typeof surface.damageStats>;
+    const scans = () => ({ full: stats.fullScans, damage: stats.damageScans });
+    ws.message(output({ generation: 5n, rows: [3, 4] }));
+    vi.runAllTimers();
+    const hinted = scans();
+    ws.message(output({ generation: 6n, rows: [3, 3] }));
+    vi.runAllTimers();
+    expect(scans()).toEqual({ full: hinted.full, damage: hinted.damage + 1 });
+    // A lagged viewer's resync frame carries no damage, so the next paint scans everything.
+    ws.message(output());
+    vi.runAllTimers();
+    expect(scans()).toEqual({ full: hinted.full + 1, damage: hinted.damage + 1 });
+    // A fresh connection forgets the generation, so an older one is not refused.
+    ws.message(connected);
+    vi.runAllTimers();
+    ws.message(output({ generation: 1n, rows: [0, 0] }));
+    vi.runAllTimers();
+    expect(stats.rejectedHints).toBe(0);
+    surface.dispose();
+    vi.useRealTimers();
+  });
+
+  it('full-scans output that was still queued when the grid resized', async () => {
+    vi.useFakeTimers();
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    surface.connect();
+    const ws = MockSocket.instances[0];
+    ws.open();
+    ws.message(
+      frame(
+        create(ServerMessageSchema, {
+          message: { case: 'connected', value: create(ConnectedSchema, { cols: 80, rows: 24 }) },
+        }),
+      ),
+    );
+    vi.runAllTimers();
+    const output = (generation: bigint) =>
+      frame(
+        create(ServerMessageSchema, {
+          message: {
+            case: 'output',
+            value: create(OutputSchema, {
+              data: new TextEncoder().encode('x'),
+              damageGeneration: generation,
+              damage: [{ startRow: 2, endRow: 2 }],
+            }),
+          },
+        }),
+      );
+    const stats = surface.damageStats as NonNullable<typeof surface.damageStats>;
+    ws.message(output(1n));
+    vi.runAllTimers();
+    const hinted = stats.damageScans;
+    deferredWrites = [];
+    ws.message(output(2n));
+    ws.message(
+      frame(
+        create(ServerMessageSchema, {
+          message: { case: 'resize', value: create(ResizeSchema, { cols: 40, rows: 24 }) },
+        }),
+      ),
+    );
+    vi.runAllTimers();
+    const fullScans = stats.fullScans;
+    const unhinted = stats.fullScanReasons.unhinted ?? 0;
+    // The queued chunk's hint addresses the old grid; once parsed it must not be trusted.
+    for (const callback of deferredWrites.splice(0)) callback();
+    vi.runAllTimers();
+    expect(stats.fullScans).toBe(fullScans + 1);
+    expect(stats.damageScans).toBe(hinted);
+    expect(stats.fullScanReasons.unhinted).toBe(unhinted + 1);
+    deferredWrites = null;
     surface.dispose();
     vi.useRealTimers();
   });

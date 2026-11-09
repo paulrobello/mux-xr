@@ -4,9 +4,11 @@ import { join } from 'node:path';
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import { chromium, type Page, type WebSocketRoute } from 'playwright';
 import type * as THREE from 'three';
+import type { TerminalDamageStats } from '../src/contracts';
 import {
   ClientMessageSchema,
   ConnectedSchema,
+  DamageRangeSchema,
   MuxTreePaneSchema,
   MuxTreeSessionSchema,
   MuxTreeSnapshotSchema,
@@ -16,6 +18,7 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import { prepareQuestFixture } from './prepare-quest-fixture';
 
 const BASE_URL = process.env.MUX_XR_BASE_URL;
 const TEST_ROOT = process.env.MUX_XR_TEST_ROOT;
@@ -24,6 +27,10 @@ const BASELINE = process.env.MUX_XR_BASELINE === '1' || process.argv.includes('-
 const COUNTS = (process.env.MUX_XR_COUNTS ?? '6,12,18').split(',').map(Number);
 const BACKGROUND = process.env.MUX_XR_BACKGROUND ?? 'black';
 const GAZE_SWEEP = process.env.MUX_XR_GAZE_SWEEP === '1';
+// Damage arm: attach the rows each chunk changes, as a core 0.77+ mux streamer does.
+const DAMAGE = process.env.MUX_XR_DAMAGE === '1';
+const WORKLOAD = process.env.MUX_XR_WORKLOAD ?? 'mixed';
+const damageGenerations = new Map<string, bigint>();
 const PANE_IDS = Array.from({ length: 18 }, (_, index) => `%${index + 1}`);
 const COLS = 149;
 const ROWS = 54;
@@ -128,7 +135,45 @@ function denseScreen(paneId: string): Uint8Array {
     const text = `${paneId} ${String(row + 1).padStart(2, '0')} ${'static full-color terminal workload '.repeat(8)}`;
     rows.push(`${color}${text.slice(0, COLS)}\x1b[0m\r\n`);
   }
-  return new TextEncoder().encode(`\x1b[2J\x1b[H${rows.join('')}`);
+  // A log pane starts with xterm's 1000-line scrollback full, so appended lines trim history
+  // instead of moving baseY, which would force every paint to full-scan as a local scroll.
+  const history = WORKLOAD === 'log' ? 'history\r\n'.repeat(1_000 + ROWS) : '';
+  return new TextEncoder().encode(`${history}\x1b[2J\x1b[H${rows.join('')}`);
+}
+
+type PainterWindow = { id: string; damage: TerminalDamageStats | null };
+
+async function painterStats(page: Page): Promise<PainterWindow[]> {
+  return await page.evaluate(() =>
+    (
+      window as unknown as {
+        __muxXR: { getState: () => { streams: PainterWindow[] } };
+      }
+    ).__muxXR
+      .getState()
+      .streams.map((stream) => ({ id: stream.id, damage: stream.damage })),
+  );
+}
+
+function painterDelta(start: PainterWindow[], end: PainterWindow[]): PainterWindow[] {
+  return end.map(({ id, damage }) => {
+    const before = start.find((stream) => stream.id === id)?.damage;
+    if (!damage || !before) return { id, damage };
+    const reasons: Record<string, number> = {};
+    for (const [reason, value] of Object.entries(damage.fullScanReasons))
+      reasons[reason] = value - (before.fullScanReasons[reason] ?? 0);
+    return {
+      id,
+      damage: {
+        damageScans: damage.damageScans - before.damageScans,
+        fullScans: damage.fullScans - before.fullScans,
+        rowsScanned: damage.rowsScanned - before.rowsScanned,
+        rejectedHints: damage.rejectedHints - before.rejectedHints,
+        auditMisses: damage.auditMisses - before.auditMisses,
+        fullScanReasons: reasons,
+      },
+    };
+  });
 }
 
 function connectedFrame(paneId: string): Buffer {
@@ -148,15 +193,24 @@ function connectedFrame(paneId: string): Buffer {
 }
 
 function outputFrame(paneId: string, tick: number): Buffer {
-  const line =
-    paneId === '%1' && tick % 10 === 0
-      ? `\x1b[38;2;255;190;70m${paneId} agent log tick=${tick} cpu queue stable\x1b[0m\r\n`
-      : `\r\x1b[2K\x1b[38;2;90;220;255m${paneId} agent spinner ${'|/-\\'[tick % 4]}\x1b[0m`;
+  const log = WORKLOAD === 'log' || (WORKLOAD === 'mixed' && paneId === '%1' && tick % 10 === 0);
+  const line = log
+    ? `\x1b[38;2;255;190;70m${paneId} agent log tick=${tick} cpu queue stable\x1b[0m\r\n`
+    : `\r\x1b[2K\x1b[38;2;90;220;255m${paneId} agent spinner ${'|/-\\'[tick % 4]}\x1b[0m`;
+  // The seed leaves the cursor on the last row: a spinner rewrites that row, a log line scrolls.
+  const generation = (damageGenerations.get(paneId) ?? 0n) + 1n;
+  damageGenerations.set(paneId, generation);
+  const damage = DAMAGE
+    ? {
+        damageGeneration: generation,
+        damage: [create(DamageRangeSchema, { startRow: log ? 0 : ROWS - 1, endRow: ROWS - 1 })],
+      }
+    : {};
   return wireFrame(
     create(ServerMessageSchema, {
       message: {
         case: 'output',
-        value: create(OutputSchema, { data: new TextEncoder().encode(line) }),
+        value: create(OutputSchema, { data: new TextEncoder().encode(line), ...damage }),
       },
     }),
   );
@@ -440,6 +494,7 @@ async function measure(
   await page.evaluate(() =>
     (window as unknown as { __capacityResetMetrics: () => void }).__capacityResetMetrics(),
   );
+  const painterStart = await painterStats(page);
   const started = Date.now();
   const timers = PANE_IDS.slice(0, count).map((paneId, index) => {
     let tick = index;
@@ -475,6 +530,10 @@ async function measure(
   } finally {
     timers.forEach(clearInterval);
   }
+  const painterWindow = painterDelta(painterStart, await painterStats(page));
+  if (DAMAGE)
+    for (const { id, damage } of painterWindow)
+      assert(damage && damage.damageScans > 0, `${id} never painted from damage hints`);
 
   const after = loadavg();
   const metrics = await page.evaluate(() => {
@@ -572,6 +631,7 @@ async function measure(
   assert(farPane.nonBlackPixels, 'far pane center sample remained black');
   return {
     count,
+    painterWindow,
     durationMs: Date.now() - started,
     hostLoad: { before, after, valid: before[0] <= 15 && after[0] <= 15 },
     outputPackets: state.outputPackets,
@@ -649,6 +709,7 @@ async function main(): Promise<void> {
     COUNTS.length > 0 && COUNTS.every((count) => count === 6 || count === 12 || count === 18),
     `MUX_XR_COUNTS must contain only 6,12,18: ${COUNTS.join(',')}`,
   );
+  prepareQuestFixture(TEST_ROOT);
   const evidence = join(process.cwd(), '.local', 'evidence');
   await mkdir(evidence, { recursive: true });
   const browser = await chromium.launch({
@@ -665,17 +726,25 @@ async function main(): Promise<void> {
       baseUrl: new URL(BASE_URL).origin,
       testRoot: TEST_ROOT,
       background: BACKGROUND,
+      damage: DAMAGE,
+      workloadKind: WORKLOAD,
       counts: COUNTS,
       viewport: { width: 1440, height: 1000, deviceScaleFactor: 2 },
       grid: { cols: COLS, rows: ROWS },
       workload: {
-        panes: 'one line at 10Hz plus appended log line at 1Hz',
+        panes:
+          WORKLOAD === 'spinner'
+            ? 'every pane rewrites its spinner row at 10Hz'
+            : WORKLOAD === 'log'
+              ? 'every pane appends a scrolling log line at 10Hz'
+              : 'one line at 10Hz plus appended log line at 1Hz',
         durationMs: 8_000,
         gazeSweep: GAZE_SWEEP,
       },
       results,
     };
-    const path = join(evidence, `terminal-capacity-${BASELINE ? 'baseline' : 'candidate'}.json`);
+    const arm = `${BASELINE ? 'baseline' : 'candidate'}-${WORKLOAD}${DAMAGE ? '-damage' : ''}`;
+    const path = join(evidence, `terminal-capacity-${arm}.json`);
     await writeFile(path, JSON.stringify(report, null, 2));
     const invalid = results.find(
       (result) => (result.hostLoad as { valid: boolean }).valid === false,

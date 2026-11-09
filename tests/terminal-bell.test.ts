@@ -34,6 +34,8 @@ vi.mock('../src/terminal/painter', () => ({
     dirtyRows: new Uint8Array(2),
     paint: () => false,
     invalidate: () => undefined,
+    noteOutput: () => undefined,
+    resetDamage: () => undefined,
   }),
 }));
 vi.mock('@xterm/xterm', () => ({

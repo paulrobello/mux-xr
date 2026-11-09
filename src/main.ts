@@ -644,6 +644,7 @@ Object.assign(window, {
         renderQuality: surface.renderQuality ?? 'full',
         canvasWidth: surface.canvas.width,
         canvasHeight: surface.canvas.height,
+        damage: surface.damageStats ? { ...surface.damageStats } : null,
       })),
     }),
     getControlHints: () => scene.getControlHints(),

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createTerminalPainter } from '../src/terminal/painter';
+import { createTerminalPainter, type TerminalPainter } from '../src/terminal/painter';
 
 type CellState = {
   chars?: string;
@@ -216,5 +216,197 @@ describe('terminal painter', () => {
     (f.context.calls as string[]).length = 0;
     expect(painter.paint(4, 3, 'comfort')).toBe(true);
     expect(painter.dirtyRows).toEqual(new Uint8Array([0, 1, 1]));
+  });
+});
+
+describe('terminal painter damage hints', () => {
+  const hint = (generation: number, ...ranges: Array<[number, number]>) => ({
+    generation: BigInt(generation),
+    ranges: ranges.map(([startRow, endRow]) => ({ startRow, endRow })),
+  });
+  // Six rows with the cursor parked on row 5, so cursor rescans never touch rows 0-4.
+  const setup = () => {
+    const f = fixture(4, 6);
+    f.terminal.buffer.active.cursorY = 5;
+    const painter = createTerminalPainter(f.canvas, f.terminal as never);
+    painter.paint(4, 6, 'comfort');
+    painter.noteOutput(hint(1));
+    painter.paint(4, 6, 'comfort');
+    return { f, painter };
+  };
+  const unhintedChange = (f: ReturnType<typeof fixture>) => {
+    f.lines[0][0] = cell({ chars: 'z' });
+    f.lines[2][0] = cell({ chars: 'y' });
+  };
+
+  it('scans every row until the first hint arrives', () => {
+    const f = fixture(4, 6);
+    const painter = createTerminalPainter(f.canvas, f.terminal as never);
+    painter.paint(4, 6, 'comfort');
+    f.lines[3][0] = cell({ chars: 'q' });
+    expect(painter.paint(4, 6, 'comfort')).toBe(true);
+    expect(painter.dirtyRows[3]).toBe(1);
+    expect(painter.damageStats).toMatchObject({ fullScans: 2, damageScans: 0 });
+  });
+
+  it('scans only the hinted rows and the cursor rows', () => {
+    const { f, painter } = setup();
+    const before = painter.damageStats.rowsScanned;
+    f.lines[2][0] = cell({ chars: 'y' });
+    f.lines[0][0] = cell({ chars: 'z' });
+    painter.noteOutput(hint(2, [2, 2]));
+    expect(painter.paint(4, 6, 'comfort')).toBe(true);
+    // Row 0 changed outside the hint, so the hinted scan does not see it.
+    expect(Array.from(painter.dirtyRows)).toEqual([0, 0, 1, 0, 0, 0]);
+    expect(painter.damageStats.rowsScanned - before).toBe(2);
+    expect(painter.damageStats.damageScans).toBeGreaterThan(0);
+  });
+
+  it('treats a present generation with no ranges as no change', () => {
+    const { f, painter } = setup();
+    f.lines[1][0] = cell({ chars: 'n' });
+    painter.noteOutput(hint(2));
+    expect(painter.paint(4, 6, 'comfort')).toBe(false);
+  });
+
+  it.each([
+    ['unknown damage', null],
+    ['a regressed generation', hint(0, [1, 1])],
+    ['overlapping ranges', hint(3, [1, 3], [2, 4])],
+    ['descending ranges', hint(3, [3, 3], [1, 1])],
+    ['an inverted range', hint(3, [3, 1])],
+    ['an out-of-bounds range', hint(3, [4, 6])],
+  ])('falls back to a full scan for %s', (_name, value) => {
+    const { f, painter } = setup();
+    const fullScans = painter.damageStats.fullScans;
+    unhintedChange(f);
+    painter.noteOutput(value);
+    painter.paint(4, 6, 'comfort');
+    expect(Array.from(painter.dirtyRows)).toEqual([1, 0, 1, 0, 0, 0]);
+    expect(painter.damageStats.fullScans).toBe(fullScans + 1);
+  });
+
+  it('counts refused hints and resumes hinted scans after the fallback', () => {
+    const { f, painter } = setup();
+    painter.noteOutput(hint(3, [3, 1]));
+    painter.paint(4, 6, 'comfort');
+    expect(painter.damageStats.rejectedHints).toBe(1);
+    // The refused chunk's rows are unknown, so the chunk after it rescans everything too.
+    unhintedChange(f);
+    painter.noteOutput(hint(4));
+    painter.paint(4, 6, 'comfort');
+    expect(Array.from(painter.dirtyRows)).toEqual([1, 0, 1, 0, 0, 0]);
+    f.lines[0][0] = cell({ chars: 'w' });
+    f.lines[2][0] = cell({ chars: 'v' });
+    painter.noteOutput(hint(5, [2, 2]));
+    painter.paint(4, 6, 'comfort');
+    expect(Array.from(painter.dirtyRows)).toEqual([0, 0, 1, 0, 0, 0]);
+  });
+
+  it('merges coalesced hints and rescans the previous hint once for seam glyphs', () => {
+    const { f, painter } = setup();
+    painter.noteOutput(hint(2, [0, 0]));
+    painter.noteOutput(hint(3, [3, 3]));
+    f.lines[0][0] = cell({ chars: 'a' });
+    f.lines[3][0] = cell({ chars: 'd' });
+    painter.paint(4, 6, 'comfort');
+    expect(Array.from(painter.dirtyRows)).toEqual([1, 0, 0, 1, 0, 0]);
+    // The tail of a split glyph arrives with the next chunk, whose hint omits row 3.
+    f.lines[3][1] = cell({ chars: 'é' });
+    painter.noteOutput(hint(4));
+    painter.paint(4, 6, 'comfort');
+    expect(painter.dirtyRows[3]).toBe(1);
+    f.lines[3][2] = cell({ chars: 'x' });
+    painter.noteOutput(hint(5));
+    expect(painter.paint(4, 6, 'comfort')).toBe(false);
+  });
+
+  it('rescans everything on local scroll, scrollback view, buffer switch, resize and reset', () => {
+    const { painter, f } = setup();
+    const active = f.terminal.buffer.active as Record<string, unknown>;
+    let generation = 10;
+    const fullAfter = (change: () => void, rows = 6): number => {
+      const fullScans = painter.damageStats.fullScans;
+      change();
+      generation += 1;
+      painter.noteOutput(hint(generation));
+      painter.paint(4, rows, 'comfort');
+      return painter.damageStats.fullScans - fullScans;
+    };
+    expect(
+      fullAfter(() => {
+        active.baseY = 1;
+        active.viewportY = 1;
+      }),
+    ).toBe(1);
+    expect(painter.damageStats.fullScanReasons.scrolled).toBe(1);
+    expect(fullAfter(() => undefined)).toBe(0);
+    expect(fullAfter(() => (active.viewportY = 0))).toBe(1);
+    expect(fullAfter(() => undefined)).toBe(1);
+    active.viewportY = 1;
+    painter.paint(4, 6, 'comfort');
+    expect(fullAfter(() => (active.type = 'alternate'))).toBe(1);
+    expect(fullAfter(() => undefined, 5)).toBe(1);
+    expect(fullAfter(() => undefined, 5)).toBe(0);
+    painter.resetDamage();
+    f.lines[Number(active.viewportY) + 1][0] = cell({ chars: 'r' });
+    painter.paint(4, 5, 'comfort');
+    expect(painter.dirtyRows[1]).toBe(1);
+  });
+
+  it.each([
+    ['a paint without new output', (painter: TerminalPainter) => painter.paint(4, 6, 'comfort')],
+    [
+      'a full scan',
+      (painter: TerminalPainter) => {
+        painter.invalidate();
+        painter.paint(4, 6, 'comfort');
+      },
+    ],
+  ])('rescans the previous chunk for a seam glyph across %s', (_name, between) => {
+    const { f, painter } = setup();
+    f.lines[3][0] = cell({ chars: 'a' });
+    painter.noteOutput(hint(2, [3, 3]));
+    painter.paint(4, 6, 'comfort');
+    between(painter);
+    f.lines[3][1] = cell({ chars: '界' });
+    painter.noteOutput(hint(3, [1, 1]));
+    painter.paint(4, 6, 'comfort');
+    expect(painter.dirtyRows[3]).toBe(1);
+  });
+
+  it('rescans the seam rows of a chunk noted while a full scan was pending', () => {
+    const { f, painter } = setup();
+    painter.noteOutput(null);
+    painter.noteOutput(hint(2, [3, 3]));
+    painter.paint(4, 6, 'comfort');
+    const damageScans = painter.damageStats.damageScans;
+    f.lines[3][1] = cell({ chars: '界' });
+    painter.noteOutput(hint(3));
+    painter.paint(4, 6, 'comfort');
+    expect(painter.damageStats.damageScans).toBe(damageScans + 1);
+    expect(painter.dirtyRows[3]).toBe(1);
+  });
+
+  it('caps a long backlog of unpainted hints with a full scan', () => {
+    const { f, painter } = setup();
+    for (let index = 0; index < 300; index += 1) painter.noteOutput(hint(2 + index, [1, 1]));
+    unhintedChange(f);
+    const fullScans = painter.damageStats.fullScans;
+    painter.paint(4, 6, 'comfort');
+    expect(painter.damageStats.fullScans).toBe(fullScans + 1);
+    expect(Array.from(painter.dirtyRows)).toEqual([1, 0, 1, 0, 0, 0]);
+  });
+
+  it('counts rows the hint missed in audit mode and still paints them', () => {
+    const f = fixture(4, 6);
+    f.terminal.buffer.active.cursorY = 5;
+    const painter = createTerminalPainter(f.canvas, f.terminal as never, { audit: true });
+    painter.paint(4, 6, 'comfort');
+    painter.noteOutput(hint(1, [2, 2]));
+    unhintedChange(f);
+    painter.paint(4, 6, 'comfort');
+    expect(painter.damageStats.auditMisses).toBe(1);
+    expect(Array.from(painter.dirtyRows)).toEqual([1, 0, 1, 0, 0, 0]);
   });
 });
