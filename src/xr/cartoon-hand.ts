@@ -36,6 +36,12 @@ const THUMB_JOINTS = [
   'thumb-tip',
 ];
 const RADII = [0.018, 0.015, 0.015, 0.0145];
+// The standard hand mesh ends in an open cut 1.6-2.2 cm down the forearm from the wrist joint,
+// 5.2 cm across and offset 7 mm through the palm. The ellipse caps it: semi-axes across the
+// hand, along the forearm and through the palm.
+const WRIST_ELLIPSE = [0.03, 0.017, 0.015] as const;
+const WRIST_ELLIPSE_BACK = 0.019;
+const WRIST_ELLIPSE_DEPTH = 0.007;
 const JOINT_NAMES = FINGERS.map((finger, index) =>
   index === 0 ? THUMB_JOINTS : PARTS.map((part) => `${finger}-${part}`),
 );
@@ -117,7 +123,12 @@ export function createCartoonHand(): CartoonHand {
   mesh.raycast = () => undefined;
   const arm = createElasticArm(material);
   arm.mesh.name = 'elastic-hand-arm';
-  root.add(mesh, arm.mesh);
+  const wristEllipseGeometry = new THREE.SphereGeometry(1, 20, 12);
+  const wristEllipse = new THREE.Mesh(wristEllipseGeometry, material);
+  wristEllipse.name = 'hand-wrist-ellipse';
+  wristEllipse.raycast = () => undefined;
+  wristEllipse.scale.set(...WRIST_ELLIPSE);
+  root.add(mesh, arm.mesh, wristEllipse);
 
   const wrist = new THREE.Vector3();
   const across = new THREE.Vector3();
@@ -138,6 +149,7 @@ export function createCartoonHand(): CartoonHand {
   const anchor = new THREE.Vector3();
   const cameraPosition = new THREE.Vector3();
   const backNormal = new THREE.Vector3();
+  const wristBasis = new THREE.Matrix4();
   const synthetic = new THREE.Group() as THREE.Group & { joints: Record<string, THREE.Group> };
   synthetic.joints = {};
   for (const name of new Set(['wrist', ...JOINT_NAMES.flat().filter(Boolean), ...LITTLE_JOINTS])) {
@@ -256,9 +268,19 @@ export function createCartoonHand(): CartoonHand {
       if (haveMiddle) forward.copy(middleBase).sub(wrist).normalize();
       if (haveIndex && haveLittle) across.copy(indexBase).sub(littleBase);
       across.addScaledVector(forward, -across.dot(forward)).normalize();
-      if (across.lengthSq() < 0.5) across.set(1, 0, 0).applyQuaternion(wristRotation);
+      if (across.lengthSq() < 0.5)
+        across
+          .set(1, 0, 0)
+          .applyQuaternion(wristRotation)
+          .addScaledVector(forward, -across.dot(forward))
+          .normalize();
       normal.crossVectors(across, forward).normalize();
       backNormal.copy(normal).negate();
+      wristEllipse.position
+        .copy(wrist)
+        .addScaledVector(forward, -WRIST_ELLIPSE_BACK)
+        .addScaledVector(normal, side === 'left' ? -WRIST_ELLIPSE_DEPTH : WRIST_ELLIPSE_DEPTH);
+      wristEllipse.quaternion.setFromRotationMatrix(wristBasis.makeBasis(across, forward, normal));
       const width =
         haveIndex && haveLittle
           ? THREE.MathUtils.clamp(indexBase.distanceTo(littleBase) * 0.75, 0.056, 0.075)
@@ -424,6 +446,7 @@ export function createCartoonHand(): CartoonHand {
       hide();
       arm.dispose();
       geometry.dispose();
+      wristEllipseGeometry.dispose();
       palm.dispose();
       material.dispose();
       root.removeFromParent();
