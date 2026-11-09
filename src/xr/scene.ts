@@ -3333,7 +3333,7 @@ export function createWorkspaceScene(
         inputRoot.add(step);
       }
       const dictation = mutableState.dictation;
-      // The Keyborb Dictation orb starts and stops dictation, so its panel keeps only the review buttons.
+      // The Keyborb Mic orb starts and stops dictation, so its panel keeps only the review buttons.
       if (!mutableState.keyborbEnabled || !dictation.supported) {
         const dictate = createLabelButton(
           dictation.status === 'transcribing'
@@ -3388,6 +3388,11 @@ export function createWorkspaceScene(
         transcript.name = 'xr-dictation-transcript';
         transcript.position.set(0, 1.33, 0);
         inputRoot.add(transcript);
+        // Sits over the transcript box's left edge, the box being 1.85 wide and 0.34 tall.
+        const heading = createLabelButton('Transcript', 0.5, 0.1, { inputAction: 'noop' });
+        heading.name = 'xr-dictation-transcript-heading';
+        heading.position.set(-0.925 + 0.25, 1.33 + 0.17 + 0.06, 0);
+        inputRoot.add(heading);
       }
     }
     const targetTitle = mutableState.inputTargetTitle
@@ -3928,13 +3933,9 @@ export function createWorkspaceScene(
       if (mutableState.keyborbEnabled && mode === 'keyboard' && dictation.supported) {
         const listening = dictation.status === 'listening';
         const transcribing = dictation.status === 'transcribing';
-        // Only the idle word is wider than one orb, so only it overflows into the empty top row;
-        // Stop and the busy dots keep the orb-sized glyph.
-        const idle = !transcribing && !listening;
         const mic = createKeyborbKey(
-          transcribing ? '...' : listening ? 'Stop' : 'Dictation',
+          transcribing ? '...' : listening ? 'Stop' : 'Mic',
           unit - 0.025,
-          idle ? (unit - 0.025) * 2.2 : undefined,
         );
         mic.name = 'keyborb-dictation';
         Object.assign(mic.userData, {
