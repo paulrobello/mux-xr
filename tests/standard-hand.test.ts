@@ -126,6 +126,50 @@ describe('standard XR hand', () => {
     }
   });
 
+  it.each([
+    ...neutral.hands,
+    ...gestures.sets['captured-pinch'].hands,
+    ...gestures.sets['captured-fist'].hands,
+  ])(
+    'caps the $side forearm cut with a wrist-bone ellipse that sits on the skinned ring',
+    async (capture) => {
+      const hand = createStandardHand({ loader: parsedLoader() });
+      await hand.assetReady;
+      const source = poseSource(capture);
+      hand.update(source, new THREE.PerspectiveCamera(), capture.side, 1 / 60);
+      const skin = visibleSkin(hand, capture.side);
+      const cap = hand.root.getObjectByName(
+        `standard-hand-wrist-cap-${capture.side}`,
+      ) as THREE.Mesh;
+      expect(cap.parent).toBe(skin.skeleton.getBoneByName('wrist'));
+      expect(cap.material).toBe(skin.material);
+      const toCap = cap.matrixWorld.clone().invert();
+      const point = new THREE.Vector3();
+      const rim: number[] = [];
+      let outermost = Number.NEGATIVE_INFINITY;
+      const vertices = skin.geometry.getAttribute('position').count;
+      for (let vertex = 0; vertex < vertices; vertex++) {
+        skin.getVertexPosition(vertex, point).applyMatrix4(skin.matrixWorld).applyMatrix4(toCap);
+        // Cap-local units: x and y are scaled by the semi-axes, z by the cap depth.
+        const z = point.z * cap.scale.z;
+        outermost = Math.max(outermost, z);
+        if (z > -0.003) rim.push(Math.hypot(point.x, point.y));
+      }
+      // No skin pokes past the cut plane, and every vertex at the cut lies on the cap's rim.
+      expect(outermost).toBeLessThan(0.001);
+      expect(rim.length).toBeGreaterThanOrEqual(30);
+      expect(Math.min(...rim)).toBeGreaterThan(0.8);
+      expect(Math.max(...rim)).toBeLessThan(1);
+      // The domed face points down the forearm, away from the fingers.
+      const outward = new THREE.Vector3(0, 0, 1).transformDirection(cap.matrixWorld);
+      const fingers = source.joints['middle-finger-phalanx-proximal']
+        .getWorldPosition(new THREE.Vector3())
+        .sub(cap.getWorldPosition(new THREE.Vector3()));
+      expect(outward.dot(fingers.normalize())).toBeLessThan(-0.8);
+      hand.dispose();
+    },
+  );
+
   it('samples finite contact probes from the posed skin', async () => {
     const hand = createStandardHand({ loader: parsedLoader() });
     await hand.assetReady;

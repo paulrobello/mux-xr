@@ -188,6 +188,14 @@ describe('scalable XR labels', () => {
     expect(text.whiteSpace).toBe('normal');
   });
 
+  it('renders the whole Dictation word on the widened Keyborb orb label only', () => {
+    const orb = 0.105;
+    const inside = createScalableLabel('Dictation', orb * 0.92, orb * 0.8, { backplate: false });
+    expect((inside.userData.labelTextObject as MockTextLike).text).toBe('Dictati…');
+    const widened = createScalableLabel('Dictation', orb * 2.2, orb * 0.8, { backplate: false });
+    expect((widened.userData.labelTextObject as MockTextLike).text).toBe('Dictation');
+  });
+
   it('sanitizes unsupported glyphs while preserving supported punctuation and original text', () => {
     const root = createScalableLabel('A$ ← · … 漢', 0.7, 0.11);
     const text = root.userData.labelTextObject as MockTextLike;

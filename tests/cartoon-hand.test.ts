@@ -38,39 +38,6 @@ function trackedHand(side: 'left' | 'right'): Hand {
 }
 
 describe('cartoon tracked hands', () => {
-  it.each([
-    ['left', 0.007],
-    ['right', -0.007],
-  ] as const)('caps the %s arm joint with a flat wrist ellipse over the mesh cut', (side, back) => {
-    const visual = createCartoonHand();
-    const ellipse = visual.root.getObjectByName('hand-wrist-ellipse') as THREE.Mesh;
-    const arm = visual.root.getObjectByName('elastic-hand-arm') as THREE.Mesh;
-    expect(ellipse).toBeInstanceOf(THREE.Mesh);
-    expect(ellipse.material).toBe(arm.material);
-    const hand = trackedHand(side);
-    visual.update(hand, new THREE.PerspectiveCamera(), side, 1 / 72);
-    const wrist = visual.root.userData.wristPosition as THREE.Vector3;
-    const palmForward = visual.root.userData.palmForward as THREE.Vector3;
-    const backNormal = visual.root.userData.wristBackNormal as THREE.Vector3;
-    const offset = ellipse.position.clone().sub(wrist);
-    // Centred on the mesh's open cut: down the forearm and toward the measured palm side.
-    expect(offset.dot(palmForward)).toBeCloseTo(-0.019, 4);
-    expect(offset.dot(backNormal)).toBeCloseTo(back, 4);
-    const indexToPinky = hand.joints['index-finger-phalanx-proximal'].position
-      .clone()
-      .sub(hand.joints['pinky-finger-phalanx-proximal'].position)
-      .normalize();
-    const axis = (x: number, y: number, z: number): THREE.Vector3 =>
-      new THREE.Vector3(x, y, z).applyQuaternion(ellipse.quaternion);
-    expect(axis(1, 0, 0).dot(indexToPinky)).toBeGreaterThan(0.95);
-    expect(axis(0, 1, 0).dot(palmForward)).toBeCloseTo(1);
-    expect(axis(0, 0, 1).dot(backNormal)).toBeCloseTo(-1);
-    expect(ellipse.scale.x).toBeGreaterThan(ellipse.scale.y);
-    expect(ellipse.scale.y).toBeGreaterThan(ellipse.scale.z);
-    expect(ellipse.scale.x).toBeGreaterThan(0.014 * 1.5);
-    visual.dispose();
-  });
-
   it('keeps a compact neutral silhouette and exposes world-space contact probes', () => {
     const visual = createCartoonHand();
     const pose = new THREE.Group();
@@ -181,7 +148,7 @@ describe('cartoon tracked hands', () => {
     visual.update(trackedHand('right'), new THREE.PerspectiveCamera(), 'right', 1 / 90);
     expect(visual.root.visible).toBe(true);
     const meshes = visual.root.children as THREE.Mesh[];
-    expect(meshes).toHaveLength(3);
+    expect(meshes).toHaveLength(2);
     expect((meshes[0].material as THREE.MeshStandardMaterial).color.getHex()).toBe(0xff672f);
     expect((meshes[0].material as THREE.MeshStandardMaterial).transparent).toBe(false);
     for (const mesh of meshes) {

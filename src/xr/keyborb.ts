@@ -61,7 +61,15 @@ const SHELL_FRAGMENT = `
   }
 `;
 
-export function createKeyborbKey(label: string, diameter: number): THREE.Mesh {
+/**
+ * One orb key. `labelWidth` lets a word wider than the orb overflow its sides at a readable size;
+ * the orb itself keeps the shared diameter the instanced shells and pinch picking rely on.
+ */
+export function createKeyborbKey(
+  label: string,
+  diameter: number,
+  labelWidth = diameter * 0.92,
+): THREE.Mesh {
   const color = new THREE.Color(0xffffff);
   const material = Object.assign(
     new THREE.ShaderMaterial({
@@ -74,7 +82,7 @@ export function createKeyborbKey(label: string, diameter: number): THREE.Mesh {
     { color },
   );
   const root = new THREE.Mesh(new THREE.SphereGeometry(diameter / 2, 24, 16), material);
-  const text = createScalableLabel(label, diameter * 0.92, diameter * 0.8, {
+  const text = createScalableLabel(label, labelWidth, diameter * 0.8, {
     backplate: false,
   });
   text.raycast = () => undefined;

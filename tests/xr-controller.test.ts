@@ -638,7 +638,7 @@ describe('native XR controller event routing', () => {
       expect(actions.sendKey).toHaveBeenCalledExactlyOnceWith('b', undefined);
     });
 
-    it('starts and stops dictation from a pinch on the Keyborb Mic orb', () => {
+    it('starts and stops dictation from a pinch on the Keyborb Dictation orb', () => {
       const { workspace, actions } = setup('on');
       const dictationAction = vi.fn();
       actions.dictationAction = dictationAction;
@@ -664,7 +664,10 @@ describe('native XR controller event routing', () => {
       };
       const mic = workspace.scene.getObjectByName('keyborb-dictation') as THREE.Mesh;
       expect(mic.geometry).toBeInstanceOf(THREE.SphereGeometry);
-      expect(mic.userData.labelText).toBe('Mic');
+      expect(mic.userData.labelText).toBe('Dictation');
+      // The word overflows the orb so it renders whole rather than ellipsized.
+      const micLabel = mic.userData.keyborbLabel as THREE.Object3D;
+      expect(micLabel.userData.labelWidth).toBeCloseTo(mic.userData.labelWidth * 2.2);
       pinchOrb(20);
       expect(dictationAction).toHaveBeenCalledExactlyOnceWith('start');
       expect(actions.sendKey).not.toHaveBeenCalled();
@@ -672,6 +675,10 @@ describe('native XR controller event routing', () => {
       expect(
         (workspace.scene.getObjectByName('keyborb-dictation') as THREE.Mesh).userData.labelText,
       ).toBe('Stop');
+      const stop = workspace.scene.getObjectByName('keyborb-dictation') as THREE.Mesh;
+      expect((stop.userData.keyborbLabel as THREE.Object3D).userData.labelWidth).toBeCloseTo(
+        stop.userData.labelWidth * 0.92,
+      );
       pinchOrb(400);
       expect(dictationAction).toHaveBeenLastCalledWith('stop');
       expect(dictationAction).toHaveBeenCalledTimes(2);
@@ -708,7 +715,7 @@ describe('native XR controller event routing', () => {
       ).toBeLessThan(1e-6);
     });
 
-    it('drops the panel Dictate button when the Keyborb Mic orb is shown', () => {
+    it('drops the panel Dictation button when the Keyborb Dictation orb is shown', () => {
       const idle = { supported: true, status: 'idle', transcript: '', error: null } as const;
       const orb = setup('on');
       orb.workspace.setDictationState(idle);
@@ -730,7 +737,7 @@ describe('native XR controller event routing', () => {
       flat.workspace.setDictationState(idle);
       flat.workspace.showInput('keyboard');
       expect(flat.workspace.scene.getObjectByName('xr-dictate-button')?.userData.labelText).toBe(
-        'Dictate',
+        'Dictation',
       );
     });
 
@@ -764,7 +771,7 @@ describe('native XR controller event routing', () => {
       expect(strip.material.opacity).toBe(rest);
     });
 
-    it('offers the Mic orb only on a Keyborb text keyboard with speech support', () => {
+    it('offers the Dictation orb only on a Keyborb text keyboard with speech support', () => {
       const { workspace } = setup('off');
       workspace.showInput('keyboard');
       expect(workspace.scene.getObjectByName('keyborb-dictation')).toBeUndefined();

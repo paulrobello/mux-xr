@@ -3333,7 +3333,7 @@ export function createWorkspaceScene(
         inputRoot.add(step);
       }
       const dictation = mutableState.dictation;
-      // The Keyborb Mic orb starts and stops dictation, so its panel keeps only the review buttons.
+      // The Keyborb Dictation orb starts and stops dictation, so its panel keeps only the review buttons.
       if (!mutableState.keyborbEnabled || !dictation.supported) {
         const dictate = createLabelButton(
           dictation.status === 'transcribing'
@@ -3341,7 +3341,7 @@ export function createWorkspaceScene(
             : dictation.status === 'listening'
               ? 'Stop dictation'
               : dictation.supported
-                ? 'Dictate'
+                ? 'Dictation'
                 : 'Speech unavailable',
           0.7,
           0.1,
@@ -3928,9 +3928,13 @@ export function createWorkspaceScene(
       if (mutableState.keyborbEnabled && mode === 'keyboard' && dictation.supported) {
         const listening = dictation.status === 'listening';
         const transcribing = dictation.status === 'transcribing';
+        // Only the idle word is wider than one orb, so only it overflows into the empty top row;
+        // Stop and the busy dots keep the orb-sized glyph.
+        const idle = !transcribing && !listening;
         const mic = createKeyborbKey(
-          transcribing ? '...' : listening ? 'Stop' : 'Mic',
+          transcribing ? '...' : listening ? 'Stop' : 'Dictation',
           unit - 0.025,
+          idle ? (unit - 0.025) * 2.2 : undefined,
         );
         mic.name = 'keyborb-dictation';
         Object.assign(mic.userData, {

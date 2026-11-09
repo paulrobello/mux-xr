@@ -77,6 +77,134 @@ interface PoseTransform {
   quaternion: THREE.Quaternion;
 }
 
+// The generic hand ends in an open cut ring of wrist-only vertices a couple of centimetres
+// down the forearm, tilted off the forearm axis. The cap is a thin ellipsoid fitted to that
+// ring in wrist-bone space, so it moves with the skin rather than a frame rebuilt from joints.
+const WRIST_CUT_BAND = 0.006;
+const WRIST_CUT_PLANE_TOLERANCE = 0.001;
+const WRIST_CAP_MARGIN = 0.001;
+const WRIST_CAP_DEPTH = 0.007;
+
+export interface WristCapFit {
+  position: THREE.Vector3;
+  quaternion: THREE.Quaternion;
+  scale: THREE.Vector3;
+}
+
+// The plane through the points, its normal the least-spread direction: power iteration on
+// trace(C)·I − C, whose dominant eigenvector is the covariance's smallest one.
+function fitPlane(
+  points: THREE.Vector3[],
+  guess: THREE.Vector3,
+): { centroid: THREE.Vector3; normal: THREE.Vector3 } {
+  const centroid = new THREE.Vector3();
+  for (const point of points) centroid.add(point);
+  centroid.divideScalar(points.length);
+  let [xx, xy, xz, yy, yz, zz] = [0, 0, 0, 0, 0, 0];
+  for (const point of points) {
+    const x = point.x - centroid.x;
+    const y = point.y - centroid.y;
+    const z = point.z - centroid.z;
+    xx += x * x;
+    xy += x * y;
+    xz += x * z;
+    yy += y * y;
+    yz += y * z;
+    zz += z * z;
+  }
+  const trace = xx + yy + zz;
+  const iterate = new THREE.Matrix3().set(
+    trace - xx,
+    -xy,
+    -xz,
+    -xy,
+    trace - yy,
+    -yz,
+    -xz,
+    -yz,
+    trace - zz,
+  );
+  const normal = guess.clone();
+  for (let step = 0; step < 64; step++) normal.applyMatrix3(iterate).normalize();
+  if (normal.dot(guess) < 0) normal.negate();
+  return { centroid, normal };
+}
+
+export function fitWristCap(mesh: THREE.SkinnedMesh): WristCapFit | undefined {
+  const { bones, boneInverses } = mesh.skeleton;
+  const index = (name: string): number => bones.findIndex((bone) => bone.name === name);
+  const joints = ['wrist', 'middle-finger-phalanx-proximal', 'index-finger-phalanx-proximal'];
+  if ([...joints, 'pinky-finger-phalanx-proximal'].some((name) => index(name) < 0))
+    return undefined;
+  const wrist = index('wrist');
+  const toWrist = new THREE.Matrix4().multiplyMatrices(boneInverses[wrist], mesh.bindMatrix);
+  const jointInWrist = (name: string): THREE.Vector3 =>
+    new THREE.Vector3().applyMatrix4(
+      new THREE.Matrix4().multiplyMatrices(
+        boneInverses[wrist],
+        boneInverses[index(name)].clone().invert(),
+      ),
+    );
+  const forward = jointInWrist('middle-finger-phalanx-proximal').normalize();
+  const across = jointInWrist('index-finger-phalanx-proximal').sub(
+    jointInWrist('pinky-finger-phalanx-proximal'),
+  );
+  const vertices = mesh.geometry.getAttribute('position');
+  const points: THREE.Vector3[] = [];
+  let nearest = Number.POSITIVE_INFINITY;
+  for (let vertex = 0; vertex < vertices.count; vertex++) {
+    const point = new THREE.Vector3().fromBufferAttribute(vertices, vertex).applyMatrix4(toWrist);
+    points.push(point);
+    nearest = Math.min(nearest, point.dot(forward));
+  }
+  // The cut is tilted, so a band at the forearm end holds only part of the ring. Its plane
+  // then gathers the whole ring, and the ring alone sets the final plane.
+  const band = points.filter((point) => point.dot(forward) < nearest + WRIST_CUT_BAND);
+  if (band.length < 3) return undefined;
+  const first = fitPlane(band, forward.clone().negate());
+  const offPlane = (point: THREE.Vector3): number =>
+    Math.abs(point.clone().sub(first.centroid).dot(first.normal));
+  const ring = points.filter((point) => offPlane(point) < WRIST_CUT_PLANE_TOLERANCE);
+  if (ring.length < 3) return undefined;
+  const { centroid, normal } = fitPlane(ring, first.normal);
+  const xAxis = across.addScaledVector(normal, -across.dot(normal)).normalize();
+  const yAxis = new THREE.Vector3().crossVectors(normal, xAxis);
+  const range = (axis: THREE.Vector3): [number, number] => {
+    const values = ring.map((point) => point.dot(axis));
+    return [Math.min(...values), Math.max(...values)];
+  };
+  const [xMin, xMax] = range(xAxis);
+  const [yMin, yMax] = range(yAxis);
+  const position = new THREE.Vector3()
+    .addScaledVector(xAxis, (xMin + xMax) / 2)
+    .addScaledVector(yAxis, (yMin + yMax) / 2)
+    .addScaledVector(normal, centroid.dot(normal));
+  // The extents bound the ring's box; growing them by its widest ellipse radius takes in the
+  // vertices between the axes too.
+  const halfX = (xMax - xMin) / 2;
+  const halfY = (yMax - yMin) / 2;
+  if (!(halfX > 1e-4 && halfY > 1e-4)) return undefined;
+  const reach = Math.max(
+    ...ring.map((point) =>
+      Math.hypot(
+        (point.dot(xAxis) - (xMin + xMax) / 2) / halfX,
+        (point.dot(yAxis) - (yMin + yMax) / 2) / halfY,
+      ),
+    ),
+  );
+  return {
+    position,
+    quaternion: new THREE.Quaternion().setFromRotationMatrix(
+      new THREE.Matrix4().makeBasis(xAxis, yAxis, normal),
+    ),
+    scale: new THREE.Vector3(
+      halfX * reach + WRIST_CAP_MARGIN,
+      halfY * reach + WRIST_CAP_MARGIN,
+      WRIST_CAP_DEPTH,
+    ),
+  };
+}
+
 function disposeAsset(root: THREE.Object3D): void {
   root.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
@@ -171,6 +299,17 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
     mesh.name = `standard-hand-skin-${side}`;
     // The bind bounds sit at the asset origin while the bones follow the tracked hand.
     mesh.frustumCulled = false;
+    const fit = fitWristCap(mesh);
+    if (fit) {
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 12), mesh.material);
+      cap.name = `standard-hand-wrist-cap-${side}`;
+      cap.raycast = () => undefined;
+      cap.frustumCulled = false;
+      cap.position.copy(fit.position);
+      cap.quaternion.copy(fit.quaternion);
+      cap.scale.copy(fit.scale);
+      (bones.get('wrist') as THREE.Bone).add(cap);
+    }
     const probeVertices: number[] = [];
     const probes: HandContactProbe[] = [];
     const cells = new Set<string>();
