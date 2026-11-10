@@ -96,7 +96,7 @@ export function requestPaneCreate(
 ): Promise<PaneCreateOutcome> {
   const correlationId = options.correlationId ?? newCorrelationId();
   const timeoutMs = options.timeoutMs ?? 10000;
-  const lateGraceMs = options.lateGraceMs ?? 20000;
+  const lateGraceMs = options.lateGraceMs ?? 10000;
   const factory =
     options.socketFactory ?? ((url: string) => new WebSocket(url) as unknown as PaneCreateSocket);
   return new Promise((resolve) => {
@@ -295,7 +295,7 @@ const PERMANENT_REFUSALS = new Set<PaneCreateRefusal>(['disabled', 'read_only', 
 export function createPaneCreator(deps: PaneCreatorDeps): PaneCreator {
   const attachTimeoutMs = deps.attachTimeoutMs ?? 10000;
   const confirmMs = deps.confirmMs ?? 3000;
-  const lateConfirmMs = deps.lateConfirmMs ?? 20000;
+  const lateConfirmMs = deps.lateConfirmMs ?? 10000;
   let state: PaneCreationState = { available: true, pending: false };
   let epoch = 0;
   let inFlight: AbortController | null = null;
