@@ -3990,6 +3990,19 @@ describe('native XR controller event routing', () => {
     settleHierarchy();
     hit(workspace, { inputAction: 'createPane', sessionId: 'session' });
     expect(createPane).toHaveBeenCalledWith('session');
+    workspace.closePaneSelector();
+    expect(() => objectWithData(workspace, { inputAction: 'createPane' })).toThrow();
+    const panels = workspace.scene.children.filter((object) =>
+      object.name.startsWith('terminal-panel-'),
+    );
+    expect(panels.length).toBeGreaterThan(0);
+    expect(panels.every((object) => object.visible)).toBe(true);
+    workspace.closePaneSelector();
+    workspace.showInput('panes');
+    hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Workspace' });
+    settleHierarchy();
+    hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Session' });
+    settleHierarchy();
     workspace.setPaneCreation({
       available: false,
       pending: false,

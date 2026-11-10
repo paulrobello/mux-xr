@@ -684,7 +684,7 @@ export function createHierarchyNavigator(
     addNavigationControl(
       title,
       normalized.path,
-      new THREE.Vector3(0, 1.2, 0.12),
+      new THREE.Vector3(1.25, 0.6, 0.12),
       {
         inputAction: 'createPane',
         sessionId: sessionPane.sessionId,

@@ -431,6 +431,12 @@ describe('volumetric hierarchy navigator', () => {
     expect(controls.length).toBeGreaterThan(0);
     expect(controls.every((object) => object.userData.sessionId === '$2')).toBe(true);
     expect(controls.every((object) => object.userData.createAvailable === true)).toBe(true);
+    const control = controls[0].parent as THREE.Object3D;
+    // The panes panel title is 1.8 m wide at panel y 1.65; the ring's hit disc has radius 0.118.
+    const panelY = ready.root.position.y + control.position.y;
+    expect(Math.abs(control.position.x) > 0.9 + 0.118 || panelY < 1.65 - 0.06 - 0.118).toBe(true);
+    const up = ready.root.getObjectByName('hierarchy-control-up') as THREE.Object3D;
+    expect(up.position.distanceTo(control.position)).toBeGreaterThan(2 * 0.118);
     ready.dispose();
     const off = createHierarchyNavigator(
       panes,

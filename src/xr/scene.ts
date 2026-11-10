@@ -211,6 +211,8 @@ export interface WorkspaceScene {
   setDictationState(state: DictationState): void;
   setAvailablePanes(panes: PaneDescriptor[]): void;
   setPaneCreation(state: PaneCreationState): void;
+  /** Close the mux tree selector, if open, so a newly opened pane is in view. */
+  closePaneSelector(): void;
   /** Feed the agent roster; the panes menu shows it as an Agents group. */
   setAgentRoster(rows: readonly AgentRosterRow[], layout?: AgentRosterLayout): void;
   setQuickCommands(commands: QuickCommandEntry[]): void;
@@ -6644,6 +6646,9 @@ export function createWorkspaceScene(
     setDictationState,
     setAvailablePanes,
     setPaneCreation,
+    closePaneSelector: () => {
+      if (inputRoot && inputMode === 'panes') hideInput();
+    },
     setAgentRoster,
     setQuickCommands,
     showInput,

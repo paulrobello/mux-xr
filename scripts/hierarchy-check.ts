@@ -201,6 +201,20 @@ try {
         )?.userData.transitioning === false,
       branch.length,
     );
+    if (branch.length + 1 === 2) {
+      const hasCreate = await page.evaluate(() => {
+        let found = false;
+        (window as unknown as FixtureWindow).__designScene.scene
+          .getObjectByName('hierarchy-navigator')
+          ?.traverse((object) => {
+            if (object.userData.inputAction === 'createPane') found = true;
+          });
+        return found;
+      });
+      if (!hasCreate) throw new Error('Session level has no New terminal control');
+      await page.waitForTimeout(600);
+      await page.screenshot({ path: join(testRoot, 'hierarchy-session.png') });
+    }
   }
   const paneTarget = await page.evaluate(() => {
     const w = window as unknown as FixtureWindow;

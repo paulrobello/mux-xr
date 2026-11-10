@@ -101,7 +101,10 @@ const paneCreator = createPaneCreator({
     });
   },
   refreshTree: () => refreshMetadata?.(),
-  attach: (paneId) => selectPane(paneId),
+  attach: (paneId) => {
+    selectPane(paneId);
+    scene?.closePaneSelector();
+  },
   notify: (message) => scene?.setNotice(message),
   onChange: (state) => publishPaneCreation(demo ? DEMO_CREATION : state),
 });
