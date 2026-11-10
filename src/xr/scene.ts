@@ -456,10 +456,10 @@ function createLabelButton(
 // Keyboard-panel units; the panel spawns at 0.38 scale, so this is about 11 mm raised, 6 mm travel.
 const BUTTON_DEPTH = 0.03;
 /**
- * Radial toggle buttons per hand: right A, and on the left the menu button (Touch Plus index 7)
- * plus X, kept until the menu button is confirmed to reach the page on a Quest.
+ * Radial toggle buttons per hand: right A and left X. The left menu button (Touch Plus index 7 in
+ * the input-profiles registry) never reached the page on a Quest 3 in testing on 2026-11-10.
  */
-const RADIAL_BUTTONS = { right: [4], left: [4, 7] } as const;
+const RADIAL_BUTTONS = { right: [4], left: [4] } as const;
 const radialPressed = (gamepad: Gamepad | undefined, hand: 'left' | 'right'): boolean =>
   RADIAL_BUTTONS[hand].some((index) => Boolean(gamepad?.buttons[index]?.pressed));
 const BUTTON_TRAVEL = 0.016;
@@ -2469,7 +2469,7 @@ export function createWorkspaceScene(
           !radialToggled
         ) {
           radialToggled = true;
-          // Warp is driven by the right stick, so the left menu button hands the radial to the right controller.
+          // Warp is driven by the right stick, so left X hands the radial to the right controller.
           const right = controllerRoots.find(
             (root) =>
               controllerHandedness.get(root) === 'right' && !disconnectedControllers.has(root),

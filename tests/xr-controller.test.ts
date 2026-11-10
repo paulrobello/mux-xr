@@ -5300,30 +5300,28 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('toggles radial with the left menu button or left X', () => {
+  it('toggles radial with left X', () => {
     const { workspace, container } = fixture();
     const gamepad = connectController(0, [0, 0, 0, 0], 'left');
-    const press = (index: number, time: number): void => {
-      (gamepad.buttons[index] as { pressed: boolean }).pressed = true;
+    const press = (time: number): void => {
+      (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
       fakeXR.frame?.(time);
-      (gamepad.buttons[index] as { pressed: boolean }).pressed = false;
+      (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
       fakeXR.frame?.(time + 16);
     };
-    press(7, 0);
+    press(0);
     expect(workspace.state.radialOpen).toBe(true);
-    press(7, 100);
+    press(100);
     expect(workspace.state.radialOpen).toBe(false);
-    press(4, 200);
-    expect(workspace.state.radialOpen).toBe(true);
     workspace.dispose();
     container.remove();
   });
 
-  it('does not toggle radial for a left menu button already held at connect', () => {
+  it('does not toggle radial for a left X already held at connect', () => {
     const { workspace, container } = fixture();
     const gamepad = {
       axes: [0, 0, 0, 0],
-      buttons: Array.from({ length: 8 }, (_, index) => ({ pressed: index === 7 })),
+      buttons: Array.from({ length: 8 }, (_, index) => ({ pressed: index === 4 })),
     } as unknown as Gamepad;
     (fakeXR.controllers[0] as THREE.Group).dispatchEvent({
       type: 'connected',
@@ -5335,7 +5333,7 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('hands a left-menu radial to the right controller so Warp follows the right stick', () => {
+  it('hands a left-X radial to the right controller so Warp follows the right stick', () => {
     const { workspace, container } = fixture();
     // The pointing helper aims controller 0, so the right controller takes index 0 here.
     const rightAxes = [0, 0, 0, 0];
@@ -5343,9 +5341,9 @@ describe('native XR controller event routing', () => {
     const left = connectController(1, [0, 0, 0, 0], 'left');
     workspace.selectTerminal('pane-a');
     const before = workspace.getTerminalCurvature('pane-a');
-    (left.buttons[7] as { pressed: boolean }).pressed = true;
+    (left.buttons[4] as { pressed: boolean }).pressed = true;
     fakeXR.frame?.(0);
-    (left.buttons[7] as { pressed: boolean }).pressed = false;
+    (left.buttons[4] as { pressed: boolean }).pressed = false;
     fakeXR.frame?.(16);
     fakeXR.frame?.(900);
     hit(workspace, { inputAction: 'radialAction', radialAction: 'warp' });
@@ -5358,11 +5356,11 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('toggles radial once when A and the left menu button land in the same frame', () => {
+  it('toggles radial once when A and X land in the same frame', () => {
     const { workspace, container } = fixture();
     const left = connectController(0, [0, 0, 0, 0], 'left');
     const right = connectController(1, [0, 0, 0, 0], 'right');
-    (left.buttons[7] as { pressed: boolean }).pressed = true;
+    (left.buttons[4] as { pressed: boolean }).pressed = true;
     (right.buttons[4] as { pressed: boolean }).pressed = true;
     fakeXR.frame?.(0);
     expect(workspace.state.radialOpen).toBe(true);
