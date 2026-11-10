@@ -3843,10 +3843,18 @@ describe('native XR controller event routing', () => {
         workspace: 'workspace',
         project: '',
         paneLabel: '',
+        source: 'hook',
         stalled: false,
         lastActivityAt: 0,
+        lastReportAt: 0,
+        lastInputAt: 0,
+        lastViewedAt: 0,
+        viewerCount: 0,
+        cpuMs: 0,
         workspaceName: 'Workspace',
         title: 'Agent shell',
+        sessionName: 'Session',
+        windowName: 'Window',
       });
       expect(() => objectWithData(workspace, { originalTitle: 'Agents (1)' })).toThrow();
       // A burst of state flips rebuilds the menu once, with the latest rows.
@@ -3858,13 +3866,17 @@ describe('native XR controller event routing', () => {
         'An agent needs attention · Open agents',
       );
       const timers = vi.getTimerCount();
-      workspace.setAgentRoster([{ ...row('question'), lastActivityAt: 99 }]);
+      // A stamp no shown token reads (cpu is not in the full layout) never rebuilds.
+      workspace.setAgentRoster([{ ...row('question'), cpuMs: 99 }]);
       expect(vi.getTimerCount()).toBe(timers);
       hit(workspace, { inputAction: 'hierarchyNode', originalTitle: 'Agents (1)' });
       settleHierarchy();
       expect(
         objectWithData(workspace, { inputAction: 'pane', paneId: 'pane-c' }).userData.originalTitle,
-      ).toBe('claude · question');
+      ).toBe('question · claude · Agent shell');
+      expect(
+        objectWithData(workspace, { inputAction: 'pane', paneId: 'pane-c' }).userData.helpText,
+      ).toBe('question · claude · Agent shell · Workspace · pane-c · Pick a plan · Open pane');
       hit(workspace, { inputAction: 'pane', paneId: 'pane-c' });
       expect(actions.selectPane).toHaveBeenLastCalledWith('pane-c');
       workspace.showInput('panes');

@@ -37,7 +37,13 @@ import {
   validateTerminalFiltering,
 } from '../terminal/filtering';
 import { terminalKeyLabel } from '../terminal/protocol';
-import { type AgentRosterRow, agentRowsSignature } from '../workspace/agent-roster';
+import {
+  type AgentRosterLayout,
+  type AgentRosterRow,
+  type AgentRows,
+  agentRowsSignature,
+  DEFAULT_AGENT_ROSTER_LAYOUT,
+} from '../workspace/agent-roster';
 import {
   DEFAULT_HIERARCHY_STYLE,
   type HierarchyStyle,
@@ -206,7 +212,7 @@ export interface WorkspaceScene {
   setAvailablePanes(panes: PaneDescriptor[]): void;
   setPaneCreation(state: PaneCreationState): void;
   /** Feed the agent roster; the panes menu shows it as an Agents group. */
-  setAgentRoster(rows: readonly AgentRosterRow[]): void;
+  setAgentRoster(rows: readonly AgentRosterRow[], layout?: AgentRosterLayout): void;
   setQuickCommands(commands: QuickCommandEntry[]): void;
   showInput(mode: InputMode): void;
   hideInput(): void;
@@ -1155,6 +1161,7 @@ export function createWorkspaceScene(
   const AGENT_ROSTER_COALESCE_MS = 400;
   let agentRoster: AgentRosterRow[] = [];
   let agentRosterSignature = '';
+  let agentRosterRows: AgentRows = DEFAULT_AGENT_ROSTER_LAYOUT.rows;
   let hierarchyOpened = false;
   let dictationCursor = 0;
   const dictationCaption = (): string => {
@@ -3675,6 +3682,7 @@ export function createWorkspaceScene(
         uiEnvironment.texture,
         () => paneCreation,
         () => agentRoster,
+        () => agentRosterRows,
       );
       hierarchyNavigation = {
         path: hierarchyNavigator.root.userData.hierarchyPath as string[],
@@ -5897,11 +5905,15 @@ export function createWorkspaceScene(
     }
     refreshInputRoot('panes');
   };
-  const setAgentRoster = (rows: readonly AgentRosterRow[]): void => {
-    const signature = agentRowsSignature(rows);
+  const setAgentRoster = (
+    rows: readonly AgentRosterRow[],
+    layout: AgentRosterLayout = DEFAULT_AGENT_ROSTER_LAYOUT,
+  ): void => {
+    const signature = agentRowsSignature(rows, layout);
     if (signature === agentRosterSignature) return;
     agentRosterSignature = signature;
     agentRoster = [...rows];
+    agentRosterRows = layout.rows;
     // Coalesce bursts of state flips into one rebuild so nodes do not churn under a reach.
     if (agentRosterRetry === undefined && inputRoot && inputMode === 'panes')
       agentRosterRetry = setTimeout(() => refreshAgentRoster(), AGENT_ROSTER_COALESCE_MS);

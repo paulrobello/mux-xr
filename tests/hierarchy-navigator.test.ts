@@ -497,8 +497,25 @@ describe('volumetric hierarchy navigator', () => {
     );
     expect([...new Set(agentPanes.map((object) => object.userData.paneId))]).toEqual(['%2', '%3']);
     const blockedPane = agentPanes.find((object) => object.userData.paneId === '%3');
-    expect(blockedPane?.userData.originalTitle).toBe('codex · blocked');
+    expect(blockedPane?.userData.originalTitle).toBe('blocked · codex · Pane %3');
     expect(blockedPane?.userData.helpText).toContain('needs approval');
+    const compact = createHierarchyNavigator(
+      panes,
+      'helix',
+      { path: ['agents:roster'], page: 0 },
+      new Set(),
+      null,
+      undefined,
+      rows,
+      [['state_icon', 'agent'], ['pane']],
+    );
+    const compactPane = nodeMeshes(compact).find(
+      (object) => object.userData.inputAction === 'pane' && object.userData.paneId === '%3',
+    );
+    // XR labels read the state word in place of the glyph; the help text joins every line.
+    expect(compactPane?.userData.originalTitle).toBe('blocked · codex');
+    expect(compactPane?.userData.helpText).toBe('blocked · codex · %3 · Open pane');
+    compact.dispose();
     const blockedColor = (blockedPane as THREE.Mesh).material as THREE.MeshStandardMaterial;
     const idlePane = agentPanes.find((object) => object.userData.paneId === '%2');
     const idleColor = (idlePane as THREE.Mesh).material as THREE.MeshStandardMaterial;

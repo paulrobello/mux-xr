@@ -273,32 +273,45 @@ textarea {
 .mux-ui .agent-row {
   align-items: flex-start;
 }
-.mux-ui .agent-state {
-  flex: none;
-  min-width: 52px;
-  margin-top: 1px;
-  padding: 2px 6px;
-  border: 1px solid #3c5563;
-  border-radius: 4px;
-  color: #9fb3bf;
-  font-size: 10px;
-  text-align: center;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+.mux-ui .agent-lines {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
-.mux-ui .agent-row[data-agent-tone="attention"] .agent-state {
-  border-color: var(--amber);
+.mux-ui .agent-sep {
+  color: #5d6f7a;
+}
+.mux-ui .agent-token[data-token="state_icon"],
+.mux-ui .agent-token[data-token="state"] {
+  color: #9fb3bf;
+}
+.mux-ui .agent-row[data-agent-tone="attention"] .agent-token[data-token="state_icon"],
+.mux-ui .agent-row[data-agent-tone="attention"] .agent-token[data-token="state"] {
   color: var(--amber);
 }
-.mux-ui .agent-row[data-agent-tone="working"] .agent-state {
-  border-color: var(--cyan);
+.mux-ui .agent-row[data-agent-tone="working"] .agent-token[data-token="state_icon"],
+.mux-ui .agent-row[data-agent-tone="working"] .agent-token[data-token="state"] {
   color: var(--cyan);
 }
-.mux-ui .agent-row[data-agent-tone="done"] .agent-state {
-  border-color: #4f8f6f;
+.mux-ui .agent-row[data-agent-tone="done"] .agent-token[data-token="state_icon"],
+.mux-ui .agent-row[data-agent-tone="done"] .agent-token[data-token="state"] {
   color: #6ecfa8;
 }
-.mux-ui .tree-pane small.agent-reason {
+.mux-ui .agent-token[data-token="message"] {
   color: #c9b48f;
   white-space: normal;
+}
+.mux-ui .agents .side-heading .mini-text {
+  padding: 1px 6px;
+  border: 1px solid #3c5563;
+  border-radius: 4px;
+  background: transparent;
+  color: #9fb3bf;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.mux-ui [data-agent-rows-hint].warn {
+  color: var(--amber);
 }

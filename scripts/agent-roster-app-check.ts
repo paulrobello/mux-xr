@@ -89,7 +89,7 @@ async function main(): Promise<void> {
       await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 15_000 });
       await page.locator('#endpoint').fill(BASE_URL);
       await page.locator('[data-action="connect"]').click();
-      const reason = page.locator('.agent-row .agent-reason').first();
+      const reason = page.locator('.agent-row [data-token="message"]').first();
       await reason.waitFor({ timeout: 15_000 });
       const shot = join(OUT, 'app-reason.png');
       await page.locator('.agents').screenshot({ path: shot });
@@ -130,6 +130,33 @@ async function main(): Promise<void> {
     const screenshot = join(OUT, 'app-roster.png');
     await page.screenshot({ path: screenshot });
 
+    // Layout configuration: priority order, then custom rows from the settings panel.
+    const order = () =>
+      page
+        .locator('.agent-row')
+        .evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).dataset.pane));
+    const sortButton = page.locator('[data-action="agents-sort"]');
+    await sortButton.click();
+    await sortButton.click();
+    assert((await sortButton.textContent()) === 'priority', 'sort did not reach priority');
+    const priorityOrder = await order();
+    assert(priorityOrder[0] === questionPane, `question not first: ${priorityOrder.join(',')}`);
+    await page.locator('[data-action="settings"]').click();
+    await page.locator('[data-agent-rows]').selectOption('custom');
+    const customRows = page.locator('[data-agent-rows-custom]');
+    await customRows.fill('agent, pane / session, window, source');
+    await customRows.press('Tab');
+    await page.locator('[data-action="close-settings"]').click();
+    const customLines = await row(agentPane)
+      .locator('.agent-lines > *')
+      .evaluateAll((nodes) => nodes.map((node) => node.textContent ?? ''));
+    assert(
+      customLines[0] === `claude · ${agentPane}` && /· hook$/.test(customLines[1] ?? ''),
+      `custom rows not rendered: ${customLines.join(' | ')}`,
+    );
+    const layoutShot = join(OUT, 'app-roster-custom.png');
+    await page.locator('.agents').screenshot({ path: layoutShot });
+
     mux(`kill-pane -t ${agentPane}`);
     await row(agentPane).waitFor({ state: 'detached', timeout: 15_000 });
     const result = {
@@ -140,6 +167,9 @@ async function main(): Promise<void> {
       panes,
       snapshotRow,
       liveRows,
+      priorityOrder,
+      customLines,
+      layoutShot,
       remainingRows: await page
         .locator('.agent-row')
         .evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).dataset.pane)),

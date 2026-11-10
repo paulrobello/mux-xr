@@ -21,10 +21,21 @@ import {
   type SpeechInput,
 } from './speech-input';
 import { createTerminalSurface } from './terminal';
-import { mountWorkspaceUI, type WorkspaceSettings, type WorkspaceUI } from './ui';
+import {
+  agentRosterLayout,
+  mountWorkspaceUI,
+  type WorkspaceSettings,
+  type WorkspaceUI,
+} from './ui';
 import { createUpdateChecker, type UpdateChecker } from './update-check';
 import { shouldAutoReload } from './update-policy';
-import { agentRosterRows, createAgentRosterStore } from './workspace/agent-roster';
+import {
+  type AgentRosterLayout,
+  agentRosterRows,
+  createAgentRosterStore,
+  DEFAULT_AGENT_ROSTER_LAYOUT,
+  sortAgentRows,
+} from './workspace/agent-roster';
 import { initialPaneSelection } from './workspace/initial';
 import {
   createOpenViewsStore,
@@ -56,6 +67,7 @@ let refreshMetadata: (() => void) | undefined;
 let autoAttachPending = true;
 const openViewsStore = createOpenViewsStore();
 const agentRoster = createAgentRosterStore();
+let rosterLayout: AgentRosterLayout = DEFAULT_AGENT_ROSTER_LAYOUT;
 let pendingOpenViews: OpenViewsProfile | null = null;
 let pauseViewPersistence = 0;
 let lastLayoutRevision = 0;
@@ -96,8 +108,9 @@ const paneCreator = createPaneCreator({
 
 function syncAgentRoster(): void {
   const rows = agentRosterRows(demo ? demoAgents : agentRoster.entries(), snapshot.panes);
-  ui?.setAgentRoster(rows);
-  scene?.setAgentRoster(rows);
+  ui?.setAgentRoster(sortAgentRows(rows, rosterLayout.sort));
+  // XR keeps pane order: a re-sort after a state change would move a node under the ray.
+  scene?.setAgentRoster(rows, rosterLayout);
 }
 
 function publishPaneCreation(state: PaneCreationState): void {
@@ -298,6 +311,8 @@ function applySettings(settings: WorkspaceSettings): void {
     scene.setUISounds(settings.uiSounds);
     scene.setBackground(settings.background);
     for (const surface of surfaces.values()) surface.setColorMode(settings.colorMode);
+    rosterLayout = agentRosterLayout(settings);
+    syncAgentRoster();
   } finally {
     applyingSettings = false;
   }

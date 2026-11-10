@@ -29,7 +29,24 @@ import {
   validateTerminalFiltering,
 } from '../terminal/filtering';
 import { terminalKeyLabel } from '../terminal/protocol';
-import { type AgentRosterRow, agentRowsSignature, agentStateTone } from '../workspace/agent-roster';
+import {
+  AGE_TOKENS,
+  AGENT_ROWS_CHOICES,
+  AGENT_TOKENS,
+  AGENTS_SORTS,
+  type AgentRosterLayout,
+  type AgentRosterRow,
+  type AgentRowsChoice,
+  type AgentsSort,
+  agentRowLines,
+  agentRowParts,
+  agentRowsSignature,
+  agentStateTone,
+  agentTokenText,
+  DEFAULT_AGENT_ROSTER_LAYOUT,
+  parseAgentRows,
+  resolveAgentRows,
+} from '../workspace/agent-roster';
 import {
   DEFAULT_HIERARCHY_STYLE,
   type HierarchyStyle,
@@ -98,6 +115,20 @@ export interface WorkspaceSettings {
   hierarchyStyle: HierarchyStyle;
   keyborbMode: KeyborbMode;
   uiSounds: boolean;
+  /** par-mux `agent-rows` preset, or `custom` for {@link agentRowsCustom}. */
+  agentRows: AgentRowsChoice;
+  agentRowsCustom: string;
+  agentsSort: AgentsSort;
+}
+
+/** The roster layout a settings value selects. */
+export function agentRosterLayout(
+  settings: Pick<WorkspaceSettings, 'agentRows' | 'agentRowsCustom' | 'agentsSort'>,
+): AgentRosterLayout {
+  return {
+    rows: resolveAgentRows(settings.agentRows, settings.agentRowsCustom),
+    sort: settings.agentsSort,
+  };
 }
 
 export interface WorkspaceUI {
@@ -154,6 +185,7 @@ export interface CommandStore {
 }
 
 const SETTINGS_KEY = 'mux-xr:settings:v1';
+const AGENT_AGE_REFRESH_MS = 15_000;
 const COMMANDS_KEY = 'mux-xr:commands:v1';
 const COMMAND_STATS_KEY = 'mux-xr:command-stats:v1';
 
@@ -214,6 +246,9 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   hierarchyStyle: DEFAULT_HIERARCHY_STYLE,
   keyborbMode: 'auto',
   uiSounds: true,
+  agentRows: 'full',
+  agentRowsCustom: '',
+  agentsSort: DEFAULT_AGENT_ROSTER_LAYOUT.sort,
 };
 
 export function workspaceScope(endpoint: string, workspaceId: string): string {
@@ -319,6 +354,14 @@ export function validateSettings(value: unknown): WorkspaceSettings {
     hierarchyStyle: validateHierarchyStyle(candidate.hierarchyStyle),
     keyborbMode: validateKeyborbMode(candidate.keyborbMode),
     uiSounds: candidate.uiSounds !== false,
+    agentRows: AGENT_ROWS_CHOICES.includes(candidate.agentRows as AgentRowsChoice)
+      ? (candidate.agentRows as AgentRowsChoice)
+      : DEFAULT_SETTINGS.agentRows,
+    agentRowsCustom:
+      typeof candidate.agentRowsCustom === 'string' ? candidate.agentRowsCustom.slice(0, 500) : '',
+    agentsSort: AGENTS_SORTS.includes(candidate.agentsSort as AgentsSort)
+      ? (candidate.agentsSort as AgentsSort)
+      : DEFAULT_SETTINGS.agentsSort,
     arrangement:
       candidate.arrangement === 'row' ||
       candidate.arrangement === 'grid' ||
@@ -433,6 +476,9 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   let paneCreation: PaneCreationState = { available: true, pending: false };
   let agentRows: AgentRosterRow[] = [];
   let agentSignature = '';
+  let agentRenderDeferred = false;
+  let agentRenderedOrder = '';
+  let agentRenderedAges = '';
   const paneStatuses = new Map<string, TerminalStatus>();
   let commands: QuickCommand[] = [];
   let sharedCommands: QuickCommand[] = [];
@@ -484,7 +530,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         `<button class="key" data-key="${escapeHtml(entry.key)}" data-modifier="${entry.modifier ?? ''}" style="--key-x:${entry.x};--key-y:${entry.y};--key-width:${entry.width};--key-height:${entry.height}" aria-pressed="false" aria-label="${escapeHtml(entry.key === 'Backspace' ? 'Backspace' : entry.label)}" title="${escapeHtml(keyboardTitle(entry.key))}">${escapeHtml(entry.label)}</button>`,
     )
     .join('');
-  root.innerHTML = `<style>${CSS}</style><header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><section class="agents" data-agents-section hidden aria-label="Agent roster"><div class="side-heading"><span>Agents</span><span data-agent-count></span></div><div class="agent-list" data-agents></div></section><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. Creates default-shell terminals only when the streamer allows it.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="update-notice" data-update-notice hidden role="status"><span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button></div><div class="workspace-notice" data-notice hidden role="status"><span data-notice-text></span><button data-action="dismiss-notice" class="icon-btn" aria-label="Dismiss notice" title="Dismiss notice">×</button></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button><button data-action="pin-command" class="text-btn" title="Pin or unpin the selected quick command in XR">Pin / unpin</button><button data-action="export-commands" class="text-btn" title="Download every quick command for this server as JSON">Export</button><button data-action="import-commands" class="text-btn" title="Merge quick commands from an exported JSON file">Import</button><input type="file" accept="application/json,.json" data-command-import hidden></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${keyboardMarkup}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Highlight the pane at the center of your view.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
+  root.innerHTML = `<style>${CSS}</style><header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><section class="agents" data-agents-section hidden aria-label="Agent roster"><div class="side-heading"><span>Agents <span data-agent-count></span></span><button data-action="agents-sort" class="mini-text" aria-label="Agent order" title="Change the agent order"></button></div><div class="agent-list" data-agents></div></section><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. Creates default-shell terminals only when the streamer allows it.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="update-notice" data-update-notice hidden role="status"><span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button></div><div class="workspace-notice" data-notice hidden role="status"><span data-notice-text></span><button data-action="dismiss-notice" class="icon-btn" aria-label="Dismiss notice" title="Dismiss notice">×</button></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button><button data-action="pin-command" class="text-btn" title="Pin or unpin the selected quick command in XR">Pin / unpin</button><button data-action="export-commands" class="text-btn" title="Download every quick command for this server as JSON">Export</button><button data-action="import-commands" class="text-btn" title="Merge quick commands from an exported JSON file">Import</button><input type="file" accept="application/json,.json" data-command-import hidden></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${keyboardMarkup}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Highlight the pane at the center of your view.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
   const keyboardElement = root.querySelector<HTMLElement>('[data-keyboard]');
   root
     .querySelector('style')
@@ -567,6 +613,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   let arrangementSelect: HTMLSelectElement | null = null;
   let arrangementApply: HTMLButtonElement | null = null;
   let hierarchyStyleSelect: HTMLSelectElement | null = null;
+  let agentSortSelect: HTMLSelectElement | null = null;
   let keyborbModeSelect: HTMLSelectElement | null = null;
   let filteringMaxAnisotropy = 16;
   let updateWindowPreferenceControls = (): void => undefined;
@@ -708,6 +755,54 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     hierarchyStyleSelect = hierarchyStyle.querySelector('[data-hierarchy-style]');
     if (!hierarchyStyleSelect) throw new Error('Hierarchy style control missing');
     hierarchyStyleSelect.value = settings.hierarchyStyle;
+    const agentControls = document.createElement('fieldset');
+    agentControls.dataset.agentRoster = 'true';
+    agentControls.innerHTML = `<legend>Agent roster</legend><label>Rows<select data-agent-rows aria-label="Agent roster rows"><option value="full">Full (state, agent, title / workspace, project, pane / message)</option><option value="default">par-mux default (state, workspace, project / agent)</option><option value="compact">Compact (state, agent)</option><option value="detailed">Detailed (state, workspace, project / agent, pane)</option><option value="verbose">Verbose (state, agent / message)</option><option value="custom">Custom</option></select></label><label data-agent-rows-custom-row>Custom rows<input data-agent-rows-custom type="text" spellcheck="false" placeholder="state_icon, workspace, project / agent" aria-label="Custom agent roster rows"><small data-agent-rows-hint></small></label><label>Order<select data-agents-sort aria-label="Agent order"><option value="pane">Pane (rows stay put)</option><option value="grouped">Grouped by workspace, urgent first</option><option value="priority">Priority, most urgent first</option></select></label>`;
+    settingsPanel.insertBefore(agentControls, settingsPanel.querySelector('[data-action="reset"]'));
+    const agentRowsSelect = agentControls.querySelector<HTMLSelectElement>('[data-agent-rows]');
+    const agentRowsCustom = agentControls.querySelector<HTMLInputElement>(
+      '[data-agent-rows-custom]',
+    );
+    const agentRowsCustomRow = agentControls.querySelector<HTMLElement>(
+      '[data-agent-rows-custom-row]',
+    );
+    const agentRowsHint = agentControls.querySelector<HTMLElement>('[data-agent-rows-hint]');
+    agentSortSelect = agentControls.querySelector('[data-agents-sort]');
+    if (
+      !agentRowsSelect ||
+      !agentRowsCustom ||
+      !agentRowsCustomRow ||
+      !agentRowsHint ||
+      !agentSortSelect
+    )
+      throw new Error('Agent roster controls missing');
+    const sortSelect = agentSortSelect;
+    const updateAgentControls = (): void => {
+      agentRowsSelect.value = settings.agentRows;
+      agentRowsCustom.value = settings.agentRowsCustom;
+      sortSelect.value = settings.agentsSort;
+      agentRowsCustomRow.hidden = settings.agentRows !== 'custom';
+      const { rows, unknown } = parseAgentRows(settings.agentRowsCustom);
+      agentRowsHint.textContent = `${
+        unknown.length ? `Unknown, skipped: ${unknown.join(', ')}. ` : ''
+      }${rows.length ? '' : 'No known token yet, so the Full rows show. '}Separate lines with / and tokens with commas. Tokens: ${AGENT_TOKENS.join(', ')}.`;
+      agentRowsHint.classList.toggle('warn', unknown.length > 0);
+    };
+    const changeAgentLayout = (): void => {
+      settings = {
+        ...settings,
+        agentRows: validateSettings({ ...settings, agentRows: agentRowsSelect.value }).agentRows,
+        agentRowsCustom: agentRowsCustom.value.slice(0, 500),
+        agentsSort: validateSettings({ ...settings, agentsSort: sortSelect.value }).agentsSort,
+      };
+      updateAgentControls();
+      saveSettings();
+      renderAgents();
+    };
+    agentRowsSelect.addEventListener('change', changeAgentLayout);
+    agentRowsCustom.addEventListener('change', changeAgentLayout);
+    sortSelect.addEventListener('change', changeAgentLayout);
+    updateAgentControls();
     const windowControls = document.createElement('div');
     windowControls.dataset.windowPreferences = 'true';
     windowControls.innerHTML =
@@ -908,14 +1003,57 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     qs<HTMLElement>('[data-agent-count]').textContent = agentRows.length
       ? String(agentRows.length)
       : '';
-    qs<HTMLElement>('[data-agents]').innerHTML = agentRows
+    const layout = agentRosterLayout(settings);
+    const sortButton = qs<HTMLButtonElement>('[data-action="agents-sort"]');
+    sortButton.textContent = layout.sort;
+    sortButton.title = `Agent order: ${layout.sort}. Change the agent order`;
+    const list = qs<HTMLElement>('[data-agents]');
+    // A reorder waits while the pointer is over the list; other updates render in place.
+    const order = agentRows.map((row) => row.paneId).join(' ');
+    if (order !== agentRenderedOrder && agentRenderedOrder && list.matches(':hover')) {
+      agentRenderDeferred = true;
+      return;
+    }
+    agentRenderDeferred = false;
+    agentRenderedOrder = order;
+    agentRenderedAges = agentAgesKey();
+    const now = Date.now();
+    list.innerHTML = agentRows
       .map((row) => {
         const tone = agentStateTone(row.state);
-        const state = row.stalled ? `${row.state} · stalled` : row.state;
-        return `<button class="tree-pane agent-row ${row.paneId === activePaneId ? 'selected' : ''}" data-pane="${escapeHtml(row.paneId)}" data-agent-tone="${tone}" title="${escapeHtml(`Open ${row.agent} in ${row.paneId}`)}" aria-label="${escapeHtml(`${row.agent} ${state} in ${row.workspaceName || 'unknown workspace'}, pane ${row.paneId}${row.reason ? `, ${row.reason}` : ''}`)}"><span class="agent-state">${escapeHtml(state)}</span><span><b>${escapeHtml(row.agent)} · ${escapeHtml(row.title)}</b><small>${escapeHtml(row.paneId)}${row.workspaceName ? ` · ${escapeHtml(row.workspaceName)}` : ''}</small>${row.reason ? `<small class="agent-reason">${escapeHtml(row.reason)}</small>` : ''}</span></button>`;
+        const state = agentTokenText(row, 'state', now);
+        const lines = agentRowParts(row, layout.rows, now);
+        const content = (lines.length ? lines : [[{ token: 'agent' as const, text: row.agent }]])
+          .map((line, index) => {
+            const parts = line
+              .map(
+                (part) =>
+                  `<span class="agent-token" data-token="${part.token}">${escapeHtml(part.text)}</span>`,
+              )
+              .join('<span class="agent-sep"> · </span>');
+            return index === 0 ? `<b>${parts}</b>` : `<small>${parts}</small>`;
+          })
+          .join('');
+        return `<button class="tree-pane agent-row ${row.paneId === activePaneId ? 'selected' : ''}" data-pane="${escapeHtml(row.paneId)}" data-agent-tone="${tone}" title="${escapeHtml(`Open ${row.agent} in ${row.paneId}`)}" aria-label="${escapeHtml(`${row.agent} ${state} in ${row.workspaceName || 'unknown workspace'}, pane ${row.paneId}${row.project ? `, project ${row.project}` : ''}${row.reason ? `, ${row.reason}` : ''}`)}"><span class="agent-lines">${content}</span></button>`;
       })
       .join('');
   };
+  /** The age texts the rows would show now; empty when the layout has no age token. */
+  function agentAgesKey(): string {
+    const { rows } = agentRosterLayout(settings);
+    const ages = rows.map((line) => line.filter((token) => AGE_TOKENS.has(token)));
+    if (!ages.some((line) => line.length)) return '';
+    const now = Date.now();
+    return agentRows.map((row) => agentRowLines(row, ages, now).join('|')).join('\u0000');
+  }
+  qs<HTMLElement>('[data-agents]').addEventListener('pointerleave', () => {
+    if (agentRenderDeferred) renderAgents();
+  });
+  const agentAgeTimer = setInterval(() => {
+    // Also resumes a deferred reorder where pointerleave never fired (touch).
+    if (agentRenderDeferred || (agentRows.length && agentAgesKey() !== agentRenderedAges))
+      renderAgents();
+  }, AGENT_AGE_REFRESH_MS);
   const renderTree = (): void => {
     renderAgents();
     const tree = qs<HTMLElement>('[data-tree]');
@@ -1217,6 +1355,15 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       return;
     }
     switch (button.dataset.action) {
+      case 'agents-sort': {
+        const next =
+          AGENTS_SORTS[(AGENTS_SORTS.indexOf(settings.agentsSort) + 1) % AGENTS_SORTS.length];
+        settings = { ...settings, agentsSort: next };
+        if (agentSortSelect) agentSortSelect.value = next;
+        saveSettings();
+        renderAgents();
+        break;
+      }
       case 'connect': {
         const endpoint = qs<HTMLInputElement>('#endpoint').value.trim();
         settings = { ...settings, endpoint };
@@ -1607,7 +1754,8 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       renderTree();
     },
     setAgentRoster(rows) {
-      const signature = agentRowsSignature(rows);
+      const layout = agentRosterLayout(settings);
+      const signature = `${layout.sort}\u0002${agentRowsSignature(rows, layout)}`;
       agentRows = [...rows];
       if (signature === agentSignature) return;
       agentSignature = signature;
@@ -1841,6 +1989,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     captureCommandTarget: () => capturedTarget,
     destroy() {
       clearModifiers();
+      clearInterval(agentAgeTimer);
       root.remove();
     },
   };

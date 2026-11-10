@@ -45,8 +45,14 @@ export const demoAgents: AgentRosterEntry[] = [
     workspace: 'demo-work',
     project: 'mux-xr',
     paneLabel: 'Agent activity',
+    source: 'hook',
     stalled: false,
     lastActivityAt: 0,
+    lastReportAt: 0,
+    lastInputAt: 0,
+    lastViewedAt: 0,
+    viewerCount: 0,
+    cpuMs: 0,
   },
 ];
 

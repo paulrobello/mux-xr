@@ -1,9 +1,14 @@
 import * as THREE from 'three';
 import type { PaneDescriptor } from '../contracts';
 import {
+  AGE_TOKENS,
+  AGENT_ROWS_PRESETS,
   type AgentRosterRow,
+  type AgentRows,
   type AgentStateTone,
+  agentRowParts,
   agentStateTone,
+  agentTokenText,
 } from '../workspace/agent-roster';
 import type { HierarchyStyle } from '../workspace/hierarchy-style';
 import type { PaneCreationState } from '../workspace/pane-create';
@@ -66,24 +71,46 @@ function keyFor(kind: Node['kind'], scope: string[]): string {
   return `${kind}:${scope.map(keyPart).join('/')}`;
 }
 
+/**
+ * A roster row's layout lines for XR text. The node colour already carries the state, and
+ * label fonts may lack the glyphs, so `state_icon` reads as the state word.
+ */
+function agentXRLines(row: AgentRosterRow, rows: AgentRows, now: number): string[] {
+  // Nodes rebuild only on roster changes, so clock-driven ages would go stale here.
+  return agentRowParts(row, rows, now, AGE_TOKENS)
+    .map((line) => {
+      const hasState = line.some((part) => part.token === 'state');
+      return line
+        .filter((part) => !(part.token === 'state_icon' && hasState))
+        .map((part) =>
+          part.token === 'state_icon' ? agentTokenText(row, 'state', now) : part.text,
+        )
+        .join(' · ');
+    })
+    .filter(Boolean);
+}
+
 function agentsNode(
   panes: readonly PaneDescriptor[],
   agents: readonly AgentRosterRow[],
+  rows: AgentRows,
 ): Node | undefined {
   const byId = new Map(panes.map((pane) => [pane.id, pane]));
   const children: Node[] = [];
+  const now = Date.now();
   for (const row of agents) {
     const pane = byId.get(row.paneId);
     if (!pane) continue;
-    const state = row.stalled ? `${row.state} · stalled` : row.state;
+    const lines = agentXRLines(row, rows, now);
     children.push({
       key: `agent:${keyPart(row.paneId)}`,
       kind: 'pane',
-      title: `${row.agent} · ${state}`,
+      // The 0.48 m label holds one line; the help text carries the whole entry.
+      title: lines[0] ?? row.agent,
       children: [],
       pane,
       tone: agentStateTone(row.state),
-      helpText: `${row.agent} · ${state} · ${row.title}${row.reason ? ` · ${row.reason}` : ''} · Open pane`,
+      helpText: `${(lines.length ? lines : [row.agent]).join(' · ')} · Open pane`,
     });
   }
   if (!children.length) return undefined;
@@ -93,6 +120,7 @@ function agentsNode(
 function buildTree(
   panes: readonly PaneDescriptor[],
   agents: readonly AgentRosterRow[] = [],
+  agentRows: AgentRows = AGENT_ROWS_PRESETS.full,
 ): Node[] {
   const workspaces = new Map<string, Node>();
   for (const pane of panes) {
@@ -145,7 +173,7 @@ function buildTree(
     return nodes;
   };
   const tree = sort([...workspaces.values()]);
-  const roster = agentsNode(panes, agents);
+  const roster = agentsNode(panes, agents, agentRows);
   return roster ? [roster, ...tree] : tree;
 }
 
@@ -213,10 +241,12 @@ export function createHierarchyNavigator(
     pending: false,
   },
   agentSource: readonly AgentRosterRow[] | (() => readonly AgentRosterRow[]) = [],
+  agentRowsSource: AgentRows | (() => AgentRows) = AGENT_ROWS_PRESETS.full,
 ): HierarchyNavigator {
   const creation = typeof creationSource === 'function' ? creationSource() : creationSource;
   const agents = typeof agentSource === 'function' ? agentSource() : agentSource;
-  const tree = buildTree(panes, agents);
+  const agentRows = typeof agentRowsSource === 'function' ? agentRowsSource() : agentRowsSource;
+  const tree = buildTree(panes, agents, agentRows);
   const normalized = normalizeNavigation(tree, navigation);
   const root = new THREE.Group();
   root.name = 'hierarchy-navigator';
@@ -730,6 +760,7 @@ export function createHierarchyNavigator(
         envMap,
         creationSource,
         agentSource,
+        agentRowsSource,
       ) as InternalNavigator;
       const outgoing = [...root.children];
       const incoming = [...next.root.children];
