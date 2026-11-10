@@ -597,12 +597,60 @@ async function measure(
       __questThree: typeof THREE;
       __muxXR: FixtureWindow['__muxXR'];
     };
-    const far =
-      w.__questScene.getObjectByName('terminal-panel-%4') ??
-      w.__questScene.getObjectByName('terminal-panel-%1');
-    if (!far) return { selectedId: w.__muxXR.getState().selectedId, visible: false };
-    const point = far.getWorldPosition(new w.__questThree.Vector3());
-    w.__questCamera.lookAt(point);
+    // The scene's gaze ray promotes the first terminal screen it hits, so the probe must be a
+    // far pane no other pane hides from the head: the farthest unoccluded non-selected one.
+    const three = w.__questThree;
+    const eye = w.__questCamera.getWorldPosition(new three.Vector3());
+    const caster = new three.Raycaster();
+    caster.far = w.__questCamera.far;
+    // Matches the scene's isControlVisible: every ancestor visible and none focus-hidden.
+    const shown = (object: THREE.Object3D): boolean => {
+      for (let current: THREE.Object3D | null = object; current; current = current.parent)
+        if (!current.visible || current.userData.focusHidden) return false;
+      return true;
+    };
+    const firstScreen = (target: THREE.Vector3) => {
+      caster.set(eye, target.clone().sub(eye).normalize());
+      const hit = caster
+        .intersectObject(w.__questScene, true)
+        .find((entry) => entry.object.name === 'terminal-surface' && shown(entry.object));
+      return hit ? { id: String(hit.object.parent?.userData.terminalId) } : null;
+    };
+    const selectedId = w.__muxXR.getState().selectedId;
+    const candidates = w.__muxXR
+      .getState()
+      .streams.map((stream) => {
+        const root = w.__questScene.getObjectByName(`terminal-panel-${stream.id}`);
+        const screen = root?.getObjectByName('terminal-surface');
+        if (!root || !screen || stream.id === selectedId || !shown(screen)) return null;
+        // A partly hidden pane is still gazeable on its visible part, so sample its screen.
+        const mesh = screen as THREE.Mesh;
+        mesh.geometry.computeBoundingBox();
+        const box = mesh.geometry.boundingBox as THREE.Box3;
+        let point: THREE.Vector3 | null = null;
+        for (const fy of [0.5, 0.25, 0.75, 0.1, 0.9])
+          for (const fx of [0.5, 0.25, 0.75, 0.1, 0.9]) {
+            if (point) break;
+            const local = new three.Vector3(
+              box.min.x + (box.max.x - box.min.x) * fx,
+              box.min.y + (box.max.y - box.min.y) * fy,
+              (box.min.z + box.max.z) / 2,
+            );
+            const candidate = screen.localToWorld(local);
+            if (firstScreen(candidate)?.id === stream.id) point = candidate;
+          }
+        if (!point) return null;
+        // The scene's LOD distance: panel origin to eye over the panel's world scale.
+        const scale = Math.max(0.01, Math.abs(root.getWorldScale(new three.Vector3()).y));
+        const distance = root.getWorldPosition(new three.Vector3()).distanceTo(eye) / scale;
+        return { id: stream.id, point, distance };
+      })
+      .filter((entry) => entry !== null)
+      .sort((a, b) => b.distance - a.distance);
+    const far = candidates[0];
+    if (!far) return { selectedId, visible: false, candidates: 0 };
+    w.__questCamera.lookAt(far.point);
+    w.__questCamera.updateMatrixWorld(true);
     await new Promise<void>((resolve) =>
       requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
     );
@@ -615,18 +663,47 @@ async function measure(
     const y = Math.max(0, Math.floor((gl.drawingBufferHeight - height) / 2));
     const pixels = new Uint8Array(width * height * 4);
     gl.readPixels(x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    const quality = (id: string) =>
+      w.__muxXR.getState().streams.find((stream) => stream.id === id)?.renderQuality;
+    // Gaze promotes one pane: other far panes must stay below full, or LOD is not active at all.
+    const otherFar = candidates
+      .slice(1)
+      .filter((entry) => entry.distance > 3.9)
+      .map((entry) => ({ id: entry.id, renderQuality: quality(entry.id) }));
     return {
+      presenting: (window as unknown as FixtureWindow).__questRenderer.xr.isPresenting,
+      otherFar,
       selectedId: w.__muxXR.getState().selectedId,
-      visible: far.visible,
-      renderQuality:
-        w.__muxXR.getState().streams.find((stream) => stream.id === '%4')?.renderQuality ?? 'full',
+      visible: true,
+      paneId: far.id,
+      distance: Number(far.distance.toFixed(2)),
+      candidates: candidates.length,
+      renderQuality: w.__muxXR.getState().streams.find((stream) => stream.id === far.id)
+        ?.renderQuality,
       nonBlackPixels: pixels.some((value, index) => index % 4 !== 3 && value !== 0),
     };
   });
+  assert(farPane.visible, 'no unoccluded non-selected pane to gaze at');
+  assert(
+    farPane.presenting,
+    `far-pane probe ran outside an XR session: ${JSON.stringify(farPane)}`,
+  );
+  assert(
+    (farPane.otherFar ?? []).every((entry) => entry.renderQuality !== 'full'),
+    `a far pane the probe did not gaze at rendered full: ${JSON.stringify(farPane)}`,
+  );
+  // Beyond 3.9 m distance LOD alone would leave the pane medium, so full proves gaze promotion.
+  // With 6 panes the farthest unoccluded non-selected pane sits inside that radius, so there is
+  // nothing to prove there.
+  const gazeProbe = (farPane.distance ?? 0) > 3.9;
+  assert(
+    gazeProbe || count < 12,
+    `nearest-visible far pane is within full-quality range: ${JSON.stringify(farPane)}`,
+  );
   assert(farPane.selectedId === metrics.selectedId, 'far-pane gaze retargeted selected pane');
   assert(
-    farPane.renderQuality === 'full',
-    `far pane was not promoted to full quality: ${String(farPane.renderQuality)}`,
+    !gazeProbe || farPane.renderQuality === 'full',
+    `far pane was not promoted to full quality: ${JSON.stringify(farPane)}`,
   );
   assert(farPane.nonBlackPixels, 'far pane center sample remained black');
   return {
@@ -655,7 +732,7 @@ async function measure(
       frameCpuP95Ms: percentile(cpu, 0.95),
       pacingP95Ms: percentile(times, 0.95),
     },
-    farPane,
+    farPane: { ...farPane, gazeProbe },
     errors: state.errors,
   };
 }
