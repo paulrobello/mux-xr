@@ -5307,7 +5307,14 @@ export function createWorkspaceScene(
         { width: PANEL_WIDTH, height: PANEL_HEIGHT, radians: 0 },
         { chin: mutableState.windowPreferences.frameChin },
       ),
-      new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, side: THREE.DoubleSide }),
+      new THREE.MeshBasicMaterial({
+        color: ACCENT,
+        transparent: true,
+        side: THREE.DoubleSide,
+        // Unlit uniform colour blends identically in any order, so the back-then-front pass is
+        // wasted. Revisit if the accent gains a texture, vertex colours or lighting.
+        forceSinglePass: true,
+      }),
     );
     frameAccent.name = 'terminal-frame-accent';
     frameAccent.raycast = () => undefined;

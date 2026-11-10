@@ -2849,6 +2849,18 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('draws the frame accent in one pass instead of three.js back-then-front transparent passes', () => {
+    const { workspace, container } = fixture();
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+    const material = (panel.getObjectByName('terminal-frame-accent') as THREE.Mesh)
+      .material as THREE.MeshBasicMaterial;
+    const twoPass =
+      material.transparent && material.side === THREE.DoubleSide && !material.forceSinglePass;
+    expect(twoPass).toBe(false);
+    workspace.dispose();
+    container.remove();
+  });
+
   it('scrolls only the pointed pane while ungripped without changing selection', () => {
     const { workspace, actions, container } = fixture();
     actions.scrollTerminal = vi.fn(() => true);
