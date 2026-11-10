@@ -455,6 +455,13 @@ function createLabelButton(
 
 // Keyboard-panel units; the panel spawns at 0.38 scale, so this is about 11 mm raised, 6 mm travel.
 const BUTTON_DEPTH = 0.03;
+/**
+ * Radial toggle buttons per hand: right A, and on the left the menu button (Touch Plus index 7)
+ * plus X, kept until the menu button is confirmed to reach the page on a Quest.
+ */
+const RADIAL_BUTTONS = { right: [4], left: [4, 7] } as const;
+const radialPressed = (gamepad: Gamepad | undefined, hand: 'left' | 'right'): boolean =>
+  RADIAL_BUTTONS[hand].some((index) => Boolean(gamepad?.buttons[index]?.pressed));
 const BUTTON_TRAVEL = 0.016;
 const BUTTON_PRESS_MS = 140;
 const BUTTON_RELEASE_MS = 80;
@@ -2449,7 +2456,7 @@ export function createWorkspaceScene(
       for (const controller of controllerRoots) {
         const hand = controllerHandedness.get(controller);
         if (hand !== 'right' && hand !== 'left') continue;
-        const keyboardPressed = Boolean(controllerGamepads.get(controller)?.buttons[4]?.pressed);
+        const keyboardPressed = radialPressed(controllerGamepads.get(controller), hand);
         const keyboardWasPressed = radialButtonDown.has(controller);
         if (keyboardPressed) radialButtonDown.add(controller);
         else radialButtonDown.delete(controller);
@@ -2462,7 +2469,7 @@ export function createWorkspaceScene(
           !radialToggled
         ) {
           radialToggled = true;
-          // Warp is driven by the right stick, so left X hands the radial to the right controller.
+          // Warp is driven by the right stick, so the left menu button hands the radial to the right controller.
           const right = controllerRoots.find(
             (root) =>
               controllerHandedness.get(root) === 'right' && !disconnectedControllers.has(root),
@@ -5095,7 +5102,8 @@ export function createWorkspaceScene(
         const gamepad = data?.hand ? undefined : data?.gamepad;
         root.userData.inputSourceHand = data?.hand;
         controllerHandedness.set(root, data?.handedness ?? 'none');
-        if (gamepad?.buttons[4]?.pressed) radialButtonDown.add(root);
+        if (radialPressed(gamepad, data?.handedness === 'left' ? 'left' : 'right'))
+          radialButtonDown.add(root);
         else radialButtonDown.delete(root);
         if (gamepad?.buttons[5]?.pressed) focusButtonDown.add(root);
         else focusButtonDown.delete(root);

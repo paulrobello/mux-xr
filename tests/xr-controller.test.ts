@@ -210,7 +210,7 @@ function connectController(
 ): Gamepad {
   const gamepad = {
     axes,
-    buttons: Array.from({ length: 6 }, () => ({ pressed: false })),
+    buttons: Array.from({ length: 8 }, () => ({ pressed: false })),
   } as unknown as Gamepad;
   (fakeXR.controllers[index] as THREE.Group).dispatchEvent({
     type: 'connected',
@@ -5300,26 +5300,69 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('toggles radial with left X, since Quest reserves the left menu button for leaving XR', () => {
+  it('toggles radial with the left menu button or left X', () => {
     const { workspace, container } = fixture();
     const gamepad = connectController(0, [0, 0, 0, 0], 'left');
-    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
-    fakeXR.frame?.(0);
+    const press = (index: number, time: number): void => {
+      (gamepad.buttons[index] as { pressed: boolean }).pressed = true;
+      fakeXR.frame?.(time);
+      (gamepad.buttons[index] as { pressed: boolean }).pressed = false;
+      fakeXR.frame?.(time + 16);
+    };
+    press(7, 0);
     expect(workspace.state.radialOpen).toBe(true);
-    (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
-    fakeXR.frame?.(120);
-    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
-    fakeXR.frame?.(140);
+    press(7, 100);
+    expect(workspace.state.radialOpen).toBe(false);
+    press(4, 200);
+    expect(workspace.state.radialOpen).toBe(true);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('does not toggle radial for a left menu button already held at connect', () => {
+    const { workspace, container } = fixture();
+    const gamepad = {
+      axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 8 }, (_, index) => ({ pressed: index === 7 })),
+    } as unknown as Gamepad;
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({
+      type: 'connected',
+      data: { gamepad, handedness: 'left' },
+    } as never);
+    fakeXR.frame?.(0);
     expect(workspace.state.radialOpen).toBe(false);
     workspace.dispose();
     container.remove();
   });
 
-  it('toggles radial once when A and X land in the same frame', () => {
+  it('hands a left-menu radial to the right controller so Warp follows the right stick', () => {
+    const { workspace, container } = fixture();
+    // The pointing helper aims controller 0, so the right controller takes index 0 here.
+    const rightAxes = [0, 0, 0, 0];
+    connectController(0, rightAxes, 'right');
+    const left = connectController(1, [0, 0, 0, 0], 'left');
+    workspace.selectTerminal('pane-a');
+    const before = workspace.getTerminalCurvature('pane-a');
+    (left.buttons[7] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(0);
+    (left.buttons[7] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(16);
+    fakeXR.frame?.(900);
+    hit(workspace, { inputAction: 'radialAction', radialAction: 'warp' });
+    fakeXR.frame?.(2000);
+    expect(workspace.state.warpTerminalId).toBe('pane-a');
+    rightAxes[2] = 1;
+    fakeXR.frame?.(2200);
+    expect(workspace.getTerminalCurvature('pane-a')).toBeGreaterThan(before);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('toggles radial once when A and the left menu button land in the same frame', () => {
     const { workspace, container } = fixture();
     const left = connectController(0, [0, 0, 0, 0], 'left');
     const right = connectController(1, [0, 0, 0, 0], 'right');
-    (left.buttons[4] as { pressed: boolean }).pressed = true;
+    (left.buttons[7] as { pressed: boolean }).pressed = true;
     (right.buttons[4] as { pressed: boolean }).pressed = true;
     fakeXR.frame?.(0);
     expect(workspace.state.radialOpen).toBe(true);
