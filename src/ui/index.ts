@@ -48,6 +48,14 @@ import {
   resolveAgentRows,
 } from '../workspace/agent-roster';
 import {
+  BUTTON_FUNCTION_LABELS,
+  BUTTON_FUNCTIONS,
+  CONTROLLER_BUTTON_LABELS,
+  CONTROLLER_BUTTONS,
+  type ControllerButton,
+  DEFAULT_BUTTON_MAP,
+} from '../workspace/controller-buttons';
+import {
   DEFAULT_HIERARCHY_STYLE,
   type HierarchyStyle,
   validateHierarchyStyle,
@@ -856,6 +864,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
           focusCurvature: Number(windowCurvature.value),
           scrollStripSide: stripSide.value,
           frameChin: frameChin.checked,
+          buttonMap: settings.windowPreferences.buttonMap,
         }),
       };
       updateWindowPreferenceControls();
@@ -867,6 +876,54 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     stripSide.addEventListener('change', changeWindowPreferences);
     frameChin.addEventListener('change', changeWindowPreferences);
     updateWindowPreferenceControls();
+    const buttonControls = document.createElement('div');
+    buttonControls.dataset.controllerButtons = 'true';
+    const functionOptions = BUTTON_FUNCTIONS.map(
+      (choice) => `<option value="${choice}">${BUTTON_FUNCTION_LABELS[choice]}</option>`,
+    ).join('');
+    buttonControls.innerHTML = `<fieldset><legend>Controller buttons</legend>${CONTROLLER_BUTTONS.map(
+      (button) =>
+        `<label>${CONTROLLER_BUTTON_LABELS[button]} <select data-controller-button="${button}" aria-label="${CONTROLLER_BUTTON_LABELS[button]} button function">${functionOptions}</select></label>`,
+    ).join(
+      '',
+    )}<button data-action="reset-controller-buttons" class="secondary">Reset buttons</button><small>While warping a pane, right A saves and right B cancels.</small></fieldset>`;
+    settingsPanel.insertBefore(
+      buttonControls,
+      settingsPanel.querySelector('[data-action="passthrough"]'),
+    );
+    const buttonSelects = [
+      ...buttonControls.querySelectorAll<HTMLSelectElement>('[data-controller-button]'),
+    ];
+    const updateButtonControls = (): void => {
+      for (const select of buttonSelects)
+        select.value =
+          settings.windowPreferences.buttonMap[select.dataset.controllerButton as ControllerButton];
+    };
+    const saveButtonMap = (buttonMap: unknown): void => {
+      settings = {
+        ...settings,
+        windowPreferences: validateWindowPreferences({ ...settings.windowPreferences, buttonMap }),
+      };
+      updateButtonControls();
+      saveSettings();
+    };
+    for (const select of buttonSelects)
+      select.addEventListener('change', () =>
+        saveButtonMap(
+          Object.fromEntries(
+            buttonSelects.map((entry) => [entry.dataset.controllerButton, entry.value]),
+          ),
+        ),
+      );
+    buttonControls
+      .querySelector('[data-action="reset-controller-buttons"]')
+      ?.addEventListener('click', () => saveButtonMap(DEFAULT_BUTTON_MAP));
+    const refreshWindowControls = updateWindowPreferenceControls;
+    updateWindowPreferenceControls = (): void => {
+      refreshWindowControls();
+      updateButtonControls();
+    };
+    updateButtonControls();
     const grid = document.createElement('div');
     grid.dataset.gridControls = 'true';
     grid.innerHTML =

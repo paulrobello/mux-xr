@@ -10,6 +10,7 @@ import {
   validateSettings,
   workspaceScope,
 } from '../src/ui';
+import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
 
 const command = (id: string, workspaceId?: string): QuickCommand => ({
   id,
@@ -263,6 +264,30 @@ describe('mux XR local UI state', () => {
     localStorage.clear();
   });
 
+  it('saves controller button functions from browser Settings and resets them', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    const leftY = query<HTMLSelectElement>(root, '[data-controller-button="leftY"]');
+    expect(leftY.value).toBe('none');
+    leftY.value = 'keyboard';
+    leftY.dispatchEvent(new Event('change'));
+    expect(ui.getSettings().windowPreferences.buttonMap).toEqual({
+      ...DEFAULT_BUTTON_MAP,
+      leftY: 'keyboard',
+    });
+    ui.destroy();
+    const again = mountWorkspaceUI(root, { onConnect: () => undefined });
+    expect(query<HTMLSelectElement>(root, '[data-controller-button="leftY"]').value).toBe(
+      'keyboard',
+    );
+    query<HTMLButtonElement>(root, '[data-action="reset-controller-buttons"]').click();
+    expect(again.getSettings().windowPreferences.buttonMap).toEqual(DEFAULT_BUTTON_MAP);
+    again.destroy();
+    root.remove();
+    localStorage.clear();
+  });
+
   it('exposes new-window display defaults separately from per-pane opacity', () => {
     localStorage.clear();
     const root = document.createElement('div');
@@ -305,6 +330,7 @@ describe('mux XR local UI state', () => {
       focusCurvature: 25,
       scrollStripSide: 'both',
       frameChin: true,
+      buttonMap: DEFAULT_BUTTON_MAP,
     });
     expect(changes).toEqual([0.65, 0.65, 0.65, 0.65, 0.65]);
     ui.setWindowPreferences(
@@ -314,6 +340,7 @@ describe('mux XR local UI state', () => {
         focusCurvature: 50,
         scrollStripSide: 'left',
         frameChin: true,
+        buttonMap: DEFAULT_BUTTON_MAP,
       },
       true,
     );
@@ -330,6 +357,7 @@ describe('mux XR local UI state', () => {
       focusCurvature: 50,
       scrollStripSide: 'left',
       frameChin: true,
+      buttonMap: DEFAULT_BUTTON_MAP,
     });
     restored.destroy();
     root.remove();

@@ -45,6 +45,15 @@ import {
   DEFAULT_AGENT_ROSTER_LAYOUT,
 } from '../workspace/agent-roster';
 import {
+  BUTTON_FUNCTION_LABELS,
+  type ButtonFunction,
+  CONTROLLER_BUTTON_LABELS,
+  CONTROLLER_BUTTONS,
+  type ControllerButton,
+  DEFAULT_BUTTON_MAP,
+  nextButtonFunction,
+} from '../workspace/controller-buttons';
+import {
   DEFAULT_HIERARCHY_STYLE,
   type HierarchyStyle,
   validateHierarchyStyle,
@@ -136,7 +145,8 @@ type InputMode =
   | 'warp'
   | 'settings'
   | 'display'
-  | 'world';
+  | 'world'
+  | 'buttons';
 
 export interface PanelTransform {
   position: THREE.Vector3;
@@ -456,11 +466,19 @@ function createLabelButton(
 // Keyboard-panel units; the panel spawns at 0.38 scale, so this is about 11 mm raised, 6 mm travel.
 const BUTTON_DEPTH = 0.03;
 /**
- * Lower face button: right A toggles the radial, left X toggles Panes. The left menu button
- * (Touch Plus index 7 in the input-profiles registry) never reached the page on a Quest 3 on
- * 2026-11-10, so it is unused.
+ * Face buttons by gamepad index: 4 is A or X, 5 is B or Y. The left menu button (Touch Plus index 7
+ * in the input-profiles registry) never reached the page on a Quest 3 on 2026-11-10, so it is unused.
  */
-const FACE_BUTTON = 4;
+const FACE_BUTTONS: Record<'left' | 'right', Array<[number, ControllerButton]>> = {
+  right: [
+    [4, 'rightA'],
+    [5, 'rightB'],
+  ],
+  left: [
+    [4, 'leftX'],
+    [5, 'leftY'],
+  ],
+};
 const BUTTON_TRAVEL = 0.016;
 const BUTTON_PRESS_MS = 140;
 const BUTTON_RELEASE_MS = 80;
@@ -2451,55 +2469,45 @@ export function createWorkspaceScene(
         );
     }
     if (renderer?.xr.isPresenting) {
-      // Left X and right A landing in one frame open Panes, whatever order the controllers list in.
-      const panesPressed = controllerRoots.some(
-        (root) =>
-          controllerHandedness.get(root) === 'left' &&
-          !radialButtonDown.has(root) &&
-          Boolean(controllerGamepads.get(root)?.buttons[FACE_BUTTON]?.pressed),
-      );
+      const fired: Array<{ controller: THREE.Group; button: ControllerButton }> = [];
       for (const controller of controllerRoots) {
         const hand = controllerHandedness.get(controller);
         if (hand !== 'right' && hand !== 'left') continue;
-        const keyboardPressed = Boolean(
-          controllerGamepads.get(controller)?.buttons[FACE_BUTTON]?.pressed,
-        );
-        const keyboardWasPressed = radialButtonDown.has(controller);
-        if (keyboardPressed) radialButtonDown.add(controller);
-        else radialButtonDown.delete(controller);
-        if (
-          keyboardPressed &&
-          !keyboardWasPressed &&
-          controller.visible &&
-          !disconnectedControllers.has(controller) &&
-          !gripActive()
-        ) {
-          if (hand === 'left') {
-            if (!warpEdit) togglePanes();
-          } else if (!panesPressed) toggleRadialMenu(controller);
+        const pad = controllerGamepads.get(controller);
+        for (const [index, button] of FACE_BUTTONS[hand]) {
+          const held = index === 4 ? radialButtonDown : focusButtonDown;
+          const pressed = Boolean(pad?.buttons[index]?.pressed);
+          const wasPressed = held.has(controller);
+          if (pressed) held.add(controller);
+          else held.delete(controller);
+          if (
+            pressed &&
+            !wasPressed &&
+            controller.visible &&
+            !disconnectedControllers.has(controller) &&
+            !gripActive()
+          )
+            fired.push({ controller, button });
         }
-        if (hand !== 'right') continue;
-        const pressed = Boolean(controllerGamepads.get(controller)?.buttons[5]?.pressed);
-        const wasPressed = focusButtonDown.has(controller);
-        if (pressed) focusButtonDown.add(controller);
-        else focusButtonDown.delete(controller);
-        if (
-          pressed &&
-          !wasPressed &&
-          controller.visible &&
-          !disconnectedControllers.has(controller) &&
-          !gripActive() &&
-          (!radialMenu.root.visible || warpEdit)
-        ) {
-          if (warpEdit) finishWarp(false);
-          else if (inputRoot && inputMode === 'panes') hideInput();
-          else {
-            const target = targetFromController(controller);
-            toggleFocusMode(
-              target?.terminalId && panels.has(target.terminalId) ? target.terminalId : undefined,
-            );
-          }
+      }
+      // A menu press landing with another function in one frame yields to it, whatever the
+      // controller order, so the other function is not hidden behind a radial.
+      const functionOf = (button: ControllerButton): ButtonFunction =>
+        mutableState.windowPreferences.buttonMap[button];
+      const others = fired.some(({ button }) => !['menu', 'none'].includes(functionOf(button)));
+      // Presses in the frame Warp was already running only save or cancel it, so one started this
+      // frame is not cancelled by a later button in the same frame.
+      const warping = Boolean(warpEdit);
+      for (const { controller, button } of fired) {
+        if (warping) {
+          if (!warpEdit) continue;
+          if (button === 'rightA') finishWarp(true);
+          else if (button === 'rightB') finishWarp(false);
+          continue;
         }
+        const choice = functionOf(button);
+        if (choice === 'menu' && others) continue;
+        runButtonFunction(choice, controller);
       }
       if (warpEdit && !gripActive()) {
         const controller = warpEdit.controller;
@@ -3413,19 +3421,21 @@ export function createWorkspaceScene(
           ? 'Widgets'
           : mode === 'settings'
             ? 'Settings'
-            : mode === 'display'
-              ? 'Display settings'
-              : mode === 'world'
-                ? 'World settings'
-                : mode === 'filtering'
-                  ? 'Terminal filtering'
-                  : mode === 'warp'
-                    ? 'Terminal curvature'
-                    : mode === 'arrange'
-                      ? 'Arrange terminals'
-                      : mode === 'panes'
-                        ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
-                        : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? (mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard') : 'Terminal settings'} · ${targetTitle}`,
+            : mode === 'buttons'
+              ? 'Controller buttons'
+              : mode === 'display'
+                ? 'Display settings'
+                : mode === 'world'
+                  ? 'World settings'
+                  : mode === 'filtering'
+                    ? 'Terminal filtering'
+                    : mode === 'warp'
+                      ? 'Terminal curvature'
+                      : mode === 'arrange'
+                        ? 'Arrange terminals'
+                        : mode === 'panes'
+                          ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
+                          : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? (mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard') : 'Terminal settings'} · ${targetTitle}`,
       mode === 'panes' ? 1.8 : 0.9,
       0.12,
       { inputAction: 'grabInput' },
@@ -3487,17 +3497,18 @@ export function createWorkspaceScene(
           ['Display', 'display'],
           ['World', 'world'],
           ['Selected terminal', 'terminal'],
+          ['Controller buttons', 'buttons'],
         ] as const
       ).entries()) {
         const button = createLabelButton(label, 1.15, 0.13, {
           inputAction: 'openInput',
           mode: destination,
         });
-        button.position.set(0, 0.3 - index * 0.2, 0);
+        button.position.set(0, 0.36 - index * 0.17, 0);
         inputRoot.add(button);
       }
       const caption = createLabelButton('Keyborb keyboard', 1.15, 0.1, { inputAction: 'noop' });
-      caption.position.y = -0.28;
+      caption.position.y = -0.3;
       inputRoot.add(caption);
       for (const [index, keyborbMode] of (['off', 'on', 'auto'] as const).entries()) {
         const button = createLabelButton(
@@ -3506,7 +3517,7 @@ export function createWorkspaceScene(
           0.12,
           { inputAction: 'keyborbMode', keyborbMode },
         );
-        button.position.set((index - 1) * 0.4, -0.43, 0);
+        button.position.set((index - 1) * 0.4, -0.44, 0);
         setModifierVisual(button, mutableState.keyborbMode === keyborbMode);
         inputRoot.add(button);
       }
@@ -3621,6 +3632,31 @@ export function createWorkspaceScene(
       );
       frameChinButton.position.set(0, -0.84, 0);
       inputRoot.add(frameChinButton);
+    } else if (mode === 'buttons') {
+      const map = mutableState.windowPreferences.buttonMap;
+      for (const [index, button] of CONTROLLER_BUTTONS.entries()) {
+        const row = createLabelButton(
+          `${CONTROLLER_BUTTON_LABELS[button]}: ${BUTTON_FUNCTION_LABELS[map[button]]}`,
+          1.05,
+          0.11,
+          { inputAction: 'buttonMapNext', controllerButton: button },
+        );
+        row.position.set(0, 0.32 - index * 0.15, 0);
+        inputRoot.add(row);
+      }
+      const reset = createLabelButton('Reset buttons', 0.6, 0.1, { inputAction: 'buttonMapReset' });
+      reset.position.set(0, -0.32, 0);
+      inputRoot.add(reset);
+      const hint = createLabelButton(
+        'While warping, right A saves and right B cancels',
+        1.4,
+        0.07,
+        {
+          inputAction: 'noop',
+        },
+      );
+      hint.position.y = -0.46;
+      inputRoot.add(hint);
     } else if (mode === 'arrange') {
       const status = createLabelButton(
         panels.size
@@ -3995,7 +4031,7 @@ export function createWorkspaceScene(
       0,
     );
     inputRoot.add(close);
-    if (['terminal', 'display', 'world', 'filtering'].includes(mode)) {
+    if (['terminal', 'display', 'world', 'filtering', 'buttons'].includes(mode)) {
       close.position.x = 0.22;
       const back = createLabelButton('Back', 0.3, 0.09, {
         inputAction: 'openInput',
@@ -4407,6 +4443,23 @@ export function createWorkspaceScene(
       setWindowPreferences({
         ...mutableState.windowPreferences,
         scrollStripSide: hit.userData.scrollStripSide as ScrollStripSide,
+      });
+      return true;
+    }
+    if (action === 'buttonMapNext') {
+      const button = hit.userData.controllerButton as ControllerButton;
+      const map = mutableState.windowPreferences.buttonMap;
+      if (CONTROLLER_BUTTONS.includes(button))
+        setWindowPreferences({
+          ...mutableState.windowPreferences,
+          buttonMap: { ...map, [button]: nextButtonFunction(map[button]) },
+        });
+      return true;
+    }
+    if (action === 'buttonMapReset') {
+      setWindowPreferences({
+        ...mutableState.windowPreferences,
+        buttonMap: { ...DEFAULT_BUTTON_MAP },
       });
       return true;
     }
@@ -5104,7 +5157,7 @@ export function createWorkspaceScene(
         const gamepad = data?.hand ? undefined : data?.gamepad;
         root.userData.inputSourceHand = data?.hand;
         controllerHandedness.set(root, data?.handedness ?? 'none');
-        if (gamepad?.buttons[FACE_BUTTON]?.pressed) radialButtonDown.add(root);
+        if (gamepad?.buttons[4]?.pressed) radialButtonDown.add(root);
         else radialButtonDown.delete(root);
         if (gamepad?.buttons[5]?.pressed) focusButtonDown.add(root);
         else focusButtonDown.delete(root);
@@ -5713,15 +5766,81 @@ export function createWorkspaceScene(
     );
     notify();
   };
+  const closeRadial = (): void => {
+    if (!radialMenu.isOpen) return;
+    radialMenu.close();
+    mutableState.radialOpen = false;
+  };
+  const SETTINGS_MODES: readonly InputMode[] = [
+    'settings',
+    'display',
+    'world',
+    'terminal',
+    'filtering',
+    'buttons',
+  ];
+  const toggleInputMode = (mode: InputMode): void => {
+    const open =
+      inputRoot &&
+      (inputMode === mode || (mode === 'settings' && SETTINGS_MODES.includes(inputMode)));
+    if (open) {
+      hideInput();
+      return;
+    }
+    closeRadial();
+    showInput(mode);
+    notify();
+  };
+  const runButtonFunction = (choice: ButtonFunction, controller: THREE.Group): void => {
+    const right =
+      controllerRoots.find(
+        (root) => controllerHandedness.get(root) === 'right' && !disconnectedControllers.has(root),
+      ) ?? controller;
+    const aimed = (): string | undefined => {
+      const id = targetFromController(controller)?.terminalId;
+      return id && panels.has(id) ? id : undefined;
+    };
+    switch (choice) {
+      case 'menu':
+        // Warp follows the right stick, so a left-hand menu press hands the radial to the right.
+        toggleRadialMenu(right);
+        return;
+      case 'panes':
+        togglePanes();
+        return;
+      case 'focus':
+        if (radialMenu.root.visible) return;
+        if (inputRoot && inputMode === 'panes') hideInput();
+        else toggleFocusMode(aimed());
+        return;
+      case 'keyboard':
+        closeRadial();
+        toggleKeyboard();
+        notify();
+        return;
+      case 'commands':
+      case 'widgets':
+      case 'settings':
+        toggleInputMode(choice);
+        return;
+      case 'layout':
+        toggleInputMode('arrange');
+        return;
+      case 'warp':
+        closeRadial();
+        startWarp(aimed() ?? mutableState.selectedTerminalId, right);
+        notify();
+        return;
+      case 'none':
+        return;
+    }
+  };
   const togglePanes = (): void => {
     if (inputRoot && inputMode === 'panes') {
       hideInput();
       return;
     }
-    if (radialMenu.isOpen) {
-      radialMenu.close();
-      mutableState.radialOpen = false;
-    }
+    closeRadial();
     showInput('panes');
     notify();
   };
@@ -6270,7 +6389,8 @@ export function createWorkspaceScene(
       const placement = focusPlacement(panel);
       paneFocus.retarget(placement.position, placement.rotation);
     }
-    if (inputRoot && inputMode === 'display') refreshInputRoot('display');
+    if (inputRoot && (inputMode === 'display' || inputMode === 'buttons'))
+      refreshInputRoot(inputMode);
     notify();
   };
   const toggleFocusMode = (id?: string): void => {

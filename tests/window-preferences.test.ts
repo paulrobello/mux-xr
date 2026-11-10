@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
 import {
   DEFAULT_WINDOW_PREFERENCES,
   validateWindowPreferences,
@@ -21,6 +22,7 @@ describe('window preferences', () => {
       focusCurvature: 0,
       scrollStripSide: 'right',
       frameChin: false,
+      buttonMap: DEFAULT_BUTTON_MAP,
     });
     expect(
       validateWindowPreferences({ defaultOpacity: 2, focusDistance: 0, focusCurvature: 120 }),
@@ -30,6 +32,7 @@ describe('window preferences', () => {
       focusCurvature: 100,
       scrollStripSide: 'right',
       frameChin: false,
+      buttonMap: DEFAULT_BUTTON_MAP,
     });
   });
 

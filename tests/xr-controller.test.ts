@@ -64,6 +64,7 @@ vi.mock('three', async (importOriginal) => {
 
 import * as THREE from 'three';
 import type { PaneDescriptor, TerminalSurface, WorkspaceActions } from '../src/contracts';
+import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
 import { createWorkspaceScene } from '../src/xr/scene';
 import { terminalWarpPoint } from '../src/xr/terminal-warp';
@@ -5381,6 +5382,132 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('runs a remapped function from left Y and lets right A do nothing', () => {
+    const { workspace, container } = fixture();
+    workspace.setWindowPreferences({
+      ...workspace.state.windowPreferences,
+      buttonMap: { ...DEFAULT_BUTTON_MAP, leftY: 'keyboard', rightA: 'none' },
+    });
+    const right = connectController(1, [0, 0, 0, 0], 'right');
+    const left = connectController(0, [0, 0, 0, 0], 'left');
+    (right.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(0);
+    expect(workspace.state.radialOpen).toBe(false);
+    (left.buttons[5] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(16);
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeDefined();
+    (left.buttons[5] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(32);
+    (left.buttons[5] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(48);
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('keeps right A save and right B cancel during Warp whatever they are mapped to', () => {
+    const { workspace, container } = fixture();
+    const pad = connectController(0, [0, 0, 0, 0], 'right');
+    selectRadialAction(workspace, pad, 'warp', 0);
+    workspace.setWindowPreferences({
+      ...workspace.state.windowPreferences,
+      buttonMap: { ...DEFAULT_BUTTON_MAP, rightA: 'keyboard', rightB: 'none' },
+    });
+    (pad.axes as number[])[2] = 1;
+    fakeXR.frame?.(1200);
+    (pad.axes as number[])[2] = 0;
+    const previewed = workspace.getTerminalCurvature('pane-a');
+    expect(previewed).toBeGreaterThan(0);
+    (pad.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(1300);
+    expect(workspace.state.warpTerminalId).toBeNull();
+    expect(workspace.getTerminalCurvature('pane-a')).toBe(previewed);
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+    (pad.buttons[4] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(1316);
+    workspace.setWindowPreferences({
+      ...workspace.state.windowPreferences,
+      buttonMap: DEFAULT_BUTTON_MAP,
+    });
+    selectRadialAction(workspace, pad, 'warp', 2000);
+    workspace.setWindowPreferences({
+      ...workspace.state.windowPreferences,
+      buttonMap: { ...DEFAULT_BUTTON_MAP, rightA: 'keyboard', rightB: 'none' },
+    });
+    (pad.axes as number[])[2] = 1;
+    fakeXR.frame?.(3200);
+    (pad.axes as number[])[2] = 0;
+    (pad.buttons[5] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(3300);
+    expect(workspace.state.warpTerminalId).toBeNull();
+    expect(workspace.getTerminalCurvature('pane-a')).toBe(previewed);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('cycles and resets button functions from XR Settings → Controller buttons', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('settings');
+    hit(workspace, { inputAction: 'openInput', mode: 'buttons' });
+    expect(workspace.scene.getObjectByName('xr-buttons-controls')).toBeDefined();
+    hit(workspace, { inputAction: 'buttonMapNext', controllerButton: 'leftY' });
+    expect(workspace.state.windowPreferences.buttonMap.leftY).toBe('menu');
+    hit(workspace, { inputAction: 'buttonMapNext', controllerButton: 'leftY' });
+    expect(workspace.state.windowPreferences.buttonMap.leftY).toBe('panes');
+    hit(workspace, { inputAction: 'buttonMapReset' });
+    expect(workspace.state.windowPreferences.buttonMap).toEqual(DEFAULT_BUTTON_MAP);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('opens the radial when right A lands with a button mapped to Nothing', () => {
+    const { workspace, container } = fixture();
+    const right = connectController(1, [0, 0, 0, 0], 'right');
+    const left = connectController(0, [0, 0, 0, 0], 'left');
+    (left.buttons[5] as { pressed: boolean }).pressed = true;
+    (right.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(0);
+    expect(workspace.state.radialOpen).toBe(true);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('starts Warp from a mapped button on the aimed pane, or says to select one', () => {
+    const { workspace, container } = fixture();
+    workspace.setWindowPreferences({
+      ...workspace.state.windowPreferences,
+      buttonMap: { ...DEFAULT_BUTTON_MAP, leftY: 'warp' },
+    });
+    const right = connectController(1, [0, 0, 0, 0], 'right');
+    const left = connectController(0, [0, 0, 0, 0], 'left');
+    (left.buttons[5] as { pressed: boolean }).pressed = true;
+    (right.buttons[5] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(0);
+    expect(workspace.state.warpTerminalId).toBe('pane-a');
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('closes Settings from a sub-page with a button mapped to Settings', () => {
+    const { workspace, container } = fixture();
+    workspace.setWindowPreferences({
+      ...workspace.state.windowPreferences,
+      buttonMap: { ...DEFAULT_BUTTON_MAP, leftY: 'settings' },
+    });
+    const left = connectController(0, [0, 0, 0, 0], 'left');
+    workspace.showInput('display');
+    (left.buttons[5] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(0);
+    expect(workspace.scene.getObjectByName('xr-display-controls')).toBeUndefined();
+    (left.buttons[5] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(16);
+    (left.buttons[5] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(32);
+    expect(workspace.scene.getObjectByName('xr-settings-controls')).toBeDefined();
+    workspace.dispose();
+    container.remove();
+  });
+
   it('leaves Focus to right B, so left Y does nothing', () => {
     const { workspace, container } = fixture();
     const left = connectController(0, [0, 0, 0, 0], 'left');
@@ -6191,6 +6318,7 @@ describe('native XR controller event routing', () => {
       focusCurvature: 0,
       scrollStripSide: 'right',
       frameChin: true,
+      buttonMap: DEFAULT_BUTTON_MAP,
     });
     expect(workspace.getTerminalOpacity('pane-a')).toBe(0.7);
     expect(workspace.getTerminalOpacity('pane-b')).toBe(1);
@@ -6230,6 +6358,7 @@ describe('native XR controller event routing', () => {
       focusCurvature: 40,
       scrollStripSide: 'right',
       frameChin: true,
+      buttonMap: DEFAULT_BUTTON_MAP,
     });
     for (let frame = 20; frame < 40; frame++) fakeXR.frame?.(frame * 20);
     checkDistance(2.2);

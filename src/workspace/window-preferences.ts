@@ -1,3 +1,5 @@
+import { type ButtonMap, DEFAULT_BUTTON_MAP, validateButtonMap } from './controller-buttons';
+
 export type ScrollStripSide = 'right' | 'left' | 'both';
 
 export const SCROLL_STRIP_SIDES: readonly ScrollStripSide[] = ['right', 'left', 'both'];
@@ -9,6 +11,8 @@ export interface WindowPreferences {
   scrollStripSide: ScrollStripSide;
   /** Show the instrument chin under each pane frame. */
   frameChin: boolean;
+  /** Function run by each controller face button. */
+  buttonMap: ButtonMap;
 }
 
 export const DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
@@ -17,13 +21,15 @@ export const DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
   focusCurvature: 0,
   scrollStripSide: 'right',
   frameChin: false,
+  buttonMap: { ...DEFAULT_BUTTON_MAP },
 };
 
 const clamp = (value: number, minimum: number, maximum: number, fallback: number): number =>
   Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, value)) : fallback;
 
 export function validateWindowPreferences(value: unknown): WindowPreferences {
-  if (!value || typeof value !== 'object') return { ...DEFAULT_WINDOW_PREFERENCES };
+  if (!value || typeof value !== 'object')
+    return { ...DEFAULT_WINDOW_PREFERENCES, buttonMap: { ...DEFAULT_BUTTON_MAP } };
   const candidate = value as Partial<WindowPreferences>;
   return {
     defaultOpacity: clamp(
@@ -51,5 +57,6 @@ export function validateWindowPreferences(value: unknown): WindowPreferences {
       typeof candidate.frameChin === 'boolean'
         ? candidate.frameChin
         : DEFAULT_WINDOW_PREFERENCES.frameChin,
+    buttonMap: validateButtonMap(candidate.buttonMap),
   };
 }
