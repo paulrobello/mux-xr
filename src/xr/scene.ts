@@ -103,11 +103,9 @@ import {
 import { createTerminalTexture, type TerminalTexture } from './terminal-texture';
 import {
   createCurvedTerminalGeometry,
-  createCurvedTerminalSelection,
   createTerminalFrameAccentGeometry,
   createTerminalFrameGeometry,
   getTerminalWarpBounds,
-  TERMINAL_FRAME_RELIEF,
   terminalWarpPoint,
 } from './terminal-warp';
 import { createTerminalWarpStore } from './terminal-warp-store';
@@ -324,6 +322,7 @@ const SCROLL_STRIP_WIDTH = 0.05;
 const SCROLL_STRIP_OPACITY = 0.14;
 const SCROLL_STRIP_ACTIVE_OPACITY = 0.38;
 const ACCENT = 0x68d6ff;
+const SELECTED_FRAME_GLOW = 0.45;
 const CONTROLLER_RAY_LENGTH = 8;
 // An XR press becomes a drag only once its hit moves past both limits, so hand and controller
 // jitter during a press stays a click.
@@ -375,7 +374,6 @@ interface TerminalPanel {
   frame: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   frameAccent: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   scrollStrips: Record<'right' | 'left', ScrollStripMesh>;
-  selection: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   unsubscribe: () => void;
   defaultPosition: THREE.Vector3;
   titleLabel: THREE.Mesh;
@@ -609,40 +607,6 @@ function createGradientTexture(): THREE.CanvasTexture {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
-}
-
-function selectionGeometry(width: number, height: number): THREE.ShapeGeometry {
-  const x = (width + 0.07) / 2;
-  const y = (height + 0.07) / 2;
-  const innerX = (width + 0.01) / 2;
-  const innerY = (height + 0.01) / 2;
-  const shape = new THREE.Shape();
-  shape.moveTo(-x, -y).lineTo(x, -y).lineTo(x, y).lineTo(-x, y).closePath();
-  const hole = new THREE.Path();
-  hole
-    .moveTo(-innerX, -innerY)
-    .lineTo(-innerX, innerY)
-    .lineTo(innerX, innerY)
-    .lineTo(innerX, -innerY)
-    .closePath();
-  shape.holes.push(hole);
-  return new THREE.ShapeGeometry(shape);
-}
-
-function createSelection(): THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial> {
-  const material = new THREE.MeshBasicMaterial({
-    color: ACCENT,
-    transparent: true,
-    opacity: 0.55,
-    depthWrite: false,
-  });
-  const line = new THREE.Mesh(selectionGeometry(PANEL_WIDTH, PANEL_HEIGHT), material);
-  line.name = 'active-pane-highlight';
-  // The outline sits above the frame's corner brackets even where a 100° warp tilts them forward.
-  line.position.z = TERMINAL_FRAME_RELIEF + 0.01;
-  line.visible = false;
-  line.raycast = () => undefined;
-  return line;
 }
 
 function isControlVisible(object: THREE.Object3D): boolean {
@@ -3010,8 +2974,13 @@ export function createWorkspaceScene(
   canvas.addEventListener('lostpointercapture', onPointerUp);
 
   const setSelectedVisual = (): void => {
-    for (const panel of panels.values())
-      panel.selection.visible = panel.id === mutableState.selectedTerminalId;
+    for (const panel of panels.values()) {
+      const selected = panel.id === mutableState.selectedTerminalId;
+      panel.frame.material.emissiveIntensity = selected ? SELECTED_FRAME_GLOW : 0;
+      panel.frameAccent.material.color.setHex(selected ? 0xffffff : ACCENT);
+      // The selected pane keeps a solid accent however far its glass is faded.
+      panel.frameAccent.material.opacity = selected ? 1 : panel.opacity;
+    }
   };
   const saveUIPose = (name: UIPoseName, object: THREE.Object3D): void => {
     if (!renderer || (!renderer.xr.isPresenting && !activeSession) || xrViewerPending) return;
@@ -5261,16 +5230,6 @@ export function createWorkspaceScene(
       ? createCurvedTerminalGeometry(span)
       : new THREE.PlaneGeometry(width, height);
     syncPanelFrame(panel);
-    panel.selection.geometry.dispose();
-    panel.selection.geometry = bent
-      ? createCurvedTerminalSelection({
-          width: width + 0.07,
-          surfaceWidth: width,
-          height: height + 0.07,
-          radians,
-          border: 0.03,
-        })
-      : selectionGeometry(width, height);
     panel.titleLabel.position.y = height / 2 + 0.07;
     panel.bellLabel.position.set(0.58, height / 2 + 0.07, 0.02);
     panel.connectionButton.position.set(0.24, -(height / 2 + 0.24), 0.02);
@@ -5333,6 +5292,8 @@ export function createWorkspaceScene(
           vertexColors: true,
           roughness: 0.62,
           metalness: 0.35,
+          emissive: ACCENT,
+          emissiveIntensity: 0,
           side: THREE.DoubleSide,
         }),
         uiEnvironment.texture,
@@ -5386,7 +5347,6 @@ export function createWorkspaceScene(
       right: createScrollStrip('terminal-scroll-strip'),
       left: createScrollStrip('terminal-scroll-strip-left'),
     };
-    const selection = createSelection();
     root.userData.fontZoom = 1;
     const shortError = surface.error ? ` · ${surface.error.slice(0, 28)}` : '';
     const titleLabel = createLabelButton(
@@ -5432,7 +5392,7 @@ export function createWorkspaceScene(
       terminalId: surface.pane.id,
       excludeFromBounds: true,
     });
-    root.add(selection, titleLabel, bellLabel, connectionButton, closeButton, bringButton);
+    root.add(titleLabel, bellLabel, connectionButton, closeButton, bringButton);
     const panel: TerminalPanel = {
       id: surface.pane.id,
       surface,
@@ -5443,7 +5403,6 @@ export function createWorkspaceScene(
       frame,
       frameAccent,
       scrollStrips,
-      selection,
       unsubscribe: () => undefined,
       defaultPosition,
       titleLabel,
@@ -5596,7 +5555,8 @@ export function createWorkspaceScene(
     const frame = panel.frame.material;
     const transparent = panel.opacity < 1;
     frame.opacity = panel.opacity;
-    panel.frameAccent.material.opacity = panel.opacity;
+    panel.frameAccent.material.opacity =
+      panel.id === mutableState.selectedTerminalId ? 1 : panel.opacity;
     panel.frameAccent.material.depthWrite = !transparent;
     if (frame.transparent === transparent) return;
     frame.transparent = transparent;

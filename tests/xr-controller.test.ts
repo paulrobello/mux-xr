@@ -66,11 +66,7 @@ import * as THREE from 'three';
 import type { PaneDescriptor, TerminalSurface, WorkspaceActions } from '../src/contracts';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
 import { createWorkspaceScene } from '../src/xr/scene';
-import {
-  MAX_TERMINAL_CURVATURE_RADIANS,
-  TERMINAL_FRAME_RELIEF,
-  terminalWarpPoint,
-} from '../src/xr/terminal-warp';
+import { terminalWarpPoint } from '../src/xr/terminal-warp';
 
 const pane = (id: string, title = id): PaneDescriptor => ({
   id,
@@ -2800,30 +2796,47 @@ describe('native XR controller event routing', () => {
     });
   });
 
-  it('keeps the selection outline above the frame brackets at the widest warp', () => {
+  it('marks the selected pane by lighting its frame and whitening its accent', () => {
     const { workspace, container } = fixture();
-    const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
-    const outline = panel.getObjectByName('active-pane-highlight') as THREE.Mesh;
-    const accentLift = 0.0004;
-    const edgeClearance =
-      outline.position.z * Math.cos(MAX_TERMINAL_CURVATURE_RADIANS / 2) -
-      (TERMINAL_FRAME_RELIEF + accentLift);
-    expect(edgeClearance).toBeGreaterThan(0.002);
+    const look = (id: string): { glow: number; accent: number } => {
+      const panel = workspace.scene.getObjectByName(`terminal-panel-${id}`) as THREE.Group;
+      const frame = panel.getObjectByName('terminal-frame') as THREE.Mesh<
+        THREE.BufferGeometry,
+        THREE.MeshStandardMaterial
+      >;
+      const accent = panel.getObjectByName('terminal-frame-accent') as THREE.Mesh<
+        THREE.BufferGeometry,
+        THREE.MeshBasicMaterial
+      >;
+      return { glow: frame.material.emissiveIntensity, accent: accent.material.color.getHex() };
+    };
+    expect(workspace.scene.getObjectByName('active-pane-highlight')).toBeUndefined();
+    expect(look('pane-a').glow).toBeGreaterThan(0.3);
+    expect(look('pane-a').accent).toBe(0xffffff);
+    expect(look('pane-b')).toEqual({ glow: 0, accent: 0x68d6ff });
+    workspace.selectTerminal('pane-b');
+    expect(look('pane-a')).toEqual({ glow: 0, accent: 0x68d6ff });
+    expect(look('pane-b').glow).toBeGreaterThan(0.3);
+    expect(look('pane-b').accent).toBe(0xffffff);
     workspace.dispose();
     container.remove();
   });
 
-  it('fades the frame accent with the glass and keeps it out of ray hits', () => {
+  it('fades an unselected frame accent with the glass and keeps it out of ray hits', () => {
     const { workspace, container } = fixture();
-    const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-b') as THREE.Group;
     const accent = panel.getObjectByName('terminal-frame-accent') as THREE.Mesh<
       THREE.BufferGeometry,
       THREE.MeshBasicMaterial
     >;
-    workspace.setTerminalOpacity('pane-a', 0.4);
+    workspace.setTerminalOpacity('pane-b', 0.4);
     expect(accent.material.opacity).toBeCloseTo(0.4);
     expect(accent.material.depthWrite).toBe(false);
-    workspace.setTerminalOpacity('pane-a', 1);
+    workspace.selectTerminal('pane-b');
+    expect(accent.material.opacity).toBe(1);
+    workspace.selectTerminal('pane-a');
+    expect(accent.material.opacity).toBeCloseTo(0.4);
+    workspace.setTerminalOpacity('pane-b', 1);
     expect(accent.material.opacity).toBe(1);
     expect(accent.material.depthWrite).toBe(true);
     const hits: THREE.Intersection[] = [];
@@ -3463,16 +3476,16 @@ describe('native XR controller event routing', () => {
     workspace.camera.lookAt(0.87, 1.5, -1.5);
     fakeXR.frame?.(0);
     fakeXR.frame?.(800);
-    expect(
-      workspace.scene
-        .getObjectByName('terminal-panel-pane-a')
-        ?.getObjectByName('active-pane-highlight')?.visible,
-    ).toBe(true);
-    expect(
-      workspace.scene
-        .getObjectByName('terminal-panel-pane-b')
-        ?.getObjectByName('active-pane-highlight')?.visible,
-    ).toBe(false);
+    const glow = (id: string): number => {
+      const panel = workspace.scene.getObjectByName(`terminal-panel-${id}`) as THREE.Group;
+      const frame = panel.getObjectByName('terminal-frame') as THREE.Mesh<
+        THREE.BufferGeometry,
+        THREE.MeshStandardMaterial
+      >;
+      return frame.material.emissiveIntensity;
+    };
+    expect(glow('pane-a')).toBeGreaterThan(0);
+    expect(glow('pane-b')).toBe(0);
     workspace.dispose();
     container.remove();
   });
