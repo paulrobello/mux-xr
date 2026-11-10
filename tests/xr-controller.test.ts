@@ -5300,7 +5300,7 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('toggles radial with left X', () => {
+  it('toggles Panes with left X and leaves the radial to right A', () => {
     const { workspace, container } = fixture();
     const gamepad = connectController(0, [0, 0, 0, 0], 'left');
     const press = (time: number): void => {
@@ -5310,14 +5310,62 @@ describe('native XR controller event routing', () => {
       fakeXR.frame?.(time + 16);
     };
     press(0);
-    expect(workspace.state.radialOpen).toBe(true);
-    press(100);
+    expect(workspace.scene.getObjectByName('xr-panes-controls')).toBeDefined();
     expect(workspace.state.radialOpen).toBe(false);
+    press(100);
+    expect(workspace.scene.getObjectByName('xr-panes-controls')).toBeUndefined();
     workspace.dispose();
     container.remove();
   });
 
-  it('does not toggle radial for a left X already held at connect', () => {
+  it('closes an open radial when left X opens Panes', () => {
+    const { workspace, container } = fixture();
+    const right = connectController(1, [0, 0, 0, 0], 'right');
+    const left = connectController(0, [0, 0, 0, 0], 'left');
+    (right.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(0);
+    expect(workspace.state.radialOpen).toBe(true);
+    (left.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(16);
+    expect(workspace.state.radialOpen).toBe(false);
+    expect(workspace.scene.getObjectByName('xr-panes-controls')).toBeDefined();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('opens Panes, not the radial, when right A and left X land in one frame', () => {
+    for (const leftFirst of [true, false]) {
+      const { workspace, container } = fixture();
+      const left = connectController(leftFirst ? 0 : 1, [0, 0, 0, 0], 'left');
+      const right = connectController(leftFirst ? 1 : 0, [0, 0, 0, 0], 'right');
+      (left.buttons[4] as { pressed: boolean }).pressed = true;
+      (right.buttons[4] as { pressed: boolean }).pressed = true;
+      fakeXR.frame?.(0);
+      expect(workspace.state.radialOpen).toBe(false);
+      expect(workspace.scene.getObjectByName('xr-panes-controls')).toBeDefined();
+      workspace.dispose();
+      container.remove();
+    }
+  });
+
+  it('ignores left X during Warp', () => {
+    const { workspace, container } = fixture();
+    // The pointing helper aims controller 0, so the right controller takes index 0 here.
+    const right = connectController(0, [0, 0, 0, 0], 'right');
+    const left = connectController(1, [0, 0, 0, 0], 'left');
+    selectRadialAction(workspace, right, 'warp', 0);
+    expect(workspace.state.warpTerminalId).toBe('pane-a');
+    (left.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(1500);
+    expect(workspace.scene.getObjectByName('xr-panes-controls')).toBeUndefined();
+    expect(workspace.state.warpTerminalId).toBe('pane-a');
+    (left.buttons[4] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(1516);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('does not toggle Panes for a left X already held at connect', () => {
     const { workspace, container } = fixture();
     const gamepad = {
       axes: [0, 0, 0, 0],
@@ -5328,42 +5376,7 @@ describe('native XR controller event routing', () => {
       data: { gamepad, handedness: 'left' },
     } as never);
     fakeXR.frame?.(0);
-    expect(workspace.state.radialOpen).toBe(false);
-    workspace.dispose();
-    container.remove();
-  });
-
-  it('hands a left-X radial to the right controller so Warp follows the right stick', () => {
-    const { workspace, container } = fixture();
-    // The pointing helper aims controller 0, so the right controller takes index 0 here.
-    const rightAxes = [0, 0, 0, 0];
-    connectController(0, rightAxes, 'right');
-    const left = connectController(1, [0, 0, 0, 0], 'left');
-    workspace.selectTerminal('pane-a');
-    const before = workspace.getTerminalCurvature('pane-a');
-    (left.buttons[4] as { pressed: boolean }).pressed = true;
-    fakeXR.frame?.(0);
-    (left.buttons[4] as { pressed: boolean }).pressed = false;
-    fakeXR.frame?.(16);
-    fakeXR.frame?.(900);
-    hit(workspace, { inputAction: 'radialAction', radialAction: 'warp' });
-    fakeXR.frame?.(2000);
-    expect(workspace.state.warpTerminalId).toBe('pane-a');
-    rightAxes[2] = 1;
-    fakeXR.frame?.(2200);
-    expect(workspace.getTerminalCurvature('pane-a')).toBeGreaterThan(before);
-    workspace.dispose();
-    container.remove();
-  });
-
-  it('toggles radial once when A and X land in the same frame', () => {
-    const { workspace, container } = fixture();
-    const left = connectController(0, [0, 0, 0, 0], 'left');
-    const right = connectController(1, [0, 0, 0, 0], 'right');
-    (left.buttons[4] as { pressed: boolean }).pressed = true;
-    (right.buttons[4] as { pressed: boolean }).pressed = true;
-    fakeXR.frame?.(0);
-    expect(workspace.state.radialOpen).toBe(true);
+    expect(workspace.scene.getObjectByName('xr-panes-controls')).toBeUndefined();
     workspace.dispose();
     container.remove();
   });
