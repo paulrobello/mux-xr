@@ -33,8 +33,6 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
       return 'Keep this curvature';
     case 'warpCancel':
       return 'Restore the curvature from before this Warp panel opened';
-    case 'toggleRadial':
-      return 'Open or close the action menu; point and pinch to choose an item';
     case 'pasteClipboard':
       return 'Paste copied text into the selected terminal without adding Enter';
     case 'keyboardCurvature':

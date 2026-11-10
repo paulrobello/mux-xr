@@ -201,7 +201,8 @@ export interface WorkspaceScene {
   captureTerminalPose(id: string): SavedUIPose | null;
   captureWorkspaceState(): void;
   restoreTerminalPose(id: string, pose: SavedUIPose): void;
-  toggleRadialMenu(): void;
+  /** Toggle the radial; `controller` owns it, so a tracked hand gets hand-sized panels. */
+  toggleRadialMenu(controller?: THREE.Group): void;
   setTerminalCurvature(id: string, degrees: number): void;
   getTerminalCurvature(id: string): number;
   setKeyboardBackgroundEnabled(enabled: boolean): void;
@@ -788,13 +789,7 @@ export function createWorkspaceScene(
   const hierarchyTouch = createHierarchyTouch();
   const keyborbFlashes = new Map<number, number>();
   let keyborbHighlighted = false;
-  const priorityHandActions = new Set([
-    'wristMenu',
-    'toggleRadial',
-    'exit',
-    'reloadUpdate',
-    'dismissNotice',
-  ]);
+  const priorityHandActions = new Set(['wristMenu', 'exit', 'reloadUpdate', 'dismissNotice']);
   const contactSamples = new Map<THREE.Group, HandContactSample>();
   const contactGripArmed = new Set<THREE.Group>();
   const pokeSources = new Set<THREE.Group>();
@@ -2450,8 +2445,10 @@ export function createWorkspaceScene(
         );
     }
     if (renderer?.xr.isPresenting) {
+      let radialToggled = false;
       for (const controller of controllerRoots) {
-        if (controllerHandedness.get(controller) !== 'right') continue;
+        const hand = controllerHandedness.get(controller);
+        if (hand !== 'right' && hand !== 'left') continue;
         const keyboardPressed = Boolean(controllerGamepads.get(controller)?.buttons[4]?.pressed);
         const keyboardWasPressed = radialButtonDown.has(controller);
         if (keyboardPressed) radialButtonDown.add(controller);
@@ -2461,9 +2458,18 @@ export function createWorkspaceScene(
           !keyboardWasPressed &&
           controller.visible &&
           !disconnectedControllers.has(controller) &&
-          !gripActive()
-        )
-          toggleRadialMenu(controller);
+          !gripActive() &&
+          !radialToggled
+        ) {
+          radialToggled = true;
+          // Warp is driven by the right stick, so left X hands the radial to the right controller.
+          const right = controllerRoots.find(
+            (root) =>
+              controllerHandedness.get(root) === 'right' && !disconnectedControllers.has(root),
+          );
+          toggleRadialMenu(hand === 'left' ? (right ?? controller) : controller);
+        }
+        if (hand !== 'right') continue;
         const pressed = Boolean(controllerGamepads.get(controller)?.buttons[5]?.pressed);
         const wasPressed = focusButtonDown.has(controller);
         if (pressed) focusButtonDown.add(controller);
@@ -3976,7 +3982,7 @@ export function createWorkspaceScene(
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
     close.position.set(
       mode === 'panes' ? -1.2 : 0,
-      mode === 'panes' ? -0.9 : mode === 'display' || mode === 'settings' ? -0.89 : -0.66,
+      mode === 'panes' ? -0.9 : mode === 'display' ? -1.0 : mode === 'settings' ? -0.89 : -0.66,
       0,
     );
     inputRoot.add(close);
@@ -3986,7 +3992,7 @@ export function createWorkspaceScene(
         inputAction: 'openInput',
         mode: mode === 'filtering' ? 'display' : 'settings',
       });
-      back.position.set(-0.22, mode === 'display' ? -0.89 : -0.66, 0);
+      back.position.set(-0.22, mode === 'display' ? -1.0 : -0.66, 0);
       inputRoot.add(back);
     }
     if (mode === 'panes') {
@@ -4108,10 +4114,7 @@ export function createWorkspaceScene(
     activePaneLabel.position.x = -0.2;
     const exit = createLabelButton('Exit', 0.27, 0.09, { inputAction: 'exit' });
     exit.position.x = 0.57;
-    const menu = createLabelButton('Menu', 0.27, 0.09, { inputAction: 'toggleRadial' });
-    menu.name = 'xr-hand-menu';
-    menu.position.set(-0.6, 0.13, 0);
-    hudRoot.add(activePaneLabel, exit, menu);
+    hudRoot.add(activePaneLabel, exit);
     toastLabel = createLabelButton(mutableState.toast ?? '', 1.4, 0.09, {
       inputAction: 'noop',
       wrap: true,
@@ -4265,10 +4268,6 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'grabInput') return true;
-    if (action === 'toggleRadial') {
-      toggleRadialMenu();
-      return true;
-    }
     if (action === 'newCommand') {
       commandDraft = createCommandDraft(crypto.randomUUID());
       commandWorkspaceId = availablePanes.find(
@@ -4819,8 +4818,8 @@ export function createWorkspaceScene(
   const activateTarget = (target: InputTarget | null): void => {
     if (warpEdit) {
       const action = target?.object?.userData.inputAction;
-      if (action !== 'exit' && action !== 'toggleRadial') return;
-      if (action === 'exit') finishWarp(false);
+      if (action !== 'exit') return;
+      finishWarp(false);
     }
     if (target?.object?.userData.inputAction !== 'backgroundSelect') closeBackgroundMenus();
     if (!target) return;
@@ -4863,16 +4862,10 @@ export function createWorkspaceScene(
     const clicks =
       target?.object?.userData.key !== undefined || (action && !PASSIVE_ACTIONS.has(action));
     // These controls bypass handleInputTarget, which is where other presses disarm.
-    if (action === 'wristMenu' || action === 'toggleRadial' || action === 'scrollStrip')
-      disarmPresses();
+    if (action === 'wristMenu' || action === 'scrollStrip') disarmPresses();
     if (action === 'wristMenu') {
       if (clicks) cue('select', controller);
       if (controllerHandedness.get(controller) === 'left') toggleWristMenu(controller);
-      return;
-    }
-    if (action === 'toggleRadial') {
-      if (clicks) cue('select', controller);
-      toggleRadialMenu(controller);
       return;
     }
     if (warpEdit) {

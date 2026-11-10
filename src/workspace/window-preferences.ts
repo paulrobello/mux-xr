@@ -16,7 +16,7 @@ export const DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
   focusDistance: 1.5,
   focusCurvature: 0,
   scrollStripSide: 'right',
-  frameChin: true,
+  frameChin: false,
 };
 
 const clamp = (value: number, minimum: number, maximum: number, fallback: number): number =>

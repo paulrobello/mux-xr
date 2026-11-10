@@ -1649,7 +1649,7 @@ describe('native XR controller event routing', () => {
       const keyboard = keyboardRoot(workspace);
       expect(keyboard.position.distanceTo(eyeAt(PANEL_SPAWN))).toBeLessThan(1e-6);
       expect(tilt(keyboard)).toBeCloseTo(0, 5);
-      hit(workspace, { inputAction: 'toggleRadial' });
+      workspace.toggleRadialMenu(fakeXR.controllers[0] as THREE.Group);
       fakeXR.frame?.(1000);
       expect(workspace.state.radialOpen).toBe(true);
     });
@@ -1927,10 +1927,10 @@ describe('native XR controller event routing', () => {
       expect(actions.sendKey).toHaveBeenCalledTimes(2);
     });
 
-    it('opens the radial and keyboard through the hand-accessible HUD Menu', () => {
+    it('opens the radial and keyboard from a hand session', () => {
       const { workspace } = setup();
       connectHand();
-      hit(workspace, { inputAction: 'toggleRadial' });
+      workspace.toggleRadialMenu(fakeXR.controllers[0] as THREE.Group);
       fakeXR.frame?.(1000);
       expect(workspace.state.radialOpen).toBe(true);
       hit(workspace, { inputAction: 'radialAction', radialAction: 'keyboard' });
@@ -1941,13 +1941,13 @@ describe('native XR controller event routing', () => {
       const { workspace } = setup();
       connectHand();
       workspace.selectTerminal('pane-b');
-      hit(workspace, { inputAction: 'toggleRadial' });
+      workspace.toggleRadialMenu(fakeXR.controllers[0] as THREE.Group);
       fakeXR.frame?.(1000);
       hit(workspace, { inputAction: 'radialAction', radialAction: 'focus' });
       expect(workspace.state.focusModeTerminalId).toBe('pane-b');
       expect(workspace.state.radialOpen).toBe(false);
       fakeXR.frame?.(1500);
-      hit(workspace, { inputAction: 'toggleRadial' });
+      workspace.toggleRadialMenu(fakeXR.controllers[0] as THREE.Group);
       fakeXR.frame?.(2500);
       expect(workspace.state.radialOpen).toBe(true);
       hit(workspace, { inputAction: 'radialAction', radialAction: 'focus' });
@@ -1959,7 +1959,7 @@ describe('native XR controller event routing', () => {
       connectHand();
       const saved = (): string => localStorage.getItem('mux-xr:terminal-warp:v1') ?? '';
       const openWarp = (time: number): void => {
-        hit(workspace, { inputAction: 'toggleRadial' });
+        workspace.toggleRadialMenu(fakeXR.controllers[0] as THREE.Group);
         fakeXR.frame?.(time);
         hit(workspace, { inputAction: 'radialAction', radialAction: 'warp' });
         fakeXR.frame?.(time + 200);
@@ -2002,12 +2002,12 @@ describe('native XR controller event routing', () => {
     it('leaves Focus when the hand Warp panel opens', () => {
       const { workspace } = setup();
       connectHand();
-      hit(workspace, { inputAction: 'toggleRadial' });
+      workspace.toggleRadialMenu(fakeXR.controllers[0] as THREE.Group);
       fakeXR.frame?.(1000);
       hit(workspace, { inputAction: 'radialAction', radialAction: 'focus' });
       expect(workspace.state.focusModeTerminalId).toBe('pane-a');
       fakeXR.frame?.(1500);
-      hit(workspace, { inputAction: 'toggleRadial' });
+      workspace.toggleRadialMenu(fakeXR.controllers[0] as THREE.Group);
       fakeXR.frame?.(2500);
       hit(workspace, { inputAction: 'radialAction', radialAction: 'warp' });
       expect(workspace.state.focusModeTerminalId).toBeNull();
@@ -2017,7 +2017,7 @@ describe('native XR controller event routing', () => {
     it('offers hand-selectable Warp presets without entering a stick-only mode', () => {
       const { workspace, left } = setup();
       connectHand();
-      hit(workspace, { inputAction: 'toggleRadial' });
+      workspace.toggleRadialMenu(fakeXR.controllers[0] as THREE.Group);
       fakeXR.frame?.(1000);
       hit(workspace, { inputAction: 'radialAction', radialAction: 'warp' });
       fakeXR.frame?.(1200);
@@ -2772,7 +2772,7 @@ describe('native XR controller event routing', () => {
       container.remove();
     });
 
-    it('toggles the frame chin from the XR Display settings and rebuilds open frames', () => {
+    it('starts without the frame chin and toggles it from XR Display settings, rebuilding open frames', () => {
       const { workspace, container } = fixture();
       const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
       const bottoms = (): number[] =>
@@ -2781,16 +2781,17 @@ describe('native XR controller event routing', () => {
           mesh.geometry.computeBoundingBox();
           return mesh.geometry.boundingBox?.min.y ?? Number.NaN;
         });
-      const [chinFrame, chinAccent] = bottoms() as [number, number];
-      workspace.showInput('display');
-      hit(workspace, { inputAction: 'frameChin' });
       expect(workspace.state.windowPreferences.frameChin).toBe(false);
       const [bareFrame, bareAccent] = bottoms() as [number, number];
+      workspace.showInput('display');
+      hit(workspace, { inputAction: 'frameChin' });
+      expect(workspace.state.windowPreferences.frameChin).toBe(true);
+      const [chinFrame, chinAccent] = bottoms() as [number, number];
       expect(bareFrame - chinFrame).toBeCloseTo(0.05);
       expect(bareAccent).toBeGreaterThan(chinAccent);
       hit(workspace, { inputAction: 'frameChin' });
-      expect(workspace.state.windowPreferences.frameChin).toBe(true);
-      expect(bottoms()[0]).toBeCloseTo(chinFrame);
+      expect(workspace.state.windowPreferences.frameChin).toBe(false);
+      expect(bottoms()[0]).toBeCloseTo(bareFrame);
       workspace.dispose();
       container.remove();
     });
@@ -5140,7 +5141,7 @@ describe('native XR controller event routing', () => {
       vi.useRealTimers();
     });
 
-    it('pulses the pressing controller for the Reset confirm and disarms on HUD Menu', () => {
+    it('pulses the pressing controller for the Reset confirm', () => {
       vi.useFakeTimers();
       const play = vi.fn();
       const { workspace, container } = fixture({ feedback: { play, dispose: vi.fn() } });
@@ -5158,8 +5159,6 @@ describe('native XR controller event routing', () => {
       play.mockClear();
       hit(workspace, { inputAction: 'exit' });
       expect(objectWithData(workspace, { inputAction: 'exit' }).userData.armed).toBe(true);
-      hit(workspace, { inputAction: 'toggleRadial' });
-      expect(objectWithData(workspace, { inputAction: 'exit' }).userData.armed).toBeUndefined();
       workspace.dispose();
       container.remove();
     });
@@ -5297,6 +5296,79 @@ describe('native XR controller event routing', () => {
     workspace.selectTerminal('pane-b');
     hit(workspace, { inputAction: 'key', key: 'c' });
     expect(actions.sendKey).toHaveBeenLastCalledWith('c', undefined);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('toggles radial with left X, since Quest reserves the left menu button for leaving XR', () => {
+    const { workspace, container } = fixture();
+    const gamepad = connectController(0, [0, 0, 0, 0], 'left');
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(0);
+    expect(workspace.state.radialOpen).toBe(true);
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
+    fakeXR.frame?.(120);
+    (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(140);
+    expect(workspace.state.radialOpen).toBe(false);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('toggles radial once when A and X land in the same frame', () => {
+    const { workspace, container } = fixture();
+    const left = connectController(0, [0, 0, 0, 0], 'left');
+    const right = connectController(1, [0, 0, 0, 0], 'right');
+    (left.buttons[4] as { pressed: boolean }).pressed = true;
+    (right.buttons[4] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(0);
+    expect(workspace.state.radialOpen).toBe(true);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('leaves Focus to right B, so left Y does nothing', () => {
+    const { workspace, container } = fixture();
+    const left = connectController(0, [0, 0, 0, 0], 'left');
+    const right = connectController(1, [0, 0, 0, 0], 'right');
+    (left.buttons[5] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(0);
+    expect(workspace.state.focusModeTerminalId).toBeNull();
+    (right.buttons[5] as { pressed: boolean }).pressed = true;
+    fakeXR.frame?.(16);
+    expect(workspace.state.focusModeTerminalId).not.toBeNull();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('keeps the main HUD to pane status and Exit with no Menu button', () => {
+    const { workspace, container } = fixture();
+    const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+    if (!hud) throw new Error('HUD missing');
+    const actions: string[] = [];
+    hud.traverse((object) => {
+      if (object.userData.inputAction) actions.push(object.userData.inputAction as string);
+    });
+    expect(actions).not.toContain('toggleRadial');
+    expect(actions).toContain('exit');
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('keeps Display settings rows clear of Back and Close', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('display');
+    const controls = workspace.scene.getObjectByName('xr-input-controls') ?? workspace.scene;
+    const boxes = new Map<string, THREE.Box3>();
+    controls.traverse((object) => {
+      const action = object.userData.inputAction as string | undefined;
+      if (action && object instanceof THREE.Mesh && !boxes.has(action))
+        boxes.set(action, new THREE.Box3().setFromObject(object));
+    });
+    const chin = boxes.get('frameChin');
+    const close = boxes.get('close');
+    if (!chin || !close) throw new Error('Display controls missing');
+    expect(chin.min.y).toBeGreaterThan(close.max.y);
     workspace.dispose();
     container.remove();
   });

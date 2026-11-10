@@ -296,15 +296,15 @@ describe('mux XR local UI state', () => {
     stripSide.value = 'both';
     stripSide.dispatchEvent(new Event('change'));
     const frameChin = query<HTMLInputElement>(root, '[data-frame-chin]');
-    expect(frameChin.checked).toBe(true);
-    frameChin.checked = false;
+    expect(frameChin.checked).toBe(false);
+    frameChin.checked = true;
     frameChin.dispatchEvent(new Event('change'));
     expect(ui.getSettings().windowPreferences).toEqual({
       defaultOpacity: 0.65,
       focusDistance: 2.4,
       focusCurvature: 25,
       scrollStripSide: 'both',
-      frameChin: false,
+      frameChin: true,
     });
     expect(changes).toEqual([0.65, 0.65, 0.65, 0.65, 0.65]);
     ui.setWindowPreferences(
