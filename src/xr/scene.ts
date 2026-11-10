@@ -104,8 +104,10 @@ import { createTerminalTexture, type TerminalTexture } from './terminal-texture'
 import {
   createCurvedTerminalGeometry,
   createCurvedTerminalSelection,
+  createTerminalFrameAccentGeometry,
   createTerminalFrameGeometry,
   getTerminalWarpBounds,
+  TERMINAL_FRAME_RELIEF,
   terminalWarpPoint,
 } from './terminal-warp';
 import { createTerminalWarpStore } from './terminal-warp-store';
@@ -371,6 +373,7 @@ interface TerminalPanel {
   texture: THREE.Texture;
   textureSource: TerminalTexture;
   frame: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+  frameAccent: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   scrollStrips: Record<'right' | 'left', ScrollStripMesh>;
   selection: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   unsubscribe: () => void;
@@ -635,7 +638,8 @@ function createSelection(): THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMate
   });
   const line = new THREE.Mesh(selectionGeometry(PANEL_WIDTH, PANEL_HEIGHT), material);
   line.name = 'active-pane-highlight';
-  line.position.z = 0.012;
+  // The outline sits above the frame's corner brackets even where a 100° warp tilts them forward.
+  line.position.z = TERMINAL_FRAME_RELIEF + 0.01;
   line.visible = false;
   line.raycast = () => undefined;
   return line;
@@ -3623,6 +3627,14 @@ export function createWorkspaceScene(
       );
       stripSideButton.position.set(0, -0.71, 0);
       inputRoot.add(stripSideButton);
+      const frameChinButton = createLabelButton(
+        `Frame chin: ${preferences.frameChin ? 'on' : 'off'}`,
+        1.05,
+        0.1,
+        { inputAction: 'frameChin' },
+      );
+      frameChinButton.position.set(0, -0.84, 0);
+      inputRoot.add(frameChinButton);
     } else if (mode === 'arrange') {
       const status = createLabelButton(
         panels.size
@@ -4419,6 +4431,13 @@ export function createWorkspaceScene(
       });
       return true;
     }
+    if (action === 'frameChin') {
+      setWindowPreferences({
+        ...mutableState.windowPreferences,
+        frameChin: !mutableState.windowPreferences.frameChin,
+      });
+      return true;
+    }
     if (action === 'dismissNotice') {
       setNotice(null);
       return true;
@@ -5211,6 +5230,18 @@ export function createWorkspaceScene(
     }
   };
   setupControllers();
+  const syncPanelFrame = (panel: TerminalPanel): void => {
+    const span = {
+      width: panel.width,
+      height: panel.height,
+      radians: THREE.MathUtils.degToRad(Math.max(0, panel.geometryCurvature)),
+    };
+    const options = { chin: mutableState.windowPreferences.frameChin };
+    panel.frame.geometry.dispose();
+    panel.frame.geometry = createTerminalFrameGeometry(span, options);
+    panel.frameAccent.geometry.dispose();
+    panel.frameAccent.geometry = createTerminalFrameAccentGeometry(span, options);
+  };
   const syncPanelGrid = (panel: TerminalPanel): void => {
     const width = (PANEL_WIDTH * panel.surface.cols) / 80;
     const height = (PANEL_HEIGHT * panel.surface.rows) / 24;
@@ -5229,8 +5260,7 @@ export function createWorkspaceScene(
     panel.screen.geometry = bent
       ? createCurvedTerminalGeometry(span)
       : new THREE.PlaneGeometry(width, height);
-    panel.frame.geometry.dispose();
-    panel.frame.geometry = createTerminalFrameGeometry(span);
+    syncPanelFrame(panel);
     panel.selection.geometry.dispose();
     panel.selection.geometry = bent
       ? createCurvedTerminalSelection({
@@ -5294,12 +5324,15 @@ export function createWorkspaceScene(
     screen.userData.helpText = getControlHelp({ terminalTitle: true });
     root.add(screen);
     const frame = new THREE.Mesh(
-      createTerminalFrameGeometry({ width: PANEL_WIDTH, height: PANEL_HEIGHT, radians: 0 }),
+      createTerminalFrameGeometry(
+        { width: PANEL_WIDTH, height: PANEL_HEIGHT, radians: 0 },
+        { chin: mutableState.windowPreferences.frameChin },
+      ),
       applyUIEnvironment(
         new THREE.MeshStandardMaterial({
-          color: 0x101820,
-          roughness: 0.72,
-          metalness: 0.3,
+          vertexColors: true,
+          roughness: 0.62,
+          metalness: 0.35,
           side: THREE.DoubleSide,
         }),
         uiEnvironment.texture,
@@ -5308,6 +5341,16 @@ export function createWorkspaceScene(
     frame.name = 'terminal-frame';
     frame.position.z = -0.025;
     root.add(frame);
+    const frameAccent = new THREE.Mesh(
+      createTerminalFrameAccentGeometry(
+        { width: PANEL_WIDTH, height: PANEL_HEIGHT, radians: 0 },
+        { chin: mutableState.windowPreferences.frameChin },
+      ),
+      new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, side: THREE.DoubleSide }),
+    );
+    frameAccent.name = 'terminal-frame-accent';
+    frameAccent.raycast = () => undefined;
+    frame.add(frameAccent);
     const createScrollStrip = (name: string): ScrollStripMesh => {
       const strip = new THREE.Mesh(
         new THREE.PlaneGeometry(SCROLL_STRIP_WIDTH, PANEL_HEIGHT),
@@ -5398,6 +5441,7 @@ export function createWorkspaceScene(
       texture,
       textureSource,
       frame,
+      frameAccent,
       scrollStrips,
       selection,
       unsubscribe: () => undefined,
@@ -5552,6 +5596,8 @@ export function createWorkspaceScene(
     const frame = panel.frame.material;
     const transparent = panel.opacity < 1;
     frame.opacity = panel.opacity;
+    panel.frameAccent.material.opacity = panel.opacity;
+    panel.frameAccent.material.depthWrite = !transparent;
     if (frame.transparent === transparent) return;
     frame.transparent = transparent;
     frame.depthWrite = !transparent;
@@ -6227,7 +6273,9 @@ export function createWorkspaceScene(
       next.focusCurvature !== mutableState.windowPreferences.focusCurvature;
     const stripSideChanged =
       next.scrollStripSide !== mutableState.windowPreferences.scrollStripSide;
+    const chinChanged = next.frameChin !== mutableState.windowPreferences.frameChin;
     mutableState.windowPreferences = next;
+    if (chinChanged) for (const panel of panels.values()) syncPanelFrame(panel);
     if (stripSideChanged) {
       stripScrolls.clear();
       for (const panel of panels.values()) showScrollStrips(panel);

@@ -4,10 +4,12 @@ import {
   clampTerminalCurvatureRadians,
   createCurvedTerminalGeometry,
   createCurvedTerminalSelection,
+  createTerminalFrameAccentGeometry,
   createTerminalFrameGeometry,
   getConservativeTerminalArrangementSize,
   getTerminalWarpBounds,
   MAX_TERMINAL_CURVATURE_RADIANS,
+  terminalFrameBracketArm,
   terminalWarpPoint,
   warpGeometryPositions,
 } from '../src/xr/terminal-warp';
@@ -146,18 +148,26 @@ describe('curved terminal geometry', () => {
     geometry.dispose();
   });
 
-  it('builds a front-only frame rim aligned with the screen surface', () => {
+  it('builds a stepped bezel whose inner edge sits on the screen surface', () => {
     const geometry = createTerminalFrameGeometry({ width: 4, height: 2, radians: 0 });
     const positions = geometry.getAttribute('position');
-    const zValues = Array.from({ length: positions.count }, (_, index) =>
-      Number(positions.getZ(index).toFixed(6)),
-    );
-    expect(new Set(zValues)).toEqual(new Set([0.025]));
     geometry.computeBoundingBox();
-    expect(geometry.boundingBox?.min.x).toBeCloseTo(-2.0175);
-    expect(geometry.boundingBox?.max.x).toBeCloseTo(2.0175);
-    expect(geometry.boundingBox?.min.y).toBeCloseTo(-1.03);
-    expect(geometry.boundingBox?.max.y).toBeCloseTo(1.03);
+    const bounds = geometry.boundingBox;
+    if (!bounds) throw new Error('frame geometry must have bounds');
+    expect(bounds.min.x).toBeCloseTo(-2.0175);
+    expect(bounds.max.x).toBeCloseTo(2.0175);
+    expect(bounds.min.y).toBeCloseTo(-1.03);
+    expect(bounds.max.y).toBeCloseTo(1.03);
+    // Depth runs from the back of the outer wall to the top of the corner brackets.
+    expect(bounds.min.z).toBeCloseTo(0.025 - 0.014);
+    expect(bounds.max.z).toBeCloseTo(0.025 + 0.008);
+    for (let index = 0; index < positions.count; index += 1) {
+      const inside =
+        Math.abs(positions.getX(index)) < 2 - 1e-6 && Math.abs(positions.getY(index)) < 1 - 1e-6;
+      expect(inside).toBe(false);
+    }
+    expect(geometry.getAttribute('color').count).toBe(positions.count);
+    expect(geometry.getAttribute('normal').count).toBe(positions.count);
     geometry.dispose();
   });
 
@@ -212,7 +222,8 @@ describe('curved terminal geometry', () => {
         const bounds = geometry.boundingBox;
         if (!bounds) throw new Error('frame geometry must have bounds');
         const edge = terminalWarpPoint(span.width / 2, { ...span, radians });
-        const expectedX = edge.x + Math.cos(radians / 2) * 0.0175;
+        // The outer wall runs 0.014 back along the surface normal, which leans outward.
+        const expectedX = edge.x + Math.cos(radians / 2) * 0.0175 + Math.sin(radians / 2) * 0.014;
         expect(bounds.min.x).toBeCloseTo(-expectedX, 4);
         expect(bounds.max.x).toBeCloseTo(expectedX, 4);
 
@@ -239,37 +250,145 @@ describe('curved terminal geometry', () => {
     }
   });
 
-  it('joins top and bottom borders to the outer side-rim endpoints', () => {
+  it('rounds the outer corners between the side and top rim tangent points', () => {
     for (const span of [
       { width: 1.2, height: 0.7 },
       { width: 4, height: 2 },
       { width: 8.5, height: 3.2 },
     ]) {
-      for (const degrees of [60, 100]) {
+      for (const degrees of [0, 60, 100]) {
         const radians = (degrees * Math.PI) / 180;
         const geometry = createTerminalFrameGeometry({ ...span, radians });
         const positions = geometry.getAttribute('position');
-        const outerX = span.width / 2 + 0.0175;
-        const outerTop = span.height / 2 + 0.03;
-        const outerBottom = -span.height / 2 - 0.03;
-        for (const x of [-outerX, outerX]) {
-          const edge = terminalWarpPoint((Math.sign(x) * span.width) / 2, { ...span, radians });
-          const point = {
-            x: edge.x + Math.sign(x) * Math.cos(radians / 2) * 0.0175,
-            z: edge.z + Math.sin(radians / 2) * 0.0175,
-          };
-          for (const y of [outerBottom, outerTop]) {
-            const matches = Array.from({ length: positions.count }, (_, index) => index).filter(
-              (index) =>
-                Math.abs(positions.getX(index) - point.x) < 1e-5 &&
-                Math.abs(positions.getY(index) - y) < 1e-5 &&
-                Math.abs(positions.getZ(index) - (0.025 + point.z)) < 1e-5,
-            );
-            expect(matches.length).toBeGreaterThanOrEqual(2);
+        const has = (x: number, y: number, z: number): boolean => {
+          for (let index = 0; index < positions.count; index += 1)
+            if (
+              Math.abs(positions.getX(index) - x) < 1e-5 &&
+              Math.abs(positions.getY(index) - y) < 1e-5 &&
+              Math.abs(positions.getZ(index) - z) < 1e-5
+            )
+              return true;
+          return false;
+        };
+        // The outer wall's back edge traces the silhouette.
+        const front = 0.025;
+        for (const sign of [-1, 1]) {
+          const edge = terminalWarpPoint((sign * span.width) / 2, { ...span, radians });
+          const along = (rim: number, depth: number): [number, number] => [
+            edge.x + sign * Math.cos(radians / 2) * rim + edge.normalX * depth,
+            edge.z + Math.sin(radians / 2) * rim + edge.normalZ * depth,
+          ];
+          for (const ySign of [-1, 1]) {
+            const [sideX, sideZ] = along(0.0175, -0.014);
+            expect(has(sideX, ySign * (span.height / 2 + 0.03 - 0.0175), front + sideZ)).toBe(true);
+            const [topX, topZ] = along(0, -0.014);
+            expect(has(topX, ySign * (span.height / 2 + 0.03), front + topZ)).toBe(true);
+            const [cornerX, cornerZ] = along(0.0175, -0.014);
+            expect(has(cornerX, ySign * (span.height / 2 + 0.03), front + cornerZ)).toBe(false);
           }
         }
         geometry.dispose();
       }
     }
+  });
+
+  const FRAME_SIZES = [
+    { width: 0.36, height: 0.17 },
+    { width: 0.71, height: 0.4 },
+    { width: 1.42, height: 0.8 },
+    { width: 0.9, height: 1.4 },
+    { width: 4, height: 2 },
+    { width: 8.5, height: 3.2 },
+  ];
+
+  it('builds a finite, fully indexed frame and accent at every size and curvature', () => {
+    for (const size of FRAME_SIZES) {
+      for (const degrees of [0, 30, 60, 100]) {
+        for (const chin of [false, true]) {
+          const span = { ...size, radians: (degrees * Math.PI) / 180 };
+          for (const geometry of [
+            createTerminalFrameGeometry(span, { chin }),
+            createTerminalFrameAccentGeometry(span, { chin }),
+          ]) {
+            const positions = geometry.getAttribute('position');
+            expect(positions.count).toBeGreaterThan(0);
+            expect(Array.from(positions.array as Float32Array).every(Number.isFinite)).toBe(true);
+            const index = geometry.getIndex();
+            if (!index) throw new Error('frame geometry must be indexed');
+            expect(index.count % 3).toBe(0);
+            expect(Math.max(...Array.from(index.array as Uint32Array))).toBeLessThan(
+              positions.count,
+            );
+            geometry.dispose();
+          }
+        }
+      }
+    }
+  });
+
+  it('keeps the frame and accent off the text area at every size and curvature', () => {
+    for (const size of FRAME_SIZES) {
+      for (const degrees of [0, 60, 100]) {
+        const span = { ...size, radians: (degrees * Math.PI) / 180 };
+        for (const geometry of [
+          createTerminalFrameGeometry(span, { chin: true }),
+          createTerminalFrameAccentGeometry(span, { chin: true }),
+        ]) {
+          const mesh = new THREE.Mesh(
+            geometry,
+            new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+          );
+          mesh.position.z = -0.025;
+          mesh.updateMatrixWorld(true);
+          const raycaster = new THREE.Raycaster();
+          for (const u of [-0.499, -0.25, 0, 0.25, 0.499]) {
+            for (const v of [-0.499, 0, 0.499]) {
+              const point = terminalWarpPoint(u * span.width, span);
+              const origin = new THREE.Vector3(
+                point.x + point.normalX,
+                v * span.height,
+                point.z + point.normalZ,
+              );
+              raycaster.set(origin, new THREE.Vector3(-point.normalX, 0, -point.normalZ));
+              expect(raycaster.intersectObject(mesh, false)).toHaveLength(0);
+            }
+          }
+          geometry.dispose();
+        }
+      }
+    }
+  });
+
+  it('adds the chin as a separate slab below the bezel only when asked', () => {
+    for (const size of FRAME_SIZES) {
+      const span = { ...size, radians: Math.PI / 3 };
+      const bare = createTerminalFrameGeometry(span);
+      const chinned = createTerminalFrameGeometry(span, { chin: true });
+      bare.computeBoundingBox();
+      chinned.computeBoundingBox();
+      expect(bare.boundingBox?.min.y).toBeCloseTo(-(size.height / 2 + 0.03));
+      expect(chinned.boundingBox?.min.y).toBeCloseTo(-(size.height / 2 + 0.08));
+      expect(chinned.boundingBox?.max.y).toBeCloseTo(size.height / 2 + 0.03);
+      expect(chinned.getAttribute('position').count).toBeGreaterThan(
+        bare.getAttribute('position').count,
+      );
+      const bareAccent = createTerminalFrameAccentGeometry(span);
+      const chinAccent = createTerminalFrameAccentGeometry(span, { chin: true });
+      bareAccent.computeBoundingBox();
+      chinAccent.computeBoundingBox();
+      expect(bareAccent.boundingBox?.min.y).toBeGreaterThan(-(size.height / 2 + 0.03));
+      expect(chinAccent.boundingBox?.min.y).toBeLessThan(-(size.height / 2 + 0.03));
+      for (const geometry of [bare, chinned, bareAccent, chinAccent]) geometry.dispose();
+    }
+  });
+
+  it('scales the corner bracket arm with the pane and never past the half edge', () => {
+    expect(terminalFrameBracketArm({ width: 1.42, height: 0.8, radians: 0 })).toBeCloseTo(0.144);
+    expect(terminalFrameBracketArm({ width: 8.5, height: 3.2, radians: 0 })).toBeCloseTo(0.3);
+    expect(terminalFrameBracketArm({ width: 0.36, height: 0.17, radians: 0 })).toBeCloseTo(0.04);
+    for (const size of FRAME_SIZES)
+      expect(terminalFrameBracketArm({ ...size, radians: 0 })).toBeLessThan(
+        Math.min(size.width, size.height) / 2,
+      );
   });
 });

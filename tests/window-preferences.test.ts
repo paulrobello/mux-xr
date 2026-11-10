@@ -20,6 +20,7 @@ describe('window preferences', () => {
       focusDistance: 5,
       focusCurvature: 0,
       scrollStripSide: 'right',
+      frameChin: true,
     });
     expect(
       validateWindowPreferences({ defaultOpacity: 2, focusDistance: 0, focusCurvature: 120 }),
@@ -28,7 +29,14 @@ describe('window preferences', () => {
       focusDistance: 0.5,
       focusCurvature: 100,
       scrollStripSide: 'right',
+      frameChin: true,
     });
+  });
+
+  it('keeps a boolean frame chin choice and falls back to showing it', () => {
+    expect(validateWindowPreferences({ frameChin: false }).frameChin).toBe(false);
+    expect(validateWindowPreferences({ frameChin: 'no' }).frameChin).toBe(true);
+    expect(validateWindowPreferences({}).frameChin).toBe(true);
   });
 
   it('keeps a known scroll strip side and falls back to the right edge', () => {

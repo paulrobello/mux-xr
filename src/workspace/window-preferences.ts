@@ -7,6 +7,8 @@ export interface WindowPreferences {
   focusDistance: number;
   focusCurvature: number;
   scrollStripSide: ScrollStripSide;
+  /** Show the instrument chin under each pane frame. */
+  frameChin: boolean;
 }
 
 export const DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
@@ -14,6 +16,7 @@ export const DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
   focusDistance: 1.5,
   focusCurvature: 0,
   scrollStripSide: 'right',
+  frameChin: true,
 };
 
 const clamp = (value: number, minimum: number, maximum: number, fallback: number): number =>
@@ -44,5 +47,9 @@ export function validateWindowPreferences(value: unknown): WindowPreferences {
     scrollStripSide: SCROLL_STRIP_SIDES.includes(candidate.scrollStripSide as ScrollStripSide)
       ? (candidate.scrollStripSide as ScrollStripSide)
       : DEFAULT_WINDOW_PREFERENCES.scrollStripSide,
+    frameChin:
+      typeof candidate.frameChin === 'boolean'
+        ? candidate.frameChin
+        : DEFAULT_WINDOW_PREFERENCES.frameChin,
   };
 }

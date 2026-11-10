@@ -66,7 +66,11 @@ import * as THREE from 'three';
 import type { PaneDescriptor, TerminalSurface, WorkspaceActions } from '../src/contracts';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
 import { createWorkspaceScene } from '../src/xr/scene';
-import { terminalWarpPoint } from '../src/xr/terminal-warp';
+import {
+  MAX_TERMINAL_CURVATURE_RADIANS,
+  TERMINAL_FRAME_RELIEF,
+  terminalWarpPoint,
+} from '../src/xr/terminal-warp';
 
 const pane = (id: string, title = id): PaneDescriptor => ({
   id,
@@ -2771,6 +2775,65 @@ describe('native XR controller event routing', () => {
       workspace.dispose();
       container.remove();
     });
+
+    it('toggles the frame chin from the XR Display settings and rebuilds open frames', () => {
+      const { workspace, container } = fixture();
+      const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+      const bottoms = (): number[] =>
+        ['terminal-frame', 'terminal-frame-accent'].map((name) => {
+          const mesh = panel.getObjectByName(name) as THREE.Mesh;
+          mesh.geometry.computeBoundingBox();
+          return mesh.geometry.boundingBox?.min.y ?? Number.NaN;
+        });
+      const [chinFrame, chinAccent] = bottoms() as [number, number];
+      workspace.showInput('display');
+      hit(workspace, { inputAction: 'frameChin' });
+      expect(workspace.state.windowPreferences.frameChin).toBe(false);
+      const [bareFrame, bareAccent] = bottoms() as [number, number];
+      expect(bareFrame - chinFrame).toBeCloseTo(0.05);
+      expect(bareAccent).toBeGreaterThan(chinAccent);
+      hit(workspace, { inputAction: 'frameChin' });
+      expect(workspace.state.windowPreferences.frameChin).toBe(true);
+      expect(bottoms()[0]).toBeCloseTo(chinFrame);
+      workspace.dispose();
+      container.remove();
+    });
+  });
+
+  it('keeps the selection outline above the frame brackets at the widest warp', () => {
+    const { workspace, container } = fixture();
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+    const outline = panel.getObjectByName('active-pane-highlight') as THREE.Mesh;
+    const accentLift = 0.0004;
+    const edgeClearance =
+      outline.position.z * Math.cos(MAX_TERMINAL_CURVATURE_RADIANS / 2) -
+      (TERMINAL_FRAME_RELIEF + accentLift);
+    expect(edgeClearance).toBeGreaterThan(0.002);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('fades the frame accent with the glass and keeps it out of ray hits', () => {
+    const { workspace, container } = fixture();
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
+    const accent = panel.getObjectByName('terminal-frame-accent') as THREE.Mesh<
+      THREE.BufferGeometry,
+      THREE.MeshBasicMaterial
+    >;
+    workspace.setTerminalOpacity('pane-a', 0.4);
+    expect(accent.material.opacity).toBeCloseTo(0.4);
+    expect(accent.material.depthWrite).toBe(false);
+    workspace.setTerminalOpacity('pane-a', 1);
+    expect(accent.material.opacity).toBe(1);
+    expect(accent.material.depthWrite).toBe(true);
+    const hits: THREE.Intersection[] = [];
+    accent.raycast(
+      new THREE.Raycaster(new THREE.Vector3(0, 0, 5), new THREE.Vector3(0, 0, -1)),
+      hits,
+    );
+    expect(hits).toHaveLength(0);
+    workspace.dispose();
+    container.remove();
   });
 
   it('scrolls only the pointed pane while ungripped without changing selection', () => {
@@ -5963,6 +6026,7 @@ describe('native XR controller event routing', () => {
       focusDistance: 1.5,
       focusCurvature: 0,
       scrollStripSide: 'right',
+      frameChin: true,
     });
     expect(workspace.getTerminalOpacity('pane-a')).toBe(0.7);
     expect(workspace.getTerminalOpacity('pane-b')).toBe(1);
@@ -6001,6 +6065,7 @@ describe('native XR controller event routing', () => {
       focusDistance: 2.2,
       focusCurvature: 40,
       scrollStripSide: 'right',
+      frameChin: true,
     });
     for (let frame = 20; frame < 40; frame++) fakeXR.frame?.(frame * 20);
     checkDistance(2.2);

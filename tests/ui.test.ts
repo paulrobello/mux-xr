@@ -295,17 +295,29 @@ describe('mux XR local UI state', () => {
     expect(stripSide.value).toBe('right');
     stripSide.value = 'both';
     stripSide.dispatchEvent(new Event('change'));
+    const frameChin = query<HTMLInputElement>(root, '[data-frame-chin]');
+    expect(frameChin.checked).toBe(true);
+    frameChin.checked = false;
+    frameChin.dispatchEvent(new Event('change'));
     expect(ui.getSettings().windowPreferences).toEqual({
       defaultOpacity: 0.65,
       focusDistance: 2.4,
       focusCurvature: 25,
       scrollStripSide: 'both',
+      frameChin: false,
     });
-    expect(changes).toEqual([0.65, 0.65, 0.65, 0.65]);
+    expect(changes).toEqual([0.65, 0.65, 0.65, 0.65, 0.65]);
     ui.setWindowPreferences(
-      { defaultOpacity: 0.4, focusDistance: 3, focusCurvature: 50, scrollStripSide: 'left' },
+      {
+        defaultOpacity: 0.4,
+        focusDistance: 3,
+        focusCurvature: 50,
+        scrollStripSide: 'left',
+        frameChin: true,
+      },
       true,
     );
+    expect(frameChin.checked).toBe(true);
     expect(opacity.value).toBe('40');
     expect(distance.value).toBe('3');
     expect(curvature.value).toBe('50');
@@ -317,6 +329,7 @@ describe('mux XR local UI state', () => {
       focusDistance: 3,
       focusCurvature: 50,
       scrollStripSide: 'left',
+      frameChin: true,
     });
     restored.destroy();
     root.remove();
