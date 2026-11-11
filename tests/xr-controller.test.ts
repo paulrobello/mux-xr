@@ -6846,6 +6846,80 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  describe('opening an unattached pane uses the new-window defaults', () => {
+    const prefs = {
+      defaultOpacity: 0.5,
+      defaultCurvature: 40,
+      focusDistance: 1.5,
+      focusCurvature: 0,
+      scrollStripSide: 'right' as const,
+      frameChin: true,
+      buttonMap: DEFAULT_BUTTON_MAP,
+    };
+    const setup = () => {
+      localStorage.clear();
+      const ctx = fixture();
+      const { workspace, actions } = ctx;
+      const target = pane('pane-c', 'C');
+      workspace.setAvailablePanes([pane('pane-a', 'A'), pane('pane-b', 'B'), target]);
+      workspace.setWindowPreferences(prefs);
+      vi.mocked(actions.selectPane).mockImplementation((id: string) => {
+        if (id === 'pane-c') workspace.addTerminal(surface(target));
+      });
+      return ctx;
+    };
+    const expectDefaults = (workspace: ReturnType<typeof createWorkspaceScene>): void => {
+      expect(workspace.getTerminalOpacity('pane-c')).toBe(0.5);
+      expect(workspace.getTerminalCurvature('pane-c')).toBe(40);
+    };
+
+    it('via an agent board row', () => {
+      const { workspace, container } = setup();
+      workspace.setAgentRoster([
+        {
+          paneId: 'pane-c',
+          agent: 'claude',
+          state: 'working',
+          reason: '',
+          workspace: '+1',
+          project: '',
+          paneLabel: '',
+          source: 'hook',
+          stalled: false,
+          lastActivityAt: Date.now(),
+          lastReportAt: 0,
+          lastInputAt: 0,
+          lastViewedAt: 0,
+          viewerCount: 0,
+          cpuMs: 0,
+          workspaceName: 'Main',
+          title: 'Shell C',
+          sessionName: 'S',
+          windowName: 'W',
+        },
+      ] as never);
+      workspace.showInput('widgets');
+      hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'agent-board' });
+      hit(workspace, { inputAction: 'selectAgentPane', agentPaneId: 'pane-c' });
+      expectDefaults(workspace);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('via the Panes navigator', () => {
+      const { workspace, container } = setup();
+      workspace.showInput('panes');
+      for (const title of ['Workspace', 'Session', 'Window']) {
+        hit(workspace, { inputAction: 'hierarchyNode', originalTitle: title });
+        for (let frame = 0; frame < 40; frame++) fakeXR.frame?.(100 + frame * 16);
+      }
+      hit(workspace, { inputAction: 'pane', paneId: 'pane-c' });
+      expectDefaults(workspace);
+      workspace.dispose();
+      container.remove();
+    });
+  });
+
   it('applies focus distance and temporary warp and restores the saved pane geometry and pose', () => {
     const { workspace, actions, container } = fixture();
     const root = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
