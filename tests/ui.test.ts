@@ -299,6 +299,9 @@ describe('mux XR local UI state', () => {
     const opacity = query<HTMLInputElement>(root, '[data-window-opacity]');
     const distance = query<HTMLInputElement>(root, '[data-focus-distance]');
     const curvature = query<HTMLInputElement>(root, '[data-focus-curvature]');
+    const warp = query<HTMLInputElement>(root, '[data-window-warp]');
+    expect(warp.value).toBe('0');
+    expect(warp.getAttribute('aria-label')).toContain('New window');
     expect(opacity.value).toBe('100');
     expect(distance.value).toBe('1.5');
     expect(curvature.value).toBe('0');
@@ -315,6 +318,8 @@ describe('mux XR local UI state', () => {
     distance.dispatchEvent(new Event('input'));
     curvature.value = '25';
     curvature.dispatchEvent(new Event('input'));
+    warp.value = '35';
+    warp.dispatchEvent(new Event('input'));
     const stripSide = root.querySelector<HTMLSelectElement>('[data-scroll-strip-side]');
     if (!stripSide) throw new Error('Scroll strip side control missing');
     expect(stripSide.value).toBe('right');
@@ -326,16 +331,18 @@ describe('mux XR local UI state', () => {
     frameChin.dispatchEvent(new Event('change'));
     expect(ui.getSettings().windowPreferences).toEqual({
       defaultOpacity: 0.65,
+      defaultCurvature: 35,
       focusDistance: 2.4,
       focusCurvature: 25,
       scrollStripSide: 'both',
       frameChin: true,
       buttonMap: DEFAULT_BUTTON_MAP,
     });
-    expect(changes).toEqual([0.65, 0.65, 0.65, 0.65, 0.65]);
+    expect(changes).toEqual([0.65, 0.65, 0.65, 0.65, 0.65, 0.65]);
     ui.setWindowPreferences(
       {
         defaultOpacity: 0.4,
+        defaultCurvature: 60,
         focusDistance: 3,
         focusCurvature: 50,
         scrollStripSide: 'left',
@@ -346,6 +353,7 @@ describe('mux XR local UI state', () => {
     );
     expect(frameChin.checked).toBe(true);
     expect(opacity.value).toBe('40');
+    expect(warp.value).toBe('60');
     expect(distance.value).toBe('3');
     expect(curvature.value).toBe('50');
     expect(stripSide.value).toBe('left');
@@ -353,6 +361,7 @@ describe('mux XR local UI state', () => {
     const restored = mountWorkspaceUI(root, { onConnect: () => undefined });
     expect(restored.getSettings().windowPreferences).toEqual({
       defaultOpacity: 0.4,
+      defaultCurvature: 60,
       focusDistance: 3,
       focusCurvature: 50,
       scrollStripSide: 'left',

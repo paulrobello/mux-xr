@@ -6,6 +6,8 @@ export const SCROLL_STRIP_SIDES: readonly ScrollStripSide[] = ['right', 'left', 
 
 export interface WindowPreferences {
   defaultOpacity: number;
+  /** Curvature in degrees for panes with no saved warp. */
+  defaultCurvature: number;
   focusDistance: number;
   focusCurvature: number;
   scrollStripSide: ScrollStripSide;
@@ -17,6 +19,7 @@ export interface WindowPreferences {
 
 export const DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
   defaultOpacity: 1,
+  defaultCurvature: 0,
   focusDistance: 1.5,
   focusCurvature: 0,
   scrollStripSide: 'right',
@@ -37,6 +40,12 @@ export function validateWindowPreferences(value: unknown): WindowPreferences {
       0.1,
       1,
       DEFAULT_WINDOW_PREFERENCES.defaultOpacity,
+    ),
+    defaultCurvature: clamp(
+      candidate.defaultCurvature ?? NaN,
+      0,
+      100,
+      DEFAULT_WINDOW_PREFERENCES.defaultCurvature,
     ),
     focusDistance: clamp(
       candidate.focusDistance ?? NaN,

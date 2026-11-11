@@ -6309,11 +6309,13 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('uses new-window opacity without changing open panes or saved overrides', () => {
+  it('uses new-window opacity and curvature without changing open panes or saved overrides', () => {
     const { workspace, container } = fixture();
     workspace.setTerminalOpacity('pane-a', 0.7);
+    workspace.setTerminalCurvature('pane-a', 15);
     workspace.setWindowPreferences({
       defaultOpacity: 0.4,
+      defaultCurvature: 45,
       focusDistance: 1.5,
       focusCurvature: 0,
       scrollStripSide: 'right',
@@ -6324,9 +6326,13 @@ describe('native XR controller event routing', () => {
     expect(workspace.getTerminalOpacity('pane-b')).toBe(1);
     workspace.addTerminal(surface(pane('pane-c')));
     expect(workspace.getTerminalOpacity('pane-c')).toBe(0.4);
+    expect(workspace.getTerminalCurvature('pane-a')).toBe(15);
+    expect(workspace.getTerminalCurvature('pane-b')).toBe(0);
+    expect(workspace.getTerminalCurvature('pane-c')).toBe(45);
     workspace.removeTerminal('pane-a');
     workspace.addTerminal(surface(pane('pane-a')));
     expect(workspace.getTerminalOpacity('pane-a')).toBe(0.7);
+    expect(workspace.getTerminalCurvature('pane-a')).toBe(15);
     workspace.dispose();
     container.remove();
   });
@@ -6354,6 +6360,7 @@ describe('native XR controller event routing', () => {
     checkDistance(1.5);
     workspace.setWindowPreferences({
       defaultOpacity: 0.4,
+      defaultCurvature: 0,
       focusDistance: 2.2,
       focusCurvature: 40,
       scrollStripSide: 'right',

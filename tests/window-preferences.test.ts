@@ -15,9 +15,15 @@ describe('window preferences', () => {
 
   it('clamps finite values to the supported display ranges', () => {
     expect(
-      validateWindowPreferences({ defaultOpacity: 0, focusDistance: 99, focusCurvature: -5 }),
+      validateWindowPreferences({
+        defaultOpacity: 0,
+        defaultCurvature: -5,
+        focusDistance: 99,
+        focusCurvature: -5,
+      }),
     ).toEqual({
       defaultOpacity: 0.1,
+      defaultCurvature: 0,
       focusDistance: 5,
       focusCurvature: 0,
       scrollStripSide: 'right',
@@ -25,9 +31,15 @@ describe('window preferences', () => {
       buttonMap: DEFAULT_BUTTON_MAP,
     });
     expect(
-      validateWindowPreferences({ defaultOpacity: 2, focusDistance: 0, focusCurvature: 120 }),
+      validateWindowPreferences({
+        defaultOpacity: 2,
+        defaultCurvature: 120,
+        focusDistance: 0,
+        focusCurvature: 120,
+      }),
     ).toEqual({
       defaultOpacity: 1,
+      defaultCurvature: 100,
       focusDistance: 0.5,
       focusCurvature: 100,
       scrollStripSide: 'right',

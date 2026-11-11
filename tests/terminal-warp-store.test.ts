@@ -26,6 +26,15 @@ describe('terminal warp store', () => {
     expect(store.getOpacity('custom', 0.4)).toBe(0.7);
     expect(createTerminalWarpStore(null).getOpacity('new', 0.4)).toBe(0.4);
   });
+  it('uses a curvature fallback only when the pane has no saved curvature', () => {
+    const store = createTerminalWarpStore(memoryStorage());
+    store.set('saved-flat', 0);
+    store.setOpacity('opacity-only', 0.5);
+    expect(store.get('new', 30)).toBe(30);
+    expect(store.get('opacity-only', 30)).toBe(30);
+    expect(store.get('saved-flat', 30)).toBe(0);
+    expect(createTerminalWarpStore(null).get('new', 30)).toBe(30);
+  });
   it('stores values by opaque pane identity and clamps them to degrees', () => {
     const store = createTerminalWarpStore(memoryStorage());
     expect(store.get('workspace/session/window/pane')).toBe(0);

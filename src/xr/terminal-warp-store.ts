@@ -51,15 +51,15 @@ function defaultStorage(): Storage | null {
 }
 
 export function createTerminalWarpStore(storage: Storage | null = defaultStorage()): {
-  get(key: string): number;
+  get(key: string, fallback?: number): number;
   set(key: string, degrees: number): boolean;
   getOpacity(key: string, fallback?: number): number;
   setOpacity(key: string, value: number): boolean;
 } {
   return {
-    get(key): number {
-      if (!storage) return 0;
-      return readDocument(storage).values[key] ?? 0;
+    get(key, fallback = 0): number {
+      if (!storage) return clampDegrees(fallback);
+      return readDocument(storage).values[key] ?? clampDegrees(fallback);
     },
     set(key, degrees): boolean {
       if (!storage) return false;

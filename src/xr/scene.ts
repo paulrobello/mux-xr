@@ -3592,6 +3592,7 @@ export function createWorkspaceScene(
             `New window glass: ${Math.round(preferences.defaultOpacity * 100)}%`,
             0.1,
           ],
+          ['defaultCurvature', `New window warp: ${Math.round(preferences.defaultCurvature)}°`, 5],
           ['focusDistance', `Focus distance: ${preferences.focusDistance.toFixed(1)} m`, 0.1],
           ['focusCurvature', `Focus warp: ${Math.round(preferences.focusCurvature)}°`, 5],
         ] as const
@@ -3623,7 +3624,7 @@ export function createWorkspaceScene(
             ],
         },
       );
-      stripSideButton.position.set(0, -0.71, 0);
+      stripSideButton.position.set(0, -0.84, 0);
       inputRoot.add(stripSideButton);
       const frameChinButton = createLabelButton(
         `Frame chin: ${preferences.frameChin ? 'on' : 'off'}`,
@@ -3631,7 +3632,7 @@ export function createWorkspaceScene(
         0.1,
         { inputAction: 'frameChin' },
       );
-      frameChinButton.position.set(0, -0.84, 0);
+      frameChinButton.position.set(0, -0.97, 0);
       inputRoot.add(frameChinButton);
     } else if (mode === 'buttons') {
       const map = mutableState.windowPreferences.buttonMap;
@@ -4028,7 +4029,7 @@ export function createWorkspaceScene(
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
     close.position.set(
       mode === 'panes' ? -1.2 : 0,
-      mode === 'panes' ? -0.9 : mode === 'display' ? -1.0 : mode === 'settings' ? -0.89 : -0.66,
+      mode === 'panes' ? -0.9 : mode === 'display' ? -1.13 : mode === 'settings' ? -0.89 : -0.66,
       0,
     );
     inputRoot.add(close);
@@ -4038,7 +4039,7 @@ export function createWorkspaceScene(
         inputAction: 'openInput',
         mode: mode === 'filtering' ? 'display' : 'settings',
       });
-      back.position.set(-0.22, mode === 'display' ? -1.0 : -0.66, 0);
+      back.position.set(-0.22, mode === 'display' ? -1.13 : -0.66, 0);
       inputRoot.add(back);
     }
     if (mode === 'panes') {
@@ -4431,9 +4432,14 @@ export function createWorkspaceScene(
     if (action === 'windowPreference') {
       const preference = hit.userData.preference as
         | 'defaultOpacity'
+        | 'defaultCurvature'
         | 'focusDistance'
         | 'focusCurvature';
-      if (['defaultOpacity', 'focusDistance', 'focusCurvature'].includes(preference))
+      if (
+        ['defaultOpacity', 'defaultCurvature', 'focusDistance', 'focusCurvature'].includes(
+          preference,
+        )
+      )
         setWindowPreferences({
           ...mutableState.windowPreferences,
           [preference]: mutableState.windowPreferences[preference] + Number(hit.userData.delta),
@@ -5487,7 +5493,7 @@ export function createWorkspaceScene(
       filterVersion,
       filterGaze: false,
       filterGazeAt: 0,
-      curvature: warpStore.get(warpKey(surface)),
+      curvature: warpStore.get(warpKey(surface), mutableState.windowPreferences.defaultCurvature),
       geometryCurvature: -1,
       focusCurvature: null,
       opacity: warpStore.getOpacity(

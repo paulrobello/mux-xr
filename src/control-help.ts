@@ -54,9 +54,11 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
     case 'windowPreference':
       return data.preference === 'defaultOpacity'
         ? 'Set glass opacity for newly opened windows; existing panes keep their opacity'
-        : data.preference === 'focusDistance'
-          ? 'Set how far the focused window appears in front of you'
-          : 'Set temporary focus curvature; the original warp returns when focus ends';
+        : data.preference === 'defaultCurvature'
+          ? 'Set curvature for newly opened windows; existing panes keep their warp'
+          : data.preference === 'focusDistance'
+            ? 'Set how far the focused window appears in front of you'
+            : 'Set temporary focus curvature; the original warp returns when focus ends';
     case 'glassOpacity':
       return 'Adjust the dark terminal background opacity';
     case 'radialAction':
