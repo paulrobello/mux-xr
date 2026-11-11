@@ -3321,7 +3321,8 @@ export function createWorkspaceScene(
         0.09,
         { inputAction: 'keyboardBackground' },
       );
-      backdropToggle.position.set(0.35, 0.7, 0);
+      // Flanks the 0.9-wide target label (x -0.45..0.45) at its own height.
+      backdropToggle.position.set(0.45 + 0.04 + 0.34 / 2, 0.56, 0);
       inputRoot.add(backdropToggle);
       const gazeToggle = createLabelButton(
         `Gaze input: ${mutableState.gazeInputEnabled ? 'on' : 'off'}`,
@@ -3329,7 +3330,7 @@ export function createWorkspaceScene(
         0.09,
         { inputAction: 'gazeInput' },
       );
-      gazeToggle.position.set(-0.25, 0.7, 0);
+      gazeToggle.position.set(-(0.45 + 0.04 + 0.5 / 2), 0.56, 0);
       inputRoot.add(gazeToggle);
       const curvature = createLabelButton(
         `Keyboard curve: ${Math.round(mutableState.keyboardCurvature)}°`,
@@ -3337,14 +3338,14 @@ export function createWorkspaceScene(
         0.09,
         { inputAction: 'noop' },
       );
-      curvature.position.set(0, 0.86, 0);
+      curvature.position.set(0, 0.7, 0);
       inputRoot.add(curvature);
       for (const direction of [-1, 1]) {
         const step = createLabelButton(direction < 0 ? '−' : '+', 0.16, 0.09, {
           inputAction: 'keyboardCurvature',
           delta: direction * 10,
         });
-        step.position.set(direction * 0.52, 0.86, 0);
+        step.position.set(direction * 0.52, 0.7, 0);
         inputRoot.add(step);
       }
       const dictation = mutableState.dictation;
@@ -3367,18 +3368,18 @@ export function createWorkspaceScene(
           },
         );
         dictate.name = 'xr-dictate-button';
-        dictate.position.set(-0.42, 1.03, 0);
+        dictate.position.set(-0.42, 0.87, 0);
         inputRoot.add(dictate);
       }
       const paste = createLabelButton('Paste', 0.44, 0.1, { inputAction: 'pasteClipboard' });
-      paste.position.set(-1, 1.03, 0);
+      paste.position.set(-1, 0.87, 0);
       inputRoot.add(paste);
       if (dictation.transcript && dictation.status !== 'listening') {
         const insert = createLabelButton('Insert text', 0.5, 0.1, {
           inputAction: 'dictation',
           dictationAction: 'insert',
         });
-        insert.position.set(0.25, 1.03, 0);
+        insert.position.set(0.25, 0.87, 0);
         inputRoot.add(insert);
       }
       if (['review', 'error'].includes(dictation.status) && dictation.transcript.trim()) {
@@ -3386,7 +3387,7 @@ export function createWorkspaceScene(
           inputAction: 'dictation',
           dictationAction: 'clear',
         });
-        clear.position.set(1.17, 1.03, 0);
+        clear.position.set(1.17, 0.87, 0);
         inputRoot.add(clear);
       }
       if (dictation.status !== 'idle') {
@@ -3394,19 +3395,19 @@ export function createWorkspaceScene(
           inputAction: 'dictation',
           dictationAction: 'cancel',
         });
-        cancel.position.set(0.73, 1.03, 0);
+        cancel.position.set(0.73, 0.87, 0);
         inputRoot.add(cancel);
         const transcript = createLabelButton(dictationCaption(), 1.85, 0.34, {
           inputAction: 'noop',
           wrap: true,
         });
         transcript.name = 'xr-dictation-transcript';
-        transcript.position.set(0, 1.33, 0);
+        transcript.position.set(0, 1.17, 0);
         inputRoot.add(transcript);
         // Sits over the transcript box's left edge, the box being 1.85 wide and 0.34 tall.
         const heading = createLabelButton('Transcript', 0.5, 0.1, { inputAction: 'noop' });
         heading.name = 'xr-dictation-transcript-heading';
-        heading.position.set(-0.925 + 0.25, 1.33 + 0.17 + 0.06, 0);
+        heading.position.set(-0.925 + 0.25, 1.17 + 0.17 + 0.06, 0);
         inputRoot.add(heading);
       }
     }
