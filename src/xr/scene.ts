@@ -129,7 +129,8 @@ import {
   type UIPoseName,
 } from './ui-poses';
 import { createWidgetPoseStore } from './widget-poses';
-import { type ClockWidget, createClockWidget, type WidgetKind } from './widgets';
+import { getWidgetEntry, isWidgetKind, WIDGET_REGISTRY, type WidgetKind } from './widget-registry';
+import type { Widget } from './widgets';
 import { createWristMenuWatch, WRIST_WATCH_PROBE_REACH } from './wrist-menu-watch';
 
 type InputKind = 'hand' | 'controller';
@@ -703,7 +704,7 @@ export function createWorkspaceScene(
   scene.add(ambient, key);
   const observatory = createObservatory(scene);
   const panels = new Map<string, TerminalPanel>();
-  const widgets = new Map<WidgetKind, ClockWidget>();
+  const widgets = new Map<WidgetKind, Widget>();
   const touchedWidgets = new Set<WidgetKind>();
   const clipboard = createClipboardBridge();
   const pendingPaste = new Map<THREE.Group, string | null>();
@@ -2301,8 +2302,8 @@ export function createWorkspaceScene(
     }
     if (widgetRestorePending) {
       for (const [kind, pose] of Object.entries(widgetPoseStore.read())) {
-        if (touchedWidgets.has(kind as WidgetKind)) continue;
-        const widget = widgets.get(kind as WidgetKind) ?? addWidget(kind as WidgetKind);
+        if (!pose || !isWidgetKind(kind) || touchedWidgets.has(kind)) continue;
+        const widget = widgets.get(kind) ?? addWidget(kind);
         applyUIPose(widget.root, pose, [0.25, 2]);
       }
       widgetRestorePending = false;
@@ -3021,7 +3022,7 @@ export function createWorkspaceScene(
     if (inputPoseSpawn) poseStore.forget('keyboard');
     else saveUIPose('keyboard', root);
   };
-  const placeWidget = (widget: ClockWidget): void => {
+  const placeWidget = (kind: WidgetKind, widget: Widget): void => {
     const view = poseViewer();
     view.updateWorldMatrix(true, false);
     const eye = view.getWorldPosition(new THREE.Vector3());
@@ -3032,12 +3033,12 @@ export function createWorkspaceScene(
       new THREE.Vector3(0, 1, 0),
       Math.atan2(-forward.x, -forward.z),
     );
-    const x = widget.root.userData.widgetKind === 'digital-clock' ? -0.45 : 0.45;
-    widget.root.position.copy(new THREE.Vector3(x, 0.3, -1.25).applyQuaternion(rotation).add(eye));
+    const [x, y, z] = getWidgetEntry(kind).spawnOffset;
+    widget.root.position.copy(new THREE.Vector3(x, y, z).applyQuaternion(rotation).add(eye));
     widget.root.quaternion.copy(rotation);
     widget.root.scale.setScalar(1);
   };
-  const saveWidgetPose = (kind: WidgetKind, widget: ClockWidget): void => {
+  const saveWidgetPose = (kind: WidgetKind, widget: Widget): void => {
     if (!widgetPoseStore.save(kind, captureUIPose(widget.root)))
       setNotice('Widget position could not be saved on this device');
   };
@@ -3057,15 +3058,18 @@ export function createWorkspaceScene(
     if (!disposed && inputRoot && inputMode === 'widgets') refreshInputRoot('widgets');
     notify();
   };
-  const addWidget = (kind: WidgetKind): ClockWidget => {
+  const addWidget = (kind: WidgetKind): Widget => {
     touchedWidgets.add(kind);
-    const widget = createClockWidget(kind, uiEnvironment.texture);
+    const widget = getWidgetEntry(kind).create(uiEnvironment.texture);
+    const widgetId = String(widget.root.userData.widgetId ?? `widget-${kind}`);
     widget.root.traverse((object) => {
+      object.userData.widgetKind = kind;
+      object.userData.widgetId = widgetId;
       if (!object.userData.inputAction) object.userData.inputAction = 'grabWidget';
     });
     widgets.set(kind, widget);
     scene.add(widget.root);
-    placeWidget(widget);
+    placeWidget(kind, widget);
     return widget;
   };
   const toggleWidget = (kind: WidgetKind): void => {
@@ -3885,10 +3889,9 @@ export function createWorkspaceScene(
         inputRoot.add(button);
       }
     } else if (mode === 'widgets') {
-      for (const [index, kind] of (['digital-clock', 'analog-clock'] as const).entries()) {
-        const name = kind === 'digital-clock' ? 'Digital clock' : 'Analog clock';
+      for (const [index, { kind, displayName }] of WIDGET_REGISTRY.entries()) {
         const button = createLabelButton(
-          (widgets.has(kind) ? 'Hide ' : 'Add ') + name,
+          (widgets.has(kind) ? 'Hide ' : 'Add ') + displayName,
           1.25,
           0.14,
           { inputAction: 'toggleWidget', widgetKind: kind },
@@ -4518,7 +4521,7 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'toggleWidget') {
-      toggleWidget(hit.userData.widgetKind as WidgetKind);
+      if (isWidgetKind(hit.userData.widgetKind)) toggleWidget(hit.userData.widgetKind);
       return true;
     }
     if (action === 'closeWidget') {
@@ -6600,7 +6603,7 @@ export function createWorkspaceScene(
     }
     resetInputPose();
     for (const [kind, widget] of widgets) {
-      placeWidget(widget);
+      placeWidget(kind, widget);
       saveWidgetPose(kind, widget);
     }
     const view = poseViewer();

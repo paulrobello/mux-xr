@@ -1,10 +1,9 @@
 import { legacyPoseToWorld, type SavedUIPose } from './ui-poses';
-import type { WidgetKind } from './widgets';
+import { isWidgetKind, type WidgetKind, widgetKinds } from './widget-registry';
 
 const STORAGE_KEY = 'mux-xr:widget-poses:v2';
 const LEGACY_STORAGE_KEY = 'mux-xr:widget-poses:v1';
 const VERSION = 2;
-const WIDGET_KINDS = ['digital-clock', 'analog-clock'] as const satisfies readonly WidgetKind[];
 
 export type WidgetPoses = Partial<Record<WidgetKind, SavedUIPose>>;
 
@@ -63,7 +62,7 @@ function readDocument(storage: Storage): PoseDocument {
       return emptyDocument();
     }
     const poses: WidgetPoses = {};
-    for (const kind of WIDGET_KINDS) {
+    for (const kind of widgetKinds()) {
       const pose = document.poses[kind];
       if (validPose(pose)) poses[kind] = current ? clonePose(pose) : legacyPoseToWorld(pose);
     }
@@ -92,13 +91,13 @@ export function createWidgetPoseStore(storage: Storage | null = defaultStorage()
       if (!storage) return {};
       const { poses } = readDocument(storage);
       const copy: WidgetPoses = {};
-      for (const kind of WIDGET_KINDS) {
+      for (const kind of widgetKinds()) {
         if (poses[kind]) copy[kind] = clonePose(poses[kind]);
       }
       return copy;
     },
     save(kind, pose): boolean {
-      if (!storage || !WIDGET_KINDS.includes(kind) || !validPose(pose)) return false;
+      if (!storage || !isWidgetKind(kind) || !validPose(pose)) return false;
       const document = readDocument(storage);
       document.poses[kind] = clonePose(pose);
       try {
@@ -109,7 +108,7 @@ export function createWidgetPoseStore(storage: Storage | null = defaultStorage()
       }
     },
     remove(kind): boolean {
-      if (!storage || !WIDGET_KINDS.includes(kind)) return false;
+      if (!storage || !isWidgetKind(kind)) return false;
       const document = readDocument(storage);
       delete document.poses[kind];
       try {

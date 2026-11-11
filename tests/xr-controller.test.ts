@@ -68,6 +68,7 @@ import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
 import { createWorkspaceScene } from '../src/xr/scene';
 import { terminalWarpPoint } from '../src/xr/terminal-warp';
+import { WIDGET_REGISTRY } from '../src/xr/widget-registry';
 
 const pane = (id: string, title = id): PaneDescriptor => ({
   id,
@@ -2500,6 +2501,39 @@ describe('native XR controller event routing', () => {
     expect(workspace.state.widgets).toEqual([]);
     expect(actions.sendKey).not.toHaveBeenCalled();
     expect(actions.sendText).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('labels the Widgets panel from the registry display names', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('widgets');
+    for (const { kind, displayName } of WIDGET_REGISTRY) {
+      expect(
+        objectWithData(workspace, { inputAction: 'toggleWidget', widgetKind: kind }).userData
+          .labelText,
+      ).toBe(`Add ${displayName}`);
+    }
+    hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'digital-clock' });
+    workspace.showInput('widgets');
+    expect(
+      objectWithData(workspace, { inputAction: 'toggleWidget', widgetKind: 'digital-clock' })
+        .userData.labelText,
+    ).toBe('Hide Digital clock');
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('ignores a toggle hit whose widgetKind is not registered', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('widgets');
+    const button = objectWithData(workspace, {
+      inputAction: 'toggleWidget',
+      widgetKind: 'digital-clock',
+    });
+    button.userData.widgetKind = 'unregistered-widget';
+    hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'unregistered-widget' });
+    expect(workspace.state.widgets).toEqual([]);
     workspace.dispose();
     container.remove();
   });

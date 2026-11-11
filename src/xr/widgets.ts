@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import { applyUIEnvironment } from './ui-environment';
 
-export type WidgetKind = 'digital-clock' | 'analog-clock';
+export type ClockKind = 'digital-clock' | 'analog-clock';
 
-export interface ClockWidget {
+export interface Widget {
   root: THREE.Group;
   update: (nowMs: number) => void;
   dispose: () => void;
@@ -16,7 +16,7 @@ const BODY_COLOR = 0x101820;
 const FACE_COLOR = 0x182935;
 const ACCENT_COLOR = 0x73d6e6;
 
-function setWidgetMetadata(object: THREE.Object3D, widgetId: string, kind: WidgetKind): void {
+function setWidgetMetadata(object: THREE.Object3D, widgetId: string, kind: ClockKind): void {
   object.userData.widgetId = widgetId;
   object.userData.widgetKind = kind;
 }
@@ -70,10 +70,7 @@ function digitalText(now: Date): string {
   return `${hour}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} ${suffix}`;
 }
 
-export function createClockWidget(
-  kind: WidgetKind,
-  envMap: THREE.Texture | null = null,
-): ClockWidget {
+export function createClockWidget(kind: ClockKind, envMap: THREE.Texture | null = null): Widget {
   const widgetId = `clock-widget-${nextWidgetId++}`;
   const root = new THREE.Group();
   root.name = widgetId;
