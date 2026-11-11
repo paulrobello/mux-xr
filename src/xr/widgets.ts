@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { AgentRosterRow } from '../workspace/agent-roster';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import { applyUIEnvironment } from './ui-environment';
 
@@ -8,6 +9,8 @@ export interface Widget {
   root: THREE.Group;
   update: (nowMs: number) => void;
   dispose: () => void;
+  /** Receives every roster change; widgets that do not show agents omit it. */
+  setAgentRoster?: (rows: readonly AgentRosterRow[]) => void;
 }
 
 let nextWidgetId = 1;
@@ -25,7 +28,7 @@ function disposeMaterial(material: THREE.Material | THREE.Material[]): void {
   for (const item of Array.isArray(material) ? material : [material]) item.dispose();
 }
 
-function disposeOwned(root: THREE.Group): void {
+export function disposeOwned(root: THREE.Group): void {
   const geometries = new Set<THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>();
   root.traverse((object) => {

@@ -15,9 +15,11 @@ vi.mock('troika-three-text', () => ({
 
 import { createWidgetPoseStore } from '../src/xr/widget-poses';
 import {
+  findWidgetEntry,
   getWidgetEntry,
   isWidgetKind,
   WIDGET_REGISTRY,
+  type WidgetKind,
   widgetKinds,
 } from '../src/xr/widget-registry';
 
@@ -48,13 +50,54 @@ describe('widget registry', () => {
     ).toEqual([
       ['digital-clock', 'Digital clock', [-0.45, 0.3, -1.25]],
       ['analog-clock', 'Analog clock', [0.45, 0.3, -1.25]],
+      ['agent-board', 'Agent board', [0, -0.27, -1.25]],
     ]);
-    expect(widgetKinds()).toEqual(['digital-clock', 'analog-clock']);
+    expect(widgetKinds()).toEqual(['digital-clock', 'analog-clock', 'agent-board']);
+  });
+
+  // Eye at the origin, as placeWidget measures offsets. Each box projects onto the z = -1 image
+  // plane, so a nearer surface hiding a farther one counts even when the boxes do not intersect.
+  const projected = (box: THREE.Box3): { x: [number, number]; y: [number, number] } => {
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (const x of [box.min.x, box.max.x])
+      for (const y of [box.min.y, box.max.y])
+        for (const z of [box.min.z, box.max.z]) {
+          xs.push(x / -z);
+          ys.push(y / -z);
+        }
+    return { x: [Math.min(...xs), Math.max(...xs)], y: [Math.min(...ys), Math.max(...ys)] };
+  };
+  const overlaps = (left: THREE.Box3, right: THREE.Box3): boolean => {
+    const a = projected(left);
+    const b = projected(right);
+    return a.x[0] < b.x[1] && b.x[0] < a.x[1] && a.y[0] < b.y[1] && b.y[0] < a.y[1];
+  };
+  const spawnBoxes = () =>
+    WIDGET_REGISTRY.map((entry) => {
+      const widget = entry.create(null);
+      const [x, y, z] = entry.spawnOffset;
+      widget.root.position.set(x, y, z);
+      widget.root.scale.setScalar('spawnScale' in entry ? entry.spawnScale : 1);
+      widget.root.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(widget.root);
+      widget.dispose();
+      return { kind: entry.kind, box };
+    });
+
+  it('spawns every widget without covering another', () => {
+    const boxes = spawnBoxes();
+    for (const [index, left] of boxes.entries())
+      for (const right of boxes.slice(index + 1)) {
+        expect(left.box.intersectsBox(right.box), `${left.kind} and ${right.kind}`).toBe(false);
+        expect(overlaps(left.box, right.box), `${left.kind} and ${right.kind}`).toBe(false);
+      }
   });
 
   it('looks entries up by kind and rejects unknown kinds', () => {
-    expect(getWidgetEntry('analog-clock')?.displayName).toBe('Analog clock');
-    expect(getWidgetEntry('nope')).toBeUndefined();
+    expect(getWidgetEntry('analog-clock').displayName).toBe('Analog clock');
+    expect(findWidgetEntry('nope')).toBeUndefined();
+    expect(() => getWidgetEntry('nope' as unknown as WidgetKind)).toThrow(/Unknown widget kind/);
     expect(isWidgetKind('digital-clock')).toBe(true);
     expect(isWidgetKind('nope')).toBe(false);
     expect(isWidgetKind(undefined)).toBe(false);
@@ -75,12 +118,12 @@ describe('widget registry', () => {
     const storage = memoryStorage({
       'mux-xr:widget-poses:v2': JSON.stringify({
         version: 2,
-        poses: { 'digital-clock': pose, 'agent-board': pose },
+        poses: { 'digital-clock': pose, 'retired-widget': pose },
       }),
     });
     const store = createWidgetPoseStore(storage);
     expect(Object.keys(store.read())).toEqual(['digital-clock']);
-    expect(store.save('agent-board' as never, pose)).toBe(false);
-    expect(store.remove('agent-board' as never)).toBe(false);
+    expect(store.save('retired-widget' as unknown as WidgetKind, pose)).toBe(false);
+    expect(store.remove('retired-widget' as unknown as WidgetKind)).toBe(false);
   });
 });

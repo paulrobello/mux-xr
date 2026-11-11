@@ -22,7 +22,7 @@ const TEAL = '#3c91a0';
 const MUTED_TEAL = '#1d4c59';
 const DARK = '#102832';
 const AGENTS_KEY = 'agents:roster';
-const AGENT_TONE_COLORS: Record<AgentStateTone, string> = {
+export const AGENT_TONE_COLORS: Record<AgentStateTone, string> = {
   attention: '#f0785a',
   working: '#66d5e7',
   idle: IVORY,

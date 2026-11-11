@@ -568,6 +568,22 @@ function setModifierVisual(object: THREE.Object3D, armed: boolean): void {
   if (material?.color) material.color.setHex(armed ? ACCENT : 0xffffff);
 }
 
+// Transient HUD lines (notice, dismiss, toast, Reload, FPS) sit above the HUD bar, where a widget can
+// be nearer than them, so they draw without depth testing. Draw order then layers each label:
+// its plate first, then its text.
+const HUD_OVERLAY_RENDER_ORDER = 40;
+function setHudOverlay(object: THREE.Object3D, order: number): void {
+  object.userData.hudOverlay = true;
+  object.traverse((child) => {
+    const material = (child as THREE.Mesh).material;
+    for (const value of Array.isArray(material) ? material : material ? [material] : []) {
+      value.depthTest = false;
+      value.depthWrite = false;
+    }
+    child.renderOrder = child === object ? order : order + 1;
+  });
+}
+
 function updateLabel(object: THREE.Mesh, label: string): void {
   if (object.userData.labelText === label) return;
   const keyborbLabel = object.userData.keyborbLabel as THREE.Mesh | undefined;
@@ -1166,6 +1182,8 @@ export function createWorkspaceScene(
   let paneCreation: PaneCreationState = { available: true, pending: false };
   const AGENT_ROSTER_COALESCE_MS = 400;
   let agentRoster: AgentRosterRow[] = [];
+  // Unlike agentRoster, refreshed on every feed: the board shows ages the signature omits.
+  let latestAgentRoster: readonly AgentRosterRow[] = [];
   let agentRosterSignature = '';
   let agentRosterRows: AgentRows = DEFAULT_AGENT_ROSTER_LAYOUT.rows;
   let hierarchyOpened = false;
@@ -3038,6 +3056,15 @@ export function createWorkspaceScene(
     if (inputPoseSpawn) poseStore.forget('keyboard');
     else saveUIPose('keyboard', root);
   };
+  // Ancestry, not stamped ids: nodes a widget adds after creation carry no widget metadata.
+  const widgetOwning = (
+    object: THREE.Object3D | null | undefined,
+  ): [WidgetKind, Widget] | undefined => {
+    for (let node = object; node; node = node.parent) {
+      for (const entry of widgets) if (entry[1].root === node) return entry;
+    }
+    return undefined;
+  };
   const placeWidget = (kind: WidgetKind, widget: Widget): void => {
     const view = poseViewer();
     view.updateWorldMatrix(true, false);
@@ -3049,10 +3076,11 @@ export function createWorkspaceScene(
       new THREE.Vector3(0, 1, 0),
       Math.atan2(-forward.x, -forward.z),
     );
-    const [x, y, z] = getWidgetEntry(kind).spawnOffset;
+    const entry = getWidgetEntry(kind);
+    const [x, y, z] = entry.spawnOffset;
     widget.root.position.copy(new THREE.Vector3(x, y, z).applyQuaternion(rotation).add(eye));
     widget.root.quaternion.copy(rotation);
-    widget.root.scale.setScalar(1);
+    widget.root.scale.setScalar(entry.spawnScale ?? 1);
   };
   const saveWidgetPose = (kind: WidgetKind, widget: Widget): void => {
     if (!widgetPoseStore.save(kind, captureUIPose(widget.root)))
@@ -3083,6 +3111,7 @@ export function createWorkspaceScene(
       object.userData.widgetId = widgetId;
       if (!object.userData.inputAction) object.userData.inputAction = 'grabWidget';
     });
+    widget.setAgentRoster?.(latestAgentRoster);
     widgets.set(kind, widget);
     scene.add(widget.root);
     placeWidget(kind, widget);
@@ -4219,6 +4248,8 @@ export function createWorkspaceScene(
     fpsLabel.name = 'xr-fps-counter';
     fpsLabel.position.set(0.6, 0.13, 0);
     hudRoot.add(fpsLabel);
+    for (const overlay of [toastLabel, updateNotice, statusNotice, statusDismiss, fpsLabel])
+      setHudOverlay(overlay, HUD_OVERLAY_RENDER_ORDER);
     scene.add(hudRoot);
   };
   const setUpdateAvailable = (available: boolean): void => {
@@ -4541,9 +4572,7 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'closeWidget') {
-      const kind = [...widgets.entries()].find(
-        ([, widget]) => widget.root.userData.widgetId === hit.userData.widgetId,
-      )?.[0];
+      const kind = widgetOwning(hit)?.[0];
       if (kind) removeWidget(kind);
       return true;
     }
@@ -4672,6 +4701,13 @@ export function createWorkspaceScene(
         return true;
       }
       if (typeof hit.userData.sessionId === 'string') actions.createPane?.(hit.userData.sessionId);
+      return true;
+    }
+    if (action === 'selectAgentPane') {
+      const paneId = hit.userData.agentPaneId;
+      if (typeof paneId === 'string' && availablePanes.some((pane) => pane.id === paneId))
+        actions.selectPane(paneId);
+      else setNotice('That agent pane is no longer open');
       return true;
     }
     if (action === 'pane') {
@@ -4871,8 +4907,21 @@ export function createWorkspaceScene(
       targets.push(radialMenu.root);
     }
     if (wristWatch.root.visible) targets.push(wristWatch.root);
-    const hits = raycaster.intersectObjects(targets, true);
-    const intersection = hits.find((entry) => isControlVisible(entry.object));
+    const hits = raycaster
+      .intersectObjects(targets, true)
+      .filter((entry) => isControlVisible(entry.object));
+    // Only HUD controls drawn over widgets (hudOverlay) win the ray past a nearer widget; a
+    // control the widget hides, such as Exit, must never fire through it.
+    const hudButton =
+      hudRoot && widgetOwning(hits[0]?.object)
+        ? hits.find(
+            (entry) =>
+              entry.object.userData.hudOverlay === true &&
+              hudRoot?.getObjectById(entry.object.id) &&
+              !PASSIVE_ACTIONS.has(String(entry.object.userData.inputAction)),
+          )
+        : undefined;
+    const intersection = hudButton ?? hits[0];
     const hit = intersection?.object;
     lastRayDistance = intersection?.distance ?? CONTROLLER_RAY_LENGTH;
     if (!hit) return null;
@@ -4883,6 +4932,9 @@ export function createWorkspaceScene(
         kind: 'keyboard',
         object: hit,
       };
+    const owner = widgetOwning(hit)?.[1].root;
+    if (owner)
+      return { terminalId: mutableState.focusedTerminalId ?? '', kind: 'keyboard', object: owner };
     let current: THREE.Object3D | null = hit;
     while (current && !current.userData.terminalId) current = current.parent;
     const terminalId = current?.userData.terminalId as string | undefined;
@@ -5116,11 +5168,8 @@ export function createWorkspaceScene(
           object = radialMenu.root;
         else if (!object && hudRoot && target?.object && hudRoot.getObjectById(target.object.id))
           object = hudRoot;
-        else if (!object && target?.object?.userData.widgetId) {
-          object =
-            [...widgets.values()].find(
-              (widget) => widget.root.userData.widgetId === target.object?.userData.widgetId,
-            )?.root ?? null;
+        else if (!object && widgetOwning(target?.object)) {
+          object = widgetOwning(target?.object)?.[1].root ?? null;
         } else if (!object && target?.terminalId && target.object) {
           const panel = panels.get(target.terminalId);
           if (panel?.root.getObjectById(target.object.id)) object = panel.root;
@@ -6088,6 +6137,8 @@ export function createWorkspaceScene(
     rows: readonly AgentRosterRow[],
     layout: AgentRosterLayout = DEFAULT_AGENT_ROSTER_LAYOUT,
   ): void => {
+    latestAgentRoster = [...rows];
+    for (const widget of widgets.values()) widget.setAgentRoster?.(latestAgentRoster);
     const signature = agentRowsSignature(rows, layout);
     if (signature === agentRosterSignature) return;
     agentRosterSignature = signature;

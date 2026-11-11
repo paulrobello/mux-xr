@@ -68,6 +68,7 @@ import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
 import { createWorkspaceScene } from '../src/xr/scene';
 import { terminalWarpPoint } from '../src/xr/terminal-warp';
+import { NOMINAL_VIEWER_HEIGHT } from '../src/xr/ui-poses';
 import { WIDGET_REGISTRY } from '../src/xr/widget-registry';
 
 const pane = (id: string, title = id): PaneDescriptor => ({
@@ -2503,6 +2504,344 @@ describe('native XR controller event routing', () => {
     expect(actions.sendText).not.toHaveBeenCalled();
     workspace.dispose();
     container.remove();
+  });
+
+  it('places, grabs and closes a widget whose factory stamps no metadata', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('widgets');
+    hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'digital-clock' });
+    const stamped = objectWithData(workspace, {
+      widgetKind: 'digital-clock',
+      inputAction: 'grabWidget',
+    });
+    let stampedRoot = stamped;
+    while (stampedRoot.parent && stampedRoot.parent !== workspace.scene)
+      stampedRoot = stampedRoot.parent;
+    const spawn = stampedRoot.position.clone();
+    workspace.showInput('widgets');
+    hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'digital-clock' });
+    expect(workspace.state.widgets).toEqual([]);
+
+    const bare = new THREE.Group();
+    const entry = WIDGET_REGISTRY[0] as unknown as { create: (env: unknown) => unknown };
+    const create = vi.spyOn(entry, 'create').mockReturnValue({
+      root: bare,
+      update: () => undefined,
+      dispose: () => undefined,
+    });
+    try {
+      workspace.showInput('widgets');
+      hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'digital-clock' });
+      expect(workspace.state.widgets).toEqual(['digital-clock']);
+      expect(bare.parent).toBe(workspace.scene);
+      expect(bare.position.distanceTo(spawn)).toBeLessThan(1e-6);
+      // Children added after creation carry no widget metadata at all.
+      const plain = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.2, 0.2),
+        new THREE.MeshBasicMaterial(),
+      );
+      plain.userData.latePlain = true;
+      plain.position.set(-0.2, 0, 0.02);
+      const close = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.05, 0.05),
+        new THREE.MeshBasicMaterial(),
+      );
+      close.userData.inputAction = 'lateClose';
+      close.position.set(0.2, 0, 0.02);
+      bare.add(plain, close);
+      workspace.scene.updateMatrixWorld(true);
+      hit(workspace, { latePlain: true }, 'squeezestart');
+      const initial = bare.getWorldPosition(new THREE.Vector3());
+      (fakeXR.controllers[0] as THREE.Group).position.x += 0.2;
+      fakeXR.frame?.(16);
+      expect(bare.getWorldPosition(new THREE.Vector3()).distanceTo(initial)).toBeGreaterThan(0.1);
+      (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
+      close.userData.inputAction = 'closeWidget';
+      hit(workspace, { inputAction: 'closeWidget' });
+      expect(workspace.state.widgets).toEqual([]);
+      expect(bare.parent).toBeNull();
+    } finally {
+      create.mockRestore();
+      workspace.dispose();
+      container.remove();
+    }
+  });
+
+  it('feeds the agent board, focuses a row pane and still grabs and closes it', () => {
+    const { workspace, actions, container } = fixture();
+    const now = Date.now();
+    const row = (paneId: string, state: string, lastActivityAt: number) => ({
+      paneId,
+      agent: 'claude',
+      state,
+      reason: '',
+      workspace: '+1',
+      project: '',
+      paneLabel: '',
+      source: 'hook',
+      stalled: false,
+      lastActivityAt,
+      lastReportAt: 0,
+      lastInputAt: 0,
+      lastViewedAt: 0,
+      viewerCount: 0,
+      cpuMs: 0,
+      workspaceName: 'Main',
+      title: `Shell ${paneId}`,
+      sessionName: 'S',
+      windowName: 'W',
+    });
+    workspace.setAgentRoster([row('pane-b', 'working', now - 30_000)]);
+    workspace.showInput('widgets');
+    hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'agent-board' });
+    expect(workspace.state.widgets).toEqual(['agent-board']);
+    const plate = objectWithData(workspace, {
+      inputAction: 'selectAgentPane',
+      agentPaneId: 'pane-b',
+    });
+    expect(plate.parent?.getObjectByName('agent-board-row-age')?.userData.labelText).toBe('30s');
+    // An age-only change skips the menu signature but must still reach the board.
+    workspace.setAgentRoster([row('pane-b', 'working', now - 3 * 60_000)]);
+    expect(plate.parent?.getObjectByName('agent-board-row-age')?.userData.labelText).toBe('3m');
+    vi.mocked(actions.selectPane).mockClear();
+    hit(workspace, { inputAction: 'selectAgentPane', agentPaneId: 'pane-b' });
+    expect(actions.selectPane).toHaveBeenLastCalledWith('pane-b');
+    // A grip on a row moves the board instead of selecting.
+    vi.mocked(actions.selectPane).mockClear();
+    let root: THREE.Object3D = plate;
+    while (root.parent && root.parent !== workspace.scene) root = root.parent;
+    hit(workspace, { inputAction: 'selectAgentPane', agentPaneId: 'pane-b' }, 'squeezestart');
+    const initial = root.getWorldPosition(new THREE.Vector3());
+    (fakeXR.controllers[0] as THREE.Group).position.x += 0.2;
+    fakeXR.frame?.(16);
+    expect(root.getWorldPosition(new THREE.Vector3()).distanceTo(initial)).toBeGreaterThan(0.1);
+    (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
+    expect(actions.selectPane).not.toHaveBeenCalled();
+    // A row for a pane that left the tree selects nothing.
+    workspace.setAgentRoster([row('pane-gone', 'question', now)]);
+    hit(workspace, { inputAction: 'selectAgentPane', agentPaneId: 'pane-gone' });
+    expect(actions.selectPane).not.toHaveBeenCalled();
+    expect(workspace.state.notice).toBe('That agent pane is no longer open');
+    hit(workspace, { inputAction: 'closeWidget', widgetKind: 'agent-board' });
+    expect(workspace.state.widgets).toEqual([]);
+    workspace.dispose();
+    container.remove();
+  });
+
+  describe('HUD over widgets', () => {
+    // The layout viewer the widgets spawned from, recovered from the digital clock's offset.
+    const EYE = new THREE.Vector3();
+    const projected = (object: THREE.Object3D) => {
+      const box = new THREE.Box3().setFromObject(object);
+      const xs: number[] = [];
+      const ys: number[] = [];
+      for (const x of [box.min.x, box.max.x])
+        for (const y of [box.min.y, box.max.y])
+          for (const z of [box.min.z, box.max.z]) {
+            const depth = EYE.z - z;
+            xs.push((x - EYE.x) / depth);
+            ys.push((y - EYE.y) / depth);
+          }
+      return { x: [Math.min(...xs), Math.max(...xs)], y: [Math.min(...ys), Math.max(...ys)] };
+    };
+    const overlaps = (left: THREE.Object3D, right: THREE.Object3D): boolean => {
+      const a = projected(left);
+      const b = projected(right);
+      return a.x[0] < b.x[1] && b.x[0] < a.x[1] && a.y[0] < b.y[1] && b.y[0] < a.y[1];
+    };
+    const spawnAll = (workspace: ReturnType<typeof createWorkspaceScene>): THREE.Object3D[] => {
+      for (const { kind } of WIDGET_REGISTRY) {
+        workspace.showInput('widgets');
+        hit(workspace, { inputAction: 'toggleWidget', widgetKind: kind });
+      }
+      expect(workspace.state.widgets).toHaveLength(WIDGET_REGISTRY.length);
+      const roots: THREE.Object3D[] = [];
+      for (const { kind } of WIDGET_REGISTRY) {
+        let root = objectWithData(workspace, { widgetKind: kind });
+        while (root.parent && root.parent !== workspace.scene) root = root.parent;
+        roots.push(root);
+      }
+      const [x, y, z] = WIDGET_REGISTRY[0].spawnOffset;
+      expect(roots[0]?.quaternion.angleTo(new THREE.Quaternion())).toBeCloseTo(0, 6);
+      EYE.copy(roots[0]?.position ?? new THREE.Vector3()).sub(new THREE.Vector3(x, y, z));
+      return roots;
+    };
+    // Mirrors the both-stick recenter: 0.65 m below and 1.35 m ahead of the eye.
+    const recenterHud = (hud: THREE.Object3D): void => {
+      hud.position.set(EYE.x, EYE.y - 0.65, EYE.z - 1.35);
+      hud.quaternion.identity();
+      hud.updateMatrixWorld(true);
+    };
+
+    it('draws notice, toast, dismiss and Reload above widgets', () => {
+      const { workspace, container } = fixture();
+      const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+      const overlays = hud?.children.filter((child) => child.userData.hudOverlay) ?? [];
+      expect(overlays.map((child) => String(child.userData.inputAction)).sort()).toEqual([
+        'dismissNotice',
+        'dismissNotice',
+        'noop',
+        'noop',
+        'reloadUpdate',
+      ]);
+      for (const overlay of overlays)
+        overlay.traverse((child) => {
+          expect(child.renderOrder).toBeGreaterThan(30);
+          const material = (child as THREE.Mesh).material as THREE.Material | undefined;
+          if (material) expect(material.depthTest).toBe(false);
+        });
+      workspace.dispose();
+      container.remove();
+    });
+
+    const ROSTER_PANES = ['pane-a', 'pane-b', 'pane-c', 'pane-d', 'pane-e', 'pane-f'];
+    const rosterRow = (paneId: string) => ({
+      paneId,
+      agent: 'claude',
+      state: 'working',
+      reason: '',
+      workspace: '+1',
+      project: '',
+      paneLabel: '',
+      source: 'hook',
+      stalled: false,
+      lastActivityAt: Date.now(),
+      lastReportAt: 0,
+      lastInputAt: 0,
+      lastViewedAt: 0,
+      viewerCount: 0,
+      cpuMs: 0,
+      workspaceName: 'Main',
+      title: paneId,
+      sessionName: 'S',
+      windowName: 'W',
+    });
+    const aim = (
+      workspace: ReturnType<typeof createWorkspaceScene>,
+      target: THREE.Vector3,
+    ): THREE.Group => {
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      controller.position.copy(EYE);
+      controller.lookAt(target);
+      // three's lookAt points +z at the target for non-cameras; the ray runs down -z.
+      controller.rotateY(Math.PI);
+      workspace.scene.updateMatrixWorld(true);
+      return controller;
+    };
+    const firstWidgetHit = (
+      roots: THREE.Object3D[],
+      target: THREE.Vector3,
+    ): THREE.Intersection | undefined => {
+      const ray = new THREE.Raycaster(EYE, target.clone().sub(EYE).normalize());
+      ray.far = EYE.distanceTo(target);
+      return ray.intersectObjects(roots, true).find((entry) => {
+        for (let node: THREE.Object3D | null = entry.object; node; node = node.parent)
+          if (!node.visible) return false;
+        return true;
+      });
+    };
+
+    // Default HUD: world-fixed at y 0.78, 1.35 m ahead of a viewer at the origin, so its offset
+    // from the eye depends on eye height (local-floor). Recentered HUD: 0.65 m below the eye.
+    for (const eyeHeight of [1.1, 1.35, 1.52, 1.8]) {
+      it(`reaches overlay HUD controls through widgets and never a hidden one, eye ${eyeHeight} m`, () => {
+        const { workspace, actions, container } = fixture();
+        workspace.setAgentRoster(ROSTER_PANES.map(rosterRow));
+        const roots = spawnAll(workspace);
+        const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+        if (!hud) throw new Error('HUD missing');
+        const exit = hud.children.find((child) => child.userData.inputAction === 'exit');
+        if (!exit) throw new Error('HUD Exit missing');
+        let blocked = 0;
+        for (const offsetY of [0.78 - eyeHeight, -0.65]) {
+          hud.position.set(EYE.x, EYE.y + offsetY, EYE.z - 1.35);
+          hud.quaternion.identity();
+          workspace.setNotice('Overlay check');
+          for (const child of hud.children)
+            if (child.userData.inputAction === 'reloadUpdate') child.visible = true;
+          workspace.scene.updateMatrixWorld(true);
+          for (const child of hud.children) {
+            const action = String(child.userData.inputAction);
+            if (!child.visible || ['noop', 'grabInput', 'undefined'].includes(action)) continue;
+            const target = child.getWorldPosition(new THREE.Vector3());
+            const widgetHit = firstWidgetHit(roots, target);
+            // An unblocked non-overlay control is ordinary input; pressing Exit there would arm it.
+            if (!child.userData.hudOverlay && !widgetHit) continue;
+            vi.mocked(actions.selectPane).mockClear();
+            vi.mocked(actions.reloadApp ?? vi.fn()).mockClear();
+            aim(workspace, target).dispatchEvent({ type: 'selectstart' } as never);
+            if (child.userData.hudOverlay) {
+              // Overlay controls draw on top, so they stay reachable at every eye height.
+              if (action === 'reloadUpdate') expect(actions.reloadApp).toHaveBeenCalled();
+              else expect(workspace.state.notice).toBeNull();
+              workspace.setNotice('Overlay check');
+              continue;
+            }
+            // A control a widget hides never fires through it; the widget takes the press.
+            expect(exit.userData.labelText, `${action} at HUD ${offsetY.toFixed(2)}`).toBe('Exit');
+            if (!widgetHit) continue;
+            blocked += 1;
+            const pane = widgetHit.object.userData.agentPaneId;
+            if (widgetHit.object.userData.inputAction === 'selectAgentPane' && pane)
+              if (['pane-a', 'pane-b'].includes(String(pane)))
+                expect(actions.selectPane).toHaveBeenLastCalledWith(pane);
+              else expect(workspace.state.notice).toBe('That agent pane is no longer open');
+          }
+        }
+        // Seated, the board covers the default HUD bar's Exit; the check above must have run.
+        if (eyeHeight <= 1.1) expect(blocked).toBeGreaterThan(0);
+        workspace.dispose();
+        container.remove();
+      });
+    }
+
+    it('sends a ray through the board to the Reload button behind it', () => {
+      const { workspace, actions, container } = fixture();
+      spawnAll(workspace);
+      const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+      if (!hud) throw new Error('HUD missing');
+      recenterHud(hud);
+      const reload = hud.children.find((child) => child.userData.inputAction === 'reloadUpdate');
+      if (!reload) throw new Error('HUD Reload missing');
+      reload.visible = true;
+      workspace.scene.updateMatrixWorld(true);
+      const target = reload.getWorldPosition(new THREE.Vector3());
+      const board = workspace.scene.children.find((child) => child.name.startsWith('agent-board-'));
+      if (!board) throw new Error('board missing');
+      expect(firstWidgetHit([board], target)).toBeDefined();
+      aim(workspace, target).dispatchEvent({ type: 'selectstart' } as never);
+      expect(actions.reloadApp).toHaveBeenCalled();
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('selects the board row, not a hidden Exit behind it', () => {
+      const { workspace, actions, container } = fixture();
+      workspace.setAgentRoster(ROSTER_PANES.map(rosterRow));
+      const roots = spawnAll(workspace);
+      const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+      if (!hud) throw new Error('HUD missing');
+      const exit = hud.children.find((child) => child.userData.inputAction === 'exit');
+      const board = roots[2];
+      if (!exit || !board) throw new Error('missing');
+      // Put Exit directly behind the right end of the board's first row.
+      const row = board.getObjectByName('agent-board-row-1');
+      const plate = row?.getObjectByName('agent-board-row-plate');
+      if (!plate) throw new Error('row missing');
+      board.updateMatrixWorld(true);
+      const aimPoint = plate.localToWorld(new THREE.Vector3(0.3, 0, 0));
+      const behind = aimPoint.clone().sub(EYE).multiplyScalar(1.15).add(EYE);
+      hud.position.add(behind.sub(exit.getWorldPosition(new THREE.Vector3())));
+      workspace.scene.updateMatrixWorld(true);
+      const target = exit.getWorldPosition(new THREE.Vector3());
+      const widgetHit = firstWidgetHit(roots, target);
+      expect(widgetHit?.object.userData.inputAction).toBe('selectAgentPane');
+      aim(workspace, target).dispatchEvent({ type: 'selectstart' } as never);
+      expect(exit.userData.labelText).toBe('Exit');
+      expect(actions.selectPane).toHaveBeenLastCalledWith('pane-a');
+      workspace.dispose();
+      container.remove();
+    });
   });
 
   it('labels the Widgets panel from the registry display names', () => {

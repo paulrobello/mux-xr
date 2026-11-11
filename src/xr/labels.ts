@@ -21,6 +21,8 @@ export interface ScalableLabelOptions {
   border?: string;
   /** Keep the interaction plane, but omit its visible rectangular backplate. */
   backplate?: boolean;
+  /** Horizontal text alignment inside the plane; centered by default. */
+  align?: 'center' | 'left';
 }
 
 interface LabelUserData {
@@ -28,6 +30,7 @@ interface LabelUserData {
   labelWidth: number;
   labelHeight: number;
   labelWrap: boolean;
+  labelAlign: 'center' | 'left';
   labelTextObject: Text;
   labelBackgroundTexture: THREE.DataTexture;
   labelDisposed: boolean;
@@ -123,6 +126,7 @@ function configureText(
   width: number,
   height: number,
   wrap: boolean,
+  align: 'center' | 'left' = 'center',
 ): void {
   const fitted = fitLabel(label, width, height);
   const arrows: Record<string, string> = { '←': '⇦', '↑': '⇧', '→': '⇨', '↓': '⇩' };
@@ -140,15 +144,16 @@ function configureText(
   textMesh.font = needsSymbolFont ? LABEL_SYMBOL_FONT_URL : LABEL_FONT_URL;
   textMesh.fontSize = fitted.fontSize;
   textMesh.maxWidth = Math.max(width * LABEL_MAX_WIDTH_RATIO, 0.01);
-  (textMesh as unknown as { anchorX: number | string }).anchorX = '50%';
+  const left = align === 'left';
+  (textMesh as unknown as { anchorX: number | string }).anchorX = left ? 'left' : '50%';
   (textMesh as unknown as { anchorY: number | string }).anchorY = 'middle';
-  textMesh.textAlign = 'center';
+  textMesh.textAlign = left ? 'left' : 'center';
   textMesh.whiteSpace = wrap || fitted.text.includes('\n') ? 'normal' : 'nowrap';
   textMesh.lineHeight = wrap || fitted.text.includes('\n') ? '1.1' : 'normal';
   textMesh.overflowWrap = 'break-word';
   textMesh.color = 0xffffff;
   textMesh.depthOffset = -1;
-  textMesh.position.set(0, 0, LABEL_Z_OFFSET);
+  textMesh.position.set(left ? -(width * LABEL_MAX_WIDTH_RATIO) / 2 : 0, 0, LABEL_Z_OFFSET);
 }
 
 function syncText(textMesh: Text, width: number, height: number): Promise<void> {
@@ -199,7 +204,14 @@ export function createScalableLabel(
   // A plane with no backplate only carries the text; skipping its draw keeps it pickable.
   if (!backplate) root.material.visible = false;
   const textMesh = new Text();
-  configureText(textMesh, label, safeWidth, safeHeight, options.wrap ?? false);
+  configureText(
+    textMesh,
+    label,
+    safeWidth,
+    safeHeight,
+    options.wrap ?? false,
+    options.align ?? 'center',
+  );
   textMesh.raycast = () => undefined;
   root.add(textMesh);
 
@@ -209,6 +221,7 @@ export function createScalableLabel(
   userData.labelWidth = safeWidth;
   userData.labelHeight = safeHeight;
   userData.labelWrap = options.wrap ?? false;
+  userData.labelAlign = options.align ?? 'center';
   userData.labelTextObject = textMesh;
   userData.labelBackgroundTexture = texture;
   userData.labelDisposed = false;
@@ -243,6 +256,7 @@ export function updateScalableLabel(root: THREE.Mesh, label: string): void {
     data.labelWidth ?? root.scale.x,
     data.labelHeight ?? root.scale.y,
     data.labelWrap ?? false,
+    data.labelAlign ?? 'center',
   );
   data.labelText = label;
   data.labelSyncPromise = syncText(
