@@ -10,7 +10,7 @@ import type {
 } from './contracts';
 import { createDemoSurface, demoAgents, demoSnapshot } from './demo';
 import { createDesktopPanels, type DesktopPanels } from './desktop/panels';
-import { loadObservatory } from './environment';
+import { createEnvironmentManager, loadObservatory } from './environment';
 import { createLocalSpeechRecognition, isLocalSpeechSupported } from './local-speech';
 import { executeQuickCommand, loadSharedCommands } from './quick-commands';
 import { reloadAfterXR } from './reload';
@@ -76,6 +76,7 @@ let ui: WorkspaceUI;
 let scene: WorkspaceScene;
 let desktop: DesktopPanels;
 let disposeEnvironment: (() => void) | undefined;
+let disposeEnvironmentManager: (() => void) | undefined;
 const environmentAbort = new AbortController();
 let applyingSettings = false;
 let updateChecker: UpdateChecker | undefined;
@@ -565,6 +566,7 @@ desktop = createDesktopPanels(ui.sceneHost, selectPane, {
 });
 const stopPresentation = scene.subscribe((state) => {
   if (!applyingSettings) {
+    ui.setBackground(state.background, true);
     ui.setGazeInputEnabled(state.gazeInputEnabled);
     ui.setKeyboardBackgroundEnabled(state.keyboardBackgroundEnabled, false);
     ui.setKeyboardCurvature(state.keyboardCurvature, true);
@@ -600,6 +602,7 @@ void loadSharedCommands(new URL('quick-commands.json', window.location.href).hre
     syncCommands();
   },
 );
+disposeEnvironmentManager = createEnvironmentManager(scene);
 void loadObservatory(scene, environmentAbort.signal)
   .then((dispose) => {
     disposeEnvironment = dispose;
@@ -628,6 +631,7 @@ window.addEventListener(
     stopPresentation();
     desktop.dispose();
     disposeEnvironment?.();
+    disposeEnvironmentManager?.();
     scene.dispose();
     ui.destroy();
   },

@@ -99,7 +99,21 @@ export interface TerminalSurface {
   dispose(): void;
 }
 
-export type BackgroundMode = 'black' | 'gradient' | 'observatory';
+export const BACKGROUND_MODES = [
+  'black',
+  'gradient',
+  'observatory',
+  'hangar',
+  'deep-water',
+  'studio',
+  'desert',
+] as const;
+
+export type BackgroundMode = (typeof BACKGROUND_MODES)[number];
+
+export function isBackgroundMode(value: unknown): value is BackgroundMode {
+  return (BACKGROUND_MODES as readonly unknown[]).includes(value);
+}
 
 export type PanelArrangement = 'row' | 'grid' | 'arc' | 'sphere';
 

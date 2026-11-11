@@ -3234,7 +3234,7 @@ describe('native XR controller event routing', () => {
     const widths = menu?.children
       .filter((child) => child.userData.inputAction === 'background')
       .map((child) => child.userData.labelWidth);
-    expect(widths).toHaveLength(3);
+    expect(widths).toHaveLength(7);
     expect(new Set(widths).size).toBe(1);
     const hud = workspace.scene.getObjectByName('xr-workspace-hud');
     expect(hud?.children.some((child) => child.userData.inputAction === 'backgroundSelect')).toBe(
@@ -3242,6 +3242,65 @@ describe('native XR controller event routing', () => {
     );
     workspace.showInput('keyboard');
     expect(workspace.scene.getObjectByName('background-options')).toBeUndefined();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('lists all seven backgrounds in the World selector without overlapping other controls', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('settings');
+    hit(workspace, { inputAction: 'openInput', mode: 'world' });
+    const world = workspace.scene.getObjectByName('xr-world-controls');
+    if (!world) throw new Error('World missing');
+    hit(workspace, { inputAction: 'backgroundSelect', backgroundSelectOwner: 'input' });
+    world.updateMatrixWorld(true);
+    const options = (world.getObjectByName('background-options') as THREE.Object3D).children.filter(
+      (child) => child.userData.inputAction === 'background',
+    );
+    expect(options.map((option) => option.userData.labelText)).toEqual([
+      'Black',
+      'Gradient',
+      'Observatory',
+      'Hangar deck',
+      'Deep-water station',
+      'Minimal studio',
+      'Desert night',
+    ]);
+    const boxOf = (object: THREE.Object3D): THREE.Box3 => {
+      const center = world.worldToLocal(object.getWorldPosition(new THREE.Vector3()));
+      const width = object.userData.labelWidth as number;
+      const height = object.userData.labelHeight as number;
+      return new THREE.Box3(
+        new THREE.Vector3(center.x - width / 2, center.y - height / 2, -1),
+        new THREE.Vector3(center.x + width / 2, center.y + height / 2, 1),
+      );
+    };
+    const others: THREE.Object3D[] = [];
+    world.traverse((object) => {
+      const action = object.userData.inputAction;
+      // The title (grabInput) is excluded on purpose: the popup closes when an option is picked.
+      if (
+        action &&
+        action !== 'background' &&
+        action !== 'noop' &&
+        action !== 'grabInput' &&
+        object.userData.labelWidth &&
+        object.userData.labelHeight
+      )
+        others.push(object);
+    });
+    expect(others.length).toBeGreaterThanOrEqual(4);
+    const optionBoxes = options.map(boxOf);
+    optionBoxes.forEach((box, index) => {
+      for (const later of optionBoxes.slice(index + 1))
+        expect(box.intersectsBox(later)).toBe(false);
+      for (const other of others) {
+        expect(
+          box.intersectsBox(boxOf(other)),
+          `${options[index].userData.labelText} overlaps ${other.userData.labelText}`,
+        ).toBe(false);
+      }
+    });
     workspace.dispose();
     container.remove();
   });
@@ -4231,6 +4290,83 @@ describe('native XR controller event routing', () => {
     expect(new THREE.Box3().setFromObject(panel).min.y).toBeGreaterThanOrEqual(0.095 - 1e-6);
     workspace.dispose();
     container.remove();
+  });
+
+  it('clamps restored panes inside the hangar safe radius only', () => {
+    const horizontal = (panel: THREE.Object3D): number => {
+      const center = new THREE.Box3().setFromObject(panel).getCenter(new THREE.Vector3());
+      return Math.hypot(center.x, center.z);
+    };
+    const far = {
+      position: [9, 1.5, 0] as [number, number, number],
+      quaternion: [0, 0, 0, 1] as [number, number, number, number],
+      scale: 1,
+    };
+    for (const mode of [
+      'black',
+      'gradient',
+      'observatory',
+      'deep-water',
+      'studio',
+      'desert',
+    ] as const) {
+      const { workspace, container } = fixture();
+      workspace.setBackground(mode);
+      workspace.restoreTerminalPose('pane-a', far);
+      const panel = workspace.scene.getObjectByName('terminal-panel-pane-a');
+      if (!panel) throw new Error('Panel missing');
+      expect(horizontal(panel), mode).toBeGreaterThan(8.5);
+      workspace.dispose();
+      container.remove();
+    }
+    const { workspace, container } = fixture();
+    workspace.setBackground('hangar');
+    workspace.restoreTerminalPose('pane-a', far);
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    if (!panel) throw new Error('Panel missing');
+    expect(horizontal(panel)).toBeLessThanOrEqual(6.5 + 1e-6);
+    expect(horizontal(panel)).toBeGreaterThan(6);
+    workspace.setBackground('black');
+    workspace.restoreTerminalPose('pane-a', far);
+    expect(horizontal(panel)).toBeGreaterThan(8.5);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('clamps a pane grabbed past the hangar radius when it is released', () => {
+    const horizontal = (panel: THREE.Object3D): number => {
+      const center = new THREE.Box3().setFromObject(panel).getCenter(new THREE.Vector3());
+      return Math.hypot(center.x, center.z);
+    };
+    for (const mode of ['hangar', 'black'] as const) {
+      const { workspace, container } = fixture();
+      workspace.setBackground(mode);
+      workspace.restoreTerminalPose('pane-a', {
+        position: [4, 1.5, -2],
+        quaternion: [0, 0, 0, 1],
+        scale: 1,
+      });
+      const panel = workspace.scene.getObjectByName('terminal-panel-pane-a');
+      if (!panel) throw new Error('Panel missing');
+      const controller = fakeXR.controllers[0] as THREE.Group;
+      connectController(0);
+      controller.position.copy(
+        new THREE.Box3().setFromObject(panel).getCenter(new THREE.Vector3()),
+      );
+      workspace.scene.updateMatrixWorld(true);
+      controller.dispatchEvent({ type: 'squeezestart' } as never);
+      fakeXR.frame?.(20);
+      controller.position.x += 3;
+      controller.position.z -= 3;
+      fakeXR.frame?.(40);
+      expect(horizontal(panel), `${mode} while held`).toBeGreaterThan(6.6);
+      controller.dispatchEvent({ type: 'squeezeend' } as never);
+      fakeXR.frame?.(60);
+      if (mode === 'hangar') expect(horizontal(panel)).toBeLessThanOrEqual(6.5 + 1e-6);
+      else expect(horizontal(panel)).toBeGreaterThan(6.6);
+      workspace.dispose();
+      container.remove();
+    }
   });
 
   it('keeps the graph root while children animate between levels', () => {

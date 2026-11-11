@@ -77,7 +77,12 @@ import {
   draftFromCommand,
   editCommandDraft,
 } from './command-editor';
-import { keepLayoutAboveFloor, workspaceFloorY } from './floor-layout';
+import {
+  keepLayoutAboveFloor,
+  keepLayoutInsideRadius,
+  workspaceFloorY,
+  workspacePaneSafeRadius,
+} from './floor-layout';
 import { createFrameCounter } from './fps';
 import { createHandContact, type HandContact, type HandContactSample } from './hand-contact';
 import { type HandInputState, updateHandInput } from './hand-input';
@@ -577,6 +582,10 @@ const BACKGROUND_LABELS: Record<BackgroundMode, string> = {
   black: 'Black',
   gradient: 'Gradient',
   observatory: 'Observatory',
+  hangar: 'Hangar deck',
+  'deep-water': 'Deep-water station',
+  studio: 'Minimal studio',
+  desert: 'Desert night',
 };
 
 function createBackgroundSelect(mode: BackgroundMode, owner: 'hud' | 'input'): THREE.Group {
@@ -599,19 +608,25 @@ function createBackgroundSelect(mode: BackgroundMode, owner: 'hud' | 'input'): T
   options.name = 'background-options';
   options.visible = false;
   options.position.z = 0.03;
+  const modes = Object.keys(BACKGROUND_LABELS) as BackgroundMode[];
+  const rows = Math.ceil(modes.length / 2);
   const backing = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.5, 0.33),
+    new THREE.PlaneGeometry(1.02, rows * 0.11),
     new THREE.MeshBasicMaterial({ color: 0x0d1720 }),
   );
-  backing.position.set(0, 0.22, -0.005);
+  backing.position.set(0, 0.11 + (rows - 1) * 0.055, -0.005);
   backing.userData.inputAction = 'noop';
   options.add(backing);
-  (Object.keys(BACKGROUND_LABELS) as BackgroundMode[]).forEach((background, index) => {
+  modes.forEach((background, index) => {
     const option = createLabelButton(BACKGROUND_LABELS[background], 0.48, 0.09, {
       inputAction: 'background',
       background,
     });
-    option.position.y = 0.33 - index * 0.11;
+    option.position.set(
+      index % 2 === 0 ? -0.25 : 0.25,
+      0.11 + (rows - 1 - Math.floor(index / 2)) * 0.11,
+      0,
+    );
     setModifierVisual(option, background === mode);
     options.add(option);
   });
@@ -1007,6 +1022,7 @@ export function createWorkspaceScene(
     const object = dragStates.get(controller)?.object;
     dragStates.delete(controller);
     if (!object) return;
+    if (object.userData.terminalId) floorCorrectionPending = true;
     const pair = pairGrabs.get(object);
     if (!pair) return;
     pairGrabs.delete(object);
@@ -5697,12 +5713,17 @@ export function createWorkspaceScene(
       return;
     floorCorrectionPending = false;
     const view = poseViewer();
+    const roots = [...panels.values()].map((panel) => panel.root);
+    const clamped = keepLayoutInsideRadius(
+      roots,
+      workspacePaneSafeRadius(mutableState.background, mutableState.xrMode),
+    );
     const offset = keepLayoutAboveFloor(
-      [...panels.values()].map((panel) => panel.root),
+      roots,
       workspaceFloorY(mutableState.background, mutableState.xrMode),
       view.getWorldPosition(new THREE.Vector3()),
     );
-    if (offset > 0) rememberTerminalPlacements();
+    if (offset > 0 || clamped) rememberTerminalPlacements();
   };
   const captureWorkspaceState = (): void => {
     if (hudRoot) saveUIPose('hud', hudRoot);
@@ -6353,6 +6374,10 @@ export function createWorkspaceScene(
     const originalQuaternion = panel.root.quaternion.clone();
     panel.root.position.copy(position);
     panel.root.quaternion.copy(rotation);
+    keepLayoutInsideRadius(
+      [panel.root],
+      workspacePaneSafeRadius(mutableState.background, mutableState.xrMode),
+    );
     keepLayoutAboveFloor(
       [panel.root],
       workspaceFloorY(mutableState.background, mutableState.xrMode),
@@ -6496,6 +6521,10 @@ export function createWorkspaceScene(
       panel.root.position.copy(poses[index].position).sub(offset).applyQuaternion(yaw).add(eye);
       panel.root.quaternion.copy(yaw).multiply(poses[index].quaternion);
     });
+    keepLayoutInsideRadius(
+      ordered.map((panel) => panel.root),
+      workspacePaneSafeRadius(mutableState.background, mutableState.xrMode),
+    );
     keepLayoutAboveFloor(
       ordered.map((panel) => panel.root),
       workspaceFloorY(mutableState.background, mutableState.xrMode),
@@ -6607,6 +6636,10 @@ export function createWorkspaceScene(
       saveWidgetPose(kind, widget);
     }
     const view = poseViewer();
+    keepLayoutInsideRadius(
+      [...panels.values()].map((panel) => panel.root),
+      workspacePaneSafeRadius(mutableState.background, mutableState.xrMode),
+    );
     keepLayoutAboveFloor(
       [...panels.values()].map((panel) => panel.root),
       workspaceFloorY(mutableState.background, mutableState.xrMode),

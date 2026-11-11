@@ -87,7 +87,7 @@ components:
 
 Mux XR is a functional monitoring instrument wrapped in a restrained sci-fi observatory. The interface stays dark and low-glare so live terminal text remains the visual priority. Controls are compact, legible, and deliberately targeted for controller use in mixed reality, while the world contributes only enough atmosphere to establish orientation.
 
-The system uses blue-black tonal layering, cool blue-gray text, and a scarce cyan selection signal. Motion may clarify active-pane selection, but the user's viewpoint remains under their control. Passthrough, pure black, gradient, and observatory backgrounds are explicit modes, not competing visual identities.
+The system uses blue-black tonal layering, cool blue-gray text, and a scarce cyan selection signal. Motion may clarify active-pane selection, but the user's viewpoint remains under their control. Passthrough, pure black, gradient, observatory, hangar deck, deep-water station, minimal studio, and desert night backgrounds are explicit modes, not competing visual identities.
 
 **Key Characteristics:**
 - Terminal content and intentional input stay primary.
@@ -206,7 +206,7 @@ Each panel presents one live pane with a readable terminal surface, title/status
 - **Do** keep live terminal text and targeted input visually primary.
 - **Do** use the existing blue-black palette and cyan only for interaction state.
 - **Do** preserve 4px control corners and 8px container corners.
-- **Do** support black, gradient, observatory, and passthrough modes as explicit choices.
+- **Do** support black, gradient, observatory, hangar deck, deep-water station, minimal studio, desert night, and passthrough modes as explicit choices.
 - **Do** keep motion expressive enough to explain selection while leaving viewpoint control to the user.
 
 ### Don't:
@@ -226,7 +226,7 @@ The native Arrange surface uses four labeled choices in the existing grabbable p
 
 ### Widgets, placement and filtering
 
-The HUD uses Widgets in the former Keyboard slot. Clocks have dark physical bodies, crisp digital text or raised analog hands, a compact close action and the same grip gestures as other surfaces. Save keyboard/HUD transforms relative to the headset heading across sessions. Keep arranged terminal bounds above the Observatory or passthrough floor without constraining Black/Gradient layouts.
+The HUD uses Widgets in the former Keyboard slot. Clocks have dark physical bodies, crisp digital text or raised analog hands, a compact close action and the same grip gestures as other surfaces. Save keyboard/HUD transforms relative to the headset heading across sessions. Keep arranged terminal bounds above the Observatory or passthrough floor without constraining Black/Gradient layouts. The hangar, deep-water, studio and desert environments share the observatory's 0.035 m floor and clearance.
 
 Expose four terminal sampling choices and bounded anisotropy in browser/native settings, with visible current values. Sharper head-gaze rendering is independent of input gaze and selection. Use stable soft circular stars with varied size and restrained color, retaining one draw call.
 

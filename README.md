@@ -4,7 +4,7 @@ A LAN-only Quest 3 workspace for monitoring par-mux panes and issuing occasional
 
 The desktop opens with sharp, flat terminal canvases at their natural text size. Use **3D preview** to inspect the spatial scene, or **Enter XR** on Quest.
 
-The MVP candidate includes individual terminal panels, controller and hand input, global/workspace quick commands, a virtual keyboard, headset-local preferences, passthrough and silent black/gradient/observatory VR backgrounds. Animated radial navigation is implemented. Named 3D layouts and whole-window split views remain roadmap work. Hand input still requires physical Quest acceptance.
+The MVP candidate includes individual terminal panels, controller and hand input, global/workspace quick commands, a virtual keyboard, headset-local preferences, passthrough and silent black/gradient/observatory/hangar-deck/deep-water-station/minimal-studio/desert-night VR backgrounds. Animated radial navigation is implemented. Named 3D layouts and whole-window split views remain roadmap work. Hand input still requires physical Quest acceptance.
 
 ## Development
 
@@ -196,7 +196,7 @@ The **Widgets** radial item opens the clock controls. A opens the radial menu. W
 
 Keyboard and main-panel position, rotation and scale save on final grip release and XR exit. The next XR session restores them relative to the new headset position and heading. Both-stick recovery clears those saved poses while retaining commands and other preferences. Clock presence, position, rotation and scale now persist locally, including desktop preview and XR reload. Closing a clock removes its saved entry.
 
-Arrangements keep the full terminal bounds above the Observatory deck or passthrough floor. Black and Gradient keep unrestricted vertical layouts. Stars use varied-size circular soft sprites in one draw call, with no flashing or audio.
+Arrangements keep the full terminal bounds above the Observatory deck or passthrough floor. Black and Gradient keep unrestricted vertical layouts. Hangar deck, Deep-water station, Minimal studio and Desert night are procedural backgrounds with the same 0.035 m floor. Each is created only while selected, disposed when another background is chosen, and hidden in passthrough. The XR World selector lists all seven backgrounds in two columns above the VR/Passthrough and Back/Close buttons, and the browser Background select lists the same seven. Stars use varied-size circular soft sprites in one draw call, with no flashing or audio.
 
 ## Verification
 

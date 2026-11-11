@@ -1,7 +1,99 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import type { BackgroundMode } from './contracts';
 import type { WorkspaceScene } from './xr';
+import { createDeepWaterEnvironment } from './xr/environments/deep-water';
+import { createDesertNightEnvironment } from './xr/environments/desert-night';
+import { createHangarDeckEnvironment } from './xr/environments/hangar-deck';
+import { createMinimalStudioEnvironment } from './xr/environments/minimal-studio';
 import { createSpaceBackground } from './xr/space-background';
+
+type EnvironmentUpdater = (deltaSeconds: number) => void;
+
+/** Adds an updater to the scene's single `updateEnvironment` hook; returns its removal. */
+export function registerEnvironmentUpdater(
+  scene: THREE.Scene,
+  updater: EnvironmentUpdater,
+): () => void {
+  const updaters = (scene.userData.environmentUpdaters ??
+    new Set<EnvironmentUpdater>()) as Set<EnvironmentUpdater>;
+  scene.userData.environmentUpdaters = updaters;
+  updaters.add(updater);
+  scene.userData.updateEnvironment = (deltaSeconds: number): void => {
+    for (const each of [...updaters]) each(deltaSeconds);
+  };
+  return () => {
+    updaters.delete(updater);
+    if (updaters.size === 0 && scene.userData.environmentUpdaters === updaters) {
+      delete scene.userData.updateEnvironment;
+      delete scene.userData.environmentUpdaters;
+    }
+  };
+}
+
+export interface EnvironmentInstance {
+  root: THREE.Group;
+  update(deltaSeconds: number): void;
+  dispose(): void;
+  floorY: number;
+}
+
+export type EnvironmentFactories = Partial<Record<BackgroundMode, () => EnvironmentInstance>>;
+
+export const ENVIRONMENT_FACTORIES: EnvironmentFactories = {
+  hangar: createHangarDeckEnvironment,
+  'deep-water': createDeepWaterEnvironment,
+  studio: createMinimalStudioEnvironment,
+  desert: createDesertNightEnvironment,
+};
+
+/**
+ * Keeps at most one procedural environment alive: created when its mode is selected outside AR,
+ * fully disposed as soon as the mode changes or AR starts.
+ */
+export function createEnvironmentManager(
+  workspace: WorkspaceScene,
+  factories: EnvironmentFactories = ENVIRONMENT_FACTORIES,
+): () => void {
+  let active: { mode: BackgroundMode; instance: EnvironmentInstance } | null = null;
+  let failedMode: BackgroundMode | null = null;
+  const release = (): void => {
+    if (!active) return;
+    const { instance } = active;
+    active = null;
+    workspace.scene.remove(instance.root);
+    instance.dispose();
+  };
+  const sync = (): void => {
+    const { background, xrMode } = workspace.state;
+    if (failedMode !== background) failedMode = null;
+    const wanted = xrMode === 'ar' || failedMode === background ? undefined : factories[background];
+    if (!wanted) {
+      release();
+      return;
+    }
+    if (active?.mode === background) return;
+    release();
+    try {
+      const instance = wanted();
+      instance.root.visible = true;
+      workspace.scene.add(instance.root);
+      active = { mode: background, instance };
+    } catch (error) {
+      failedMode = background;
+      console.warn(`Environment ${background} unavailable.`, error);
+    }
+  };
+  const update: EnvironmentUpdater = (deltaSeconds) => active?.instance.update(deltaSeconds);
+  const unsubscribe = workspace.subscribe(sync);
+  const unregister = registerEnvironmentUpdater(workspace.scene, update);
+  sync();
+  return () => {
+    unsubscribe();
+    unregister();
+    release();
+  };
+}
 
 export function quietObservatoryPlanet(root: THREE.Object3D): void {
   root.traverse((child) => {
@@ -93,6 +185,7 @@ export async function loadObservatory(
   const ownedTextures = new Set<THREE.Texture>();
   let planetPivot: THREE.Group | null = null;
   let unsubscribe = (): void => undefined;
+  let unregisterUpdater = (): void => undefined;
   const sync = (): void => {
     const visible = workspace.state.background === 'observatory' && workspace.state.xrMode !== 'ar';
     background.root.visible = visible;
@@ -103,8 +196,7 @@ export async function loadObservatory(
     if (disposed) return;
     disposed = true;
     unsubscribe();
-    if (workspace.scene.userData.updateEnvironment === updateEnvironment)
-      delete workspace.scene.userData.updateEnvironment;
+    unregisterUpdater();
     signal?.removeEventListener('abort', dispose);
     if (root) {
       workspace.scene.remove(root);
@@ -127,7 +219,7 @@ export async function loadObservatory(
     return dispose;
   }
   unsubscribe = workspace.subscribe(sync);
-  workspace.scene.userData.updateEnvironment = updateEnvironment;
+  unregisterUpdater = registerEnvironmentUpdater(workspace.scene, updateEnvironment);
   signal?.addEventListener('abort', dispose, { once: true });
   sync();
   try {

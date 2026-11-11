@@ -159,6 +159,33 @@ describe('mux XR local UI state', () => {
     localStorage.clear();
   });
 
+  it('keeps a background chosen in XR through later settings changes', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    let sceneBackground = 'observatory';
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onSettingsChange: (settings) => {
+        sceneBackground = settings.background;
+      },
+    });
+    ui.setBackground('desert', true);
+    ui.setUISounds(false, true);
+    expect(sceneBackground).toBe('desert');
+    expect(ui.getSettings().background).toBe('desert');
+    expect(query<HTMLSelectElement>(root, '[data-background]').value).toBe('desert');
+    expect(JSON.parse(localStorage.getItem('mux-xr:settings:v1') ?? '{}').background).toBe(
+      'desert',
+    );
+    ui.destroy();
+    const reloaded = mountWorkspaceUI(document.createElement('div'), {
+      onConnect: () => undefined,
+    });
+    expect(reloaded.getSettings().background).toBe('desert');
+    reloaded.destroy();
+    localStorage.clear();
+  });
+
   it('persists and synchronizes Keyborb mode selection', () => {
     localStorage.clear();
     const root = document.createElement('div');

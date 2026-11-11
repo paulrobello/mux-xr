@@ -1,16 +1,62 @@
 import * as THREE from 'three';
 import type { BackgroundMode } from '../contracts';
+import { HANGAR_DECK_PANE_SAFE_RADIUS } from './environments/hangar-deck';
 import { measurePanelBounds } from './panel-bounds';
 
-const OBSERVATORY_FLOOR_Y = 0.035;
+const BACKGROUND_FLOOR_Y: Partial<Record<BackgroundMode, number>> = {
+  observatory: 0.035,
+  hangar: 0.035,
+  'deep-water': 0.035,
+  studio: 0.035,
+  desert: 0.035,
+};
 const PANEL_FLOOR_CLEARANCE = 0.06;
+
+/** Environments whose walls end panes' usable space; others are unbounded. */
+const BACKGROUND_PANE_SAFE_RADIUS: Partial<Record<BackgroundMode, number>> = {
+  hangar: HANGAR_DECK_PANE_SAFE_RADIUS,
+};
+
+export function workspacePaneSafeRadius(
+  background: BackgroundMode,
+  xrMode: 'desktop' | 'vr' | 'ar',
+): number | null {
+  if (xrMode === 'ar') return null;
+  return BACKGROUND_PANE_SAFE_RADIUS[background] ?? null;
+}
+
+/** Pulls each root's bounds center horizontally inside `radius` of the origin. */
+export function keepLayoutInsideRadius(
+  roots: readonly THREE.Group[],
+  radius: number | null,
+): boolean {
+  if (radius === null) return false;
+  let moved = false;
+  for (const root of roots) {
+    root.updateWorldMatrix(true, true);
+    const box = new THREE.Box3().setFromObject(root);
+    if (box.isEmpty()) continue;
+    const center = box.getCenter(new THREE.Vector3());
+    const distance = Math.hypot(center.x, center.z);
+    if (distance <= radius) continue;
+    const scale = radius / distance - 1;
+    const world = root.getWorldPosition(new THREE.Vector3());
+    world.x += center.x * scale;
+    world.z += center.z * scale;
+    if (root.parent) root.parent.worldToLocal(world);
+    root.position.copy(world);
+    root.updateWorldMatrix(true, true);
+    moved = true;
+  }
+  return moved;
+}
 
 export function workspaceFloorY(
   background: BackgroundMode,
   xrMode: 'desktop' | 'vr' | 'ar',
 ): number | null {
   if (xrMode === 'ar') return 0;
-  return background === 'observatory' ? OBSERVATORY_FLOOR_Y : null;
+  return BACKGROUND_FLOOR_Y[background] ?? null;
 }
 
 function faceRootTowardEye(root: THREE.Group, eye: THREE.Vector3): void {
