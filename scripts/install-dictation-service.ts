@@ -414,7 +414,7 @@ export const performAgentInstall = async (plist: string, deps: AgentInstallDeps)
     if (previousLoaded) {
       deps.launchctl(['bootout', target], true);
       await deps.waitFor(
-        () => deps.listenerPid() === undefined,
+        () => deps.listenerPid() === undefined && !deps.agentLoaded(),
         PORT_FREE_TIMEOUT_MS,
         'Port 4242 did not free after stopping the previous LaunchAgent.',
       );
@@ -442,7 +442,7 @@ export const performAgentInstall = async (plist: string, deps: AgentInstallDeps)
       try {
         if (replaced)
           await deps.waitFor(
-            () => deps.listenerPid() === undefined,
+            () => deps.listenerPid() === undefined && !deps.agentLoaded(),
             PORT_FREE_TIMEOUT_MS,
             'Port 4242 did not free during rollback.',
           );

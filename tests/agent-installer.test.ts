@@ -20,6 +20,9 @@ type World = {
   drainPolls: number;
   listener: number | undefined;
   healthyAfterBootstrap: boolean;
+  /** launchd keeps the label registered for this many polls after a bootout. */
+  deregisterPolls: number;
+  unloading: number;
 };
 
 const fakeDeps = (world: World): AgentInstallDeps => ({
@@ -28,15 +31,25 @@ const fakeDeps = (world: World): AgentInstallDeps => ({
   pid: 7,
   launchctl: (args) => {
     world.log.push(args.join(' '));
-    if (args[0] === 'bootout') world.agentLoaded = false;
+    if (args[0] === 'bootout') {
+      world.agentLoaded = false;
+      world.unloading = world.deregisterPolls;
+    }
     if (args[0] === 'bootstrap') {
+      if (world.unloading > 0) throw new Error('Bootstrap failed: 5: Input/output error');
       world.agentLoaded = true;
       world.listener = 100 + world.log.length;
     }
     return '';
   },
   daemonLoaded: () => false,
-  agentLoaded: () => world.agentLoaded,
+  agentLoaded: () => {
+    if (world.unloading > 0) {
+      world.unloading -= 1;
+      return true;
+    }
+    return world.agentLoaded;
+  },
   listenerPid: () => {
     if (!world.agentLoaded && world.listener !== undefined) {
       if (world.drainPolls > 0) world.drainPolls -= 1;
@@ -72,6 +85,8 @@ const world = (overrides: Partial<World> = {}): World => ({
   drainPolls: 3,
   listener: 99,
   healthyAfterBootstrap: true,
+  deregisterPolls: 0,
+  unloading: 0,
   ...overrides,
 });
 
@@ -80,6 +95,13 @@ describe('per-user LaunchAgent installer (F2)', () => {
     const state = world();
     await performAgentInstall(NEW, fakeDeps(state));
     expect(state.log[0]).toBe(`bootout gui/501/${DICTATION_LABEL}`);
+    expect(state.log).toContain(`bootstrap gui/501 ${PATH}`);
+    expect(state.files.get(PATH)).toBe(NEW);
+  });
+
+  it('waits for launchd to deregister the old agent before bootstrapping the new one', async () => {
+    const state = world({ drainPolls: 0, deregisterPolls: 5 });
+    await performAgentInstall(NEW, fakeDeps(state));
     expect(state.log).toContain(`bootstrap gui/501 ${PATH}`);
     expect(state.files.get(PATH)).toBe(NEW);
   });
