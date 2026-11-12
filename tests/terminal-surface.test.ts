@@ -58,6 +58,7 @@ vi.mock('@xterm/xterm', () => ({
     };
     public options = { cursorBlink: false };
     public open(): void {}
+    public attachCustomKeyEventHandler(): void {}
     public resize(): void {}
     public reset(): void {
       fakeResets.push(1);

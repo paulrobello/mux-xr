@@ -39,6 +39,7 @@ vi.mock('@xterm/xterm', () => ({
     };
     public modes = { applicationCursorKeysMode: false, mouseTrackingMode: 'none' };
     public open(): void {}
+    public attachCustomKeyEventHandler(): void {}
     public resize(): void {}
     public reset(): void {}
     public write(data: Uint8Array, callback?: () => void): void {

@@ -39,6 +39,7 @@ vi.mock('@xterm/xterm', () => ({
     };
     public options = { cursorBlink: false };
     open(): void {}
+    attachCustomKeyEventHandler(): void {}
     resize(): void {}
     reset(): void {}
     write(_data: Uint8Array, callback?: () => void): void {

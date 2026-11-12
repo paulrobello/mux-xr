@@ -40,9 +40,18 @@ const asElement = (target: EventTarget | null): ElementLike | null => {
   return element && typeof element.tagName === 'string' ? element : null;
 };
 
+/** xterm's hidden input under each surface; it never takes typing, the router does. */
+const isXtermHelper = (element: ElementLike): boolean => {
+  try {
+    return element.matches?.('textarea.xterm-helper-textarea') === true;
+  } catch {
+    return false;
+  }
+};
+
 export function isEditableTarget(target: EventTarget | null): boolean {
   const element = asElement(target);
-  if (!element) return false;
+  if (!element || isXtermHelper(element)) return false;
   return (
     element.isContentEditable === true ||
     EDITABLE_TAGS.has((element.tagName as string).toUpperCase())
@@ -75,7 +84,8 @@ export function isActivatableControl(target: EventTarget | null): boolean {
 export function isNeutralFocusTarget(target: EventTarget | null): boolean {
   const element = asElement(target);
   if (!element) return true;
-  if (NEUTRAL_TAGS.has((element.tagName as string).toUpperCase())) return true;
+  if (NEUTRAL_TAGS.has((element.tagName as string).toUpperCase()) || isXtermHelper(element))
+    return true;
   return Boolean(element.closest?.('[data-scene-host]'));
 }
 

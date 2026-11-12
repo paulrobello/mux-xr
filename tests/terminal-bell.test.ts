@@ -56,6 +56,7 @@ vi.mock('@xterm/xterm', () => ({
       terminals.push(this);
     }
     open(): void {}
+    attachCustomKeyEventHandler(): void {}
     resize(): void {}
     reset(): void {}
     write(data: Uint8Array, callback?: () => void): void {

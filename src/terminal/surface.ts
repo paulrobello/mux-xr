@@ -117,6 +117,11 @@ export function paneWebSocketURL(endpoint: string, paneId: string): string {
   return url.toString();
 }
 
+/** The page keyboard router owns physical keys; a focused xterm would otherwise cancel and stop every keydown. */
+export function ignoreXtermKeys(terminal: Pick<Terminal, 'attachCustomKeyEventHandler'>): void {
+  terminal.attachCustomKeyEventHandler(() => false);
+}
+
 export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): TerminalSurface {
   const canvas = document.createElement('canvas');
   const host = document.createElement('div');
@@ -133,6 +138,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     disableStdin: true,
   });
   terminal.open(host);
+  ignoreXtermKeys(terminal);
   let socket: SocketLike | null = null;
   let status: TerminalStatus = 'disconnected';
   let revision = 0;
