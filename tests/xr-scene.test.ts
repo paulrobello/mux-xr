@@ -148,6 +148,82 @@ describe('XR scene interaction helpers', () => {
     }
   });
 
+  it('badges a held pane next to its connectivity and clears the badge on respawn', () => {
+    const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const container = document.createElement('div');
+    document.body.append(container);
+    let process: TerminalSurface['process'] = { state: 'running' };
+    let emit = (): void => undefined;
+    const surface: TerminalSurface = {
+      canvas: document.createElement('canvas'),
+      pane: {
+        id: '%7',
+        title: 'Build',
+        workspaceId: '+1',
+        workspaceName: 'Work',
+        sessionId: '$1',
+        sessionName: 'Dev',
+        windowId: '@1',
+        windowName: 'Shell',
+      },
+      revision: 0,
+      cols: 80,
+      rows: 24,
+      status: 'connected',
+      error: null,
+      get process() {
+        return process;
+      },
+      connect() {},
+      disconnect() {},
+      sendText: () => true,
+      sendKey: () => true,
+      paste: () => true,
+      focus() {},
+      resizeGrid: () => true,
+      canResizeGrid: true,
+      setColorMode: () => undefined,
+      dispose() {},
+      subscribe(listener) {
+        emit = listener;
+        return () => undefined;
+      },
+    };
+    const actions: WorkspaceActions = {
+      selectPane: vi.fn(),
+      closePane: vi.fn(),
+      sendText: vi.fn(),
+      sendKey: vi.fn(),
+      runCommand: vi.fn(),
+      openKeyboard: vi.fn(),
+      openCommands: vi.fn(),
+    };
+    const workspace = createWorkspaceScene(container, actions);
+    try {
+      workspace.addTerminal(surface);
+      const panel = workspace.scene.getObjectByName('terminal-panel-%7');
+      if (!panel) throw new Error('Panel was not created');
+      const title = panel.children.find((child) => child.userData.terminalTitle === true);
+      if (!title) throw new Error('Panel title was not created');
+      expect(title.userData.labelText).toBe('Build · connected');
+      process = { state: 'exited', exitCode: 3 };
+      emit();
+      expect(title.userData.labelText).toBe('Build · connected · Exited (code 3)');
+      workspace.setAvailablePanes([{ ...surface.pane, title: 'Renamed' }]);
+      expect(title.userData.labelText).toBe('Renamed · connected · Exited (code 3)');
+      process = { state: 'running' };
+      emit();
+      expect(title.userData.labelText).toBe('Renamed · connected');
+      expect(workspace.scene.getObjectByName('terminal-panel-%7')).toBe(panel);
+    } finally {
+      workspace.dispose();
+      container.remove();
+      context.mockRestore();
+      log.mockRestore();
+    }
+  });
+
   it('keeps the shared UI env map alive when a panel frame is disposed', () => {
     const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
     const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);

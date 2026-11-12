@@ -1,5 +1,6 @@
 import './styles.css';
 import type { TerminalMouseInput, TerminalSurface } from '../contracts';
+import { paneHeading } from '../terminal/lifecycle';
 
 const CELL_WIDTH = 11;
 const LINE_HEIGHT = 21;
@@ -113,8 +114,13 @@ export function createDesktopPanels(
     const heading = document.createElement('button');
     heading.type = 'button';
     const updateHeading = (): void => {
-      const error = surface.error ? ` · ${surface.error.slice(0, 48)}` : '';
-      heading.textContent = `${surface.pane.title} · ${surface.status}${error}`;
+      heading.textContent = paneHeading(
+        surface.pane.title,
+        surface.status,
+        surface.process,
+        surface.error,
+        48,
+      );
       heading.title = surface.error
         ? `${surface.error} Select terminal ${surface.pane.title} as the input target.`
         : `Select terminal ${surface.pane.title} as the input target`;

@@ -36,6 +36,7 @@ import {
   type TerminalFilterMode,
   validateTerminalFiltering,
 } from '../terminal/filtering';
+import { paneHeading, processBadge } from '../terminal/lifecycle';
 import { terminalKeyLabel } from '../terminal/protocol';
 import {
   type AgentRosterLayout,
@@ -469,6 +470,7 @@ interface TerminalPanel {
   height: number;
   revision: number;
   status: string;
+  heldBadge: string;
   title: string;
   error: string | null;
   renderQuality: TerminalRenderQuality;
@@ -1951,7 +1953,9 @@ export function createWorkspaceScene(
       const panel = panels.get(mutableState.selectedTerminalId ?? '');
       updateLabel(
         activePaneLabel,
-        panel ? `${panel.surface.pane.title} · ${panel.status}` : 'No active pane',
+        panel
+          ? paneHeading(panel.surface.pane.title, panel.status, panel.surface.process, null, 0)
+          : 'No active pane',
       );
     }
     for (const listener of listeners) listener(mutableState);
@@ -6316,9 +6320,8 @@ export function createWorkspaceScene(
       left: createScrollStrip('terminal-scroll-strip-left'),
     };
     root.userData.fontZoom = 1;
-    const shortError = surface.error ? ` · ${surface.error.slice(0, 28)}` : '';
     const titleLabel = createLabelButton(
-      `${surface.pane.title} · ${surface.status}${shortError}`,
+      paneHeading(surface.pane.title, surface.status, surface.process, surface.error, 28),
       0.92,
       0.08,
       {
@@ -6383,6 +6386,7 @@ export function createWorkspaceScene(
       height: 0,
       revision: surface.revision,
       status: String(surface.status),
+      heldBadge: processBadge(surface.process, surface.status) ?? '',
       title: surface.pane.title,
       error: surface.error,
       renderQuality: 'full',
@@ -6414,6 +6418,8 @@ export function createWorkspaceScene(
       const status = String(surface.status);
       const statusChanged = status !== panel.status;
       const errorChanged = surface.error !== panel.error;
+      const heldBadge = processBadge(surface.process, surface.status) ?? '';
+      const heldChanged = heldBadge !== panel.heldBadge;
       const bell = Boolean(surface.bellPending);
       if (bell && !panel.bellLabel.visible) bellFeed.pushBell(surface.pane.id, surface.pane.title);
       // Every acknowledge path (selection, focus, main's selectPane) lowers bellPending.
@@ -6428,11 +6434,12 @@ export function createWorkspaceScene(
           ['connected', 'connecting'].includes(status) ? 'Disconnect' : 'Reconnect',
         );
       }
-      if (surface.pane.title !== panel.title || statusChanged || errorChanged) {
+      if (surface.pane.title !== panel.title || statusChanged || errorChanged || heldChanged) {
         panel.title = surface.pane.title;
+        panel.heldBadge = heldBadge;
         updateLabel(
           panel.titleLabel,
-          `${surface.pane.title} · ${surface.status}${surface.error ? ` · ${surface.error.slice(0, 28)}` : ''}`,
+          paneHeading(surface.pane.title, surface.status, surface.process, surface.error, 28),
         );
         notify();
       }
@@ -7018,7 +7025,10 @@ export function createWorkspaceScene(
       const panel = panels.get(pane.id);
       if (panel) {
         Object.assign(panel.surface.pane, pane);
-        updateLabel(panel.titleLabel, `${pane.title} · ${panel.surface.status}`);
+        updateLabel(
+          panel.titleLabel,
+          paneHeading(pane.title, panel.surface.status, panel.surface.process, null, 0),
+        );
         bellFeed.renamePane(pane.id, pane.title);
       }
     }

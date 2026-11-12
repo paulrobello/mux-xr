@@ -1,3 +1,5 @@
+import type { PaneProcess } from './terminal/lifecycle';
+
 export interface PaneDescriptor {
   id: string;
   workspaceId: string;
@@ -74,6 +76,8 @@ export interface TerminalSurface {
   readonly rows: number;
   readonly status: TerminalStatus;
   readonly error: string | null;
+  /** Held-pane process lifecycle, independent of stream `status`. */
+  readonly process?: PaneProcess;
   readonly bellPending?: boolean;
   acknowledgeBell?(): void;
   readonly canResizeGrid: boolean;

@@ -10,6 +10,13 @@ import type {
   TerminalStatus,
   TerminalSurface,
 } from '../contracts';
+import {
+  type PaneProcess,
+  parsePaneProcess,
+  RUNNING_PROCESS,
+  samePaneId,
+  sameProcess,
+} from './lifecycle';
 import { createTerminalPainter, type TerminalDamageHint } from './painter';
 import {
   createFocusMessage,
@@ -159,6 +166,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   let selectionMarker: { line: number; dispose(): void } | undefined;
   let selectionBufferType: string | undefined;
   let error: string | null = null;
+  let processState: PaneProcess = RUNNING_PROCESS;
   const listeners = new Set<() => void>();
   const notify = (): void => {
     for (const listener of listeners) listener();
@@ -379,6 +387,8 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             serverMouseMode = null;
             serverMouseModeKnown = false;
             retries = 0;
+            // A pre-lifecycle server never sends the state, so a fresh connection must not inherit a held one.
+            processState = RUNNING_PROCESS;
             if (validGrid(connected.cols, connected.rows)) {
               cols = connected.cols;
               rows = connected.rows;
@@ -436,6 +446,16 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
               // Compatibility with older servers that only exposed an aggregate flag.
               mouseTrackingDisabled = !msg.message.value.enabled;
               mouseTrackingFallback = msg.message.value.enabled ? 'vt200' : 'none';
+            }
+            break;
+          }
+          case 'paneProcessState': {
+            const { paneId, state, exitCode } = msg.message.value;
+            if (paneId !== '' && !samePaneId(paneId, pane.id)) break;
+            const next = parsePaneProcess(state, exitCode);
+            if (next && !sameProcess(processState, next)) {
+              processState = next;
+              notify();
             }
             break;
           }
@@ -501,6 +521,9 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     },
     get error() {
       return error;
+    },
+    get process() {
+      return processState;
     },
     get bellPending() {
       return bellPending;
