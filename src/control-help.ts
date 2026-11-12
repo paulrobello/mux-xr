@@ -211,6 +211,8 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
       return 'Open or select this terminal pane';
     case 'panePage':
       return 'Show the next hierarchy entries';
+    case 'widgetsPage':
+      return 'Show another page of widgets';
     case 'hierarchyNext':
       return 'Browse inside this hierarchy item';
     case 'hierarchyBack':

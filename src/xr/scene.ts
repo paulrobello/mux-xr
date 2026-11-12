@@ -147,6 +147,7 @@ import {
   type UIPoseName,
   validPose,
 } from './ui-poses';
+import { layoutWidgetPanel } from './widget-panel-layout';
 import { createWidgetPoseStore, type WidgetPose } from './widget-poses';
 import {
   getWidgetEntry,
@@ -1305,6 +1306,7 @@ export function createWorkspaceScene(
   let pictureNotice: string | null = null;
   let recentPictures: ReadonlyArray<RecentPictureEntry> | null | 'loading' = 'loading';
   let recentPage = 0;
+  let widgetsPage = 0;
   let recentGeneration = 0;
   let commandPage = 0;
   let templateHint: string | null = null;
@@ -4591,16 +4593,43 @@ export function createWorkspaceScene(
       enterUrl.position.set(-0.3, -0.46, 0);
       inputRoot.add(enterUrl);
     } else if (mode === 'widgets') {
-      for (const [index, { kind, displayName }] of WIDGET_REGISTRY.entries()) {
+      const layout = layoutWidgetPanel(WIDGET_REGISTRY.length, widgetsPage);
+      widgetsPage = layout.page;
+      layout.buttons.forEach((rect, index) => {
+        const { kind, displayName } = WIDGET_REGISTRY[layout.first + index];
         const button = createLabelButton(
           (widgets.has(kind) && !getWidgetEntry(kind).multiInstance ? 'Hide ' : 'Add ') +
             displayName,
-          1.25,
-          0.14,
+          rect.width,
+          rect.height,
           { inputAction: 'toggleWidget', widgetKind: kind },
         );
-        button.position.set(0, 0.25 - index * 0.22, 0);
-        inputRoot.add(button);
+        button.position.set(rect.x, rect.y, 0);
+        inputRoot?.add(button);
+      });
+      if (layout.pager) {
+        const { prev, caption, next } = layout.pager;
+        const pageLabel = createLabelButton(
+          `${layout.page + 1} / ${layout.pages}`,
+          caption.width,
+          caption.height,
+          { inputAction: 'noop' },
+        );
+        pageLabel.position.set(caption.x, caption.y, 0);
+        inputRoot.add(pageLabel);
+        for (const [label, delta, rect] of [
+          ['Prev', -1, prev],
+          ['Next', 1, next],
+        ] as const) {
+          const enabled = delta < 0 ? layout.page > 0 : layout.page < layout.pages - 1;
+          const button = createLabelButton(label, rect.width, rect.height, {
+            inputAction: enabled ? 'widgetsPage' : 'noop',
+            delta,
+          });
+          button.position.set(rect.x, rect.y, 0);
+          button.visible = enabled;
+          inputRoot.add(button);
+        }
       }
     } else if (mode === 'filtering') {
       const modes: Array<[string, TerminalFilterMode]> = [
@@ -4751,6 +4780,10 @@ export function createWorkspaceScene(
     );
     if (mode === 'picture-gallery') close.position.set(0.3, -0.46, 0);
     if (mode === 'picture-url') close.position.set(1, 1.04, 0);
+    if (mode === 'widgets') {
+      const { x, y } = layoutWidgetPanel(WIDGET_REGISTRY.length, widgetsPage).close;
+      close.position.set(x, y, 0);
+    }
     inputRoot.add(close);
     if (['terminal', 'display', 'world', 'filtering', 'buttons'].includes(mode)) {
       close.position.x = 0.22;
@@ -5108,6 +5141,11 @@ export function createWorkspaceScene(
       pictureUrl = { text: '', cursor: 0 };
       picturePanelMessage = '';
       refreshInputRoot('picture-url');
+      return true;
+    }
+    if (action === 'widgetsPage') {
+      widgetsPage += Number(hit.userData.delta) || 0;
+      refreshInputRoot('widgets');
       return true;
     }
     if (action === 'pictureRecentPage') {
@@ -7054,6 +7092,7 @@ export function createWorkspaceScene(
     if (mode === 'warp' && mutableState.focusModeTerminalId) endFocusMode(true);
     keyboardResume = null;
     templateHint = null;
+    if (mode === 'widgets') widgetsPage = 0;
     if (
       !renderer?.xr.isPresenting &&
       (mode === 'commands' || mode === 'keyboard' || mode === 'command-editor')

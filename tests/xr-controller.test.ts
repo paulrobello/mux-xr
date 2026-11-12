@@ -2688,6 +2688,26 @@ describe('native XR controller event routing', () => {
     expect(modes).not.toContain('widgets');
     expect(modes).not.toContain('keyboard');
     workspace.showInput('widgets');
+    // Close, the title and every widget button keep apart on the real panel.
+    const controls = (objectWithData(workspace, { inputAction: 'close' }).parent?.children ?? [])
+      .filter(
+        (child) =>
+          ['close', 'grabInput', 'toggleWidget'].includes(child.userData.inputAction) &&
+          child.name !== 'input-backdrop',
+      )
+      .map((child) => {
+        const mesh = child as THREE.Mesh;
+        mesh.geometry.computeBoundingBox();
+        return (mesh.geometry.boundingBox as THREE.Box3).clone().translate(mesh.position);
+      });
+    expect(controls.length).toBeGreaterThanOrEqual(9);
+    for (const [index, box] of controls.entries())
+      for (const other of controls.slice(index + 1)) {
+        const overlap = box.clone().intersect(other);
+        expect(Math.min(overlap.max.x - overlap.min.x, overlap.max.y - overlap.min.y)).toBeLessThan(
+          1e-6,
+        );
+      }
     hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'digital-clock' });
     expect(workspace.state.widgets).toEqual(['digital-clock']);
     const root = objectWithData(workspace, {
