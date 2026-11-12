@@ -58,10 +58,12 @@ describe('isHeif', () => {
 
 describe('decodeHeifPixels', () => {
   it('decodes the primary image of a real HEIC to RGBA', async () => {
-    const pixels = await decodeHeifPixels(loadLibheif(), fixture, {
+    const decoded = await decodeHeifPixels(loadLibheif(), fixture, {
       maxEdge: 16384,
       maxPixels: 64 * 1024 * 1024,
     });
+    expect(decoded.right).toBeUndefined();
+    const pixels = decoded.image;
     expect([pixels.width, pixels.height]).toEqual([64, 48]);
     expect(pixels.data.length).toBe(64 * 48 * 4);
     const at = (x: number, y: number): number[] => [
@@ -125,7 +127,7 @@ describe('preparePicture with HEIF', () => {
   });
 
   it('routes HEIF to the HEIF decoder, not the browser', async () => {
-    const loader = deps(vi.fn(async () => ({ width: 2048, height: 1536 })));
+    const loader = deps(vi.fn(async () => ({ image: { width: 2048, height: 1536 } })));
     const picture = await preparePicture(
       new Blob([fixture], { type: 'image/heic' }),
       'a.heic',
@@ -138,14 +140,14 @@ describe('preparePicture with HEIF', () => {
   });
 
   it('decodes a HEIF with no browser type, as a picked .heic often has', async () => {
-    const loader = deps(vi.fn(async () => ({ width: 64, height: 48 })));
+    const loader = deps(vi.fn(async () => ({ image: { width: 64, height: 48 } })));
     await preparePicture(new Blob([fixture]), 'IMG_5424.HEIC.heif', loader);
     expect(loader.decodeHeif).toHaveBeenCalledOnce();
   });
 
   it('does not refuse a large HEIF for an unreadable header size', async () => {
     const big = new Blob([fixture, new Uint8Array(MAX_UNPROBED_PICTURE_BYTES)]);
-    const loader = deps(vi.fn(async () => ({ width: 64, height: 48 })));
+    const loader = deps(vi.fn(async () => ({ image: { width: 64, height: 48 } })));
     await expect(preparePicture(big, 'big.heic', loader)).resolves.toBeDefined();
   });
 

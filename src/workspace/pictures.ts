@@ -4,6 +4,7 @@ import {
   depthFailureNotice,
   normalizeDepthView,
   type PictureDepthView,
+  usesDepthMap,
 } from '../xr/picture-depth';
 import {
   createPictureThumbnail,
@@ -188,6 +189,7 @@ export function createPictureController(options: {
         id,
         name: picture.name,
         blob: picture.blob,
+        ...(picture.right ? { right: picture.right.blob } : {}),
         width: picture.width,
         height: picture.height,
         createdAt: now(),
@@ -218,6 +220,7 @@ export function createPictureController(options: {
             id: `recent-${id}`,
             name: picture.name,
             blob: picture.blob,
+            ...(picture.right ? { right: picture.right.blob } : {}),
             thumbnail,
             width: picture.width,
             height: picture.height,
@@ -237,7 +240,8 @@ export function createPictureController(options: {
       }
     }
     if (notices.length) options.notify(notices.join('. '));
-    if (DEFAULT_DEPTH_VIEW.enabled) requestDepth(id, picture.blob, false);
+    if (usesDepthMap(DEFAULT_DEPTH_VIEW, Boolean(picture.right)))
+      requestDepth(id, picture.blob, false);
     return true;
   };
 
@@ -296,7 +300,10 @@ export function createPictureController(options: {
         }
         let picture: PreparedPicture;
         try {
-          picture = await loaders.stored(record.blob, record.name);
+          picture = await withRightEye(
+            await loaders.stored(record.blob, record.name),
+            record.right,
+          );
         } catch (error) {
           return failed(record.name, error);
         }
@@ -322,18 +329,32 @@ export function createPictureController(options: {
         const stored = await serial(() =>
           options.library.update(id, { depthView }).catch(() => false),
         );
-        if (!stored || !depthView.enabled || depthKnown.has(id)) return;
+        if (!stored || depthKnown.has(id)) return;
+        const record = (await options.library.list().catch(() => [])).find(
+          (entry) => entry.id === id,
+        );
+        if (!record || !usesDepthMap(depthView, Boolean(record.right))) return;
         if (!options.depth) {
           options.notify(depthFailureNotice('unavailable'));
           return;
         }
-        const record = (await options.library.list().catch(() => [])).find(
-          (entry) => entry.id === id,
-        );
-        if (record) requestDepth(id, record.blob, true);
+        requestDepth(id, record.blob, true);
       })();
     },
   };
+
+  /** Adds a stored right eye; one that no longer decodes or matches leaves a flat picture. */
+  async function withRightEye<T extends PictureImage>(picture: T, right?: Blob): Promise<T> {
+    if (!right) return picture;
+    const eye = await loaders.stored(right, 'right eye').catch(() => undefined);
+    if (!eye) return picture;
+    if (eye.width !== picture.width || eye.height !== picture.height) {
+      eye.source.width = 0;
+      eye.source.height = 0;
+      return picture;
+    }
+    return { ...picture, right: { source: eye.source, blob: right } };
+  }
 
   async function restore(): Promise<void> {
     let records: Awaited<ReturnType<PictureLibrary['list']>>;
@@ -348,7 +369,7 @@ export function createPictureController(options: {
     for (const record of records) {
       let image: PictureImage;
       try {
-        image = await loaders.stored(record.blob, record.name);
+        image = await withRightEye(await loaders.stored(record.blob, record.name), record.right);
       } catch {
         broken += 1;
         await options.library.delete(record.id).catch(() => {});
@@ -360,7 +381,8 @@ export function createPictureController(options: {
         ? await loaders.stored(record.depth, 'depth').catch(() => undefined)
         : undefined;
       if (depth) depthKnown.add(record.id);
-      else if (depthView.enabled) missingDepth.push({ id: record.id, blob: record.blob });
+      else if (usesDepthMap(depthView, Boolean(image.right)))
+        missingDepth.push({ id: record.id, blob: record.blob });
       restored.push({ id: record.id, image, depthView, ...(depth ? { depth } : {}) });
     }
     options.scene()?.restorePictures(restored);

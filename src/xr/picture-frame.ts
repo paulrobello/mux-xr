@@ -7,9 +7,11 @@ import {
   normalizeDepthView,
   type PictureDepthView,
   stepDepthStrength,
+  usesDepthMap,
 } from './picture-depth';
 import type { PictureImage } from './picture-image';
 import { frameSize, PICTURE_LONG_EDGE, PLACEHOLDER_ASPECT } from './picture-sizing';
+import { measureStereoCanvases, type StereoDisparity } from './stereo-disparity';
 import { applyUIEnvironment } from './ui-environment';
 import { disposeOwned, type Widget } from './widgets';
 
@@ -92,6 +94,29 @@ const DEPTH_FRAGMENT = /* glsl */ `
     gl_FragColor = texture2D(photo, vUv);
     #include <colorspace_fragment>
   }`;
+
+// Each eye samples its own image, shifted so the chosen disparity sits on the frame plane and
+// cropped by the same amount on both axes so the picture keeps its aspect.
+const STEREO_VERTEX = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }`;
+const STEREO_FRAGMENT = /* glsl */ `
+  uniform sampler2D leftEye; uniform sampler2D rightEye; uniform float eye; uniform float converge;
+  varying vec2 vUv;
+  void main() {
+    float keep = 1.0 - abs(converge);
+    float x = vUv.x * keep + (eye > 0.5 ? max(-converge, 0.0) : max(converge, 0.0));
+    vec2 at = vec2(x, 0.5 + (vUv.y - 0.5) * keep);
+    gl_FragColor = eye > 0.5 ? texture2D(rightEye, at) : texture2D(leftEye, at);
+    #include <colorspace_fragment>
+  }`;
+
+/** The WebXR right-eye camera: three.js enables layer 2 on it and layer 1 on the left. */
+const isRightEye = (camera: THREE.Camera): boolean =>
+  camera.layers.isEnabled(2) && !camera.layers.isEnabled(1);
 
 /** A border with no backing, so a picture receding behind the frame plane stays visible. */
 function createOpenBorder(width: number, height: number, material: THREE.Material): THREE.Group {
@@ -212,7 +237,7 @@ export function createPictureFrameWidget(
     toggle.userData.helpText = '3D picture options';
     root.add(toggle);
     controls.push(toggle);
-    depthOptions = createDepthOptions(size.width, depthLabels);
+    depthOptions = createDepthOptions(size.width, depthLabels, Boolean(image.right));
     root.add(depthOptions);
     controls.push(depthOptions);
     controls.push(root.getObjectByName('picture-change') as THREE.Object3D);
@@ -236,6 +261,41 @@ export function createPictureFrameWidget(
   let depthImage: PictureImage | null = null;
   let relief: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial> | null = null;
   const longEdge = Math.max(size.width, size.height);
+  let rightTexture: THREE.CanvasTexture | null = null;
+  let stereo: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial> | null = null;
+  let disparity: StereoDisparity | null = null;
+  if (texture && image?.right) {
+    rightTexture = new THREE.CanvasTexture(image.right.source);
+    rightTexture.colorSpace = THREE.SRGBColorSpace;
+    rightTexture.generateMipmaps = true;
+    rightTexture.minFilter = THREE.LinearMipmapLinearFilter;
+    rightTexture.magFilter = THREE.LinearFilter;
+    rightTexture.anisotropy = texture.anisotropy;
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        leftEye: { value: texture },
+        rightEye: { value: rightTexture },
+        eye: { value: 0 },
+        converge: { value: 0 },
+      },
+      vertexShader: STEREO_VERTEX,
+      fragmentShader: STEREO_FRAGMENT,
+    });
+    stereo = new THREE.Mesh(new THREE.PlaneGeometry(size.width, size.height), material);
+    stereo.name = 'picture-frame-stereo';
+    stereo.position.z = 0.001;
+    stereo.raycast = () => {};
+    // Called once per eye in XR; the desktop camera is neither eye and gets the left image.
+    stereo.onBeforeRender = (_renderer, _scene, camera) => {
+      material.uniforms.eye.value = isRightEye(camera) ? 1 : 0;
+      material.uniformsNeedUpdate = true;
+    };
+    stereo.userData.widgetId = id;
+    stereo.userData.widgetKind = PICTURE_KIND;
+    stereo.userData.inputAction = 'grabWidget';
+    root.add(stereo);
+    disparity = measureStereoCanvases(image.source, image.right.source);
+  }
 
   const setControlsOnTop = (onTop: boolean): void => {
     for (const control of controls)
@@ -248,10 +308,21 @@ export function createPictureFrameWidget(
   };
 
   const applyView = (): void => {
-    const shown = Boolean(relief && view.enabled);
-    if (plane) (plane.material as THREE.Material).visible = !shown;
+    const pair = Boolean(stereo);
+    const stereoShown = pair && view.enabled && view.source === 'stereo';
+    const shown = Boolean(relief) && usesDepthMap(view, pair);
+    if (plane) (plane.material as THREE.Material).visible = !shown && !stereoShown;
     frame.visible = !shown;
     openBorder.visible = shown;
+    if (stereo) {
+      stereo.visible = stereoShown;
+      // Inward puts the nearest content on the frame plane, so the scene sits behind the frame;
+      // pop out puts the typical content there, so nearer things come forward.
+      stereo.material.uniforms.converge.value =
+        (view.mode === 'popout' ? disparity?.typical : disparity?.near) ?? 0;
+    }
+    const depthMapOptions = depthOptions?.getObjectByName('picture-depth-map-options');
+    if (depthMapOptions) depthMapOptions.visible = !pair || view.source === 'depth';
     if (relief) {
       relief.visible = shown;
       const uniforms = relief.material.uniforms;
@@ -268,6 +339,7 @@ export function createPictureFrameWidget(
     text('strength', `Depth ${depthStrengthLabel(view.strength)}`);
     text('mode', view.mode === 'popout' ? 'Pop out' : 'Inward');
     text('edges', view.edges === 'cut' ? 'Edges: Cut' : 'Edges: Stretch');
+    text('source', view.source === 'depth' ? 'Source: Depth map' : 'Source: Stereo');
   };
 
   const setDepth = (depth: PictureImage): void => {
@@ -356,6 +428,8 @@ export function createPictureFrameWidget(
         changeView({ ...view, mode: view.mode === 'popout' ? 'inward' : 'popout' });
       else if (command === 'edges')
         changeView({ ...view, edges: view.edges === 'cut' ? 'stretch' : 'cut' });
+      else if (command === 'source')
+        changeView({ ...view, source: view.source === 'depth' ? 'stereo' : 'depth' });
     },
     setTextureAnisotropy: (anisotropy) => {
       if (!texture || disposed) return;
@@ -363,6 +437,10 @@ export function createPictureFrameWidget(
       if (texture.anisotropy === next) return;
       texture.anisotropy = next;
       texture.needsUpdate = true;
+      if (rightTexture) {
+        rightTexture.anisotropy = next;
+        rightTexture.needsUpdate = true;
+      }
     },
     dispose: () => {
       if (disposed) return;
@@ -370,7 +448,8 @@ export function createPictureFrameWidget(
       // Material.dispose leaves its map alone, so the texture and its canvas go here.
       texture?.dispose();
       depthTexture?.dispose();
-      for (const owned of [image, depthImage])
+      rightTexture?.dispose();
+      for (const owned of [image, depthImage, image?.right])
         if (owned) {
           owned.source.width = 0;
           owned.source.height = 0;
@@ -383,18 +462,27 @@ export function createPictureFrameWidget(
 
 /**
  * The 3D options panel, hidden until the frame's 3D button opens it, centred on the picture:
- * 3D and mode side by side, then depth strength and edges across the full width.
+ * 3D and mode side by side, a stereo pair's source, then the depth map's strength and edges.
  */
-function createDepthOptions(width: number, labels: Map<string, THREE.Mesh>): THREE.Group {
+function createDepthOptions(
+  width: number,
+  labels: Map<string, THREE.Mesh>,
+  stereo: boolean,
+): THREE.Group {
   const panel = new THREE.Group();
   panel.name = 'picture-depth-options';
   panel.visible = false;
   panel.position.z = 0.008;
+  // Strength and edges only apply to a depth map, so a stereo pair hides them in stereo.
+  const depthMap = new THREE.Group();
+  depthMap.name = 'picture-depth-map-options';
+  panel.add(depthMap);
   const rowHeight = 0.075;
   const gap = 0.01;
+  const rows = stereo ? 4 : 3;
   const panelWidth = Math.min(0.5, width - 0.06);
   const half = (panelWidth - gap) / 2;
-  const rowY = (row: number): number => rowHeight + gap - row * (rowHeight + gap);
+  const rowY = (row: number): number => ((rows - 1) / 2 - row) * (rowHeight + gap);
   const button = (
     name: string,
     text: string,
@@ -403,6 +491,7 @@ function createDepthOptions(width: number, labels: Map<string, THREE.Mesh>): THR
     y: number,
     command: string,
     help: string,
+    parent: THREE.Object3D = panel,
   ): THREE.Mesh => {
     const control = createScalableLabel(text, w, rowHeight, { background: '#223946' });
     control.name = `picture-depth-${name}`;
@@ -410,7 +499,7 @@ function createDepthOptions(width: number, labels: Map<string, THREE.Mesh>): THR
     control.userData.inputAction = 'widgetControl';
     control.userData.pictureDepthCommand = command;
     control.userData.helpText = help;
-    panel.add(control);
+    parent.add(control);
     return control;
   };
   const left = -(half + gap) / 2;
@@ -423,16 +512,30 @@ function createDepthOptions(width: number, labels: Map<string, THREE.Mesh>): THR
     'mode',
     button('mode', 'Inward', half, right, rowY(0), 'mode', 'Recede behind the frame or pop out'),
   );
+  if (stereo)
+    labels.set(
+      'source',
+      button(
+        'source',
+        'Source: Stereo',
+        panelWidth,
+        0,
+        rowY(1),
+        'source',
+        'Show the captured stereo pair or a depth map',
+      ),
+    );
+  const strengthRow = stereo ? 2 : 1;
   const step = 0.075;
   const edge = (panelWidth - step) / 2;
-  button('weaker', '−', step, -edge, rowY(1), 'weaker', 'Less depth');
-  button('stronger', '+', step, edge, rowY(1), 'stronger', 'More depth');
+  button('weaker', '−', step, -edge, rowY(strengthRow), 'weaker', 'Less depth', depthMap);
+  button('stronger', '+', step, edge, rowY(strengthRow), 'stronger', 'More depth', depthMap);
   const value = createScalableLabel('Depth 0.25', panelWidth - step * 2 - gap * 2, rowHeight, {
     background: '#15232b',
   });
   value.name = 'picture-depth-strength';
-  value.position.set(0, rowY(1), 0);
-  panel.add(value);
+  value.position.set(0, rowY(strengthRow), 0);
+  depthMap.add(value);
   labels.set('strength', value);
   labels.set(
     'edges',
@@ -441,9 +544,10 @@ function createDepthOptions(width: number, labels: Map<string, THREE.Mesh>): THR
       'Edges: Stretch',
       panelWidth,
       0,
-      rowY(2),
+      rowY(strengthRow + 1),
       'edges',
       'Stretch or cut the picture where its depth jumps',
+      depthMap,
     ),
   );
   return panel;

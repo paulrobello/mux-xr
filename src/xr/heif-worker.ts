@@ -1,6 +1,12 @@
 import libheif from 'libheif-js/libheif-wasm/libheif.js';
 import wasmUrl from 'libheif-js/libheif-wasm/libheif.wasm?url';
-import { decodeHeifPixels, HeifDecodeError, type HeifLibrary, type HeifLimits } from './heif-core';
+import {
+  decodeHeifPixels,
+  HeifDecodeError,
+  type HeifLibrary,
+  type HeifLimits,
+  type HeifPixels,
+} from './heif-core';
 import { fitWithin } from './picture-sizing';
 
 export interface HeifWorkerRequest {
@@ -11,7 +17,7 @@ export interface HeifWorkerRequest {
 }
 
 export type HeifWorkerReply =
-  | { ok: true; bitmap: ImageBitmap }
+  | { ok: true; bitmap: ImageBitmap; right?: ImageBitmap }
   | { ok: false; code: 'decode' | 'too-large'; detail: string };
 
 const scope = self as unknown as {
@@ -32,15 +38,20 @@ scope.onmessage = async (event) => {
     // An ArrayBuffer avoids instantiateStreaming, which needs an application/wasm response type.
     const wasmBinary = await (await fetch(wasmUrl)).arrayBuffer();
     const lib = libheif({ wasmBinary }) as HeifLibrary;
-    const pixels = await decodeHeifPixels(lib, new Uint8Array(bytes), limits);
-    const size = fitWithin(pixels.width, pixels.height, outputEdge);
-    const image = new ImageData(pixels.data, pixels.width, pixels.height);
-    const bitmap = await createImageBitmap(image, {
-      resizeWidth: size.width,
-      resizeHeight: size.height,
-      resizeQuality: 'high',
-    });
-    scope.postMessage({ ok: true, bitmap }, [bitmap]);
+    const decoded = await decodeHeifPixels(lib, new Uint8Array(bytes), limits);
+    const shrink = (pixels: HeifPixels): Promise<ImageBitmap> => {
+      const size = fitWithin(pixels.width, pixels.height, outputEdge);
+      return createImageBitmap(new ImageData(pixels.data, pixels.width, pixels.height), {
+        resizeWidth: size.width,
+        resizeHeight: size.height,
+        resizeQuality: 'high',
+      });
+    };
+    const bitmap = await shrink(decoded.image);
+    if (decoded.right) {
+      const right = await shrink(decoded.right);
+      scope.postMessage({ ok: true, bitmap, right }, [bitmap, right]);
+    } else scope.postMessage({ ok: true, bitmap }, [bitmap]);
   } catch (error) {
     scope.postMessage(
       error instanceof HeifDecodeError

@@ -8,6 +8,8 @@ export interface PictureRecord {
   width: number;
   height: number;
   createdAt: number;
+  /** The right eye of a stereo pair (an iPhone spatial photo); `blob` is then the left eye. */
+  right?: Blob;
   /** The depth map from the paired Mac (8-bit PNG, near bright); absent until estimated. */
   depth?: Blob;
   /** How the frame shows its depth; absent means the default view. */
@@ -32,10 +34,12 @@ interface Footprint {
   id: string;
   createdAt: number;
   blob: { size: number };
+  right?: { size: number };
   depth?: { size: number };
 }
 
-const footprintBytes = (record: Footprint): number => record.blob.size + (record.depth?.size ?? 0);
+const footprintBytes = (record: Footprint): number =>
+  record.blob.size + (record.right?.size ?? 0) + (record.depth?.size ?? 0);
 
 /**
  * Ids to evict, oldest first, so `existing` plus one more picture of `incomingBytes` fits
@@ -81,7 +85,7 @@ export function createPictureLibrary(
     list,
     async add(record): Promise<string[]> {
       const existing = (await list()).filter((entry) => entry.id !== record.id);
-      const evicted = planEviction(existing, record.blob.size, limits);
+      const evicted = planEviction(existing, footprintBytes(record), limits);
       for (const id of evicted) await storage.delete(id);
       await storage.put(record);
       return evicted;
@@ -123,6 +127,8 @@ export interface RecentPictureRecord {
   name: string;
   blob: Blob;
   thumbnail: Blob;
+  /** The right eye of a stereo pair; `blob` is then the left eye. */
+  right?: Blob;
   width: number;
   height: number;
   /** Identifies the source (URL or file) so picking it again refreshes one entry. */
@@ -176,9 +182,9 @@ export function createRecentPictureLibrary(
         kept.map((entry) => ({
           id: entry.id,
           createdAt: entry.lastUsedAt,
-          blob: { size: entry.blob.size + entry.thumbnail.size },
+          blob: { size: entry.blob.size + entry.thumbnail.size + (entry.right?.size ?? 0) },
         })),
-        record.blob.size + record.thumbnail.size,
+        record.blob.size + record.thumbnail.size + (record.right?.size ?? 0),
         limits,
       );
       for (const id of evicted) await storage.delete(id);

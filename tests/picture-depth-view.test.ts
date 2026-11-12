@@ -46,6 +46,7 @@ describe('depth view', () => {
       strength: 0.25,
       mode: 'inward',
       edges: 'stretch',
+      source: 'stereo',
     });
   });
 

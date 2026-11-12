@@ -11,10 +11,13 @@ export const MAX_HEIF_SOURCE_PIXELS = 50 * 1000 * 1000;
 const HEIF_DECODE_TIMEOUT_MS = 60_000;
 
 /**
- * Decodes a HEIF blob in a fresh Worker and returns a bitmap no larger than MAX_PICTURE_EDGE.
- * The Worker is terminated afterwards, which frees the wasm heap the full-size decode grew.
+ * Decodes a HEIF blob in a fresh Worker and returns a bitmap no larger than MAX_PICTURE_EDGE, plus
+ * the right eye for a stereo pair (then `image` is the left eye). The Worker is terminated
+ * afterwards, which frees the wasm heap the full-size decode grew.
  */
-export async function decodeHeifInWorker(blob: Blob): Promise<ImageBitmap> {
+export async function decodeHeifInWorker(
+  blob: Blob,
+): Promise<{ image: ImageBitmap; right?: ImageBitmap }> {
   const bytes = await blob.arrayBuffer();
   const worker = new Worker(new URL('./heif-worker.ts', import.meta.url), { type: 'module' });
   try {
@@ -44,7 +47,7 @@ export async function decodeHeifInWorker(blob: Blob): Promise<ImageBitmap> {
       worker.postMessage(request, [bytes]);
     });
     if (!reply.ok) throw new PictureLoadError(reply.code, reply.detail);
-    return reply.bitmap;
+    return reply.right ? { image: reply.bitmap, right: reply.right } : { image: reply.bitmap };
   } finally {
     worker.terminate();
   }

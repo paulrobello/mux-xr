@@ -21,6 +21,14 @@ export interface PictureImage {
   source: HTMLCanvasElement;
   width: number;
   height: number;
+  /** The right eye of a stereo pair (an iPhone spatial photo); `source` is then the left eye. */
+  right?: StereoEye;
+}
+
+/** A stereo pair's right eye, the same size as the left, with its stored blob. */
+export interface StereoEye {
+  source: HTMLCanvasElement;
+  blob: Blob;
 }
 
 /** A picture ready to show and to store: the canvas plus its re-encoded downscaled blob. */
@@ -39,7 +47,7 @@ export interface PictureLoaderDeps {
   fetch: (input: string, init?: RequestInit) => Promise<Response>;
   decode: (blob: Blob) => Promise<DecodedImage>;
   /** Decodes HEIF, which the browser cannot; absent means HEIF fails as undecodable. */
-  decodeHeif?: (blob: Blob) => Promise<DecodedImage>;
+  decodeHeif?: (blob: Blob) => Promise<{ image: DecodedImage; right?: DecodedImage }>;
   createCanvas: (width: number, height: number) => HTMLCanvasElement;
   /** The page's protocol, for refusing http: URLs from an https: page. */
   pageProtocol?: string;
@@ -124,9 +132,11 @@ export async function preparePicture(
       `size unreadable from the header and over ${MAX_UNPROBED_PICTURE_BYTES / 1048576} MB`,
     );
   let image: DecodedImage;
+  let rightEye: DecodedImage | undefined;
   try {
     if (heif && !deps.decodeHeif) throw new PictureLoadError('decode', name);
-    image = heif && deps.decodeHeif ? await deps.decodeHeif(blob) : await deps.decode(blob);
+    if (heif && deps.decodeHeif) ({ image, right: rightEye } = await deps.decodeHeif(blob));
+    else image = await deps.decode(blob);
   } catch (error) {
     if (error instanceof PictureLoadError && error.code === 'too-large') throw error;
     throw new PictureLoadError('decode', name);
@@ -142,9 +152,33 @@ export async function preparePicture(
     context.imageSmoothingQuality = 'high';
     context.drawImage(image as CanvasImageSource, 0, 0, size.width, size.height);
     const stored = options.reencode === false ? blob : await encode(canvas);
-    return { source: canvas, width: size.width, height: size.height, blob: stored, name };
+    const picture: PreparedPicture = {
+      source: canvas,
+      width: size.width,
+      height: size.height,
+      blob: stored,
+      name,
+    };
+    // A right eye of another size is not a usable pair; the left eye alone shows as a flat picture.
+    if (rightEye && rightEye.width === image.width && rightEye.height === image.height) {
+      const right = deps.createCanvas(size.width, size.height);
+      try {
+        const rightContext = right.getContext('2d');
+        if (!rightContext) throw new PictureLoadError('decode', name);
+        rightContext.imageSmoothingEnabled = true;
+        rightContext.imageSmoothingQuality = 'high';
+        rightContext.drawImage(rightEye as CanvasImageSource, 0, 0, size.width, size.height);
+        picture.right = { source: right, blob: await encode(right) };
+      } catch {
+        // The left eye still shows as a flat picture; the right canvas goes now, not at GC.
+        right.width = 0;
+        right.height = 0;
+      }
+    }
+    return picture;
   } finally {
     image.close?.();
+    rightEye?.close?.();
   }
 }
 
