@@ -320,6 +320,8 @@ export function createHierarchyNavigator(
         transparent: true,
         opacity: 0,
         side: THREE.DoubleSide,
+        // Transparent double-sided materials otherwise draw twice and rebuild program parameters.
+        forceSinglePass: true,
       }),
     );
     sharedMaterials.set(key, value);

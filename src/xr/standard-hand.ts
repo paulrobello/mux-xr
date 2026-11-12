@@ -356,6 +356,10 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
           material.emissiveIntensity = 0.6;
           if (skin) (skin.material as THREE.MeshStandardMaterial).copy(material);
         }
+        // A material shared by a skinned and an unskinned mesh makes three rebuild its program
+        // parameters on every draw of either, so the wrist cap gets its own copy.
+        const cap = ready.root.getObjectByName(`standard-hand-wrist-cap-${side}`);
+        if (cap instanceof THREE.Mesh) cap.material = material.clone();
         models[side] = ready;
         fallback.root.add(ready.root);
       }

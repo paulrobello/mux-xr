@@ -2476,6 +2476,7 @@ export function createWorkspaceScene(
         transparent: true,
         opacity: 0.75,
         side: THREE.DoubleSide,
+        forceSinglePass: true,
       }),
     );
     const edge = new THREE.LineSegments(
@@ -6357,6 +6358,9 @@ export function createWorkspaceScene(
           emissive: ACCENT,
           emissiveIntensity: 0,
           side: THREE.DoubleSide,
+          // Under glass opacity the default back-then-front pair marks the material changed
+          // twice per draw. One pass measured 0 front and 5 back pixels of difference at 0.5.
+          forceSinglePass: true,
         }),
         uiEnvironment.texture,
       ),
@@ -6390,6 +6394,9 @@ export function createWorkspaceScene(
           opacity: SCROLL_STRIP_OPACITY,
           depthWrite: false,
           side: THREE.DoubleSide,
+          // A flat unlit plane blends identically in one pass. The default back-then-front pair
+          // also marks the material changed twice per draw, rebuilding its program parameters.
+          forceSinglePass: true,
         }),
       );
       strip.name = name;

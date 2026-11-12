@@ -142,7 +142,13 @@ describe('standard XR hand', () => {
         `standard-hand-wrist-cap-${capture.side}`,
       ) as THREE.Mesh;
       expect(cap.parent).toBe(skin.skeleton.getBoneByName('wrist'));
-      expect(cap.material).toBe(skin.material);
+      // Its own copy: one material across skinned and unskinned meshes churns three's programs.
+      const capMaterial = cap.material as THREE.MeshStandardMaterial;
+      const skinMaterial = skin.material as THREE.MeshStandardMaterial;
+      expect(capMaterial).not.toBe(skinMaterial);
+      expect(capMaterial.color.getHex()).toBe(skinMaterial.color.getHex());
+      expect(capMaterial.emissive.getHex()).toBe(skinMaterial.emissive.getHex());
+      expect(capMaterial.emissiveIntensity).toBe(skinMaterial.emissiveIntensity);
       const toCap = cap.matrixWorld.clone().invert();
       const point = new THREE.Vector3();
       const rim: number[] = [];
