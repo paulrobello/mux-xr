@@ -9,6 +9,11 @@ export interface ClipboardCopyOptions {
 export interface ClipboardReadOptions {
   /** Ignore locally kept host text, so it is never sent back to the host. */
   excludeHost?: boolean;
+  /**
+   * Return the latest Mux XR copy (a terminal selection) without asking the system clipboard. Quest
+   * Browser can resolve a write and then read back older contents inside an immersive session.
+   */
+  preferLocal?: boolean;
 }
 
 export const HOST_TEXT_TTL_MS = 60_000;
@@ -98,6 +103,9 @@ export function createClipboardBridge(
 
   const read = (readOptions: ClipboardReadOptions = {}): Promise<string | null> => {
     if (disposed) return Promise.resolve(null);
+    if (readOptions.preferLocal && !cachedFromHost && cachedText !== null) {
+      return Promise.resolve(cachedText);
+    }
     if (
       cachedFromHost &&
       writeState !== 'confirmed' &&

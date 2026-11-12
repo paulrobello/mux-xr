@@ -1721,7 +1721,7 @@ export function createWorkspaceScene(
   ): Promise<boolean> => {
     clipboardGeneration++;
     // The read starts before any await so the browser still sees the user gesture.
-    const pending = clipboard.read({ excludeHost: true });
+    const pending = clipboard.read({ excludeHost: true, preferLocal: true });
     if (!actions.writeHostClipboard) {
       setNotice('Host clipboard is not available here.');
       cue('error', source);

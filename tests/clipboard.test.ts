@@ -197,4 +197,20 @@ describe('host text kept after a refused write (F5)', () => {
     expect(await bridge.read()).toBe('local selection');
     expect(await bridge.read({ excludeHost: true })).toBe('local selection');
   });
+
+  it('sends the latest terminal selection when the system read returns older text', async () => {
+    const bridge = createClipboardBridge(() => ({
+      writeText: async () => undefined,
+      readText: async () => 'stale host text',
+    }));
+    await bridge.copy('host text', { fromHost: true });
+    await bridge.copy('quest selection');
+    expect(await bridge.read({ excludeHost: true, preferLocal: true })).toBe('quest selection');
+  });
+
+  it('never prefers kept host text for a local-first read', async () => {
+    const bridge = createClipboardBridge(() => refusing(async () => 'quest text'));
+    await bridge.copy('host text', { fromHost: true });
+    expect(await bridge.read({ excludeHost: true, preferLocal: true })).toBe('quest text');
+  });
 });
