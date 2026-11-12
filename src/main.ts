@@ -55,7 +55,12 @@ import {
 import { createPictureController } from './workspace/pictures';
 import { createWorkspaceScene, type WorkspaceScene } from './xr';
 import { createXREntryController, type XrEntryController } from './xr/entry';
-import { createIndexedDBPictureStorage, createPictureLibrary } from './xr/picture-store';
+import {
+  createIndexedDBPictureStorage,
+  createIndexedDBRecentPictureStorage,
+  createPictureLibrary,
+  createRecentPictureLibrary,
+} from './xr/picture-store';
 
 const app = document.querySelector<HTMLElement>('#app');
 if (!app) throw new Error('Application mount is missing');
@@ -555,11 +560,13 @@ ui = mountWorkspaceUI(app, {
 });
 const pictures = createPictureController({
   library: createPictureLibrary(createIndexedDBPictureStorage()),
+  recent: createRecentPictureLibrary(createIndexedDBRecentPictureStorage()),
   scene: () => scene ?? null,
-  notify: (message) => scene?.setNotice(message),
+  notify: (message) => scene?.notifyPicture(message),
 });
 scene = createWorkspaceScene(ui.sceneHost, actions, {
   onPictureClosed: (id) => pictures.closed(id),
+  pictures,
 });
 const setPageKey = mountPageKeyIndicator(document.body);
 const keyFlash = createKeyFlash((text) => {
@@ -572,6 +579,7 @@ const disposeKeyboardRouter = installKeyboardRouter(document, {
   applicationCursor: (id) => surfaces.get(id)?.applicationCursor ?? false,
   sendBytes: sendText,
   textEntryActive: () => scene.isTextEntryActive(),
+  typeTextEntry: (key) => scene.typeTextEntryKey(key),
   xrPresenting: () => scene.state.xrMode !== 'desktop',
   xrEntryFallbackArmed: () => xrEntry.isFallbackArmed(),
   onKey: (label, sent) => keyFlash.flash(formatKeyIndicator(label, sent)),

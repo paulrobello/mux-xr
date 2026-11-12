@@ -20,7 +20,7 @@ interface PoseDocument {
   poses: Partial<Record<UIPoseName, SavedUIPose>>;
 }
 
-function validPose(value: unknown, maxDistance = 20): value is SavedUIPose {
+export function validPose(value: unknown, maxDistance = 20): value is SavedUIPose {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Partial<SavedUIPose>;
   if (!Array.isArray(candidate.position) || candidate.position.length !== 3) return false;

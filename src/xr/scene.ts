@@ -144,6 +144,7 @@ import {
   NOMINAL_VIEWER_HEIGHT,
   type SavedUIPose,
   type UIPoseName,
+  validPose,
 } from './ui-poses';
 import { createWidgetPoseStore, type WidgetPose } from './widget-poses';
 import {
@@ -173,7 +174,13 @@ type InputMode =
   | 'settings'
   | 'display'
   | 'world'
-  | 'buttons';
+  | 'buttons'
+  | 'picture-url'
+  | 'picture-gallery';
+
+/** Modes that show the virtual keyboard and edit text with it. */
+const isTypingMode = (mode: InputMode): boolean =>
+  mode === 'keyboard' || mode === 'command-editor' || mode === 'picture-url';
 
 export interface PanelTransform {
   position: THREE.Vector3;
@@ -266,9 +273,12 @@ export interface WorkspaceScene {
   /** Feed the agent roster; the panes menu shows it as an Agents group. */
   setAgentRoster(rows: readonly AgentRosterRow[], layout?: AgentRosterLayout): void;
   setQuickCommands(commands: QuickCommandEntry[]): void;
-  /** Shows a picked picture; it fills the newest open placeholder frame when there is one. */
-  /** Returns the ids of older frames removed to keep the frame cap (they lose their stored image). */
-  addPicture(id: string, image: PictureImage): string[];
+  /**
+   * Shows a picked picture in frame `target` (a placeholder or a filled frame it replaces) when
+   * that is still open, else in the newest open placeholder, else in a new frame. Returns the ids
+   * of older frames removed to keep the frame cap (they lose their stored image).
+   */
+  addPicture(id: string, image: PictureImage, target?: string): string[];
   /** Shows stored pictures at their saved poses and drops saved poses with no picture. */
   restorePictures(pictures: ReadonlyArray<{ id: string; image: PictureImage }>): void;
   removePicture(id: string): void;
@@ -282,6 +292,10 @@ export interface WorkspaceScene {
   setKeyIndicator(text: string | null): void;
   /** True while an in-scene text field is taking input. */
   isTextEntryActive(): boolean;
+  /** Types a physical key into the open picture URL field; false when no field took it. */
+  typeTextEntryKey(key: string): boolean;
+  /** A picture controller notice: shown in the open picker panel during its pick, else the HUD. */
+  notifyPicture(message: string): void;
   pasteClipboard(paneId?: string): Promise<boolean>;
   /** Types the host (Mac) clipboard into the selected terminal through the guarded paste path. */
   pasteHostClipboard(paneId?: string): Promise<boolean>;
@@ -751,6 +765,37 @@ function createObservatory(scene: THREE.Scene): THREE.Group {
 }
 
 const COPY_TO_HOST = '\u0000copy-to-host';
+/** pendingPaste target for the picture URL field, which belongs to no terminal. */
+const PICTURE_URL_PASTE = '\u0000picture-url';
+/** Physical editing keys the picture URL field takes besides printable characters. */
+const PICTURE_URL_EDIT_KEYS = new Set([
+  'Backspace',
+  'Delete',
+  'ArrowLeft',
+  'ArrowRight',
+  'Home',
+  'End',
+]);
+/** Recent gallery thumbnails per page: a 3 x 2 grid. */
+const RECENT_PAGE_SIZE = 6;
+
+/** The in-XR picture picker: URL entry and the Recent gallery, served by the picture controller. */
+export interface ScenePicturePicker {
+  addUrl(url: string, target?: string): Promise<boolean>;
+  listRecent(): Promise<ReadonlyArray<RecentPictureEntry> | null>;
+  placeRecent(id: string, target?: string): Promise<boolean>;
+  /** Resolves false when storage refused the delete. */
+  removeRecent(id: string): Promise<boolean>;
+}
+
+export interface RecentPictureEntry {
+  id: string;
+  name: string;
+  thumbnail: PictureImage;
+}
+
+/** An open "Add Picture" placeholder's pose key; it restores as a placeholder, not a picture. */
+const isPlaceholderKey = (key: string): boolean => key.startsWith(`${PICTURE_KIND}:placeholder-`);
 
 export function createWorkspaceScene(
   container: HTMLElement,
@@ -759,6 +804,8 @@ export function createWorkspaceScene(
     feedback?: UIFeedback;
     /** A picture frame was closed by the user; its stored image should go. */
     onPictureClosed?: (id: string) => void;
+    /** In-XR picture picking; without it the frame's Enter URL and Recent actions do nothing. */
+    pictures?: ScenePicturePicker;
   } = {},
 ): WorkspaceScene {
   const feedback = options.feedback ?? createUIFeedback();
@@ -1245,6 +1292,18 @@ export function createWorkspaceScene(
   let commandDraft: CommandDraft | null = null;
   let commandWorkspaceId: string | undefined;
   let commandEditorMessage = '';
+  // In-XR picture picking: the URL being typed, the frame it fills, and the Recent gallery.
+  let pictureUrl = { text: '', cursor: 0 };
+  let pictureTarget: string | undefined;
+  let picturePanelMessage = '';
+  let pictureBusy = false;
+  /** Bumped whenever a picker panel opens, so a finished pick never closes a newer panel. */
+  let pictureSession = 0;
+  /** A controller notice raised during the running pick, shown once: in the panel or on the HUD. */
+  let pictureNotice: string | null = null;
+  let recentPictures: ReadonlyArray<RecentPictureEntry> | null | 'loading' = 'loading';
+  let recentPage = 0;
+  let recentGeneration = 0;
   let commandPage = 0;
   let templateHint: string | null = null;
   let commandTool: CommandTool = 'run';
@@ -1402,8 +1461,7 @@ export function createWorkspaceScene(
     if (!press?.before) return;
     modifierState.restore(press.modifier, press.before.active, press.before.locked);
     syncModifierVisuals();
-    if (refresh && inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
-      refreshInputRoot(inputMode);
+    if (refresh && inputRoot && isTypingMode(inputMode)) refreshInputRoot(inputMode);
   };
   const resetHandContact = (
     source: THREE.Group,
@@ -1759,6 +1817,35 @@ export function createWorkspaceScene(
     supersedable = false,
   ): Promise<boolean> => {
     const generation = ++clipboardGeneration;
+    if (
+      inputRoot &&
+      inputMode === 'picture-url' &&
+      (paneId === undefined || paneId === PICTURE_URL_PASTE)
+    ) {
+      const received = await read();
+      if (disposed || (supersedable && generation !== clipboardGeneration)) return false;
+      // URLs hold no whitespace, so a copied line break or indent is dropped.
+      const text = typeof received === 'string' ? received.replace(/\s+/g, '') : '';
+      if (!text) {
+        setNotice(
+          received && typeof received === 'object'
+            ? received.error
+            : 'Clipboard is empty or unavailable. Copy an image URL first.',
+        );
+        cue('error', source);
+        return false;
+      }
+      if (!inputRoot || inputMode !== 'picture-url') return false;
+      const characters = Array.from(pictureUrl.text);
+      const cursor = Math.min(pictureUrl.cursor, characters.length);
+      const inserted = Array.from(text);
+      characters.splice(cursor, 0, ...inserted);
+      pictureUrl = { text: characters.join(''), cursor: cursor + inserted.length };
+      picturePanelMessage = '';
+      refreshInputRoot('picture-url');
+      showToast(pastedToast);
+      return true;
+    }
     const id = paneId ?? mutableState.inputTargetId ?? mutableState.selectedTerminalId;
     const panel = id ? panels.get(id) : undefined;
     if (
@@ -2065,10 +2152,7 @@ export function createWorkspaceScene(
   const controllerRayBlocked = (source: THREE.Group): boolean =>
     keyboardRaysBlocked || (controllerHandedness.get(source) === 'left' && wristWatch.near);
   const keyboardSurface = (): THREE.Group | null =>
-    inputRoot &&
-    (inputMode === 'keyboard' || inputMode === 'command-editor') &&
-    !radialMenu.root.visible &&
-    !warpEdit
+    inputRoot && isTypingMode(inputMode) && !radialMenu.root.visible && !warpEdit
       ? inputRoot
       : null;
   const contactKeyboard = (): THREE.Group | null =>
@@ -2173,7 +2257,7 @@ export function createWorkspaceScene(
     renderer?.xr.isPresenting &&
     mutableState.keyborbEnabled &&
     inputRoot?.visible &&
-    (inputMode === 'keyboard' || inputMode === 'command-editor') &&
+    isTypingMode(inputMode) &&
     !radialMenu.root.visible &&
     !warpEdit &&
     !gripActive()
@@ -2508,8 +2592,21 @@ export function createWorkspaceScene(
     if (widgetRestorePending) {
       for (const [kind, pose] of Object.entries(widgetPoseStore.read())) {
         // Multi-instance widgets (pictures) restore from their own records, not from a pose.
-        if (!pose || !isWidgetKind(kind) || widgetKeyKind(kind) !== kind) continue;
-        if (touchedWidgets.has(kind)) continue;
+        if (!pose || touchedWidgets.has(kind)) continue;
+        if (isPlaceholderKey(kind) && !widgets.has(kind)) {
+          const widget = createPictureFrameWidget(uiEnvironment.texture, {
+            id: kind.slice(PICTURE_KIND.length + 1),
+          });
+          mountWidget(PICTURE_KIND, widget, false);
+          // A pose the store cannot apply falls back to the placeholder spot, never the origin.
+          if (!validPose(pose)) placeWidget(kind, widget);
+          else {
+            applyUIPose(widget.root, pose, [0.25, 2]);
+            if (pose.placed) widget.root.userData.picturePlaced = true;
+          }
+          continue;
+        }
+        if (!isWidgetKind(kind) || widgetKeyKind(kind) !== kind) continue;
         const widget = widgets.get(kind) ?? addWidget(kind);
         applyUIPose(widget.root, pose, [0.25, 2]);
       }
@@ -2655,8 +2752,7 @@ export function createWorkspaceScene(
         press.locked = true;
         modifierState.lock(press.modifier);
         cue('lock', source);
-        if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
-          refreshInputRoot(inputMode);
+        if (inputRoot && isTypingMode(inputMode)) refreshInputRoot(inputMode);
         syncModifierVisuals();
       }
     }
@@ -2828,7 +2924,8 @@ export function createWorkspaceScene(
       lastSelectSource = controller;
       const cues = cueCount;
       if (press.object.userData.inputAction === 'pasteClipboard') {
-        if (press.target) void pasteClipboard(press.target);
+        if (inputMode === 'picture-url') void pasteClipboard(PICTURE_URL_PASTE, controller);
+        else if (press.target) void pasteClipboard(press.target);
       } else if (press.object.userData.inputAction === 'copyToHost') void copyQuestToHost();
       else activateTarget(target);
       pressCue(controller, press.object.userData.inputAction, cues);
@@ -3311,8 +3408,7 @@ export function createWorkspaceScene(
     );
   };
   const saveWidgetPose = (key: WidgetKey, widget: Widget): void => {
-    // A placeholder frame has no stored picture, so its pose would restore to nothing.
-    if (widget.root.userData.picturePlaceholder) return;
+    // A placeholder's pose persists too, so a reload during the exit-to-pick flow keeps it.
     const pose: WidgetPose = captureUIPose(widget.root);
     if (widget.root.userData.widgetKind === PICTURE_KIND) {
       const slot = widget.root.userData.widgetSlot;
@@ -3363,15 +3459,123 @@ export function createWorkspaceScene(
     mountWidget(kind, widget);
     return widget;
   };
+  const releaseThumbnail = (image: PictureImage): void => {
+    image.source.width = 0;
+    image.source.height = 0;
+  };
+  /** Drops the gallery's decoded thumbnails; their textures went with the panel's disposal. */
+  const releaseRecentPictures = (): void => {
+    recentGeneration++;
+    if (Array.isArray(recentPictures))
+      for (const entry of recentPictures) releaseThumbnail(entry.thumbnail);
+    recentPictures = 'loading';
+  };
+  const openPicturePanel = (mode: 'picture-url' | 'picture-gallery', target?: string): void => {
+    pictureSession++;
+    pictureTarget = target;
+    picturePanelMessage = pictureBusy ? 'Loading… the current picture is still loading' : '';
+    if (mode === 'picture-url') pictureUrl = { text: '', cursor: 0 };
+    else {
+      releaseRecentPictures();
+      recentPage = 0;
+      const generation = recentGeneration;
+      const settle = (entries: ReadonlyArray<RecentPictureEntry> | null): void => {
+        if (disposed || generation !== recentGeneration) {
+          for (const entry of entries ?? []) releaseThumbnail(entry.thumbnail);
+          return;
+        }
+        recentPictures = entries;
+        if (inputRoot && inputMode === 'picture-gallery') refreshInputRoot('picture-gallery');
+      };
+      if (!options.pictures) recentPictures = null;
+      else void options.pictures.listRecent().then(settle, () => settle(null));
+    }
+    clearArmedModifiers();
+    showInput(mode);
+  };
+  /** Runs a pick from an XR picker panel; a failure keeps the panel open and the notice says why. */
+  const runPicturePick = (
+    mode: 'picture-url' | 'picture-gallery',
+    pick: (picker: ScenePicturePicker) => Promise<boolean>,
+    failure: string,
+  ): void => {
+    const picker = options.pictures;
+    if (!picker) return;
+    if (pictureBusy) {
+      picturePanelMessage = 'Loading… the current picture is still loading';
+      refreshInputRoot(mode);
+      return;
+    }
+    pictureBusy = true;
+    pictureNotice = null;
+    const session = pictureSession;
+    const target = pictureTarget;
+    picturePanelMessage = mode === 'picture-url' ? 'Loading picture…' : 'Placing picture…';
+    refreshInputRoot(mode);
+    void pick(picker)
+      .catch(() => false)
+      .then((shown) => {
+        pictureBusy = false;
+        const notice = pictureNotice;
+        pictureNotice = null;
+        if (disposed) return;
+        // A panel reopened for another frame during the load is left alone.
+        const current = session === pictureSession;
+        const open = current && Boolean(inputRoot) && inputMode === mode;
+        if (shown) {
+          if (pictureTarget === target) pictureTarget = undefined;
+          if (current && mode === 'picture-url') pictureUrl = { text: '', cursor: 0 };
+          if (open) hideInput();
+          if (notice) setNotice(notice);
+          return;
+        }
+        if (!open) {
+          if (notice) setNotice(notice);
+          return;
+        }
+        picturePanelMessage = notice ?? failure;
+        refreshInputRoot(mode);
+      });
+  };
+  const submitPictureUrl = (): void => {
+    const url = pictureUrl.text.trim();
+    if (!url) {
+      picturePanelMessage = 'Type or paste an image URL';
+      refreshInputRoot('picture-url');
+      return;
+    }
+    const target = pictureTarget;
+    runPicturePick(
+      'picture-url',
+      (picker) => picker.addUrl(url, target),
+      'Could not load that URL',
+    );
+  };
+  const placeRecentPicture = (id: string): void => {
+    const target = pictureTarget;
+    runPicturePick(
+      'picture-gallery',
+      (picker) => picker.placeRecent(id, target),
+      'Could not place that picture',
+    );
+  };
   const pictureAnisotropy = (): number =>
     Math.min(mutableState.filtering.anisotropy, Number(scene.userData.maxAnisotropy ?? 1));
-  const showPicture = (id: string, image: PictureImage, restore: boolean): string[] => {
+  const showPicture = (
+    id: string,
+    image: PictureImage,
+    restore: boolean,
+    target?: string,
+  ): string[] => {
     if (disposed) return [];
     const key = widgetKey(PICTURE_KIND, id);
     if (widgets.has(key)) removeWidget(key, false);
+    const targeted = target ? widgets.get(widgetKey(PICTURE_KIND, target)) : undefined;
+    // A filled placeholder or a changed frame hands over its pose and spot.
     const placeholder = restore
       ? undefined
-      : [...widgets.values()].reverse().find((entry) => entry.root.userData.picturePlaceholder);
+      : (targeted ??
+        [...widgets.values()].reverse().find((entry) => entry.root.userData.picturePlaceholder));
     const widget = createPictureFrameWidget(uiEnvironment.texture, {
       id,
       image,
@@ -3385,8 +3589,11 @@ export function createWorkspaceScene(
       widget.root.quaternion.copy(placeholder.root.quaternion);
       widget.root.scale.copy(placeholder.root.scale);
       if (placeholder.root.userData.picturePlaced) widget.root.userData.picturePlaced = true;
-      else widget.root.userData.widgetSlot = PICTURE_PLACEHOLDER_SLOT;
-      removeWidget(String(placeholder.root.userData.widgetKey), false);
+      else if (placeholder.root.userData.picturePlaceholder)
+        widget.root.userData.widgetSlot = PICTURE_PLACEHOLDER_SLOT;
+      else if (typeof placeholder.root.userData.widgetSlot === 'number')
+        widget.root.userData.widgetSlot = placeholder.root.userData.widgetSlot;
+      removeWidget(String(placeholder.root.userData.widgetKey));
     } else if (saved) {
       // Only a grab marks a frame placed. An unmoved frame keeps its saved slot so new frames
       // spawn elsewhere and recenter can re-slot it; one with no free saved slot takes a new one.
@@ -3426,8 +3633,9 @@ export function createWorkspaceScene(
         ([, entry]) =>
           entry.root.userData.widgetKind === kind && entry.root.userData.picturePlaceholder,
       );
+      const [key, widget] = open ?? [undefined, addWidget(kind)];
       if (open) placeWidget(open[0], open[1]);
-      else addWidget(kind);
+      saveWidgetPose(key ?? String(widget.root.userData.widgetKey), widget);
       mutableState.widgets = [...widgets.keys()];
       hideInput();
       notify();
@@ -3573,8 +3781,6 @@ export function createWorkspaceScene(
       return 'controller';
     return controllerRoots.some((root) => activeHand(root)) ? 'hand' : null;
   };
-  const isTypingMode = (mode: InputMode): boolean =>
-    mode === 'keyboard' || mode === 'command-editor';
   const HAND_KEYBOARD_OFFSET = new THREE.Vector3(0, -0.4, -0.45);
   const HAND_KEYBOARD_TILT = THREE.MathUtils.degToRad(-30);
   const resetInputPose = (): void => {
@@ -3618,6 +3824,7 @@ export function createWorkspaceScene(
     resetInputPose();
   };
   const refreshInputRoot = (mode: InputMode): void => {
+    if (mode !== 'picture-gallery' && inputMode === 'picture-gallery') releaseRecentPictures();
     if (mode !== 'warp') settleWarpPanel(false);
     if (mode !== inputMode) resetHandContacts(false);
     if (mode !== 'keyboard') templateHint = null;
@@ -3661,7 +3868,7 @@ export function createWorkspaceScene(
       inputRoot.quaternion.copy(inputTransform.quaternion);
       inputRoot.scale.setScalar(inputTransform.scale);
     } else resetInputPose();
-    if (!keyboardPoseRestored && (mode === 'keyboard' || mode === 'command-editor')) {
+    if (!keyboardPoseRestored && isTypingMode(mode)) {
       const saved = poseStore.read('keyboard');
       if (saved && !previousRoot) {
         applyUIPose(inputRoot, saved, inputRoot.userData.scaleLimits as [number, number]);
@@ -3787,34 +3994,39 @@ export function createWorkspaceScene(
       ? `Target: ${mutableState.inputTargetTitle}`
       : 'No target selected';
     const title = createLabelButton(
-      mode === 'command-editor'
-        ? commandEditorMessage ||
-            (commandDraft?.editing ? 'Edit quick command' : 'New quick command')
-        : mode === 'widgets'
-          ? 'Widgets'
-          : mode === 'settings'
-            ? 'Settings'
-            : mode === 'buttons'
-              ? 'Controller buttons'
-              : mode === 'display'
-                ? 'Display settings'
-                : mode === 'world'
-                  ? 'World settings'
-                  : mode === 'filtering'
-                    ? 'Terminal filtering'
-                    : mode === 'warp'
-                      ? 'Terminal curvature'
-                      : mode === 'arrange'
-                        ? 'Arrange terminals'
-                        : mode === 'panes'
-                          ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
-                          : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? (mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard') : 'Terminal settings'} · ${targetTitle}`,
+      mode === 'picture-url'
+        ? 'Picture URL'
+        : mode === 'picture-gallery'
+          ? 'Recent pictures'
+          : mode === 'command-editor'
+            ? commandEditorMessage ||
+              (commandDraft?.editing ? 'Edit quick command' : 'New quick command')
+            : mode === 'widgets'
+              ? 'Widgets'
+              : mode === 'settings'
+                ? 'Settings'
+                : mode === 'buttons'
+                  ? 'Controller buttons'
+                  : mode === 'display'
+                    ? 'Display settings'
+                    : mode === 'world'
+                      ? 'World settings'
+                      : mode === 'filtering'
+                        ? 'Terminal filtering'
+                        : mode === 'warp'
+                          ? 'Terminal curvature'
+                          : mode === 'arrange'
+                            ? 'Arrange terminals'
+                            : mode === 'panes'
+                              ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
+                              : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? (mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard') : 'Terminal settings'} · ${targetTitle}`,
       mode === 'panes' ? 1.8 : 0.9,
       0.12,
       { inputAction: 'grabInput' },
     );
     title.userData.dragHandle = true;
-    title.position.y = mode === 'panes' ? 1.65 : mode === 'command-editor' ? 0.88 : 0.56;
+    title.position.y =
+      mode === 'panes' ? 1.65 : mode === 'command-editor' || mode === 'picture-url' ? 0.88 : 0.56;
     inputRoot.add(title);
     if (mode === 'command-editor' && commandDraft) {
       for (const [field, y] of [
@@ -3863,6 +4075,44 @@ export function createWorkspaceScene(
       );
       confirm.position.set(0, 1.18, 0);
       inputRoot.add(scope, enter, save, clear, cancel, confirm);
+    }
+    if (mode === 'picture-url') {
+      const value = Array.from(pictureUrl.text);
+      const cursor = Math.min(pictureUrl.cursor, value.length);
+      value.splice(cursor, 0, '|');
+      const start = Math.max(0, cursor - 40);
+      const field = createLabelButton(
+        `URL: ${start ? '…' : ''}${value.slice(start, start + 64).join('')}`,
+        1.5,
+        0.12,
+        { inputAction: 'noop', wrap: true },
+      );
+      field.name = 'xr-picture-url-field';
+      field.position.y = 0.7;
+      setModifierVisual(field, true);
+      inputRoot.add(field);
+      // Every action sits in one row above the field, so the panel ends at the keyboard's last
+      // row and never reaches down over the HUD bar.
+      for (const [label, inputAction, x] of [
+        ['Paste', 'pasteClipboard', -1],
+        ['Paste host', 'pasteHostClipboard', -0.6],
+        [pictureBusy ? 'Loading…' : 'Load', pictureBusy ? 'noop' : 'pictureUrlLoad', -0.2],
+        ['Clear', 'pictureUrlClear', 0.2],
+        ['Recent', 'pictureRecent', 0.6],
+      ] as const) {
+        const button = createLabelButton(label, 0.36, 0.12, { inputAction });
+        button.position.set(x, 1.04, 0);
+        inputRoot.add(button);
+      }
+    }
+    if ((mode === 'picture-url' || mode === 'picture-gallery') && picturePanelMessage) {
+      const message = createLabelButton(picturePanelMessage, 1.5, 0.1, {
+        inputAction: 'noop',
+        wrap: true,
+      });
+      message.name = 'xr-picture-message';
+      message.position.y = mode === 'picture-url' ? 0.56 : -0.6;
+      inputRoot.add(message);
     }
     if (mode === 'settings') {
       for (const [index, [label, destination]] of (
@@ -4261,6 +4511,81 @@ export function createWorkspaceScene(
         button.position.set(index ? 0.4 : -0.4, -0.54, 0);
         inputRoot.add(button);
       }
+    } else if (mode === 'picture-gallery') {
+      const entries = recentPictures;
+      if (!Array.isArray(entries) || entries.length === 0) {
+        const status = createLabelButton(
+          entries === 'loading'
+            ? 'Loading…'
+            : entries === null
+              ? 'Recent pictures need browser storage'
+              : 'No recent pictures yet',
+          1.3,
+          0.1,
+          { inputAction: 'noop' },
+        );
+        status.name = 'xr-recent-status';
+        status.position.y = 0.1;
+        inputRoot.add(status);
+      } else {
+        const pages = Math.ceil(entries.length / RECENT_PAGE_SIZE);
+        recentPage = Math.max(0, Math.min(pages - 1, recentPage));
+        const first = recentPage * RECENT_PAGE_SIZE;
+        entries.slice(first, first + RECENT_PAGE_SIZE).forEach((entry, index) => {
+          // Tiles are 0.4 x 0.28 panel units (15 x 11 cm at the 0.38 spawn scale), 0.07 and 0.06 apart.
+          const x = ((index % 3) - 1) * 0.47;
+          const y = 0.28 - Math.floor(index / 3) * 0.36;
+          const { width, height, source } = entry.thumbnail;
+          const fit = Math.min(0.4 / width, 0.28 / height);
+          const texture = new THREE.CanvasTexture(source);
+          texture.colorSpace = THREE.SRGBColorSpace;
+          const tile = new THREE.Mesh(
+            new THREE.PlaneGeometry(width * fit, height * fit),
+            new THREE.MeshBasicMaterial({ map: texture, toneMapped: false }),
+          );
+          tile.name = 'xr-recent-thumbnail';
+          Object.assign(tile.userData, {
+            inputAction: 'pictureRecentPlace',
+            recentId: entry.id,
+            helpText: `Put ${entry.name} in the frame`,
+          });
+          tile.position.set(x, y, 0);
+          const remove = createLabelButton('×', 0.12, 0.12, {
+            inputAction: 'pictureRecentRemove',
+            recentId: entry.id,
+          });
+          remove.name = 'xr-recent-remove';
+          remove.userData.helpText = `Remove ${entry.name} from Recent`;
+          // Centred on the thumbnail's top-right corner: pinch-sized (0.12 is 46 mm) while covering
+          // only 0.06 of the thumbnail's width, under a third of a 3:4 portrait.
+          remove.position.set(x + (width * fit) / 2, y + (height * fit) / 2, 0.01);
+          inputRoot?.add(tile, remove);
+        });
+        if (pages > 1) {
+          const caption = createLabelButton(`${recentPage + 1} / ${pages}`, 0.3, 0.09, {
+            inputAction: 'noop',
+          });
+          caption.position.y = -0.3;
+          inputRoot.add(caption);
+          for (const [label, delta, x] of [
+            ['Prev', -1, -0.5],
+            ['Next', 1, 0.5],
+          ] as const) {
+            const page = createLabelButton(label, 0.34, 0.12, {
+              inputAction: (delta < 0 ? recentPage > 0 : recentPage < pages - 1)
+                ? 'pictureRecentPage'
+                : 'noop',
+              delta,
+            });
+            page.position.set(x, -0.3, 0);
+            inputRoot.add(page);
+          }
+        }
+      }
+      const enterUrl = createLabelButton('Enter URL', 0.5, 0.12, { inputAction: 'pictureUrl' });
+      // Shares the bottom row with Close, keeping the panel short and clear of the HUD bar.
+      enterUrl.position.set(-0.3, -0.46, 0);
+      inputRoot.add(enterUrl);
     } else if (mode === 'widgets') {
       for (const [index, { kind, displayName }] of WIDGET_REGISTRY.entries()) {
         const button = createLabelButton(
@@ -4420,6 +4745,8 @@ export function createWorkspaceScene(
               : -0.66,
       0,
     );
+    if (mode === 'picture-gallery') close.position.set(0.3, -0.46, 0);
+    if (mode === 'picture-url') close.position.set(1, 1.04, 0);
     inputRoot.add(close);
     if (['terminal', 'display', 'world', 'filtering', 'buttons'].includes(mode)) {
       close.position.x = 0.22;
@@ -4467,7 +4794,7 @@ export function createWorkspaceScene(
       }
       stackAboveControls(inputRoot, stacked);
     }
-    if (mode === 'keyboard' || mode === 'command-editor')
+    if (isTypingMode(mode))
       for (const child of inputRoot.children) {
         const action = child.userData.inputAction;
         if (
@@ -4489,10 +4816,9 @@ export function createWorkspaceScene(
     }
     const size = bounds.getSize(new THREE.Vector3());
     const center = bounds.getCenter(new THREE.Vector3());
-    const keyboardRadians =
-      mode === 'keyboard' || mode === 'command-editor'
-        ? THREE.MathUtils.degToRad(mutableState.keyboardCurvature)
-        : 0;
+    const keyboardRadians = isTypingMode(mode)
+      ? THREE.MathUtils.degToRad(mutableState.keyboardCurvature)
+      : 0;
     const backing = new THREE.Mesh(
       keyboardRadians
         ? createCurvedTerminalGeometry({
@@ -4507,10 +4833,7 @@ export function createWorkspaceScene(
     backing.position.z = -0.015;
     backing.name = 'input-backdrop';
     if (keyboardRadians) backing.material.depthWrite = false;
-    if (
-      (mode === 'keyboard' || mode === 'command-editor') &&
-      !mutableState.keyboardBackgroundEnabled
-    ) {
+    if (isTypingMode(mode) && !mutableState.keyboardBackgroundEnabled) {
       backing.material.transparent = true;
       backing.material.opacity = 0;
       backing.material.depthWrite = false;
@@ -4537,8 +4860,7 @@ export function createWorkspaceScene(
     if (enabled === mutableState.keyborbEnabled) return;
     resetHandContacts(false);
     mutableState.keyborbEnabled = enabled;
-    if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
-      refreshInputRoot(inputMode);
+    if (inputRoot && isTypingMode(inputMode)) refreshInputRoot(inputMode);
     notify();
   };
   const createHud = (): void => {
@@ -4615,7 +4937,35 @@ export function createWorkspaceScene(
     if (text !== null) updateLabel(keyLabel, text);
   };
   const isTextEntryActive = (): boolean =>
-    inputRoot !== null && inputMode === 'command-editor' && commandDraft !== null;
+    inputRoot !== null &&
+    ((inputMode === 'command-editor' && commandDraft !== null) || inputMode === 'picture-url');
+  /** Picture controller notices: held for the open picker panel during its pick, else the HUD. */
+  const notifyPicture = (message: string): void => {
+    if (
+      pictureBusy &&
+      inputRoot &&
+      (inputMode === 'picture-url' || inputMode === 'picture-gallery')
+    )
+      pictureNotice = pictureNotice ? `${pictureNotice}. ${message}` : message;
+    else setNotice(message);
+  };
+  /** A physical key typed while the picture URL field is open; true when the field took it. */
+  const typeTextEntryKey = (key: string): boolean => {
+    if (!inputRoot || inputMode !== 'picture-url') return false;
+    if (key === 'Enter') submitPictureUrl();
+    else if (key === 'Escape') hideInput();
+    else {
+      if (key.length !== 1 && !PICTURE_URL_EDIT_KEYS.has(key)) return false;
+      const draft = editCommandDraft(
+        { ...createCommandDraft('picture-url'), label: pictureUrl.text, cursor: pictureUrl.cursor },
+        key,
+      );
+      pictureUrl = { text: draft.label, cursor: draft.cursor };
+      picturePanelMessage = '';
+      refreshInputRoot('picture-url');
+    }
+    return true;
+  };
   const setUpdateAvailable = (available: boolean): void => {
     if (mutableState.updateAvailable === available) return;
     mutableState.updateAvailable = available;
@@ -4730,6 +5080,57 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'grabInput') return true;
+    if (action === 'pictureUrl' || action === 'pictureRecent') {
+      const owner = widgetOwning(hit)?.[1].root;
+      const choices = owner?.getObjectByName('picture-change-choices');
+      if (choices) choices.visible = false;
+      const id = owner?.userData.pictureId;
+      openPicturePanel(
+        action === 'pictureUrl' ? 'picture-url' : 'picture-gallery',
+        typeof id === 'string' ? id : pictureTarget,
+      );
+      return true;
+    }
+    if (action === 'pictureChange') {
+      const choices = widgetOwning(hit)?.[1].root.getObjectByName('picture-change-choices');
+      if (choices) choices.visible = !choices.visible;
+      return true;
+    }
+    if (action === 'pictureUrlLoad') {
+      submitPictureUrl();
+      return true;
+    }
+    if (action === 'pictureUrlClear') {
+      pictureUrl = { text: '', cursor: 0 };
+      picturePanelMessage = '';
+      refreshInputRoot('picture-url');
+      return true;
+    }
+    if (action === 'pictureRecentPage') {
+      recentPage += Number(hit.userData.delta) || 0;
+      refreshInputRoot('picture-gallery');
+      return true;
+    }
+    if (action === 'pictureRecentPlace') {
+      placeRecentPicture(String(hit.userData.recentId));
+      return true;
+    }
+    if (action === 'pictureRecentRemove') {
+      const id = String(hit.userData.recentId);
+      const picker = options.pictures;
+      if (!picker) return true;
+      void picker.removeRecent(id).then((removed) => {
+        if (disposed || !inputRoot || inputMode !== 'picture-gallery') return;
+        if (removed && Array.isArray(recentPictures)) {
+          for (const entry of recentPictures)
+            if (entry.id === id) releaseThumbnail(entry.thumbnail);
+          recentPictures = recentPictures.filter((entry) => entry.id !== id);
+          showToast('Removed from Recent.');
+        } else if (!removed) picturePanelMessage = 'Could not remove that picture from Recent';
+        refreshInputRoot('picture-gallery');
+      });
+      return true;
+    }
     if (action === 'newCommand') {
       commandDraft = createCommandDraft(crypto.randomUUID());
       commandWorkspaceId = availablePanes.find(
@@ -5115,6 +5516,33 @@ export function createWorkspaceScene(
       refreshInputRoot(inputMode);
       return true;
     }
+    if (action === 'key' && inputMode === 'picture-url') {
+      const key = String(hit.userData.key);
+      const modifier = hit.userData.modifier as KeyboardModifier | undefined;
+      if (modifier) modifierState.tap(modifier);
+      else if (key === 'Enter') {
+        submitPictureUrl();
+        return true;
+      } else if (key === 'Escape') {
+        hideInput();
+        return true;
+      } else {
+        const draft = editCommandDraft(
+          {
+            ...createCommandDraft('picture-url'),
+            label: pictureUrl.text,
+            cursor: pictureUrl.cursor,
+          },
+          key,
+          modifierState.active,
+        );
+        pictureUrl = { text: draft.label, cursor: draft.cursor };
+        consumeArmedModifiers();
+      }
+      picturePanelMessage = '';
+      refreshInputRoot('picture-url');
+      return true;
+    }
     if (action === 'key' && inputMode === 'command-editor' && commandDraft) {
       const modifier = hit.userData.modifier as keyof KeyModifiers | undefined;
       if (modifier) modifierState.tap(modifier);
@@ -5476,7 +5904,12 @@ export function createWorkspaceScene(
           return;
         const pressedAction = targetFromController(root)?.object?.userData.inputAction;
         if (pressedAction === 'pasteClipboard')
-          pendingPaste.set(root, mutableState.inputTargetId ?? mutableState.selectedTerminalId);
+          pendingPaste.set(
+            root,
+            inputMode === 'picture-url'
+              ? PICTURE_URL_PASTE
+              : (mutableState.inputTargetId ?? mutableState.selectedTerminalId),
+          );
         else if (pressedAction === 'copyToHost') pendingPaste.set(root, COPY_TO_HOST);
         onControllerSelect(root);
       };
@@ -5607,11 +6040,7 @@ export function createWorkspaceScene(
         if (object) cue('release', root);
         if (object && ![...dragStates.values()].some((drag) => drag.object === object)) {
           if (object === hudRoot) saveUIPose('hud', object);
-          else if (
-            object === inputRoot &&
-            (inputMode === 'keyboard' || inputMode === 'command-editor')
-          )
-            saveKeyboardPose(object);
+          else if (object === inputRoot && isTypingMode(inputMode)) saveKeyboardPose(object);
           if (object.userData.terminalId) rememberTerminalPlacements();
           if (object.userData.widgetKey) {
             const kind = object.userData.widgetKey as WidgetKey;
@@ -6204,8 +6633,7 @@ export function createWorkspaceScene(
   };
   const captureWorkspaceState = (): void => {
     if (hudRoot) saveUIPose('hud', hudRoot);
-    if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
-      saveKeyboardPose(inputRoot);
+    if (inputRoot && isTypingMode(inputMode)) saveKeyboardPose(inputRoot);
     for (const [kind, widget] of widgets) saveWidgetPose(kind, widget);
     rememberTerminalPlacements();
   };
@@ -6491,16 +6919,14 @@ export function createWorkspaceScene(
   const setKeyboardBackgroundEnabled = (enabled: boolean): void => {
     if (mutableState.keyboardBackgroundEnabled === enabled) return;
     mutableState.keyboardBackgroundEnabled = enabled;
-    if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
-      refreshInputRoot(inputMode);
+    if (inputRoot && isTypingMode(inputMode)) refreshInputRoot(inputMode);
     notify();
   };
   const setKeyboardCurvature = (degrees: number): void => {
     const next = validateKeyboardCurvature(degrees);
     if (next === mutableState.keyboardCurvature) return;
     mutableState.keyboardCurvature = next;
-    if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
-      refreshInputRoot(inputMode);
+    if (inputRoot && isTypingMode(inputMode)) refreshInputRoot(inputMode);
     notify();
   };
   const setKeyborbMode = (mode: KeyborbMode): void => {
@@ -6670,9 +7096,9 @@ export function createWorkspaceScene(
     syncModifierVisuals();
   };
   const hideInput = (): void => {
+    if (inputMode === 'picture-gallery') releaseRecentPictures();
     settleWarpPanel(false);
-    if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
-      saveKeyboardPose(inputRoot);
+    if (inputRoot && isTypingMode(inputMode)) saveKeyboardPose(inputRoot);
     if (inputRoot)
       inputTransform = {
         position: inputRoot.position.clone(),
@@ -6752,8 +7178,7 @@ export function createWorkspaceScene(
       rememberTerminalPlacements();
       for (const [kind, widget] of widgets) saveWidgetPose(kind, widget);
       if (hudRoot) saveUIPose('hud', hudRoot);
-      if (inputRoot && (inputMode === 'keyboard' || inputMode === 'command-editor'))
-        saveKeyboardPose(inputRoot);
+      if (inputRoot && isTypingMode(inputMode)) saveKeyboardPose(inputRoot);
       keyboardResume = null;
       endFocusMode(true);
       releaseAllMouse();
@@ -7342,12 +7767,19 @@ export function createWorkspaceScene(
     setUpdateAvailable,
     setKeyIndicator,
     isTextEntryActive,
+    typeTextEntryKey,
+    notifyPicture,
     setNotice,
-    addPicture: (id, image) => showPicture(id, image, false),
+    addPicture: (id, image, target) => showPicture(id, image, false, target),
     restorePictures: (pictures) => {
       const ids = new Set(pictures.map(({ id }) => widgetKey(PICTURE_KIND, id)));
       for (const key of Object.keys(widgetPoseStore.read()))
-        if (widgetKeyKind(key) === PICTURE_KIND && !ids.has(key) && !widgets.has(key))
+        if (
+          widgetKeyKind(key) === PICTURE_KIND &&
+          !isPlaceholderKey(key) &&
+          !ids.has(key) &&
+          !widgets.has(key)
+        )
           widgetPoseStore.remove(key);
       for (const { id, image } of pictures) showPicture(id, image, true);
     },

@@ -214,6 +214,24 @@ async function readCapped(response: Response, host: string, signal: AbortSignal)
   return new Blob(chunks as BlobPart[], { type });
 }
 
+/** Long edge of a Recent gallery thumbnail, so the grid never uploads full 2048 px textures. */
+export const PICTURE_THUMBNAIL_EDGE = 256;
+
+/** Draws `source` into a canvas no larger than PICTURE_THUMBNAIL_EDGE and encodes it as WebP. */
+export function createPictureThumbnail(
+  source: HTMLCanvasElement,
+  deps: Pick<PictureLoaderDeps, 'createCanvas'> = browserDeps(),
+): Promise<Blob> {
+  const size = fitWithin(source.width, source.height, PICTURE_THUMBNAIL_EDGE);
+  const canvas = deps.createCanvas(size.width, size.height);
+  const context = canvas.getContext('2d');
+  if (!context) return Promise.reject(new PictureLoadError('decode', 'thumbnail'));
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(source, 0, 0, size.width, size.height);
+  return encode(canvas);
+}
+
 /** Decodes a blob read back from storage, without re-encoding it. */
 export function restorePicture(
   blob: Blob,

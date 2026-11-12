@@ -65,7 +65,15 @@ vi.mock('three', async (importOriginal) => {
 import * as THREE from 'three';
 import type { PaneDescriptor, TerminalSurface, WorkspaceActions } from '../src/contracts';
 import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
+import { createPictureController, type PictureLoaders } from '../src/workspace/pictures';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
+import { PictureLoadError, pictureErrorNotice } from '../src/xr/picture-sizing';
+import {
+  createMemoryPictureStorage,
+  createMemoryRecentPictureStorage,
+  createPictureLibrary,
+  createRecentPictureLibrary,
+} from '../src/xr/picture-store';
 import { createWorkspaceScene } from '../src/xr/scene';
 import { terminalWarpPoint } from '../src/xr/terminal-warp';
 import { NOMINAL_VIEWER_HEIGHT } from '../src/xr/ui-poses';
@@ -3408,8 +3416,8 @@ describe('native XR controller event routing', () => {
       ).toBe('Add Picture');
       const [placeholderKey] = workspace.state.widgets;
       expect(placeholderKey).toMatch(/^picture:placeholder-/);
-      // A placeholder has no picture to restore, so it never persists a pose.
-      expect(savedPoses()).toEqual({});
+      // The placeholder persists its pose so a reload while picking on the page keeps it.
+      expect(Object.keys(savedPoses())).toEqual([placeholderKey]);
       const placeholder = workspace.scene.children.find((child) =>
         child.name.startsWith('picture-frame-placeholder-'),
       );
@@ -3614,6 +3622,474 @@ describe('native XR controller event routing', () => {
       expect(new Set(positions).size).toBe(8);
       workspace.dispose();
       container.remove();
+    });
+
+    const xrSession = () => {
+      const listeners: Array<() => void> = [];
+      const session = {
+        addEventListener: (_type: string, listener: () => void) => listeners.push(listener),
+        end: async () => {
+          for (const listener of listeners.splice(0)) listener();
+        },
+      };
+      vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+      return session;
+    };
+    const openPlaceholder = (workspace: ReturnType<typeof createWorkspaceScene>) => {
+      workspace.showInput('widgets');
+      hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'picture' });
+      const placeholder = workspace.scene.children.find((child) =>
+        child.name.startsWith('picture-frame-placeholder-'),
+      );
+      if (!placeholder) throw new Error('placeholder missing');
+      return placeholder;
+    };
+
+    it('keeps the placeholder through XR exit, a page pick and re-entry', async () => {
+      const { workspace, container } = fixture();
+      let session = xrSession();
+      await workspace.enterXR('vr');
+      fakeXR.frame?.(30);
+      const placeholder = openPlaceholder(workspace);
+      placeholder.position.set(0.3, 1.2, -0.95);
+      const key = String(placeholder.userData.widgetKey);
+      await session.end();
+      fakeXR.frame?.(60);
+      expect(workspace.state.widgets).toEqual([key]);
+      workspace.addPicture('pic-a', picture(800, 600));
+      session = xrSession();
+      await workspace.enterXR('vr');
+      fakeXR.frame?.(90);
+      expect(workspace.state.widgets).toEqual(['picture:pic-a']);
+      const frame = frameRoot(workspace, 'pic-a');
+      expect(frame?.getObjectByName('picture-frame-image')).toBeTruthy();
+      expect(frame?.position.toArray()).toEqual([0.3, 1.2, -0.95]);
+      expect(Object.keys(savedPoses())).toEqual(['picture:pic-a']);
+      await session.end();
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('keeps a grabbed placeholder where it was put through a reload, a fill and a new placeholder', async () => {
+      const first = fixture();
+      const placeholder = openPlaceholder(first.workspace);
+      const key = String(placeholder.userData.widgetKey);
+      hit(first.workspace, { inputAction: 'grabWidget', widgetKey: key }, 'squeezestart');
+      (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
+      placeholder.position.set(-1.6, 1.4, -0.4);
+      placeholder.updateMatrixWorld(true);
+      first.workspace.captureWorkspaceState();
+      expect(savedPoses()[key]).toMatchObject({ placed: true });
+      first.workspace.dispose();
+      first.container.remove();
+      const { workspace, container } = fixture();
+      workspace.restorePictures([]);
+      fakeXR.frame?.(10);
+      workspace.addPicture('pic-a', picture(800, 600));
+      // N8: filling the placeholder drops its saved pose.
+      expect(Object.keys(savedPoses())).toEqual(['picture:pic-a']);
+      expect(savedPoses()['picture:pic-a']).toMatchObject({ placed: true });
+      const spot = frameRoot(workspace, 'pic-a')?.position.clone();
+      expect(spot?.distanceTo(new THREE.Vector3(-1.6, 1.4, -0.4))).toBeLessThan(1e-3);
+      openPlaceholder(workspace);
+      expect(frameRoot(workspace, 'pic-a')?.position.distanceTo(spot as THREE.Vector3)).toBe(0);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('restores an open placeholder after a reload so a page pick still fills it', async () => {
+      const first = fixture();
+      let session = xrSession();
+      await first.workspace.enterXR('vr');
+      fakeXR.frame?.(30);
+      const placeholder = openPlaceholder(first.workspace);
+      const key = String(placeholder.userData.widgetKey);
+      expect(Object.keys(savedPoses())).toEqual([key]);
+      const spot = placeholder.position.clone();
+      await session.end();
+      // The update auto-reload on returning to the page tears the scene down.
+      first.workspace.dispose();
+      first.container.remove();
+      const { workspace, container } = fixture();
+      workspace.restorePictures([]);
+      fakeXR.frame?.(10);
+      expect(workspace.state.widgets).toEqual([key]);
+      expect(Object.keys(savedPoses())).toEqual([key]);
+      workspace.addPicture('pic-a', picture(800, 600));
+      session = xrSession();
+      await workspace.enterXR('vr');
+      fakeXR.frame?.(40);
+      expect(workspace.state.widgets).toEqual(['picture:pic-a']);
+      expect(frameRoot(workspace, 'pic-a')?.position.distanceTo(spot)).toBeLessThan(1e-3);
+      await session.end();
+      workspace.dispose();
+      container.remove();
+    });
+
+    describe('in-XR picking', () => {
+      const thumbnails: Array<{ width: number; height: number }> = [];
+      const pickerFixture = (loaders: Partial<PictureLoaders> = {}, withRecent = true) => {
+        let scene: ReturnType<typeof createWorkspaceScene> | null = null;
+        const recentStorage = createMemoryRecentPictureStorage();
+        let id = 0;
+        let clock = 0;
+        const controller = createPictureController({
+          library: createPictureLibrary(createMemoryPictureStorage()),
+          ...(withRecent ? { recent: createRecentPictureLibrary(recentStorage) } : {}),
+          scene: () => scene,
+          notify: (message) => scene?.notifyPicture(message),
+          createId: () => `pic-${++id}`,
+          now: () => ++clock,
+          loaders: {
+            url: async (url) => ({ ...picture(800, 600), name: url, blob: new Blob(['u']) }),
+            file: async (file) => ({
+              ...picture(800, 600),
+              name: file.name,
+              blob: new Blob(['f']),
+            }),
+            stored: async (_blob, name) => {
+              const image = picture(256, 192);
+              thumbnails.push(image.source);
+              return { ...image, name, blob: new Blob(['s']) };
+            },
+            thumbnail: async () => new Blob(['t'], { type: 'image/webp' }),
+            ...loaders,
+          },
+        });
+        const created = fixture({ pictures: controller, onPictureClosed: controller.closed });
+        scene = created.workspace;
+        return { ...created, controller, recentStorage };
+      };
+      const label = (workspace: ReturnType<typeof createWorkspaceScene>, name: string) =>
+        String(workspace.scene.getObjectByName(name)?.userData.labelText ?? '');
+      const panel = (workspace: ReturnType<typeof createWorkspaceScene>, mode: string) =>
+        workspace.scene.getObjectByName(`xr-${mode}-controls`);
+      const placeholderOf = (workspace: ReturnType<typeof createWorkspaceScene>) => {
+        workspace.showInput('widgets');
+        hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'picture' });
+        const placeholder = workspace.scene.children.find((child) =>
+          child.name.startsWith('picture-frame-placeholder-'),
+        );
+        if (!placeholder) throw new Error('placeholder missing');
+        return placeholder;
+      };
+
+      it('offers Enter URL and Recent on the placeholder, sized for a pinch', () => {
+        const { workspace, container } = pickerFixture();
+        const placeholder = placeholderOf(workspace);
+        workspace.scene.updateMatrixWorld(true);
+        for (const name of ['picture-url-choice', 'picture-recent-choice', 'picture-close']) {
+          const control = placeholder.getObjectByName(name);
+          if (!(control instanceof THREE.Mesh)) throw new Error(`${name} missing`);
+          // Measured in the frame's own plane: a world AABB shrinks with the frame's yaw.
+          control.geometry.computeBoundingBox();
+          const size = (control.geometry.boundingBox as THREE.Box3)
+            .getSize(new THREE.Vector3())
+            .multiply(control.getWorldScale(new THREE.Vector3()));
+          expect(Math.min(size.x, size.y)).toBeGreaterThanOrEqual(0.045);
+        }
+        expect(label(workspace, 'picture-frame-placeholder')).toBe('Add a picture');
+        workspace.dispose();
+        container.remove();
+      });
+
+      it('types and pastes a URL with the keyboard and loads it into the placeholder', async () => {
+        const { workspace, actions, container } = pickerFixture();
+        const placeholder = placeholderOf(workspace);
+        placeholder.position.set(0.2, 1.1, -0.9);
+        const key = String(placeholder.userData.widgetKey);
+        hit(workspace, { inputAction: 'pictureUrl', widgetKey: key });
+        expect(panel(workspace, 'picture-url')).toBeTruthy();
+        expect(objectWithData(workspace, { inputAction: 'key', key: 'a' })).toBeTruthy();
+        actions.readHostClipboard = vi.fn(async () => ({
+          ok: true as const,
+          value: ' https://img.example.com/cat.pn\n',
+        }));
+        hit(workspace, { inputAction: 'pasteHostClipboard' });
+        await vi.waitFor(() =>
+          expect(label(workspace, 'xr-picture-url-field')).toBe(
+            'URL: https://img.example.com/cat.pn|',
+          ),
+        );
+        hit(workspace, { inputAction: 'key', key: 'g' });
+        expect(label(workspace, 'xr-picture-url-field')).toBe(
+          'URL: https://img.example.com/cat.png|',
+        );
+        hit(workspace, { inputAction: 'pictureUrlLoad' });
+        await vi.waitFor(() => expect(workspace.state.widgets).toEqual(['picture:pic-1']));
+        expect(frameRoot(workspace, 'pic-1')?.position.toArray()).toEqual([0.2, 1.1, -0.9]);
+        expect(panel(workspace, 'picture-url')).toBeUndefined();
+        workspace.dispose();
+        container.remove();
+      });
+
+      it('shows the page picker failure notice and keeps the URL for a retry', async () => {
+        const { workspace, actions, container } = pickerFixture({
+          url: async (url) => {
+            throw new PictureLoadError('cors', new URL(url).host);
+          },
+        });
+        const placeholder = placeholderOf(workspace);
+        hit(workspace, {
+          inputAction: 'pictureUrl',
+          widgetKey: String(placeholder.userData.widgetKey),
+        });
+        hit(workspace, { inputAction: 'pictureUrlLoad' });
+        expect(label(workspace, 'xr-picture-message')).toBe('Type or paste an image URL');
+        actions.readHostClipboard = vi.fn(async () => ({
+          ok: true as const,
+          value: 'https://img.example.com/cat.png',
+        }));
+        hit(workspace, { inputAction: 'pasteHostClipboard' });
+        await vi.waitFor(() =>
+          expect(label(workspace, 'xr-picture-url-field')).toContain('cat.png'),
+        );
+        hit(workspace, { inputAction: 'key', key: 'Enter' });
+        // The reason shows once, in the panel, never in the HUD notice that would cover it.
+        await vi.waitFor(() =>
+          expect(label(workspace, 'xr-picture-message')).toBe(
+            pictureErrorNotice('cors', 'https://img.example.com/cat.png'),
+          ),
+        );
+        expect(workspace.state.notice).toBeNull();
+        expect(workspace.state.widgets).toEqual([String(placeholder.userData.widgetKey)]);
+        expect(label(workspace, 'xr-picture-url-field')).toContain('cat.png');
+        // The URL panel's actions share one row above the field, clear of the HUD bar below.
+        const panelRoot = panel(workspace, 'picture-url');
+        for (const action of ['pictureUrlClear', 'pictureRecent', 'close'])
+          expect(
+            panelRoot?.children.find((child) => child.userData.inputAction === action)?.position.y,
+          ).toBeCloseTo(1.04);
+        workspace.dispose();
+        container.remove();
+      });
+
+      it('pages, removes from, and places from Recent through Change on a filled frame', async () => {
+        const { workspace, controller, recentStorage, container } = pickerFixture();
+        for (const name of ['a', 'b', 'c', 'd', 'e', 'f', 'g'])
+          await controller.addFile(new File(['x'], `${name}.png`));
+        const target = frameRoot(workspace, 'pic-7');
+        if (!target) throw new Error('frame missing');
+        target.position.set(-0.3, 1.25, -1);
+        hit(workspace, { inputAction: 'pictureChange', widgetKey: 'picture:pic-7' });
+        expect(target.getObjectByName('picture-change-choices')?.visible).toBe(true);
+        hit(workspace, { inputAction: 'pictureRecent', widgetKey: 'picture:pic-7' });
+        expect(label(workspace, 'xr-recent-status')).toBe('Loading…');
+        const tiles = () => {
+          const found: THREE.Object3D[] = [];
+          panel(workspace, 'picture-gallery')?.traverse((object) => {
+            if (object.name === 'xr-recent-thumbnail') found.push(object);
+          });
+          return found;
+        };
+        await vi.waitFor(() => expect(tiles()).toHaveLength(6));
+        expect(tiles()[0].userData.helpText).toBe('Put g.png in the frame');
+        hit(workspace, { inputAction: 'pictureRecentPage', delta: 1 });
+        expect(tiles().map((tile) => tile.userData.helpText)).toEqual(['Put a.png in the frame']);
+        const oldest = String(tiles()[0].userData.recentId);
+        hit(workspace, { inputAction: 'pictureRecentRemove', recentId: oldest });
+        await vi.waitFor(() => expect(tiles()).toHaveLength(6));
+        expect(recentStorage.records.has(oldest)).toBe(false);
+        expect(workspace.state.toast).toBe('Removed from Recent.');
+        // Each remove control covers under a third of its thumbnail's width.
+        for (const tile of tiles()) {
+          const remove = objectWithData(workspace, {
+            inputAction: 'pictureRecentRemove',
+            recentId: tile.userData.recentId,
+          }) as THREE.Mesh;
+          const tileWidth = ((tile as THREE.Mesh).geometry as THREE.PlaneGeometry).parameters.width;
+          const removeWidth = (remove.geometry as THREE.PlaneGeometry).parameters.width;
+          expect(removeWidth).toBeGreaterThanOrEqual(0.118);
+          const covered = tile.position.x + tileWidth / 2 - (remove.position.x - removeWidth / 2);
+          expect(covered / tileWidth).toBeLessThanOrEqual(0.3);
+        }
+        const before = thumbnails.length;
+        const bId = String(
+          tiles().find((tile) => tile.userData.helpText === 'Put b.png in the frame')?.userData
+            .recentId,
+        );
+        hit(workspace, { inputAction: 'pictureRecentPlace', recentId: bId });
+        await vi.waitFor(() => expect(workspace.state.widgets).toContain('picture:pic-8'));
+        expect(workspace.state.widgets).not.toContain('picture:pic-7');
+        expect(frameRoot(workspace, 'pic-8')?.position.toArray()).toEqual([-0.3, 1.25, -1]);
+        expect(panel(workspace, 'picture-gallery')).toBeUndefined();
+        // Closing the gallery released every decoded thumbnail.
+        expect(thumbnails.slice(0, before).every(({ width }) => width === 0)).toBe(true);
+        expect(recentStorage.records.size).toBe(6);
+        workspace.dispose();
+        container.remove();
+      });
+
+      it('keeps the toast away and says so when Recent refuses a delete', async () => {
+        const { workspace, controller, recentStorage, container } = pickerFixture();
+        await controller.addFile(new File(['x'], 'a.png'));
+        recentStorage.delete = async () => {
+          throw new Error('quota');
+        };
+        hit(workspace, { inputAction: 'pictureChange', widgetKey: 'picture:pic-1' });
+        hit(workspace, { inputAction: 'pictureRecent', widgetKey: 'picture:pic-1' });
+        await vi.waitFor(() =>
+          expect(objectWithData(workspace, { inputAction: 'pictureRecentRemove' })).toBeTruthy(),
+        );
+        const id = String(
+          objectWithData(workspace, { inputAction: 'pictureRecentRemove' }).userData.recentId,
+        );
+        hit(workspace, { inputAction: 'pictureRecentRemove', recentId: id });
+        await vi.waitFor(() =>
+          expect(label(workspace, 'xr-picture-message')).toBe(
+            'Could not remove that picture from Recent',
+          ),
+        );
+        expect(workspace.state.toast).not.toBe('Removed from Recent.');
+        workspace.dispose();
+        container.remove();
+      });
+
+      it('ignores a second pick while one loads and keeps a newer target', async () => {
+        let started = 0;
+        let finish = (_value: {
+          source: HTMLCanvasElement;
+          width: number;
+          height: number;
+          blob: Blob;
+        }) => {};
+        const { workspace, actions, controller, container } = pickerFixture({
+          url: (url) =>
+            new Promise((resolve) => {
+              started++;
+              finish = (value) => resolve({ ...value, name: url });
+            }),
+        });
+        await controller.addFile(new File(['x'], 'a.png'));
+        const placeholder = placeholderOf(workspace);
+        hit(workspace, {
+          inputAction: 'pictureUrl',
+          widgetKey: String(placeholder.userData.widgetKey),
+        });
+        actions.readHostClipboard = vi.fn(async () => ({
+          ok: true as const,
+          value: 'https://img.example.com/b.png',
+        }));
+        hit(workspace, { inputAction: 'pasteHostClipboard' });
+        await vi.waitFor(() => expect(label(workspace, 'xr-picture-url-field')).toContain('b.png'));
+        hit(workspace, { inputAction: 'key', key: 'Enter' });
+        expect(label(workspace, 'xr-picture-message')).toBe('Loading picture…');
+        hit(workspace, { inputAction: 'key', key: 'Enter' });
+        expect(label(workspace, 'xr-picture-message')).toBe(
+          'Loading… the current picture is still loading',
+        );
+        // Retarget while the first load runs: Change on pic-1 opens a panel for that frame.
+        hit(workspace, { inputAction: 'pictureChange', widgetKey: 'picture:pic-1' });
+        hit(workspace, { inputAction: 'pictureUrl', widgetKey: 'picture:pic-1' });
+        await vi.waitFor(() => expect(started).toBe(1));
+        finish({ ...picture(800, 600), blob: new Blob(['u']) });
+        await vi.waitFor(() => expect(workspace.state.widgets).toContain('picture:pic-2'));
+        // The newer panel stays open and still targets pic-1.
+        expect(panel(workspace, 'picture-url')).toBeTruthy();
+        actions.readHostClipboard = vi.fn(async () => ({
+          ok: true as const,
+          value: 'https://img.example.com/c.png',
+        }));
+        hit(workspace, { inputAction: 'pasteHostClipboard' });
+        await vi.waitFor(() => expect(label(workspace, 'xr-picture-url-field')).toContain('c.png'));
+        const spot = frameRoot(workspace, 'pic-1')?.position.clone();
+        hit(workspace, { inputAction: 'pictureUrlLoad' });
+        await vi.waitFor(() => expect(started).toBe(2));
+        finish({ ...picture(800, 600), blob: new Blob(['u']) });
+        await vi.waitFor(() => expect(workspace.state.widgets).toContain('picture:pic-3'));
+        expect(workspace.state.widgets).not.toContain('picture:pic-1');
+        expect(frameRoot(workspace, 'pic-3')?.position.distanceTo(spot as THREE.Vector3)).toBe(0);
+        workspace.dispose();
+        container.remove();
+      });
+
+      it('pastes an explicit terminal paste into the terminal while the URL field is open', async () => {
+        const { workspace, actions, left, container } = pickerFixture();
+        workspace.selectTerminal('pane-a');
+        const placeholder = placeholderOf(workspace);
+        hit(workspace, {
+          inputAction: 'pictureUrl',
+          widgetKey: String(placeholder.userData.widgetKey),
+        });
+        actions.readHostClipboard = vi.fn(async () => ({ ok: true as const, value: 'ls' }));
+        const paste = vi.spyOn(left, 'paste');
+        expect(await workspace.pasteHostClipboard('pane-a')).toBe(true);
+        expect(paste).toHaveBeenCalledWith('ls');
+        expect(label(workspace, 'xr-picture-url-field')).toBe('URL: |');
+        workspace.dispose();
+        container.remove();
+      });
+
+      it('takes physical keys in the URL field and blocks them from the shell', async () => {
+        const { workspace, container } = pickerFixture();
+        expect(workspace.isTextEntryActive()).toBe(false);
+        expect(workspace.typeTextEntryKey('a')).toBe(false);
+        const placeholder = placeholderOf(workspace);
+        hit(workspace, {
+          inputAction: 'pictureUrl',
+          widgetKey: String(placeholder.userData.widgetKey),
+        });
+        expect(workspace.isTextEntryActive()).toBe(true);
+        for (const key of 'https://x/a.pnq') expect(workspace.typeTextEntryKey(key)).toBe(true);
+        expect(workspace.typeTextEntryKey('Backspace')).toBe(true);
+        expect(workspace.typeTextEntryKey('g')).toBe(true);
+        expect(workspace.typeTextEntryKey('F5')).toBe(false);
+        expect(label(workspace, 'xr-picture-url-field')).toBe('URL: https://x/a.png|');
+        expect(workspace.typeTextEntryKey('Enter')).toBe(true);
+        await vi.waitFor(() => expect(workspace.state.widgets).toEqual(['picture:pic-1']));
+        expect(workspace.isTextEntryActive()).toBe(false);
+        workspace.dispose();
+        container.remove();
+      });
+
+      it('lists Recent after a reload, closes cleanly, and explains missing storage', async () => {
+        const first = pickerFixture();
+        await first.controller.addFile(new File(['x'], 'a.png'));
+        const shared = first.recentStorage;
+        first.workspace.dispose();
+        first.container.remove();
+        let scene: ReturnType<typeof createWorkspaceScene> | null = null;
+        const controller = createPictureController({
+          library: createPictureLibrary(createMemoryPictureStorage()),
+          recent: createRecentPictureLibrary(shared),
+          scene: () => scene,
+          notify: () => {},
+          loaders: {
+            stored: async (_blob, name) => ({ ...picture(256, 192), name, blob: new Blob(['s']) }),
+          },
+        });
+        const reloaded = fixture({ pictures: controller });
+        scene = reloaded.workspace;
+        const placeholder = placeholderOf(reloaded.workspace);
+        hit(reloaded.workspace, {
+          inputAction: 'pictureRecent',
+          widgetKey: String(placeholder.userData.widgetKey),
+        });
+        await vi.waitFor(() =>
+          expect(
+            objectWithData(reloaded.workspace, { inputAction: 'pictureRecentPlace' }).userData
+              .helpText,
+          ).toBe('Put a.png in the frame'),
+        );
+        hit(reloaded.workspace, { inputAction: 'close' });
+        expect(panel(reloaded.workspace, 'picture-gallery')).toBeUndefined();
+        reloaded.workspace.dispose();
+        reloaded.container.remove();
+
+        const { workspace, container } = pickerFixture({}, false);
+        const empty = placeholderOf(workspace);
+        hit(workspace, {
+          inputAction: 'pictureRecent',
+          widgetKey: String(empty.userData.widgetKey),
+        });
+        await vi.waitFor(() =>
+          expect(label(workspace, 'xr-recent-status')).toBe('Recent pictures need browser storage'),
+        );
+        hit(workspace, { inputAction: 'pictureUrl' });
+        expect(panel(workspace, 'picture-url')).toBeTruthy();
+        workspace.dispose();
+        container.remove();
+      });
     });
 
     it('re-applies texture anisotropy to pictures when filtering changes', () => {

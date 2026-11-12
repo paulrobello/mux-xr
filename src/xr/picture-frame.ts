@@ -6,7 +6,27 @@ import { applyUIEnvironment } from './ui-environment';
 import { disposeOwned, type Widget } from './widgets';
 
 export const PICTURE_KIND = 'picture';
-export const PICTURE_PLACEHOLDER_TEXT = 'Pick an image on the page';
+export const PICTURE_PLACEHOLDER_TEXT = 'Add a picture';
+export const PICTURE_PLACEHOLDER_HINT = 'or pick one on the page';
+
+/**
+ * The XR picker choices. Frames spawn at scale 0.6 or 1, so these local sizes keep every target at
+ * least 0.045 m tall in the world.
+ */
+function addPickerChoices(parent: THREE.Object3D, y: number): void {
+  for (const [label, action, x] of [
+    ['Enter URL', 'pictureUrl', -0.135],
+    ['Recent', 'pictureRecent', 0.135],
+  ] as const) {
+    const button = createScalableLabel(label, 0.24, 0.085, { background: '#223946' });
+    button.name = `picture-${action === 'pictureUrl' ? 'url' : 'recent'}-choice`;
+    button.position.set(x, y, 0.004);
+    button.userData.inputAction = action;
+    button.userData.helpText =
+      action === 'pictureUrl' ? 'Type or paste an image URL' : 'Choose a recent picture';
+    parent.add(button);
+  }
+}
 
 const BORDER = 0.022;
 const DEPTH = 0.024;
@@ -80,11 +100,33 @@ export function createPictureFrameWidget(
       backplate: false,
     });
     placeholder.name = 'picture-frame-placeholder';
-    placeholder.position.z = 0.002;
+    placeholder.position.set(0, 0.1, 0.002);
     root.add(placeholder);
+    addPickerChoices(root, -0.03);
+    const hint = createScalableLabel(PICTURE_PLACEHOLDER_HINT, size.width - 0.16, 0.045, {
+      backplate: false,
+    });
+    hint.name = 'picture-frame-hint';
+    hint.position.set(0, -0.14, 0.002);
+    root.add(hint);
+  }
+  if (image) {
+    const change = createScalableLabel('Change', 0.2, 0.08, { background: '#223946' });
+    change.name = 'picture-change';
+    // Inside the bottom-left corner, so the frame's footprint (and slot clearance) is unchanged.
+    change.position.set(-size.width / 2 + 0.11, -size.height / 2 + 0.05, 0.012);
+    change.userData.inputAction = 'pictureChange';
+    change.userData.helpText = 'Replace this picture';
+    root.add(change);
+    const choices = new THREE.Group();
+    choices.name = 'picture-change-choices';
+    choices.visible = false;
+    choices.position.z = 0.008;
+    addPickerChoices(choices, 0);
+    root.add(choices);
   }
 
-  const close = createScalableLabel('×', 0.055, 0.055, { background: '#223946' });
+  const close = createScalableLabel('×', 0.075, 0.075, { background: '#223946' });
   close.name = 'picture-close';
   // Sits on the frame's top-right corner so it never covers the picture.
   close.position.set(size.width / 2 + BORDER / 2, size.height / 2 + BORDER / 2, 0.012);

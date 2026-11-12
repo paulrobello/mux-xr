@@ -381,6 +381,26 @@ describe('routeKeydown gating', () => {
     expect(deps.sendBytes).not.toHaveBeenCalled();
   });
 
+  it('types into an in-scene text field that takes the key, never into the shell', () => {
+    const typed: string[] = [];
+    const { deps, fire } = setup({
+      textEntryActive: () => true,
+      typeTextEntry: (key) => {
+        if (key === 'F5') return false;
+        typed.push(key);
+        return true;
+      },
+    });
+    const a = fire('a');
+    expect(a.sent).toBe(true);
+    expect(a.event.preventDefault).toHaveBeenCalled();
+    expect(fire('Backspace').sent).toBe(true);
+    expect(fire('F5').sent).toBe(false);
+    expect(fire('v', { metaKey: true }).sent).toBe(false);
+    expect(typed).toEqual(['a', 'Backspace']);
+    expect(deps.sendBytes).not.toHaveBeenCalled();
+  });
+
   it('leaves Cmd shortcuts and bare modifiers alone', () => {
     const { deps, fire } = setup();
     const cmd = fire('c', { metaKey: true });

@@ -14,6 +14,8 @@ export interface KeyRouterDeps {
   sendBytes(paneId: string, bytes: string): void;
   /** True while an in-scene text field owns typing. */
   textEntryActive(): boolean;
+  /** Types a key into the open in-scene text field; true when the field took it. */
+  typeTextEntry?(key: string): boolean;
   /** True while an XR session is presenting, when page focus no longer matters. */
   xrPresenting(): boolean;
   /** True while the first-gesture XR entry fallback will consume this keydown. */
@@ -86,6 +88,18 @@ export function routeKeydown(event: KeyboardEventLike, deps: KeyRouterDeps): boo
   const target = event.composedPath?.()[0] ?? event.target;
   if (!deps.xrPresenting() && isEditableTarget(target)) return false;
   const label = describeKey(event);
+  if (deps.textEntryActive()) {
+    const typed =
+      !event.isComposing &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      (deps.xrPresenting() || focusAllows(event.composedPath?.()[0] ?? event.target, event.key)) &&
+      deps.typeTextEntry?.(event.key) === true;
+    if (typed) event.preventDefault();
+    deps.onKey(label, typed);
+    return typed;
+  }
   const paneId = deps.selectedPaneId();
   const eligible =
     !event.isComposing &&

@@ -17,7 +17,9 @@ import { mountPicturePicker } from '../src/ui/pictures';
 import { createPictureController, type PictureLoaders } from '../src/workspace/pictures';
 import { createPictureFrameWidget, PICTURE_PLACEHOLDER_TEXT } from '../src/xr/picture-frame';
 import {
+  createPictureThumbnail,
   loadPictureUrl,
+  PICTURE_THUMBNAIL_EDGE,
   type PictureLoaderDeps,
   type PreparedPicture,
   preparePicture,
@@ -36,10 +38,15 @@ import {
 } from '../src/xr/picture-sizing';
 import {
   createIndexedDBPictureStorage,
+  createIndexedDBRecentPictureStorage,
   createMemoryPictureStorage,
+  createMemoryRecentPictureStorage,
   createPictureLibrary,
+  createRecentPictureLibrary,
   type PictureRecord,
   planEviction,
+  RECENT_PICTURE_LIMITS,
+  type RecentPictureRecord,
 } from '../src/xr/picture-store';
 import type { SavedUIPose } from '../src/xr/ui-poses';
 import { createWidgetPoseStore } from '../src/xr/widget-poses';
@@ -720,5 +727,184 @@ describe('picture picker', () => {
     expect(add.disabled).toBe(false);
     expect(url.value).toBe('');
     expect(section.querySelector('.picture-pick-row')?.getAttribute('style')).toBeNull();
+  });
+});
+
+describe('recent picture library', () => {
+  const recentRecord = (
+    id: string,
+    lastUsedAt: number,
+    bytes = 10,
+    sourceKey = `url:${id}`,
+  ): RecentPictureRecord => ({
+    id,
+    name: `${id}.webp`,
+    blob: new Blob([new Uint8Array(bytes)], { type: 'image/webp' }),
+    thumbnail: new Blob([new Uint8Array(2)], { type: 'image/webp' }),
+    width: 800,
+    height: 600,
+    sourceKey,
+    lastUsedAt,
+  });
+
+  it('bounds entries and bytes, evicting the least recently used, thumbnails included', async () => {
+    const storage = createMemoryRecentPictureStorage();
+    const recent = createRecentPictureLibrary(storage, { maxFrames: 3, maxBytes: 40 });
+    for (const [index, id] of ['a', 'b', 'c'].entries())
+      expect(await recent.add(recentRecord(id, index + 1))).toBe(0);
+    await recent.touch('a', 10);
+    // b is now least recently used, so it goes first when a fourth entry arrives.
+    expect(await recent.add(recentRecord('d', 11))).toBe(1);
+    expect((await recent.list()).map(({ id }) => id)).toEqual(['d', 'a', 'c']);
+    // 12 bytes each with the thumbnail: a 26-byte entry needs two more slots' worth of room.
+    expect(await recent.add(recentRecord('e', 12, 24))).toBe(2);
+    expect((await recent.list()).map(({ id }) => id)).toEqual(['e', 'd']);
+    expect(RECENT_PICTURE_LIMITS).toEqual({ maxFrames: 12, maxBytes: 48 * 1024 * 1024 });
+  });
+
+  it('refreshes one entry when the same source is picked again', async () => {
+    const storage = createMemoryRecentPictureStorage();
+    const recent = createRecentPictureLibrary(storage);
+    await recent.add(recentRecord('a', 1, 10, 'url:https://x/cat.png'));
+    await recent.add(recentRecord('b', 2, 10, 'url:https://x/cat.png'));
+    expect([...storage.records.keys()]).toEqual(['b']);
+  });
+
+  it('keeps entries across a reopen of the same storage', async () => {
+    const storage = createMemoryRecentPictureStorage();
+    await createRecentPictureLibrary(storage).add(recentRecord('a', 1));
+    const reopened = createRecentPictureLibrary(storage);
+    expect((await reopened.list()).map(({ id }) => id)).toEqual(['a']);
+    expect((await reopened.get('a'))?.thumbnail.size).toBe(2);
+  });
+
+  it('uses its own IndexedDB database and rejects when IndexedDB is unavailable', async () => {
+    await expect(createIndexedDBRecentPictureStorage(undefined).list()).rejects.toThrow(
+      /unavailable/,
+    );
+    const opened: string[] = [];
+    const factory = {
+      open: (name: string) => {
+        opened.push(name);
+        const request = { error: new Error('blocked') } as unknown as IDBOpenDBRequest;
+        queueMicrotask(() => request.onerror?.(new Event('error')));
+        return request;
+      },
+    } as unknown as IDBFactory;
+    await expect(createIndexedDBRecentPictureStorage(factory).list()).rejects.toThrow('blocked');
+    expect(opened).toEqual(['mux-xr-recent-pictures']);
+  });
+
+  it('draws a 256 px WebP thumbnail', async () => {
+    const canvases: HTMLCanvasElement[] = [];
+    const thumbnail = await createPictureThumbnail(fakeCanvas(2048, 1024), {
+      createCanvas: (width, height) => {
+        const canvas = fakeCanvas(width, height);
+        canvases.push(canvas);
+        return canvas;
+      },
+    });
+    expect(PICTURE_THUMBNAIL_EDGE).toBe(256);
+    expect([canvases[0].width, canvases[0].height]).toEqual([256, 128]);
+    expect(thumbnail.type).toBe('image/webp');
+  });
+});
+
+describe('picture controller recent gallery', () => {
+  const prepared = (name: string): PreparedPicture => ({
+    ...image(800, 600),
+    name,
+    blob: new Blob([new Uint8Array(32)], { type: 'image/webp' }),
+  });
+  const setup = (recentStorage = createMemoryRecentPictureStorage()) => {
+    const storage = createMemoryPictureStorage();
+    const scene = {
+      addPicture: vi.fn((): string[] => []),
+      restorePictures: vi.fn(),
+      removePicture: vi.fn(),
+    };
+    const notify = vi.fn();
+    let id = 0;
+    let clock = 0;
+    const controller = createPictureController({
+      library: createPictureLibrary(storage, { maxFrames: 2, maxBytes: 1000 }),
+      recent: createRecentPictureLibrary(recentStorage, { maxFrames: 2, maxBytes: 1000 }),
+      scene: () => scene,
+      notify,
+      createId: () => `pic-${++id}`,
+      now: () => ++clock,
+      loaders: {
+        file: async (file) => prepared(file.name),
+        url: async (url) => prepared(url),
+        stored: async (_blob, name) => prepared(name),
+        thumbnail: async () => new Blob([new Uint8Array(4)], { type: 'image/webp' }),
+      },
+    });
+    return { storage, recentStorage, scene, notify, controller };
+  };
+
+  it('files page and URL picks in Recent and places one again without a duplicate', async () => {
+    const { storage, recentStorage, scene, controller } = setup();
+    await controller.addFile(new File(['x'], 'cat.png'));
+    await controller.addUrl('https://img.example.com/dog.png');
+    const listed = await controller.listRecent();
+    expect(listed?.map(({ name }) => name)).toEqual(['https://img.example.com/dog.png', 'cat.png']);
+    expect(await controller.placeRecent(listed?.[1].id ?? '', 'placeholder-1')).toBe(true);
+    expect(scene.addPicture).toHaveBeenLastCalledWith(
+      'pic-3',
+      expect.objectContaining({ name: 'cat.png' }),
+      'placeholder-1',
+    );
+    expect(recentStorage.records.size).toBe(2);
+    expect((await controller.listRecent())?.[0].name).toBe('cat.png');
+    expect(storage.records.has('pic-3')).toBe(true);
+  });
+
+  it('replaces a changed frame instead of evicting another one at the cap', async () => {
+    const { storage, scene, notify, controller } = setup();
+    await controller.addFile(new File(['x'], 'a.png'));
+    await controller.addFile(new File(['x'], 'b.png'));
+    await controller.addUrl('https://img.example.com/c.png', 'pic-1');
+    expect([...storage.records.keys()].sort()).toEqual(['pic-2', 'pic-3']);
+    expect(scene.removePicture).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalledWith(expect.stringMatching(/picture limit/));
+  });
+
+  it('evicts the least recently used Recent entry with a notice', async () => {
+    const { notify, controller } = setup();
+    await controller.addFile(new File(['x'], 'a.png'));
+    await controller.addFile(new File(['x'], 'b.png'));
+    await controller.addFile(new File(['x'], 'c.png'));
+    expect(notify).toHaveBeenLastCalledWith(
+      expect.stringContaining('Removed the least recently used picture from Recent'),
+    );
+    expect((await controller.listRecent())?.map(({ name }) => name)).toEqual(['c.png', 'b.png']);
+    // At the cap every pick evicts; the notice shows once per page session, not each time.
+    notify.mockClear();
+    await controller.addFile(new File(['x'], 'd.png'));
+    expect(notify).not.toHaveBeenCalledWith(expect.stringContaining('from Recent'));
+  });
+
+  it('removes from Recent, survives a reopen, and reports unavailable storage as null', async () => {
+    const shared = createMemoryRecentPictureStorage();
+    const first = setup(shared);
+    await first.controller.addFile(new File(['x'], 'a.png'));
+    await first.controller.addFile(new File(['x'], 'b.png'));
+    const [newest] = (await first.controller.listRecent()) ?? [];
+    await first.controller.removeRecent(newest.id);
+    expect((await setup(shared).controller.listRecent())?.map(({ name }) => name)).toEqual([
+      'a.png',
+    ]);
+    const broken = setup({
+      list: async () => {
+        throw new Error('IndexedDB is unavailable');
+      },
+      put: async () => {
+        throw new Error('IndexedDB is unavailable');
+      },
+      delete: async () => {},
+    } as unknown as ReturnType<typeof createMemoryRecentPictureStorage>);
+    expect(await broken.controller.addUrl('https://img.example.com/a.png')).toBe(true);
+    expect(await broken.controller.listRecent()).toBeNull();
   });
 });
