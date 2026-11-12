@@ -422,7 +422,7 @@ export const createRepoStatusProbe = (options: RepoStatusProbeOptions = {}): Rep
       const untracked = await git(
         home,
         root,
-        ['ls-files', '--others', '--exclude-standard', '--directory'],
+        ['ls-files', '--others', '--exclude-standard', '--directory', '--no-empty-directory'],
         1,
       );
       if (untracked && untracked.stdout.length > 0) dirty = true;

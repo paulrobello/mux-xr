@@ -177,7 +177,15 @@ describe('repo status probe', () => {
         'refs/heads/main',
       ],
       [...HARDENED_PREFIX, repo, 'diff-index', '--cached', '--quiet', 'HEAD', '--'],
-      [...HARDENED_PREFIX, repo, 'ls-files', '--others', '--exclude-standard', '--directory'],
+      [
+        ...HARDENED_PREFIX,
+        repo,
+        'ls-files',
+        '--others',
+        '--exclude-standard',
+        '--directory',
+        '--no-empty-directory',
+      ],
       [...HARDENED_PREFIX, repo, 'config', '--get', 'remote.origin.url'],
     ]);
     expect(runner.calls.flatMap((call) => call.args)).not.toContain('status');
@@ -386,6 +394,23 @@ describe('repo status probe against real git (SEC-001)', () => {
     const status = await composeRepoStatus({ ...probe, ci: async () => null }, join(repo, '.'));
     expect(status).toMatchObject({ state: 'ok', repo: 'planted', branch: 'main', dirty: true });
     for (const marker of Object.values(markers)) expect(existsSync(marker), marker).toBe(false);
+  });
+
+  it('treats an empty untracked directory as clean, as git status does', async () => {
+    const repo = join(home, 'empty-dir');
+    mkdirSync(repo);
+    run(repo, 'init', '-q', '-b', 'main');
+    writeFileSync(join(repo, 'file.txt'), 'hello\n');
+    run(repo, 'add', 'file.txt');
+    run(repo, 'commit', '-q', '-m', 'init');
+    mkdirSync(join(repo, 'scratch', 'nested'), { recursive: true });
+    const probe = createRepoStatusProbe({ homeDir: () => home });
+    const status = await composeRepoStatus({ ...probe, ci: async () => null }, repo);
+    expect(status).toMatchObject({ state: 'ok', repo: 'empty-dir', dirty: false });
+    writeFileSync(join(repo, 'scratch', 'nested', 'new.txt'), 'x\n');
+    const fresh = createRepoStatusProbe({ homeDir: () => home });
+    const dirty = await composeRepoStatus({ ...fresh, ci: async () => null }, repo);
+    expect(dirty).toMatchObject({ state: 'ok', dirty: true });
   });
 
   it('never lazily fetches a missing object in a partial clone', async () => {
