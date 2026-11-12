@@ -158,6 +158,7 @@ import {
   validPose,
 } from './ui-poses';
 import { updateVisibleMatrixWorld } from './visible-matrix-world';
+import { intersectVisible } from './visible-raycast';
 import { layoutWidgetPanel } from './widget-panel-layout';
 import { createWidgetPoseStore, type WidgetPose } from './widget-poses';
 import {
@@ -3218,15 +3219,13 @@ export function createWorkspaceScene(
       const origin = new THREE.Vector3().setFromMatrixPosition(gazeCamera.matrixWorld);
       const direction = gazeCamera.getWorldDirection(new THREE.Vector3());
       raycaster.set(origin, direction);
-      const hit = raycaster
-        .intersectObjects(
-          [...panels.values()]
-            .map((panel) => panel.root)
-            .concat(inputRoot ? [inputRoot] : [])
-            .concat([...widgets.values()].map((widget) => widget.root)),
-          true,
-        )
-        .find((entry) => isControlVisible(entry.object))?.object;
+      const hit = intersectVisible(
+        raycaster,
+        [...panels.values()]
+          .map((panel) => panel.root)
+          .concat(inputRoot ? [inputRoot] : [])
+          .concat([...widgets.values()].map((widget) => widget.root)),
+      ).find((entry) => isControlVisible(entry.object))?.object;
       let target: THREE.Object3D | null = hit ?? null;
       while (target && !target.userData.terminalId) target = target.parent;
       if (
@@ -5846,9 +5845,9 @@ export function createWorkspaceScene(
       targets.push(radialMenu.root);
     }
     if (wristWatch.root.visible) targets.push(wristWatch.root);
-    const hits = raycaster
-      .intersectObjects(targets, true)
-      .filter((entry) => isControlVisible(entry.object));
+    const hits = intersectVisible(raycaster, targets).filter((entry) =>
+      isControlVisible(entry.object),
+    );
     // Only HUD controls drawn over widgets (hudOverlay) win the ray past a nearer widget; a
     // control the widget hides, such as Exit, must never fire through it.
     const hudButton =
