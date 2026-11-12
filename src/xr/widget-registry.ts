@@ -1,5 +1,6 @@
 import type * as THREE from 'three';
 import { createAgentBoardWidget } from './agent-board';
+import { createBellFeedWidget } from './bell-feed';
 import { createTimerWidget } from './timer-widget';
 import { createClockWidget, type Widget } from './widgets';
 
@@ -12,6 +13,8 @@ export interface WidgetEntry {
   spawnOffset: readonly [number, number, number];
   /** Uniform scale on spawn and recenter; 1 when omitted. */
   spawnScale?: number;
+  /** Turn to face the viewer from the spawn offset (yaw only) on spawn and recenter. */
+  faceViewer?: true;
   create: (envMap: THREE.Texture | null) => Widget;
 }
 
@@ -44,6 +47,15 @@ export const WIDGET_REGISTRY = [
     spawnOffset: [0.01, 0.3, -1.25],
     create: (envMap) => createTimerWidget(envMap),
   },
+  {
+    kind: 'bell-feed',
+    displayName: 'Bell feed',
+    // To the right of the analog clock, clear of the agent board and both HUD poses.
+    spawnOffset: [1.05, 0.15, -1.1],
+    spawnScale: 0.8,
+    faceViewer: true,
+    create: (envMap) => createBellFeedWidget(envMap),
+  },
 ] as const satisfies readonly WidgetEntry[];
 
 /** Union of every registered kind; grows with each entry. */
@@ -67,4 +79,11 @@ export function findWidgetEntry(kind: unknown): WidgetEntry | undefined {
 
 export function isWidgetKind(kind: unknown): kind is WidgetKind {
   return findWidgetEntry(kind) !== undefined;
+}
+
+/** Yaw (radians, about +y) added to the viewer heading at spawn: toward the eye, or 0. */
+export function widgetSpawnYaw(entry: WidgetEntry): number {
+  if (!entry.faceViewer) return 0;
+  const [x, , z] = entry.spawnOffset;
+  return Math.atan2(-x, -z);
 }

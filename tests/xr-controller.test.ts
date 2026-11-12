@@ -2699,6 +2699,88 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('feeds the bell feed from pane bells and notices, selects a bell pane and clears viewed panes', () => {
+    const { workspace, actions, container, left, right } = fixture();
+    const ringing = (descriptor: PaneDescriptor) => {
+      const state = { bell: false };
+      const listeners = new Set<() => void>();
+      const ring = (bell: boolean): void => {
+        state.bell = bell;
+        for (const listener of listeners) listener();
+      };
+      const terminal: TerminalSurface = {
+        ...surface(descriptor),
+        get bellPending() {
+          return state.bell;
+        },
+        acknowledgeBell: () => ring(false),
+        subscribe(listener) {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      };
+      return { terminal, ring };
+    };
+    const build = ringing(pane('pane-c', 'build'));
+    const tests = ringing(pane('pane-d', 'tests'));
+    workspace.addTerminal(build.terminal);
+    workspace.addTerminal(tests.terminal);
+    workspace.setAvailablePanes([left.pane, right.pane, build.terminal.pane, tests.terminal.pane]);
+    // Bells raised while the feed is closed show once it opens.
+    build.ring(true);
+    tests.ring(true);
+    // Only opted-in notices reach the feed; direct feedback stays on the HUD.
+    workspace.setNotice('Streamer connection lost', { feed: true });
+    workspace.setNotice('Clipboard is empty');
+    workspace.showInput('widgets');
+    hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'bell-feed' });
+    expect(workspace.state.widgets).toEqual(['bell-feed']);
+    const feed = workspace.scene.children.find((child) => child.name.startsWith('bell-feed-'));
+    if (!feed) throw new Error('bell feed missing');
+    const shown = (): string[] =>
+      feed.children
+        .filter((child) => child.name.startsWith('bell-feed-row-') && child.visible)
+        .map((row) => String(row.getObjectByName('bell-feed-row-label')?.userData.labelText));
+    expect(shown()).toEqual(['Streamer connection lost', 'tests', 'build']);
+    const plate = objectWithData(workspace, {
+      inputAction: 'selectBellPane',
+      bellPaneId: 'pane-c',
+    });
+    expect(plate.parent?.getObjectByName('bell-feed-row-age')?.userData.labelText).toBe('now');
+    // A bell row focuses its pane through the shared selection path and leaves the feed.
+    vi.mocked(actions.selectPane).mockClear();
+    hit(workspace, { inputAction: 'selectBellPane', bellPaneId: 'pane-c' });
+    expect(actions.selectPane).toHaveBeenLastCalledWith('pane-c');
+    expect(shown()).toEqual(['Streamer connection lost', 'tests']);
+    // Selecting the pane in the scene acknowledges its bell, which clears its entry.
+    workspace.selectTerminal('pane-d');
+    expect(shown()).toEqual(['Streamer connection lost']);
+    expect(feed.getObjectByName('bell-feed-header')?.userData.labelText).toBe('Bells');
+    // A HUD notice row shows but never selects.
+    vi.mocked(actions.selectPane).mockClear();
+    const notice = feed.getObjectByName('bell-feed-row-1')?.getObjectByName('bell-feed-row-plate');
+    expect(notice?.userData.inputAction).toBe('grabWidget');
+    expect(notice?.userData.bellPaneId).toBeUndefined();
+    // A bell for a pane that left the tree selects nothing.
+    build.ring(false);
+    build.ring(true);
+    workspace.setAvailablePanes([left.pane, right.pane]);
+    hit(workspace, { inputAction: 'selectBellPane', bellPaneId: 'pane-c' });
+    expect(actions.selectPane).not.toHaveBeenCalled();
+    expect(workspace.state.notice).toBe('That bell pane is no longer open');
+    // Renaming relabels a pending bell in place; closing the pane's view clears it.
+    build.ring(false);
+    build.ring(true);
+    workspace.setAvailablePanes([left.pane, right.pane, { ...build.terminal.pane, title: 'make' }]);
+    expect(shown()).toEqual(['make', 'Streamer connection lost']);
+    workspace.removeTerminal('pane-c');
+    expect(shown()).toEqual(['Streamer connection lost']);
+    hit(workspace, { inputAction: 'closeWidget', widgetKind: 'bell-feed' });
+    expect(workspace.state.widgets).toEqual([]);
+    workspace.dispose();
+    container.remove();
+  });
+
   describe('HUD over widgets', () => {
     // The layout viewer the widgets spawned from, recovered from the digital clock's offset.
     const EYE = new THREE.Vector3();
@@ -2892,6 +2974,31 @@ describe('native XR controller event routing', () => {
       });
     }
 
+    for (const eyeHeight of [1.1, 1.52, 1.8]) {
+      it(`spawns the bell feed clear of the other widgets and both HUD poses, eye ${eyeHeight} m`, () => {
+        const { workspace, container } = fixture();
+        const roots = spawnAll(workspace);
+        const feed = roots[WIDGET_REGISTRY.findIndex(({ kind }) => kind === 'bell-feed')];
+        const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+        if (!feed || !hud) throw new Error('missing');
+        for (const other of roots)
+          if (other !== feed) expect(overlaps(feed, other), other.name).toBe(false);
+        for (const offsetY of [0.78 - eyeHeight, -0.65]) {
+          hud.position.set(EYE.x, EYE.y + offsetY, EYE.z - 1.35);
+          hud.quaternion.identity();
+          workspace.setNotice('Overlay check');
+          workspace.scene.updateMatrixWorld(true);
+          for (const child of hud.children)
+            if (child.visible)
+              expect(overlaps(feed, child), `${child.name} at HUD ${offsetY.toFixed(2)}`).toBe(
+                false,
+              );
+        }
+        workspace.dispose();
+        container.remove();
+      });
+    }
+
     it('presses timer buttons through a real select on the widgetControl branch', () => {
       const { workspace, container } = fixture();
       const roots = spawnAll(workspace);
@@ -2918,6 +3025,125 @@ describe('native XR controller event routing', () => {
       expect(label('timer-mode')).toBe('Stopwatch');
       workspace.dispose();
       container.remove();
+    });
+
+    it('holds bell feed rows under a real ray across row gaps, the face and a just-selected row', async () => {
+      const endListeners: Array<() => void> = [];
+      const session = {
+        addEventListener: (_type: string, listener: () => void) => endListeners.push(listener),
+        end: vi.fn(async () => {
+          for (const listener of endListeners) listener();
+        }),
+      };
+      vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+      fakeXR.presenting = true;
+      const { workspace, actions, container } = fixture();
+      try {
+        await workspace.enterXR('vr');
+        vi.mocked(actions.selectPane).mockImplementation((id: string) =>
+          workspace.selectTerminal(id),
+        );
+        const ringing = new Map<string, () => void>();
+        const ring = (id: string, title: string): void => {
+          const existing = ringing.get(id);
+          if (existing) {
+            existing();
+            return;
+          }
+          let bell = false;
+          const listeners = new Set<() => void>();
+          const terminal: TerminalSurface = {
+            ...surface(pane(id, title)),
+            get bellPending() {
+              return bell;
+            },
+            acknowledgeBell: () => {
+              bell = false;
+              for (const listener of listeners) listener();
+            },
+            subscribe(listener) {
+              listeners.add(listener);
+              return () => listeners.delete(listener);
+            },
+          };
+          workspace.addTerminal(terminal);
+          ringing.set(id, () => {
+            bell = true;
+            for (const listener of listeners) listener();
+          });
+          ringing.get(id)?.();
+        };
+        ring('pane-c', 'build');
+        ring('pane-d', 'tests');
+        workspace.setAvailablePanes([
+          pane('pane-a', 'A'),
+          pane('pane-b', 'B'),
+          pane('pane-c', 'build'),
+          pane('pane-d', 'tests'),
+          pane('pane-e', 'deploy'),
+        ]);
+        const roots = spawnAll(workspace);
+        const feed = roots[WIDGET_REGISTRY.findIndex(({ kind }) => kind === 'bell-feed')];
+        if (!feed) throw new Error('bell feed missing');
+        const rowLabel = (index: number): string | null => {
+          const row = feed.getObjectByName(`bell-feed-row-${index}`);
+          return row?.visible
+            ? String(row.getObjectByName('bell-feed-row-label')?.userData.labelText)
+            : null;
+        };
+        const rowPoint = (index: number, dy = 0): THREE.Vector3 => {
+          const row = feed.getObjectByName(`bell-feed-row-${index}`);
+          if (!row) throw new Error('row missing');
+          feed.updateMatrixWorld(true);
+          return row.localToWorld(new THREE.Vector3(0, dy, 0));
+        };
+        let time = 100;
+        const frameAt = (target: THREE.Vector3): THREE.Group => {
+          const controller = aim(workspace, target);
+          time += 16;
+          fakeXR.frame?.(time);
+          return controller;
+        };
+        const away = EYE.clone().add(new THREE.Vector3(0, 3, 0.5));
+        expect([rowLabel(1), rowLabel(2)]).toEqual(['tests', 'build']);
+        // The ray rests in the gap between rows 1 and 2, on the face, not on a label.
+        frameAt(rowPoint(1, -0.041));
+        ring('pane-e', 'deploy');
+        expect([rowLabel(1), rowLabel(2), rowLabel(3)]).toEqual(['tests', 'build', null]);
+        expect(feed.getObjectByName('bell-feed-overflow')?.userData.labelText).toBe('+1 more');
+        // Select row 1 and keep the ray there: the row clears, and nothing moves up into it.
+        const controller = frameAt(rowPoint(1));
+        controller.dispatchEvent({ type: 'selectstart' } as never);
+        controller.dispatchEvent({ type: 'selectend' } as never);
+        expect(actions.selectPane).toHaveBeenLastCalledWith('pane-d');
+        frameAt(rowPoint(1));
+        expect([rowLabel(1), rowLabel(2)]).toEqual([null, 'build']);
+        // The HUD Widgets toggle for the feed is not part of the feed, so it does not hold rows.
+        workspace.showInput('widgets');
+        const toggle = objectWithData(workspace, {
+          inputAction: 'toggleWidget',
+          widgetKind: 'bell-feed',
+        });
+        frameAt(toggle.getWorldPosition(new THREE.Vector3()));
+        expect([rowLabel(1), rowLabel(2)]).toEqual(['deploy', 'build']);
+        workspace.hideInput();
+        // Pointing again holds rows; ending XR releases the hold.
+        frameAt(rowPoint(2));
+        ring('pane-d', 'tests');
+        expect([rowLabel(1), rowLabel(2)]).toEqual(['deploy', 'build']);
+        frameAt(away);
+        expect(rowLabel(1)).toBe('tests');
+        frameAt(rowPoint(2));
+        ring('pane-c', 'build');
+        await workspace.exitXR();
+        workspace.setNotice('Streamer restarted', { feed: true });
+        expect(rowLabel(1)).toBe('Streamer restarted');
+      } finally {
+        workspace.dispose();
+        container.remove();
+        fakeXR.presenting = false;
+        vi.unstubAllGlobals();
+      }
     });
 
     it('sends a ray through the board to the Reload button behind it', () => {

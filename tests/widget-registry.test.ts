@@ -21,6 +21,7 @@ import {
   WIDGET_REGISTRY,
   type WidgetKind,
   widgetKinds,
+  widgetSpawnYaw,
 } from '../src/xr/widget-registry';
 
 const pose = {
@@ -52,8 +53,15 @@ describe('widget registry', () => {
       ['analog-clock', 'Analog clock', [0.45, 0.3, -1.25]],
       ['agent-board', 'Agent board', [0, -0.27, -1.25]],
       ['timer', 'Timer', [0.01, 0.3, -1.25]],
+      ['bell-feed', 'Bell feed', [1.05, 0.15, -1.1]],
     ]);
-    expect(widgetKinds()).toEqual(['digital-clock', 'analog-clock', 'agent-board', 'timer']);
+    expect(widgetKinds()).toEqual([
+      'digital-clock',
+      'analog-clock',
+      'agent-board',
+      'timer',
+      'bell-feed',
+    ]);
   });
 
   // Eye at the origin, as placeWidget measures offsets. Each box projects onto the z = -1 image
@@ -80,6 +88,7 @@ describe('widget registry', () => {
       const [x, y, z] = entry.spawnOffset;
       widget.root.position.set(x, y, z);
       widget.root.scale.setScalar('spawnScale' in entry ? entry.spawnScale : 1);
+      widget.root.rotation.y = widgetSpawnYaw(entry);
       widget.root.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(widget.root);
       widget.dispose();
@@ -108,6 +117,20 @@ describe('widget registry', () => {
     const gapCentre = (digital.max.x + analog.min.x) / 2;
     expect(timer.getCenter(new THREE.Vector3()).x).toBeCloseTo(gapCentre, 6);
     expect(timer.min.x - digital.max.x).toBeCloseTo(analog.min.x - timer.max.x, 6);
+  });
+
+  it('turns only faceViewer entries toward the eye', () => {
+    for (const entry of WIDGET_REGISTRY) {
+      const yaw = widgetSpawnYaw(entry);
+      if (entry.kind !== 'bell-feed') {
+        expect(yaw, entry.kind).toBe(0);
+        continue;
+      }
+      const [x, , z] = entry.spawnOffset;
+      const normal = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+      const toEye = new THREE.Vector3(-x, 0, -z).normalize();
+      expect(normal.dot(toEye)).toBeCloseTo(1, 6);
+    }
   });
 
   it('looks entries up by kind and rejects unknown kinds', () => {

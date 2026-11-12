@@ -161,9 +161,10 @@ async function reloadApp(): Promise<void> {
   }
 }
 
-function notice(message: string): void {
+/** `feed` records the notice in the XR bell feed; pass it only for errors the user did not just cause. */
+function notice(message: string, feed = false): void {
   ui.setConnection('disconnected', message);
-  scene?.setNotice(message);
+  scene?.setNotice(message, { feed });
 }
 
 function syncCommands(): void {
@@ -353,7 +354,7 @@ function applySnapshot(next: WorkspaceSnapshot, authoritative = true): void {
           const ids = resolved.missing.map((view) => view.paneId).join(', ');
           const message = `${resolved.missing.length} saved terminal${resolved.missing.length === 1 ? ' is' : 's are'} no longer in mux: ${ids.slice(0, 100)}.`;
           pendingRestoreNotice = scene.state.xrMode === 'desktop' ? message : null;
-          scene.setNotice(message);
+          scene.setNotice(message, { feed: true });
         }
         if (!resolved.views.length)
           ui.setConnection('idle', 'No terminal views open. Choose a pane.');
@@ -409,7 +410,7 @@ async function connect(nextEndpoint: string): Promise<void> {
         if (current === generation) applySnapshot(next);
       },
       (message) => {
-        if (current === generation) notice(message);
+        if (current === generation) notice(message, true);
       },
       {
         replace: (entries) => {
@@ -427,7 +428,7 @@ async function connect(nextEndpoint: string): Promise<void> {
     }
   } catch (error) {
     if (current === generation)
-      notice(error instanceof Error ? error.message : 'Connection failed');
+      notice(error instanceof Error ? error.message : 'Connection failed', true);
   }
 }
 
@@ -553,7 +554,9 @@ xrEntry = createXREntryController({
   isActive: () => scene.state.xrMode !== 'desktop',
   onError: (error) => notice(error instanceof Error ? error.message : 'Could not enter XR.'),
   onActivationRequired: () =>
-    scene.setNotice('Automatic XR entry was blocked. Select Enter XR to continue.'),
+    scene.setNotice('Automatic XR entry was blocked. Select Enter XR to continue.', {
+      feed: true,
+    }),
   xr: navigator.xr,
   eventTarget: window,
   userActivation: () => navigator.userActivation?.isActive ?? false,

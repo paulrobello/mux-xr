@@ -69,6 +69,7 @@ import {
   type WindowPreferences,
 } from '../workspace/window-preferences';
 import { calculateArrangement } from './arrangements';
+import { createBellFeedStore } from './bell-feed';
 import type { CartoonHand } from './cartoon-hand';
 import {
   type CommandDraft,
@@ -134,7 +135,13 @@ import {
   type UIPoseName,
 } from './ui-poses';
 import { createWidgetPoseStore } from './widget-poses';
-import { getWidgetEntry, isWidgetKind, WIDGET_REGISTRY, type WidgetKind } from './widget-registry';
+import {
+  getWidgetEntry,
+  isWidgetKind,
+  WIDGET_REGISTRY,
+  type WidgetKind,
+  widgetSpawnYaw,
+} from './widget-registry';
 import type { Widget } from './widgets';
 import { createWristMenuWatch, WRIST_WATCH_PROBE_REACH } from './wrist-menu-watch';
 
@@ -198,6 +205,15 @@ export interface WorkspaceSceneState {
   toast: string | null;
 }
 
+export interface NoticeOptions {
+  /**
+   * Also record the notice in the bell feed. Only for notices raised outside the user's current
+   * action (connection and streamer errors, missing restored views, blocked XR entry); direct
+   * feedback to a press and storage failures stay HUD-only.
+   */
+  feed?: boolean;
+}
+
 export interface WorkspaceScene {
   readonly canvas: HTMLCanvasElement;
   readonly scene: THREE.Scene;
@@ -240,7 +256,7 @@ export interface WorkspaceScene {
   enterXR(mode: 'vr' | 'ar'): Promise<void>;
   exitXR(): Promise<void>;
   setUpdateAvailable(available: boolean): void;
-  setNotice(message: string | null): void;
+  setNotice(message: string | null, options?: NoticeOptions): void;
   pasteClipboard(paneId?: string): Promise<boolean>;
   resetLayout(): void;
   arrangeTerminals(pattern: PanelArrangement): void;
@@ -1191,6 +1207,13 @@ export function createWorkspaceScene(
   let agentRoster: AgentRosterRow[] = [];
   // Unlike agentRoster, refreshed on every feed: the board shows ages the signature omits.
   let latestAgentRoster: readonly AgentRosterRow[] = [];
+  // Scene-owned so bells and notices raised while the feed widget is closed show when it opens.
+  const bellFeed = createBellFeedStore();
+  // Reused every frame: widgets whose meshes a controller ray hit.
+  const pointedWidgets = new Set<Widget>();
+  bellFeed.subscribe(() => {
+    for (const widget of widgets.values()) widget.setBellFeed?.(bellFeed.entries());
+  });
   let agentRosterSignature = '';
   let agentRosterRows: AgentRows = DEFAULT_AGENT_ROSTER_LAYOUT.rows;
   let hierarchyOpened = false;
@@ -2952,6 +2975,9 @@ export function createWorkspaceScene(
           material.color.copy(cursorColor.lerpColors(cursorRest, cursorPinched, pinch));
         }
         const object = target?.object;
+        // Any widget mesh under the ray (row, gap, body, face) points its widget, not only labels.
+        const pointedWidget = widgetOwning(object)?.[1];
+        if (pointedWidget) pointedWidgets.add(pointedWidget);
         if (radialMenu.interactive && object?.userData.radialAction)
           radialHoverAction ??= object.userData.radialAction as RadialMenuAction;
         const modifierPress = modifierPresses.get(controller);
@@ -2989,6 +3015,8 @@ export function createWorkspaceScene(
       }
       hoveredByController.clear();
       for (const [controller, object] of nextHovered) hoveredByController.set(controller, object);
+      for (const widget of widgets.values()) widget.setPointed?.(pointedWidgets.has(widget));
+      pointedWidgets.clear();
       showHover(hover ?? (controlTargeted ? null : bodyHover), time);
     }
     if (!renderer?.xr.isPresenting && hoveredControl) showHover(hoveredControl, time);
@@ -3086,7 +3114,11 @@ export function createWorkspaceScene(
     const entry = getWidgetEntry(kind);
     const [x, y, z] = entry.spawnOffset;
     widget.root.position.copy(new THREE.Vector3(x, y, z).applyQuaternion(rotation).add(eye));
-    widget.root.quaternion.copy(rotation);
+    widget.root.quaternion
+      .copy(rotation)
+      .multiply(
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), widgetSpawnYaw(entry)),
+      );
     widget.root.scale.setScalar(entry.spawnScale ?? 1);
   };
   const saveWidgetPose = (kind: WidgetKind, widget: Widget): void => {
@@ -3119,6 +3151,7 @@ export function createWorkspaceScene(
       if (!object.userData.inputAction) object.userData.inputAction = 'grabWidget';
     });
     widget.setAgentRoster?.(latestAgentRoster);
+    widget.setBellFeed?.(bellFeed.entries());
     widgets.set(kind, widget);
     scene.add(widget.root);
     placeWidget(kind, widget);
@@ -4287,7 +4320,8 @@ export function createWorkspaceScene(
     if (updateNotice) updateNotice.visible = available && Boolean(renderer?.xr.isPresenting);
     notify();
   };
-  const setNotice = (message: string | null): void => {
+  const setNotice = (message: string | null, options: NoticeOptions = {}): void => {
+    if (message && options.feed) bellFeed.pushNotice(message);
     if (mutableState.notice === message) return;
     mutableState.notice = message;
     if (statusDismiss) statusDismiss.visible = Boolean(message);
@@ -4744,6 +4778,14 @@ export function createWorkspaceScene(
       if (typeof paneId === 'string' && availablePanes.some((pane) => pane.id === paneId))
         actions.selectPane(paneId);
       else setNotice('That agent pane is no longer open');
+      return true;
+    }
+    if (action === 'selectBellPane') {
+      const paneId = hit.userData.bellPaneId;
+      if (typeof paneId !== 'string') return true;
+      bellFeed.clearPane(paneId);
+      if (availablePanes.some((pane) => pane.id === paneId)) actions.selectPane(paneId);
+      else setNotice('That bell pane is no longer open');
       return true;
     }
     if (action === 'pane') {
@@ -5548,6 +5590,7 @@ export function createWorkspaceScene(
     bellLabel.userData.helpText = 'Bell pending. Select this pane to clear it.';
     bellLabel.position.set(0.58, 0.47, 0.02);
     bellLabel.visible = Boolean(surface.bellPending);
+    if (surface.bellPending) bellFeed.pushBell(surface.pane.id, surface.pane.title);
     const connectionButton = createLabelButton(
       ['connected', 'connecting'].includes(String(surface.status)) ? 'Disconnect' : 'Reconnect',
       0.46,
@@ -5620,7 +5663,11 @@ export function createWorkspaceScene(
       const status = String(surface.status);
       const statusChanged = status !== panel.status;
       const errorChanged = surface.error !== panel.error;
-      panel.bellLabel.visible = Boolean(surface.bellPending);
+      const bell = Boolean(surface.bellPending);
+      if (bell && !panel.bellLabel.visible) bellFeed.pushBell(surface.pane.id, surface.pane.title);
+      // Every acknowledge path (selection, focus, main's selectPane) lowers bellPending.
+      if (!bell && panel.bellLabel.visible) bellFeed.clearPane(surface.pane.id);
+      panel.bellLabel.visible = bell;
       if (statusChanged) {
         panel.status = status;
         panel.connectionButton.userData.status = status;
@@ -5661,6 +5708,8 @@ export function createWorkspaceScene(
   const removeTerminal = (id: string): void => {
     const panel = panels.get(id);
     if (!panel) return;
+    // The panel unsubscribes from its surface, so its bell's falling edge never arrives.
+    bellFeed.clearPane(id);
     cancelTextSelection(id);
     if (warpEdit?.id === id) finishWarp(false);
     terminalScreens.splice(terminalScreens.indexOf(panel.screen), 1);
@@ -6221,8 +6270,11 @@ export function createWorkspaceScene(
       if (panel) {
         Object.assign(panel.surface.pane, pane);
         updateLabel(panel.titleLabel, `${pane.title} · ${panel.surface.status}`);
+        bellFeed.renamePane(pane.id, pane.title);
       }
     }
+    const listed = new Set(panes.map((pane) => pane.id));
+    bellFeed.retainPanes((paneId) => listed.has(paneId) || panels.has(paneId));
     if (inputRoot && inputMode === 'panes') {
       initializeHierarchy();
       clearTimeout(agentRosterRetry);
@@ -6414,6 +6466,7 @@ export function createWorkspaceScene(
       modifierPresses.clear();
       previousRenderTime = null;
       hoveredByController.clear();
+      for (const widget of widgets.values()) widget.setPointed?.(false);
       showHover(null);
       gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
       mutableState.xrMode = 'desktop';

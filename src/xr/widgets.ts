@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { AgentRosterRow } from '../workspace/agent-roster';
+import type { BellFeedEntry } from './bell-feed';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import { applyUIEnvironment } from './ui-environment';
 
@@ -13,6 +14,10 @@ export interface Widget {
   setAgentRoster?: (rows: readonly AgentRosterRow[]) => void;
   /** Handles a press on one of the widget's `widgetControl` buttons. */
   activate?: (target: THREE.Object3D) => void;
+  /** Receives every bell feed change, newest first; widgets that do not show bells omit it. */
+  setBellFeed?: (entries: readonly BellFeedEntry[]) => void;
+  /** Whether a ray rests on one of the widget's controls this frame. */
+  setPointed?: (pointed: boolean) => void;
 }
 
 let nextWidgetId = 1;
