@@ -27,6 +27,7 @@ import {
   type WorkspaceSettings,
   type WorkspaceUI,
 } from './ui';
+import { mountPicturePicker } from './ui/pictures';
 import { createUpdateChecker, type UpdateChecker } from './update-check';
 import { shouldAutoReload } from './update-policy';
 import {
@@ -48,8 +49,10 @@ import {
   type PaneCreationState,
   requestPaneCreate,
 } from './workspace/pane-create';
+import { createPictureController } from './workspace/pictures';
 import { createWorkspaceScene, type WorkspaceScene } from './xr';
 import { createXREntryController, type XrEntryController } from './xr/entry';
+import { createIndexedDBPictureStorage, createPictureLibrary } from './xr/picture-store';
 
 const app = document.querySelector<HTMLElement>('#app');
 if (!app) throw new Error('Application mount is missing');
@@ -519,7 +522,21 @@ ui = mountWorkspaceUI(app, {
   onDictationAction: (action) => speechInput?.dispatch(action),
   onDictationDraftChange: (text) => speechInput?.editDraft(text),
 });
-scene = createWorkspaceScene(ui.sceneHost, actions);
+const pictures = createPictureController({
+  library: createPictureLibrary(createIndexedDBPictureStorage()),
+  scene: () => scene ?? null,
+  notify: (message) => scene?.setNotice(message),
+});
+scene = createWorkspaceScene(ui.sceneHost, actions, {
+  onPictureClosed: (id) => pictures.closed(id),
+});
+const sidebar = app.querySelector<HTMLElement>('.sidebar');
+if (sidebar)
+  mountPicturePicker(sidebar, {
+    onFile: (file) => pictures.addFile(file),
+    onUrl: (url) => pictures.addUrl(url),
+  });
+void pictures.restore();
 publishPaneCreation(paneCreator.state);
 agentRoster.subscribe(syncAgentRoster);
 speechInput = createSpeechInput({

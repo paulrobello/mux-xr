@@ -1,11 +1,22 @@
 import { legacyPoseToWorld, type SavedUIPose } from './ui-poses';
-import { isWidgetKind, type WidgetKind, widgetKinds } from './widget-registry';
+import { type WidgetKey, widgetKeyKind } from './widget-registry';
 
 const STORAGE_KEY = 'mux-xr:widget-poses:v2';
 const LEGACY_STORAGE_KEY = 'mux-xr:widget-poses:v1';
 const VERSION = 2;
 
-export type WidgetPoses = Partial<Record<WidgetKind, SavedUIPose>>;
+/**
+ * A saved widget pose. Pictures also keep their spawn slot (-1 for the Add Picture placeholder's
+ * spot) and `placed` once the user grabbed them, so a reload neither stacks a new frame on a
+ * restored one nor pins an unmoved frame against recenter.
+ */
+export interface WidgetPose extends SavedUIPose {
+  slot?: number;
+  placed?: true;
+}
+
+/** Poses by widget key: a singleton kind, or `<kind>:<id>` for multi-instance kinds. */
+export type WidgetPoses = Partial<Record<WidgetKey, WidgetPose>>;
 
 interface PoseDocument {
   version: 2;
@@ -34,12 +45,17 @@ function validPose(value: unknown): value is SavedUIPose {
   );
 }
 
-function clonePose(pose: SavedUIPose): SavedUIPose {
-  return {
+function clonePose(pose: WidgetPose): WidgetPose {
+  const copy: WidgetPose = {
     position: [...pose.position] as SavedUIPose['position'],
     quaternion: [...pose.quaternion] as SavedUIPose['quaternion'],
     scale: pose.scale,
   };
+  const { slot } = pose;
+  if (typeof slot === 'number' && Number.isInteger(slot) && slot >= -1 && slot < 64)
+    copy.slot = slot;
+  if (pose.placed === true) copy.placed = true;
+  return copy;
 }
 
 function emptyDocument(): PoseDocument {
@@ -62,9 +78,9 @@ function readDocument(storage: Storage): PoseDocument {
       return emptyDocument();
     }
     const poses: WidgetPoses = {};
-    for (const kind of widgetKinds()) {
-      const pose = document.poses[kind];
-      if (validPose(pose)) poses[kind] = current ? clonePose(pose) : legacyPoseToWorld(pose);
+    for (const [key, pose] of Object.entries(document.poses)) {
+      if (widgetKeyKind(key) && validPose(pose))
+        poses[key] = current ? clonePose(pose) : legacyPoseToWorld(pose);
     }
     return { version: VERSION, poses };
   } catch {
@@ -82,8 +98,8 @@ function defaultStorage(): Storage | null {
 
 export function createWidgetPoseStore(storage: Storage | null = defaultStorage()): {
   read(): WidgetPoses;
-  save(kind: WidgetKind, pose: SavedUIPose): boolean;
-  remove(kind: WidgetKind): boolean;
+  save(key: WidgetKey, pose: WidgetPose): boolean;
+  remove(key: WidgetKey): boolean;
   clear(): boolean;
 } {
   return {
@@ -91,15 +107,13 @@ export function createWidgetPoseStore(storage: Storage | null = defaultStorage()
       if (!storage) return {};
       const { poses } = readDocument(storage);
       const copy: WidgetPoses = {};
-      for (const kind of widgetKinds()) {
-        if (poses[kind]) copy[kind] = clonePose(poses[kind]);
-      }
+      for (const [key, pose] of Object.entries(poses)) if (pose) copy[key] = clonePose(pose);
       return copy;
     },
-    save(kind, pose): boolean {
-      if (!storage || !isWidgetKind(kind) || !validPose(pose)) return false;
+    save(key, pose): boolean {
+      if (!storage || !widgetKeyKind(key) || !validPose(pose)) return false;
       const document = readDocument(storage);
-      document.poses[kind] = clonePose(pose);
+      document.poses[key] = clonePose(pose);
       try {
         storage.setItem(STORAGE_KEY, JSON.stringify(document));
         return true;
@@ -107,10 +121,10 @@ export function createWidgetPoseStore(storage: Storage | null = defaultStorage()
         return false;
       }
     },
-    remove(kind): boolean {
-      if (!storage || !isWidgetKind(kind)) return false;
+    remove(key): boolean {
+      if (!storage || !widgetKeyKind(key)) return false;
       const document = readDocument(storage);
-      delete document.poses[kind];
+      delete document.poses[key];
       try {
         storage.setItem(STORAGE_KEY, JSON.stringify(document));
         return true;

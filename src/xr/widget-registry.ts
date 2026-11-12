@@ -2,6 +2,7 @@ import type * as THREE from 'three';
 import { createAgentBoardWidget } from './agent-board';
 import { createBellFeedWidget } from './bell-feed';
 import { createPerfGaugeWidget } from './perf-gauge';
+import { createPictureFrameWidget } from './picture-frame';
 import { createTimerWidget } from './timer-widget';
 import { createClockWidget, type Widget } from './widgets';
 
@@ -16,6 +17,8 @@ export interface WidgetEntry {
   spawnScale?: number;
   /** Turn to face the viewer from the spawn offset (yaw only) on spawn and recenter. */
   faceViewer?: true;
+  /** Many instances may coexist; each is keyed `<kind>:<id>` in the scene and the pose store. */
+  multiInstance?: boolean;
   create: (envMap: THREE.Texture | null) => Widget;
 }
 
@@ -66,6 +69,17 @@ export const WIDGET_REGISTRY = [
     faceViewer: true,
     create: (envMap) => createPerfGaugeWidget(envMap),
   },
+  {
+    kind: 'picture',
+    displayName: 'Picture',
+    // Lower left, below the perf gauge and left of the board; later frames step down-left.
+    spawnOffset: [-0.95, -0.55, -1.15],
+    spawnScale: 1,
+    multiInstance: true,
+    faceViewer: true,
+    // The menu spawns the placeholder; pictures picked on the page fill it.
+    create: (envMap) => createPictureFrameWidget(envMap),
+  },
 ] as const satisfies readonly WidgetEntry[];
 
 /** Union of every registered kind; grows with each entry. */
@@ -96,4 +110,26 @@ export function widgetSpawnYaw(entry: WidgetEntry): number {
   if (!entry.faceViewer) return 0;
   const [x, , z] = entry.spawnOffset;
   return Math.atan2(-x, -z);
+}
+
+const INSTANCE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** The scene and pose-store key for one widget: the kind, or `<kind>:<id>` for multi-instance kinds. */
+export type WidgetKey = string;
+
+export function widgetKey(kind: WidgetKind, id?: string): WidgetKey {
+  return findWidgetEntry(kind)?.multiInstance && id ? `${kind}:${id}` : kind;
+}
+
+/** The kind a key belongs to, or undefined for unknown kinds and malformed instance keys. */
+export function widgetKeyKind(key: unknown): WidgetKind | undefined {
+  if (typeof key !== 'string') return undefined;
+  const split = key.indexOf(':');
+  const kind = split < 0 ? key : key.slice(0, split);
+  const entry = findWidgetEntry(kind);
+  if (!entry) return undefined;
+  if (split < 0) return entry.multiInstance ? undefined : (kind as WidgetKind);
+  return entry.multiInstance && INSTANCE_ID.test(key.slice(split + 1))
+    ? (kind as WidgetKind)
+    : undefined;
 }

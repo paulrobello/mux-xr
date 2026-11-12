@@ -108,6 +108,16 @@ import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from '
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
 import { countsAsFrame } from './perf-gauge';
+import { createPictureFrameWidget, PICTURE_KIND } from './picture-frame';
+import type { PictureImage } from './picture-image';
+import {
+  freePictureSlot,
+  PICTURE_PLACEHOLDER_OFFSET,
+  PICTURE_PLACEHOLDER_SCALE,
+  PICTURE_PLACEHOLDER_SLOT,
+  pictureSpawnOffset,
+} from './picture-sizing';
+import { PICTURE_LIMITS } from './picture-store';
 import { createRadialMenu, type RadialMenuAction } from './radial-menu';
 import { createStandardHand } from './standard-hand';
 import { terminalQualityAtDistance } from './terminal-lod';
@@ -135,12 +145,15 @@ import {
   type SavedUIPose,
   type UIPoseName,
 } from './ui-poses';
-import { createWidgetPoseStore } from './widget-poses';
+import { createWidgetPoseStore, type WidgetPose } from './widget-poses';
 import {
   getWidgetEntry,
   isWidgetKind,
   WIDGET_REGISTRY,
+  type WidgetKey,
   type WidgetKind,
+  widgetKey,
+  widgetKeyKind,
   widgetSpawnYaw,
 } from './widget-registry';
 import type { Widget } from './widgets';
@@ -185,7 +198,8 @@ export interface WorkspaceSceneState {
   filtering: TerminalFiltering;
   windowPreferences: WindowPreferences;
   hierarchyStyle: HierarchyStyle;
-  widgets: WidgetKind[];
+  /** Widget keys: the kind, or `<kind>:<id>` for multi-instance kinds such as pictures. */
+  widgets: WidgetKey[];
   keyboardBackgroundEnabled: boolean;
   keyboardCurvature: number;
   keyborbMode: KeyborbMode;
@@ -252,6 +266,12 @@ export interface WorkspaceScene {
   /** Feed the agent roster; the panes menu shows it as an Agents group. */
   setAgentRoster(rows: readonly AgentRosterRow[], layout?: AgentRosterLayout): void;
   setQuickCommands(commands: QuickCommandEntry[]): void;
+  /** Shows a picked picture; it fills the newest open placeholder frame when there is one. */
+  /** Returns the ids of older frames removed to keep the frame cap (they lose their stored image). */
+  addPicture(id: string, image: PictureImage): string[];
+  /** Shows stored pictures at their saved poses and drops saved poses with no picture. */
+  restorePictures(pictures: ReadonlyArray<{ id: string; image: PictureImage }>): void;
+  removePicture(id: string): void;
   showInput(mode: InputMode): void;
   hideInput(): void;
   enterXR(mode: 'vr' | 'ar'): Promise<void>;
@@ -723,7 +743,11 @@ function createObservatory(scene: THREE.Scene): THREE.Group {
 export function createWorkspaceScene(
   container: HTMLElement,
   actions: WorkspaceActions,
-  options: { feedback?: UIFeedback } = {},
+  options: {
+    feedback?: UIFeedback;
+    /** A picture frame was closed by the user; its stored image should go. */
+    onPictureClosed?: (id: string) => void;
+  } = {},
 ): WorkspaceScene {
   const feedback = options.feedback ?? createUIFeedback();
   const scene = new THREE.Scene();
@@ -761,8 +785,8 @@ export function createWorkspaceScene(
   scene.add(ambient, key);
   const observatory = createObservatory(scene);
   const panels = new Map<string, TerminalPanel>();
-  const widgets = new Map<WidgetKind, Widget>();
-  const touchedWidgets = new Set<WidgetKind>();
+  const widgets = new Map<WidgetKey, Widget>();
+  const touchedWidgets = new Set<WidgetKey>();
   const clipboard = createClipboardBridge();
   const pendingPaste = new Map<THREE.Group, string | null>();
   let clipboardGeneration = 0;
@@ -1022,8 +1046,13 @@ export function createWorkspaceScene(
   const captureGrab = (controller: THREE.Group, object: THREE.Group, far?: boolean): void => {
     const previous = dragStates.get(controller);
     const reach = far ?? (previous?.object === object && previous.far);
-    const widgetKind = object.userData.widgetKind as WidgetKind | undefined;
-    if (widgetKind) touchedWidgets.add(widgetKind);
+    const widgetKeyed = object.userData.widgetKey as WidgetKey | undefined;
+    if (widgetKeyed) touchedWidgets.add(widgetKeyed);
+    if (object.userData.widgetKind === PICTURE_KIND) {
+      // A grabbed picture is user-placed: recenter leaves it, and its slot frees for new frames.
+      object.userData.picturePlaced = true;
+      delete object.userData.widgetSlot;
+    }
     if (object === inputRoot) inputPoseSpawn = null;
     const space = manipulationSpace(controller);
     space.updateMatrixWorld(true);
@@ -2382,7 +2411,9 @@ export function createWorkspaceScene(
     }
     if (widgetRestorePending) {
       for (const [kind, pose] of Object.entries(widgetPoseStore.read())) {
-        if (!pose || !isWidgetKind(kind) || touchedWidgets.has(kind)) continue;
+        // Multi-instance widgets (pictures) restore from their own records, not from a pose.
+        if (!pose || !isWidgetKind(kind) || widgetKeyKind(kind) !== kind) continue;
+        if (touchedWidgets.has(kind)) continue;
         const widget = widgets.get(kind) ?? addWidget(kind);
         applyUIPose(widget.root, pose, [0.25, 2]);
       }
@@ -3131,13 +3162,13 @@ export function createWorkspaceScene(
   // Ancestry, not stamped ids: nodes a widget adds after creation carry no widget metadata.
   const widgetOwning = (
     object: THREE.Object3D | null | undefined,
-  ): [WidgetKind, Widget] | undefined => {
+  ): [WidgetKey, Widget] | undefined => {
     for (let node = object; node; node = node.parent) {
       for (const entry of widgets) if (entry[1].root === node) return entry;
     }
     return undefined;
   };
-  const placeWidget = (kind: WidgetKind, widget: Widget): void => {
+  const placeWidget = (key: WidgetKey, widget: Widget): void => {
     const view = poseViewer();
     view.updateWorldMatrix(true, false);
     const eye = view.getWorldPosition(new THREE.Vector3());
@@ -3148,21 +3179,53 @@ export function createWorkspaceScene(
       new THREE.Vector3(0, 1, 0),
       Math.atan2(-forward.x, -forward.z),
     );
-    const entry = getWidgetEntry(kind);
-    const [x, y, z] = entry.spawnOffset;
+    const entry = getWidgetEntry(widgetKeyKind(key) ?? (key as WidgetKind));
+    let offset = entry.spawnOffset;
+    if (entry.multiInstance && widget.root.userData.picturePlaceholder) {
+      offset = PICTURE_PLACEHOLDER_OFFSET;
+      // An unmoved frame that filled an earlier placeholder still sits on this spot: give it a slot.
+      for (const [otherKey, other] of widgets)
+        if (other.root.userData.widgetSlot === PICTURE_PLACEHOLDER_SLOT) {
+          delete other.root.userData.widgetSlot;
+          placeWidget(otherKey, other);
+          saveWidgetPose(otherKey, other);
+        }
+    } else if (entry.multiInstance) {
+      if (typeof widget.root.userData.widgetSlot !== 'number')
+        widget.root.userData.widgetSlot = freePictureSlot(
+          [...widgets.values()]
+            .filter((other) => other !== widget)
+            .map((other) => other.root.userData.widgetSlot)
+            .filter((slot): slot is number => typeof slot === 'number'),
+        );
+      offset = pictureSpawnOffset(entry.spawnOffset, widget.root.userData.widgetSlot);
+    }
+    const [x, y, z] = offset;
     widget.root.position.copy(new THREE.Vector3(x, y, z).applyQuaternion(rotation).add(eye));
-    widget.root.quaternion
-      .copy(rotation)
-      .multiply(
-        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), widgetSpawnYaw(entry)),
-      );
-    widget.root.scale.setScalar(entry.spawnScale ?? 1);
+    widget.root.quaternion.copy(rotation).multiply(
+      new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        // Face the viewer from where this instance actually spawns (slot or placeholder).
+        widgetSpawnYaw({ ...entry, spawnOffset: [x, y, z] }),
+      ),
+    );
+    widget.root.scale.setScalar(
+      widget.root.userData.picturePlaceholder ? PICTURE_PLACEHOLDER_SCALE : (entry.spawnScale ?? 1),
+    );
   };
-  const saveWidgetPose = (kind: WidgetKind, widget: Widget): void => {
-    if (!widgetPoseStore.save(kind, captureUIPose(widget.root)))
+  const saveWidgetPose = (key: WidgetKey, widget: Widget): void => {
+    // A placeholder frame has no stored picture, so its pose would restore to nothing.
+    if (widget.root.userData.picturePlaceholder) return;
+    const pose: WidgetPose = captureUIPose(widget.root);
+    if (widget.root.userData.widgetKind === PICTURE_KIND) {
+      const slot = widget.root.userData.widgetSlot;
+      if (typeof slot === 'number') pose.slot = slot;
+      if (widget.root.userData.picturePlaced) pose.placed = true;
+    }
+    if (!widgetPoseStore.save(key, pose))
       setNotice('Widget position could not be saved on this device');
   };
-  const removeWidget = (kind: WidgetKind, persist = true): void => {
+  const removeWidget = (kind: WidgetKey, persist = true): void => {
     const widget = widgets.get(kind);
     if (!widget) return;
     for (const [controller, drag] of dragStates)
@@ -3174,27 +3237,105 @@ export function createWorkspaceScene(
     widget.dispose();
     widgets.delete(kind);
     if (persist) widgetPoseStore.remove(kind);
+    const pictureId = widget.root.userData.pictureId;
+    if (persist && typeof pictureId === 'string' && !widget.root.userData.picturePlaceholder)
+      options.onPictureClosed?.(pictureId);
     mutableState.widgets = [...widgets.keys()];
     if (!disposed && inputRoot && inputMode === 'widgets') refreshInputRoot('widgets');
     notify();
   };
-  const addWidget = (kind: WidgetKind): Widget => {
-    touchedWidgets.add(kind);
-    const widget = getWidgetEntry(kind).create(uiEnvironment.texture);
+  const mountWidget = (kind: WidgetKind, widget: Widget, place = true): WidgetKey => {
     const widgetId = String(widget.root.userData.widgetId ?? `widget-${kind}`);
+    const key = widgetKey(kind, widgetId);
+    touchedWidgets.add(key);
     widget.root.traverse((object) => {
       object.userData.widgetKind = kind;
+      object.userData.widgetKey = key;
       object.userData.widgetId = widgetId;
       if (!object.userData.inputAction) object.userData.inputAction = 'grabWidget';
     });
     widget.setAgentRoster?.(latestAgentRoster);
     widget.setBellFeed?.(bellFeed.entries());
-    widgets.set(kind, widget);
+    widgets.set(key, widget);
     scene.add(widget.root);
-    placeWidget(kind, widget);
+    if (place) placeWidget(key, widget);
+    return key;
+  };
+  const addWidget = (kind: WidgetKind): Widget => {
+    const widget = getWidgetEntry(kind).create(uiEnvironment.texture);
+    mountWidget(kind, widget);
     return widget;
   };
+  const pictureAnisotropy = (): number =>
+    Math.min(mutableState.filtering.anisotropy, Number(scene.userData.maxAnisotropy ?? 1));
+  const showPicture = (id: string, image: PictureImage, restore: boolean): string[] => {
+    if (disposed) return [];
+    const key = widgetKey(PICTURE_KIND, id);
+    if (widgets.has(key)) removeWidget(key, false);
+    const placeholder = restore
+      ? undefined
+      : [...widgets.values()].reverse().find((entry) => entry.root.userData.picturePlaceholder);
+    const widget = createPictureFrameWidget(uiEnvironment.texture, {
+      id,
+      image,
+      anisotropy: pictureAnisotropy(),
+    });
+    const saved = widgetPoseStore.read()[key];
+    // A filled placeholder keeps its pose and spot and takes no slot.
+    mountWidget(PICTURE_KIND, widget, !placeholder && !saved);
+    if (placeholder) {
+      widget.root.position.copy(placeholder.root.position);
+      widget.root.quaternion.copy(placeholder.root.quaternion);
+      widget.root.scale.copy(placeholder.root.scale);
+      if (placeholder.root.userData.picturePlaced) widget.root.userData.picturePlaced = true;
+      else widget.root.userData.widgetSlot = PICTURE_PLACEHOLDER_SLOT;
+      removeWidget(String(placeholder.root.userData.widgetKey), false);
+    } else if (saved) {
+      // Only a grab marks a frame placed. An unmoved frame keeps its saved slot so new frames
+      // spawn elsewhere and recenter can re-slot it; one with no free saved slot takes a new one.
+      applyUIPose(widget.root, saved, [0.25, 2]);
+      const taken = (slot: number): boolean =>
+        slot !== PICTURE_PLACEHOLDER_SLOT &&
+        [...widgets.values()].some(
+          (other) => other !== widget && other.root.userData.widgetSlot === slot,
+        );
+      if (saved.placed) widget.root.userData.picturePlaced = true;
+      else if (typeof saved.slot === 'number' && !taken(saved.slot))
+        widget.root.userData.widgetSlot = saved.slot;
+      else placeWidget(key, widget);
+    }
+    saveWidgetPose(key, widget);
+    // The frame cap holds in the scene even when storage failed or is unavailable.
+    const frames = [...widgets.entries()].filter(
+      ([, entry]) =>
+        entry.root.userData.widgetKind === PICTURE_KIND && !entry.root.userData.picturePlaceholder,
+    );
+    const evicted: string[] = [];
+    for (const [oldKey, entry] of frames.slice(
+      0,
+      Math.max(0, frames.length - PICTURE_LIMITS.maxFrames),
+    )) {
+      evicted.push(String(entry.root.userData.pictureId));
+      removeWidget(oldKey);
+    }
+    mutableState.widgets = [...widgets.keys()];
+    notify();
+    return evicted;
+  };
   const toggleWidget = (kind: WidgetKind): void => {
+    if (getWidgetEntry(kind).multiInstance) {
+      // One placeholder at a time: asking again brings the open one back into view.
+      const open = [...widgets.entries()].find(
+        ([, entry]) =>
+          entry.root.userData.widgetKind === kind && entry.root.userData.picturePlaceholder,
+      );
+      if (open) placeWidget(open[0], open[1]);
+      else addWidget(kind);
+      mutableState.widgets = [...widgets.keys()];
+      hideInput();
+      notify();
+      return;
+    }
     if (widgets.has(kind)) {
       removeWidget(kind);
       return;
@@ -4018,7 +4159,8 @@ export function createWorkspaceScene(
     } else if (mode === 'widgets') {
       for (const [index, { kind, displayName }] of WIDGET_REGISTRY.entries()) {
         const button = createLabelButton(
-          (widgets.has(kind) ? 'Hide ' : 'Add ') + displayName,
+          (widgets.has(kind) && !getWidgetEntry(kind).multiInstance ? 'Hide ' : 'Add ') +
+            displayName,
           1.25,
           0.14,
           { inputAction: 'toggleWidget', widgetKind: kind },
@@ -5326,8 +5468,8 @@ export function createWorkspaceScene(
           )
             saveKeyboardPose(object);
           if (object.userData.terminalId) rememberTerminalPlacements();
-          if (object.userData.widgetKind) {
-            const kind = object.userData.widgetKind as WidgetKind;
+          if (object.userData.widgetKey) {
+            const kind = object.userData.widgetKey as WidgetKey;
             const widget = widgets.get(kind);
             if (widget) saveWidgetPose(kind, widget);
           }
@@ -6147,6 +6289,7 @@ export function createWorkspaceScene(
       setTerminalMaterialFiltering(panel.screen.material, next, panel.filterGaze);
       panel.filterVersion = filterVersion;
     }
+    for (const widget of widgets.values()) widget.setTextureAnisotropy?.(pictureAnisotropy());
     if (inputRoot && inputMode === 'filtering') refreshInputRoot('filtering');
     notify();
   };
@@ -6844,7 +6987,11 @@ export function createWorkspaceScene(
       }
     }
     resetInputPose();
+    // User-placed pictures stay put; unmoved ones give up their slots and are re-slotted in order.
+    for (const widget of widgets.values())
+      if (!widget.root.userData.picturePlaced) delete widget.root.userData.widgetSlot;
     for (const [kind, widget] of widgets) {
+      if (widget.root.userData.picturePlaced) continue;
       placeWidget(kind, widget);
       saveWidgetPose(kind, widget);
     }
@@ -7049,6 +7196,15 @@ export function createWorkspaceScene(
     exitXR,
     setUpdateAvailable,
     setNotice,
+    addPicture: (id, image) => showPicture(id, image, false),
+    restorePictures: (pictures) => {
+      const ids = new Set(pictures.map(({ id }) => widgetKey(PICTURE_KIND, id)));
+      for (const key of Object.keys(widgetPoseStore.read()))
+        if (widgetKeyKind(key) === PICTURE_KIND && !ids.has(key) && !widgets.has(key))
+          widgetPoseStore.remove(key);
+      for (const { id, image } of pictures) showPicture(id, image, true);
+    },
+    removePicture: (id) => removeWidget(widgetKey(PICTURE_KIND, id)),
     pasteClipboard: (paneId?: string) => pasteClipboard(paneId, null),
     arrangeTerminals,
     toggleFocusMode,

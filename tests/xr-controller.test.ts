@@ -3237,6 +3237,265 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  describe('picture frames', () => {
+    const picture = (width: number, height: number) => ({
+      source: { width, height } as HTMLCanvasElement,
+      width,
+      height,
+    });
+    const frameRoot = (workspace: ReturnType<typeof createWorkspaceScene>, id: string) =>
+      workspace.scene.getObjectByName(`picture-frame-${id}`);
+    const savedPoses = (): Record<string, unknown> =>
+      JSON.parse(localStorage.getItem('mux-xr:widget-poses:v2') ?? '{"poses":{}}').poses;
+
+    it('keeps several frames under per-frame pose keys and spawns them apart', () => {
+      const { workspace, container } = fixture();
+      workspace.addPicture('pic-a', picture(1600, 900));
+      workspace.addPicture('pic-b', picture(900, 1600));
+      expect(workspace.state.widgets).toEqual(['picture:pic-a', 'picture:pic-b']);
+      expect(Object.keys(savedPoses()).sort()).toEqual(['picture:pic-a', 'picture:pic-b']);
+      const a = frameRoot(workspace, 'pic-a')?.position;
+      const b = frameRoot(workspace, 'pic-b')?.position;
+      expect(a && b && a.distanceTo(b)).toBeGreaterThan(0.03);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('spawns a placeholder from the menu that the next picked picture fills in place', () => {
+      const { workspace, container } = fixture();
+      workspace.showInput('widgets');
+      hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'picture' });
+      workspace.showInput('widgets');
+      expect(
+        objectWithData(workspace, { inputAction: 'toggleWidget', widgetKind: 'picture' }).userData
+          .labelText,
+      ).toBe('Add Picture');
+      const [placeholderKey] = workspace.state.widgets;
+      expect(placeholderKey).toMatch(/^picture:placeholder-/);
+      // A placeholder has no picture to restore, so it never persists a pose.
+      expect(savedPoses()).toEqual({});
+      const placeholder = workspace.scene.children.find((child) =>
+        child.name.startsWith('picture-frame-placeholder-'),
+      );
+      if (!placeholder) throw new Error('placeholder missing');
+      placeholder.position.set(0.4, 1.1, -0.9);
+      workspace.addPicture('pic-a', picture(800, 600));
+      expect(workspace.state.widgets).toEqual(['picture:pic-a']);
+      expect(frameRoot(workspace, 'pic-a')?.position.toArray()).toEqual([0.4, 1.1, -0.9]);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('restores stored frames at their saved pose and drops poses with no stored picture', () => {
+      const first = fixture();
+      first.workspace.addPicture('pic-a', picture(800, 600));
+      first.workspace.addPicture('pic-gone', picture(800, 600));
+      const root = frameRoot(first.workspace, 'pic-a');
+      if (!root) throw new Error('frame missing');
+      hit(
+        first.workspace,
+        { inputAction: 'grabWidget', widgetKey: 'picture:pic-a' },
+        'squeezestart',
+      );
+      (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
+      root.position.set(-0.5, 1.2, -1);
+      root.updateMatrixWorld(true);
+      // Session teardown keeps the stored pictures and their poses.
+      first.workspace.captureWorkspaceState();
+      first.workspace.dispose();
+      first.container.remove();
+      expect(Object.keys(savedPoses()).sort()).toEqual(['picture:pic-a', 'picture:pic-gone']);
+      const onPictureClosed = vi.fn();
+      const { workspace, container } = fixture({ onPictureClosed });
+      // A picture picked before the stored list arrives keeps its pose.
+      workspace.addPicture('pic-new', picture(800, 600));
+      workspace.restorePictures([{ id: 'pic-a', image: picture(800, 600) }]);
+      expect(workspace.state.widgets).toEqual(['picture:pic-new', 'picture:pic-a']);
+      expect(Object.keys(savedPoses()).sort()).toEqual(['picture:pic-a', 'picture:pic-new']);
+      const restored = frameRoot(workspace, 'pic-a')?.position;
+      expect(restored?.x).toBeCloseTo(-0.5, 3);
+      expect(restored?.y).toBeCloseTo(1.2, 3);
+      expect(onPictureClosed).not.toHaveBeenCalled();
+      workspace.dispose();
+      container.remove();
+    });
+
+    const reload = (setup: (workspace: ReturnType<typeof createWorkspaceScene>) => void) => {
+      const first = fixture();
+      setup(first.workspace);
+      first.workspace.captureWorkspaceState();
+      first.workspace.dispose();
+      first.container.remove();
+      return fixture();
+    };
+
+    it('spawns a pick after a reload apart from every restored frame', () => {
+      const { workspace, container } = reload((before) => {
+        before.addPicture('pic-a', picture(800, 600));
+        before.addPicture('pic-b', picture(800, 600));
+      });
+      expect(savedPoses()['picture:pic-a']).toMatchObject({ slot: 0 });
+      expect(savedPoses()['picture:pic-a']).not.toHaveProperty('placed');
+      workspace.restorePictures([
+        { id: 'pic-a', image: picture(800, 600) },
+        { id: 'pic-b', image: picture(800, 600) },
+      ]);
+      workspace.addPicture('pic-c', picture(800, 600));
+      expect(
+        ['pic-a', 'pic-b', 'pic-c'].map((id) => frameRoot(workspace, id)?.userData.widgetSlot),
+      ).toEqual([0, 1, 2]);
+      const [a, b, c] = ['pic-a', 'pic-b', 'pic-c'].map((id) => frameRoot(workspace, id)?.position);
+      if (!a || !b || !c) throw new Error('frame missing');
+      expect(c.distanceTo(a)).toBeGreaterThan(0.6);
+      expect(c.distanceTo(b)).toBeGreaterThan(0.6);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('re-slots a restored, never-moved frame on recenter and keeps a grabbed one', () => {
+      const { workspace, container } = reload((before) => {
+        before.addPicture('pic-a', picture(800, 600));
+        before.addPicture('pic-b', picture(800, 600));
+        before.addPicture('pic-c', picture(800, 600));
+        hit(before, { inputAction: 'grabWidget', widgetKey: 'picture:pic-a' }, 'squeezestart');
+        (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
+      });
+      expect(savedPoses()['picture:pic-a']).toMatchObject({ placed: true });
+      expect(savedPoses()['picture:pic-a']).not.toHaveProperty('slot');
+      workspace.restorePictures(
+        ['pic-a', 'pic-b', 'pic-c'].map((id) => ({ id, image: picture(800, 600) })),
+      );
+      const a = frameRoot(workspace, 'pic-a');
+      const b = frameRoot(workspace, 'pic-b');
+      if (!a || !b) throw new Error('frame missing');
+      expect(b.userData.widgetSlot).toBe(1);
+      const aBefore = a.position.clone();
+      const bBefore = b.position.clone();
+      workspace.resetLayout();
+      expect(a.position.toArray()).toEqual(aBefore.toArray());
+      expect(b.userData.widgetSlot).toBe(0);
+      expect(frameRoot(workspace, 'pic-c')?.userData.widgetSlot).toBe(1);
+      expect(b.position.distanceTo(bBefore)).toBeGreaterThan(0.5);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('moves a filled placeholder frame into a slot when a new placeholder takes its spot', () => {
+      const { workspace, container } = fixture();
+      workspace.showInput('widgets');
+      hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'picture' });
+      workspace.addPicture('pic-a', picture(800, 600));
+      const a = frameRoot(workspace, 'pic-a');
+      if (!a) throw new Error('frame missing');
+      expect(a.userData.widgetSlot).toBe(-1);
+      expect(savedPoses()['picture:pic-a']).toMatchObject({ slot: -1 });
+      const spot = a.position.clone();
+      workspace.showInput('widgets');
+      hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'picture' });
+      const placeholder = workspace.scene.children.find((child) =>
+        child.name.startsWith('picture-frame-placeholder-'),
+      );
+      expect(placeholder?.position.distanceTo(spot)).toBeLessThan(1e-6);
+      expect(a.userData.widgetSlot).toBe(0);
+      expect(a.position.distanceTo(spot)).toBeGreaterThan(0.2);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('closes a frame through its control, deleting its pose and stored picture', () => {
+      const onPictureClosed = vi.fn();
+      const { workspace, container } = fixture({ onPictureClosed });
+      workspace.addPicture('pic-a', picture(800, 600));
+      const plane = frameRoot(workspace, 'pic-a')?.getObjectByName('picture-frame-image');
+      if (!(plane instanceof THREE.Mesh)) throw new Error('picture plane missing');
+      const texture = (plane.material as THREE.MeshBasicMaterial).map as THREE.Texture;
+      const disposeTexture = vi.spyOn(texture, 'dispose');
+      hit(workspace, { inputAction: 'closeWidget', widgetKey: 'picture:pic-a' });
+      expect(workspace.state.widgets).toEqual([]);
+      expect(savedPoses()).toEqual({});
+      expect(onPictureClosed).toHaveBeenCalledWith('pic-a');
+      expect(disposeTexture).toHaveBeenCalled();
+      workspace.dispose();
+      container.remove();
+    });
+
+    const slotOf = (workspace: ReturnType<typeof createWorkspaceScene>, id: string) =>
+      frameRoot(workspace, id)?.userData.widgetSlot;
+
+    it('re-slots unmoved frames on recenter and leaves a grabbed frame where the user put it', () => {
+      const { workspace, container } = fixture();
+      workspace.addPicture('pic-a', picture(800, 600));
+      workspace.addPicture('pic-b', picture(800, 600));
+      workspace.addPicture('pic-c', picture(800, 600));
+      expect(['pic-a', 'pic-b', 'pic-c'].map((id) => slotOf(workspace, id))).toEqual([0, 1, 2]);
+      hit(workspace, { inputAction: 'grabWidget', widgetKey: 'picture:pic-a' }, 'squeezestart');
+      (fakeXR.controllers[0] as THREE.Group).dispatchEvent({ type: 'squeezeend' } as never);
+      const placed = frameRoot(workspace, 'pic-a');
+      if (!placed) throw new Error('frame missing');
+      placed.position.set(0.3, 1.9, -0.7);
+      workspace.resetLayout();
+      expect(placed.position.toArray()).toEqual([0.3, 1.9, -0.7]);
+      expect(slotOf(workspace, 'pic-a')).toBeUndefined();
+      // The freed slot 0 goes to the first unmoved frame, so recentered frames close up.
+      expect(slotOf(workspace, 'pic-b')).toBe(0);
+      expect(slotOf(workspace, 'pic-c')).toBe(1);
+      const b = frameRoot(workspace, 'pic-b')?.position;
+      const c = frameRoot(workspace, 'pic-c')?.position;
+      expect(b && c && b.distanceTo(c)).toBeGreaterThan(0.6);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('fills a placeholder without taking a slot and keeps one placeholder at a time', () => {
+      const { workspace, container } = fixture();
+      for (const _ of [1, 2]) {
+        workspace.showInput('widgets');
+        hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'picture' });
+      }
+      expect(workspace.state.widgets).toHaveLength(1);
+      workspace.addPicture('pic-a', picture(800, 600));
+      expect(slotOf(workspace, 'pic-a')).toBe(-1);
+      workspace.addPicture('pic-b', picture(800, 600));
+      expect(slotOf(workspace, 'pic-b')).toBe(0);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('caps scene frames at eight even with no stored copies, removing the oldest', () => {
+      const onPictureClosed = vi.fn();
+      const { workspace, container } = fixture({ onPictureClosed });
+      const evicted: string[][] = [];
+      for (let index = 0; index < 10; index += 1)
+        evicted.push(workspace.addPicture(`pic-${index}`, picture(800, 600)));
+      expect(workspace.state.widgets).toEqual(
+        Array.from({ length: 8 }, (_, index) => `picture:pic-${index + 2}`),
+      );
+      expect(evicted.flat()).toEqual(['pic-0', 'pic-1']);
+      expect(onPictureClosed.mock.calls.map(([id]) => id)).toEqual(['pic-0', 'pic-1']);
+      const positions = workspace.state.widgets.map((key) =>
+        frameRoot(workspace, key.slice('picture:'.length))?.position.toArray().join(),
+      );
+      expect(new Set(positions).size).toBe(8);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('re-applies texture anisotropy to pictures when filtering changes', () => {
+      const { workspace, container } = fixture();
+      workspace.scene.userData.maxAnisotropy = 16;
+      workspace.addPicture('pic-a', picture(800, 600));
+      const plane = frameRoot(workspace, 'pic-a')?.getObjectByName('picture-frame-image');
+      if (!(plane instanceof THREE.Mesh)) throw new Error('picture plane missing');
+      const texture = (plane.material as THREE.MeshBasicMaterial).map as THREE.Texture;
+      workspace.setTerminalFiltering({ ...workspace.state.filtering, anisotropy: 2 });
+      expect(texture.anisotropy).toBe(2);
+      workspace.setTerminalFiltering({ ...workspace.state.filtering, anisotropy: 8 });
+      expect(texture.anisotropy).toBe(8);
+      workspace.dispose();
+      container.remove();
+    });
+  });
+
   it('ignores a toggle hit whose widgetKind is not registered', () => {
     const { workspace, container } = fixture();
     workspace.showInput('widgets');

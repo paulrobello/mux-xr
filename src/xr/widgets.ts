@@ -23,6 +23,8 @@ export interface Widget {
   setPerfSample?: (sample: PerfSample) => void;
   /** Drops frame-time history; called when an XR session starts. */
   resetPerf?: () => void;
+  /** Applies a new texture anisotropy, already capped to the renderer maximum. */
+  setTextureAnisotropy?: (anisotropy: number) => void;
 }
 
 let nextWidgetId = 1;
