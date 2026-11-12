@@ -297,7 +297,10 @@ export function createCartoonHand(): CartoonHand {
         width,
         length,
       );
-      for (let vertex = 0; vertex < palmCount; vertex++) {
+      // A hidden skin (the standard hand model draws instead) still needs probes and tips, not
+      // vertices. Every visible update rewrites the whole buffer, so skipped frames leave no gap.
+      const drawn = mesh.visible;
+      for (let vertex = 0; drawn && vertex < palmCount; vertex++) {
         position
           .copy(center)
           .addScaledVector(across, palmPositions.getX(vertex) * width)
@@ -323,6 +326,7 @@ export function createCartoonHand(): CartoonHand {
         for (let ring = 0; ring <= SECTIONS; ring++) curve.getPoint(ring / SECTIONS, samples[ring]);
         for (let probe = 0; probe < probePoints[finger].length; probe++)
           probePoints[finger][probe].copy(samples[probe * 2]);
+        if (!drawn) continue;
         radial.copy(normal);
         const radius = RADII[finger];
         const start = palmCount + finger * FINGER_VERTICES;
@@ -360,8 +364,10 @@ export function createCartoonHand(): CartoonHand {
         tangent.copy(samples[1]).sub(samples[0]).normalize().negate();
         write(start + RINGS * SIDES, samples[0], tangent);
       }
-      geometry.getAttribute('position').needsUpdate = true;
-      geometry.getAttribute('normal').needsUpdate = true;
+      if (drawn) {
+        geometry.getAttribute('position').needsUpdate = true;
+        geometry.getAttribute('normal').needsUpdate = true;
+      }
       camera.getWorldPosition(cameraPosition);
       camera.getWorldQuaternion(cameraRotation);
       anchor

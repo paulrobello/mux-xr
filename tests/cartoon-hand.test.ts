@@ -38,6 +38,31 @@ function trackedHand(side: 'left' | 'right'): Hand {
 }
 
 describe('cartoon tracked hands', () => {
+  it('skips the skin rebuild while the skin is hidden but keeps tips and probes current', () => {
+    const visual = createCartoonHand();
+    const skin = visual.root.getObjectByName('cartoon-hand-skin') as THREE.Mesh;
+    const positions = skin.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const camera = new THREE.PerspectiveCamera();
+    const hand = trackedHand('right');
+    hand.updateMatrixWorld(true);
+    visual.update(hand, camera, 'right', 1 / 60);
+    const shown = positions.version;
+    const before = positions.array.slice();
+    skin.visible = false;
+    hand.position.x += 0.1;
+    hand.updateMatrixWorld(true);
+    visual.update(hand, camera, 'right', 1 / 60);
+    expect(positions.version).toBe(shown);
+    expect(Array.from(positions.array)).toEqual(Array.from(before));
+    const wrist = hand.joints.wrist.getWorldPosition(new THREE.Vector3());
+    const palm = visual.root.userData.palmPosition as THREE.Vector3;
+    expect(palm.distanceTo(wrist)).toBeLessThan(0.1);
+    expect(visual.contactProbes.some((probe) => probe.point.distanceTo(palm) < 1e-6)).toBe(true);
+    skin.visible = true;
+    visual.update(hand, camera, 'right', 1 / 60);
+    expect(positions.version).toBeGreaterThan(shown);
+  });
+
   it('keeps a compact neutral silhouette and exposes world-space contact probes', () => {
     const visual = createCartoonHand();
     const pose = new THREE.Group();
