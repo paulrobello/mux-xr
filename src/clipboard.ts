@@ -1,6 +1,21 @@
+export interface ClipboardCopyOptions {
+  /**
+   * Host clipboard text: if the system write fails, the local copy serves only the next read, for at
+   * most {@link HOST_TEXT_TTL_MS}, and never a read that excludes host text.
+   */
+  fromHost?: boolean;
+}
+
+export interface ClipboardReadOptions {
+  /** Ignore locally kept host text, so it is never sent back to the host. */
+  excludeHost?: boolean;
+}
+
+export const HOST_TEXT_TTL_MS = 60_000;
+
 export interface ClipboardBridge {
-  copy(text: string): Promise<boolean>;
-  read(): Promise<string | null>;
+  copy(text: string, options?: ClipboardCopyOptions): Promise<boolean>;
+  read(options?: ClipboardReadOptions): Promise<string | null>;
   dispose(): void;
 }
 
@@ -11,6 +26,7 @@ export interface ClipboardProvider {
 
 export interface ClipboardBridgeOptions {
   timeoutMs?: number;
+  now?: () => number;
 }
 
 function defaultProvider(): ClipboardProvider | undefined {
@@ -29,7 +45,10 @@ export function createClipboardBridge(
   options: ClipboardBridgeOptions = {},
 ): ClipboardBridge {
   const timeoutMs = options.timeoutMs ?? 5000;
+  const now = options.now ?? Date.now;
   let cachedText: string | null = null;
+  let cachedFromHost = false;
+  let cachedAt = 0;
   let writeState: 'pending' | 'confirmed' | 'failed' = 'failed';
   let generation = 0;
   let disposed = false;
@@ -42,10 +61,12 @@ export function createClipboardBridge(
     }
   };
 
-  const copy = (text: string): Promise<boolean> => {
+  const copy = (text: string, copyOptions: ClipboardCopyOptions = {}): Promise<boolean> => {
     if (disposed) return Promise.resolve(false);
     const currentGeneration = ++generation;
     cachedText = text;
+    cachedFromHost = Boolean(copyOptions.fromHost);
+    cachedAt = now();
     writeState = 'pending';
 
     const clipboard = currentProvider();
@@ -75,12 +96,30 @@ export function createClipboardBridge(
     );
   };
 
-  const read = (): Promise<string | null> => {
+  const read = (readOptions: ClipboardReadOptions = {}): Promise<string | null> => {
     if (disposed) return Promise.resolve(null);
-    const snapshotGeneration = generation;
+    if (
+      cachedFromHost &&
+      writeState !== 'confirmed' &&
+      cachedText !== null &&
+      (readOptions.excludeHost || now() - cachedAt > HOST_TEXT_TTL_MS)
+    ) {
+      if (!readOptions.excludeHost) cachedText = null;
+      return readSystem(null);
+    }
     const snapshotText = cachedText;
+    if (snapshotText !== null && writeState !== 'confirmed') {
+      if (cachedFromHost) cachedText = null;
+      return Promise.resolve(snapshotText);
+    }
+    const hostUsable =
+      !cachedFromHost || (!readOptions.excludeHost && now() - cachedAt <= HOST_TEXT_TTL_MS);
+    return readSystem(hostUsable ? snapshotText : null);
+  };
+
+  const readSystem = (snapshotText: string | null): Promise<string | null> => {
+    const snapshotGeneration = generation;
     const clipboard = currentProvider();
-    if (snapshotText !== null && writeState !== 'confirmed') return Promise.resolve(snapshotText);
     if (!clipboard?.readText) return Promise.resolve(snapshotText);
 
     let readResult: Promise<string>;
@@ -117,6 +156,7 @@ export function createClipboardBridge(
     disposed = true;
     generation += 1;
     cachedText = null;
+    cachedFromHost = false;
     writeState = 'failed';
   };
 

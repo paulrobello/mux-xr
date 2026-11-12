@@ -156,3 +156,45 @@ describe('clipboard bridge', () => {
     }
   });
 });
+
+describe('host text kept after a refused write (F5)', () => {
+  const refusing = (readText: () => Promise<string>) => ({
+    writeText: () => Promise.reject(new Error('not focused')),
+    readText,
+  });
+
+  it('serves only the next read, then falls back to readText', async () => {
+    const readText = vi.fn(async () => 'quest text');
+    const bridge = createClipboardBridge(() => refusing(readText));
+    expect(await bridge.copy('host text', { fromHost: true })).toBe(false);
+    expect(await bridge.read()).toBe('host text');
+    expect(readText).not.toHaveBeenCalled();
+    expect(await bridge.read()).toBe('quest text');
+    expect(readText).toHaveBeenCalledTimes(1);
+  });
+
+  it('expires after 60 seconds', async () => {
+    let now = 0;
+    const bridge = createClipboardBridge(() => refusing(async () => 'quest text'), {
+      now: () => now,
+    });
+    await bridge.copy('host text', { fromHost: true });
+    now = 60_001;
+    expect(await bridge.read()).toBe('quest text');
+  });
+
+  it('is never returned to a read that excludes host text, even as a fallback', async () => {
+    const bridge = createClipboardBridge(() => refusing(() => Promise.reject(new Error('denied'))));
+    await bridge.copy('host text', { fromHost: true });
+    expect(await bridge.read({ excludeHost: true })).toBeNull();
+    expect(await bridge.read()).toBe('host text');
+  });
+
+  it('keeps local Mux XR copies reusable as before', async () => {
+    const bridge = createClipboardBridge(() => refusing(async () => 'quest text'));
+    await bridge.copy('local selection');
+    expect(await bridge.read()).toBe('local selection');
+    expect(await bridge.read()).toBe('local selection');
+    expect(await bridge.read({ excludeHost: true })).toBe('local selection');
+  });
+});

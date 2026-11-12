@@ -279,6 +279,12 @@ export interface WorkspaceScene {
   setUpdateAvailable(available: boolean): void;
   setNotice(message: string | null, options?: NoticeOptions): void;
   pasteClipboard(paneId?: string): Promise<boolean>;
+  /** Types the host (Mac) clipboard into the selected terminal through the guarded paste path. */
+  pasteHostClipboard(paneId?: string): Promise<boolean>;
+  /** Copies the host clipboard into the Quest clipboard, keeping it for Paste if that write fails. */
+  copyHostToQuest(): Promise<boolean>;
+  /** Sends the Quest clipboard (or text copied in Mux XR) to the host clipboard. */
+  copyQuestToHost(): Promise<boolean>;
   resetLayout(): void;
   arrangeTerminals(pattern: PanelArrangement): void;
   toggleFocusMode(id?: string): void;
@@ -740,6 +746,8 @@ function createObservatory(scene: THREE.Scene): THREE.Group {
   return group;
 }
 
+const COPY_TO_HOST = '\u0000copy-to-host';
+
 export function createWorkspaceScene(
   container: HTMLElement,
   actions: WorkspaceActions,
@@ -788,8 +796,10 @@ export function createWorkspaceScene(
   const widgets = new Map<WidgetKey, Widget>();
   const touchedWidgets = new Set<WidgetKey>();
   const clipboard = createClipboardBridge();
+  // A pending native select either pastes into a pane id or, with COPY_TO_HOST, sends to the host.
   const pendingPaste = new Map<THREE.Group, string | null>();
   let clipboardGeneration = 0;
+  let hostPasteInFlight = false;
   let floorCorrectionPending = false;
   let toastDeadline = 0;
   const radialMenu = createRadialMenu();
@@ -1664,11 +1674,86 @@ export function createWorkspaceScene(
     }
     notify();
   };
-  const pasteClipboard = async (
+  // Null or empty means nothing to paste; an error object carries its own notice.
+  type PasteText = string | null | { error: string };
+  const pasteClipboard = (
+    paneId?: string,
+    source: THREE.Group | null = lastSelectSource,
+  ): Promise<boolean> => pasteFrom(paneId, source, () => clipboard.read(), 'Pasted.');
+  const readHostText = async (): Promise<string | { error: string }> => {
+    if (!actions.readHostClipboard) return { error: 'Host clipboard is not available here.' };
+    const result = await actions.readHostClipboard();
+    if (!result.ok) return { error: result.message };
+    return result.value || { error: 'The host clipboard has no text.' };
+  };
+  const pasteHostClipboard = (
     paneId?: string,
     source: THREE.Group | null = lastSelectSource,
   ): Promise<boolean> => {
+    if (hostPasteInFlight) return Promise.resolve(false);
+    hostPasteInFlight = true;
+    return pasteFrom(paneId, source, readHostText, 'Pasted host clipboard.', true).finally(() => {
+      hostPasteInFlight = false;
+    });
+  };
+  const copyHostToQuest = async (
+    source: THREE.Group | null = lastSelectSource,
+  ): Promise<boolean> => {
+    const generation = ++clipboardGeneration;
+    const result = await readHostText();
+    if (disposed) return false;
+    if (typeof result !== 'string') {
+      setNotice(result.error);
+      cue('error', source);
+      return false;
+    }
+    const systemCopied = await clipboard.copy(result, { fromHost: true });
+    if (disposed || generation !== clipboardGeneration) return systemCopied;
+    showToast(
+      systemCopied
+        ? 'Host clipboard copied to Quest.'
+        : 'Host text kept in Mux XR. The Quest clipboard refused it, so use Paste.',
+    );
+    return systemCopied;
+  };
+  const copyQuestToHost = async (
+    source: THREE.Group | null = lastSelectSource,
+  ): Promise<boolean> => {
     clipboardGeneration++;
+    // The read starts before any await so the browser still sees the user gesture.
+    const pending = clipboard.read({ excludeHost: true });
+    if (!actions.writeHostClipboard) {
+      setNotice('Host clipboard is not available here.');
+      cue('error', source);
+      return false;
+    }
+    const text = await pending;
+    if (disposed) return false;
+    if (!text) {
+      setNotice(
+        'The Quest clipboard is empty or unavailable here. Copy text in the browser, or highlight terminal text, first.',
+      );
+      cue('error', source);
+      return false;
+    }
+    const result = await actions.writeHostClipboard(text);
+    if (disposed) return false;
+    if (!result.ok) {
+      setNotice(result.message);
+      cue('error', source);
+      return false;
+    }
+    showToast('Copied to host clipboard.');
+    return true;
+  };
+  const pasteFrom = async (
+    paneId: string | undefined,
+    source: THREE.Group | null,
+    read: () => Promise<PasteText>,
+    pastedToast: string,
+    supersedable = false,
+  ): Promise<boolean> => {
+    const generation = ++clipboardGeneration;
     const id = paneId ?? mutableState.inputTargetId ?? mutableState.selectedTerminalId;
     const panel = id ? panels.get(id) : undefined;
     if (
@@ -1681,8 +1766,10 @@ export function createWorkspaceScene(
       cue('error', source);
       return false;
     }
-    const text = await clipboard.read();
+    const received = await read();
     if (disposed) return false;
+    // A slow host read loses to any clipboard action started while it was in flight.
+    if (supersedable && generation !== clipboardGeneration) return false;
     if (
       panels.get(id) !== panel ||
       mutableState.selectedTerminalId !== id ||
@@ -1692,14 +1779,18 @@ export function createWorkspaceScene(
       cue('error', source);
       return false;
     }
-    if (text === null || text === '') {
-      setNotice('Clipboard is empty or unavailable. Highlight text to copy it first.');
+    if (typeof received !== 'string' || received === '') {
+      setNotice(
+        received && typeof received === 'object'
+          ? received.error
+          : 'Clipboard is empty or unavailable. Highlight text to copy it first.',
+      );
       cue('error', source);
       return false;
     }
     try {
-      if (!panel.surface.paste(text)) throw new Error('Paste rejected');
-      showToast('Pasted.');
+      if (!panel.surface.paste(received)) throw new Error('Paste rejected');
+      showToast(pastedToast);
       return true;
     } catch {
       setNotice('The terminal rejected the paste. Reconnect and try again.');
@@ -2733,7 +2824,8 @@ export function createWorkspaceScene(
       const cues = cueCount;
       if (press.object.userData.inputAction === 'pasteClipboard') {
         if (press.target) void pasteClipboard(press.target);
-      } else activateTarget(target);
+      } else if (press.object.userData.inputAction === 'copyToHost') void copyQuestToHost();
+      else activateTarget(target);
       pressCue(controller, press.object.userData.inputAction, cues);
       pressPanelButton(press.object);
       lastSelectSource = null;
@@ -3641,6 +3733,14 @@ export function createWorkspaceScene(
       const paste = createLabelButton('Paste', 0.44, 0.1, { inputAction: 'pasteClipboard' });
       paste.position.set(-1, 0.87, 0);
       inputRoot.add(paste);
+      // Flank the curvature row (its − and + end at x ±0.6) with the host clipboard actions.
+      const hostPaste = createLabelButton('Paste host', 0.4, 0.09, {
+        inputAction: 'pasteHostClipboard',
+      });
+      hostPaste.position.set(-0.85, 0.7, 0);
+      const toHost = createLabelButton('Copy to host', 0.4, 0.09, { inputAction: 'copyToHost' });
+      toHost.position.set(0.85, 0.7, 0);
+      inputRoot.add(hostPaste, toHost);
       if (dictation.transcript && dictation.status !== 'listening') {
         const insert = createLabelButton('Insert text', 0.5, 0.1, {
           inputAction: 'dictation',
@@ -4688,6 +4788,15 @@ export function createWorkspaceScene(
       if (!renderer?.xr.isPresenting) void pasteClipboard();
       return true;
     }
+    if (action === 'pasteHostClipboard') {
+      void pasteHostClipboard();
+      return true;
+    }
+    if (action === 'copyToHost') {
+      // In a session the native select event, which carries user activation, runs this instead.
+      if (!renderer?.xr.isPresenting) void copyQuestToHost();
+      return true;
+    }
     if (action === 'hierarchyStyle') {
       setHierarchyStyle(validateHierarchyStyle(hit.userData.hierarchyStyle));
       return true;
@@ -5340,8 +5449,10 @@ export function createWorkspaceScene(
           disconnectedControllers.has(root)
         )
           return;
-        if (targetFromController(root)?.object?.userData.inputAction === 'pasteClipboard')
+        const pressedAction = targetFromController(root)?.object?.userData.inputAction;
+        if (pressedAction === 'pasteClipboard')
           pendingPaste.set(root, mutableState.inputTargetId ?? mutableState.selectedTerminalId);
+        else if (pressedAction === 'copyToHost') pendingPaste.set(root, COPY_TO_HOST);
         onControllerSelect(root);
       };
       const onSelectEnd = (): void => {
@@ -5371,6 +5482,15 @@ export function createWorkspaceScene(
         if (pendingPaste.has(root)) {
           const id = pendingPaste.get(root);
           pendingPaste.delete(root);
+          if (id === COPY_TO_HOST) {
+            if (
+              !gripActive() &&
+              !disconnectedControllers.has(root) &&
+              targetFromController(root)?.object?.userData.inputAction === 'copyToHost'
+            )
+              void copyQuestToHost(root);
+            return;
+          }
           if (
             !gripActive() &&
             !disconnectedControllers.has(root) &&
@@ -7206,6 +7326,9 @@ export function createWorkspaceScene(
     },
     removePicture: (id) => removeWidget(widgetKey(PICTURE_KIND, id)),
     pasteClipboard: (paneId?: string) => pasteClipboard(paneId, null),
+    pasteHostClipboard: (paneId?: string) => pasteHostClipboard(paneId, null),
+    copyHostToQuest: () => copyHostToQuest(null),
+    copyQuestToHost: () => copyQuestToHost(null),
     arrangeTerminals,
     toggleFocusMode,
     resetLayout,

@@ -11,6 +11,7 @@ import type {
 import { createDemoSurface, demoAgents, demoSnapshot } from './demo';
 import { createDesktopPanels, type DesktopPanels } from './desktop/panels';
 import { createEnvironmentManager, loadObservatory } from './environment';
+import { createHostClipboardClient, createHostClipboardSecretStore } from './host-clipboard';
 import { createLocalSpeechRecognition, isLocalSpeechSupported } from './local-speech';
 import { executeQuickCommand, loadSharedCommands } from './quick-commands';
 import { reloadAfterXR } from './reload';
@@ -435,7 +436,21 @@ async function connect(nextEndpoint: string): Promise<void> {
   }
 }
 
+const hostClipboardSecret = createHostClipboardSecretStore();
+const hostClipboard = createHostClipboardClient({
+  url: () => {
+    const url = new URL('/clipboard', window.location.href);
+    url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.port = '4242';
+    url.search = '';
+    url.hash = '';
+    return url.href;
+  },
+  secret: () => hostClipboardSecret.get(),
+});
 const actions: WorkspaceActions = {
+  readHostClipboard: () => hostClipboard.read(),
+  writeHostClipboard: (text) => hostClipboard.write(text),
   saveCommand: (command) => ui.addCommand(command),
   removeCommand: (id) => ui.deleteCommand(id),
   reloadApp: () => {
@@ -486,6 +501,20 @@ ui = mountWorkspaceUI(app, {
   onSendText: sendText,
   onPaste: (id) => {
     void scene.pasteClipboard(id);
+  },
+  onHostToQuest: () => {
+    void scene.copyHostToQuest();
+  },
+  onQuestToHost: () => {
+    void scene.copyQuestToHost();
+  },
+  isHostClipboardPaired: () => hostClipboardSecret.get() !== null,
+  onHostClipboardSecret: (secret) => {
+    if (secret === null) {
+      hostClipboardSecret.forget();
+      return true;
+    }
+    return hostClipboardSecret.set(secret);
   },
   onSendKey: sendKey,
   onRunCommand: runCommand,

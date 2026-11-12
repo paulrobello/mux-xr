@@ -35,6 +35,10 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
       return 'Restore the curvature from before this Warp panel opened';
     case 'pasteClipboard':
       return 'Paste copied text into the selected terminal without adding Enter';
+    case 'pasteHostClipboard':
+      return "Type the Mac's clipboard text into the selected terminal without adding Enter";
+    case 'copyToHost':
+      return "Send the Quest clipboard, or text highlighted in Mux XR, to the Mac's clipboard";
     case 'keyboardCurvature':
       return 'Curve the keyboard without changing terminal size';
     case 'dictation':

@@ -93,10 +93,16 @@ dev-restart: dev-stop dev
 pre-commit:
 	pre-commit run --all-files
 
-.PHONY: whisper-service-plist install-whisper-service explorer-controls-check
+.PHONY: whisper-service-plist install-whisper-service whisper-agent-plist install-whisper-agent uninstall-whisper-agent explorer-controls-check
 whisper-service-plist:
 	bun run scripts/install-dictation-service.ts --print
 install-whisper-service:
 	sudo /opt/homebrew/bin/bun run scripts/install-dictation-service.ts --install --migrate-running-listener
+whisper-agent-plist:
+	bun run scripts/install-dictation-service.ts --print --agent
+install-whisper-agent:
+	bun run scripts/install-dictation-service.ts --install --agent
+uninstall-whisper-agent:
+	bun run scripts/install-dictation-service.ts --uninstall --agent
 explorer-controls-check:
 	bun run scripts/explorer-controls-check.ts

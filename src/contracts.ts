@@ -164,4 +164,10 @@ export interface WorkspaceActions {
   togglePaneConnection?(id: string): void;
   dictationAction?(action: import('./speech-input').DictationAction): void;
   editDictation?(text: string): void;
+  /** One explicit host clipboard read through the dictation server's `/clipboard` route. */
+  readHostClipboard?(): Promise<import('./host-clipboard').HostClipboardResult<string>>;
+  /** One explicit host clipboard write through the dictation server's `/clipboard` route. */
+  writeHostClipboard?(
+    text: string,
+  ): Promise<import('./host-clipboard').HostClipboardResult<number>>;
 }

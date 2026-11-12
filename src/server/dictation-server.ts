@@ -6,6 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
+import {
+  CLIPBOARD_PATH,
+  type ClipboardServerOptions,
+  createClipboardRoute,
+} from './clipboard-server';
 import type { DictationTelemetry, TranscriptionOutcome } from './dictation-telemetry';
 
 const execFile = promisify(execFileCallback);
@@ -22,6 +27,8 @@ export type DictationServerOptions = {
   ffmpegPath?: string;
   whisperPath?: string;
   timeoutMs?: number;
+  /** Clipboard sync on `/clipboard`; without it the route answers that sync is disabled. */
+  clipboard?: Omit<ClipboardServerOptions, 'allowedOrigins'>;
   telemetry?: Pick<
     DictationTelemetry,
     'connected' | 'disconnected' | 'rejected' | 'beginTranscription'
@@ -114,6 +121,11 @@ export const attachDictationServer = (
   let activeTask: Promise<void> | null = null;
   const sockets = new Set<WebSocket>();
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
+  const clipboardRoute = createClipboardRoute({
+    loadSecret: () => ({ enabled: false, reason: 'no --clipboard-secret-file configured' }),
+    ...options.clipboard,
+    allowedOrigins: options.allowedOrigins,
+  });
 
   const handleUpgrade = (
     request: import('node:http').IncomingMessage,
@@ -127,6 +139,10 @@ export const attachDictationServer = (
       observe(() => options.telemetry?.rejected('path'));
       socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
       socket.destroy();
+      return;
+    }
+    if (requestUrl.pathname === CLIPBOARD_PATH && !requestUrl.search) {
+      clipboardRoute.handleUpgrade(request, socket, head);
       return;
     }
     const origin = request.headers.origin;
@@ -253,6 +269,7 @@ export const attachDictationServer = (
         await Promise.race([activeTask, new Promise((resolve) => setTimeout(resolve, 1_000))]);
       }
       await new Promise<void>((resolve) => wss.close(() => resolve()));
+      await clipboardRoute.close();
     },
   };
 };

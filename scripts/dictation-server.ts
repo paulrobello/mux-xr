@@ -1,6 +1,7 @@
 import { accessSync, constants, readFileSync } from 'node:fs';
 import { createServer } from 'node:https';
 import { resolve } from 'node:path';
+import { loadClipboardSecret } from '../src/server/clipboard-server';
 import { attachDictationServer } from '../src/server/dictation-server';
 import { createDictationTelemetry } from '../src/server/dictation-telemetry';
 
@@ -54,10 +55,27 @@ const server = createServer(
     );
   },
 );
+const clipboardSecretFile = parsed.get('--clipboard-secret-file');
+const clipboardAtStart = loadClipboardSecret(clipboardSecretFile);
+console.log(
+  clipboardAtStart.enabled
+    ? 'Clipboard sync enabled.'
+    : `Clipboard sync disabled: ${clipboardAtStart.reason}.`,
+);
 const attached = attachDictationServer(server, {
   allowedOrigins: origins,
   model,
   telemetry,
+  clipboard: {
+    loadSecret: () => loadClipboardSecret(clipboardSecretFile),
+    // Counts and sizes only: clipboard text and the secret never reach the log.
+    onEvent: (event) =>
+      console.log(
+        event.kind === 'transfer'
+          ? `Clipboard ${event.direction}: ${event.bytes} bytes`
+          : `Clipboard refused: ${event.code}`,
+      ),
+  },
   ffmpegPath: parsed.get('--ffmpeg') ?? '/opt/homebrew/bin/ffmpeg',
   whisperPath: parsed.get('--whisper') ?? '/opt/homebrew/bin/whisper-cli',
 });

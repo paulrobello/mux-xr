@@ -30,13 +30,11 @@ export const validateRepository = (repository: string): string => {
   return normalized;
 };
 
-export const buildLaunchDaemonPlist = (options: DictationLaunchdOptions = {}): string => {
-  const repository = validateRepository(options.repository ?? DEFAULT_REPOSITORY);
-  const user = validateUser(options.user ?? DEFAULT_USER);
+const serverArguments = (repository: string): string[] => {
   const script = `${repository}/scripts/dictation-server.ts`;
   const model = `${repository}/.local/models/ggml-base.en.bin`;
   const pem = `${repository}/.local/https/_cert.pem`;
-  const args = [
+  return [
     '/opt/homebrew/bin/bun',
     'run',
     script,
@@ -55,7 +53,22 @@ export const buildLaunchDaemonPlist = (options: DictationLaunchdOptions = {}): s
     '--model',
     model,
   ];
-  const array = args.map((argument) => `    <string>${xml(argument)}</string>`).join('\n');
+};
+
+const plistArray = (args: string[]): string =>
+  args.map((argument) => `    <string>${xml(argument)}</string>`).join('\n');
+
+/** The pairing secret the user creates; the server never creates or defaults it. */
+export const clipboardSecretPath = (repository: string): string =>
+  `${repository}/.local/clipboard-secret`;
+
+export const agentPlistPath = (user: string): string =>
+  `/Users/${validateUser(user)}/Library/LaunchAgents/${DICTATION_LABEL}.plist`;
+
+export const buildLaunchDaemonPlist = (options: DictationLaunchdOptions = {}): string => {
+  const repository = validateRepository(options.repository ?? DEFAULT_REPOSITORY);
+  const user = validateUser(options.user ?? DEFAULT_USER);
+  const array = plistArray(serverArguments(repository));
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -70,6 +83,48 @@ ${array}
   </array>
   <key>WorkingDirectory</key>
   <string>${xml(repository)}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+  <key>StandardOutPath</key>
+  <string>${xml(`${repository}/.local/whisper-launchd.log`)}</string>
+  <key>StandardErrorPath</key>
+  <string>${xml(`${repository}/.local/whisper-launchd.log`)}</string>
+</dict>
+</plist>
+`;
+};
+
+/**
+ * The same server as a per-user LaunchAgent in the gui/<uid> domain. Only that Aqua session can reach
+ * the user's pasteboard (com.apple.pboard), so clipboard sync needs this instead of the LaunchDaemon.
+ */
+export const buildLaunchAgentPlist = (options: DictationLaunchdOptions = {}): string => {
+  const repository = validateRepository(options.repository ?? DEFAULT_REPOSITORY);
+  const array = plistArray([
+    ...serverArguments(repository),
+    '--clipboard-secret-file',
+    clipboardSecretPath(repository),
+  ]);
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${DICTATION_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+${array}
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${xml(repository)}</string>
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>

@@ -4,6 +4,8 @@ import { chmod, chown, readFile, rename, unlink, writeFile } from 'node:fs/promi
 import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  agentPlistPath,
+  buildLaunchAgentPlist,
   buildLaunchDaemonPlist,
   DEFAULT_REPOSITORY,
   DEFAULT_USER,
@@ -16,6 +18,9 @@ import {
 
 type InstallerOptions = {
   install: boolean;
+  uninstall: boolean;
+  /** Per-user LaunchAgent in gui/<uid>, required for host clipboard sync. */
+  agent: boolean;
   print: boolean;
   migrateRunningListener: boolean;
   repository: string;
@@ -31,23 +36,33 @@ export type ListenerMetadata = {
 
 export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
   let install = false;
+  let uninstall = false;
   let print = false;
   let repository = DEFAULT_REPOSITORY;
   let user = DEFAULT_USER;
   let migrateRunningListener = false;
+  let agent = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--install') install = true;
+    else if (argument === '--uninstall') uninstall = true;
     else if (argument === '--print') print = true;
     else if (argument === '--migrate-running-listener') migrateRunningListener = true;
+    else if (argument === '--agent') agent = true;
     else if (argument === '--repo') repository = argv[++index] ?? '';
     else if (argument === '--user') user = argv[++index] ?? '';
     else throw new Error(`Unknown argument: ${argument}`);
   }
-  if (!install && !print) print = true;
-  if (install && print) throw new Error('Choose only one of --print or --install.');
+  if (uninstall && !agent) throw new Error('--uninstall is only supported with --agent.');
+  if ([install, print, uninstall].filter(Boolean).length > 1)
+    throw new Error('Choose only one of --print, --install or --uninstall.');
+  if (!install && !print && !uninstall) print = true;
+  if (agent && migrateRunningListener)
+    throw new Error('--agent installs never migrate a running listener.');
   return {
     install,
+    uninstall,
+    agent,
     print,
     migrateRunningListener,
     repository: validateRepository(repository),
@@ -234,10 +249,33 @@ const preflight = (repository: string, user: string): void => {
     accessSync(path, constants.R_OK);
 };
 
+/**
+ * The LaunchDaemon and the per-user LaunchAgent share a label and port 4242. A daemon install that
+ * SIGTERMs the agent's listener would lose to KeepAlive restarting it, so refuse instead.
+ */
+export const assertNoAgentLoaded = (
+  user: string,
+  uid: number,
+  isLoaded: (target: string) => boolean,
+): void => {
+  if (isLoaded(`gui/${uid}/${DICTATION_LABEL}`))
+    throw new Error(
+      `The per-user LaunchAgent gui/${uid}/${DICTATION_LABEL} is loaded. Run make uninstall-whisper-agent as ${user} first, then retry.`,
+    );
+};
+
+const launchdTargetLoaded = (target: string): boolean =>
+  spawnSync('/bin/launchctl', ['print', target]).status === 0;
+
 const install = async (plist: string, options: InstallerOptions): Promise<void> => {
   if (process.getuid?.() !== 0)
     throw new Error('--install requires root. Use --print as a non-root user.');
   preflight(options.repository, options.user);
+  assertNoAgentLoaded(
+    options.user,
+    Number(execFileSync('/usr/bin/id', ['-u', options.user], { encoding: 'utf8' }).trim()),
+    launchdTargetLoaded,
+  );
   let existing: string | undefined;
   try {
     existing = await readFile(DICTATION_PLIST_PATH, 'utf8');
@@ -327,9 +365,153 @@ const install = async (plist: string, options: InstallerOptions): Promise<void> 
   }
 };
 
+export type AgentInstallDeps = {
+  uid: number;
+  path: string;
+  launchctl: (args: string[], allowFailure?: boolean) => string;
+  daemonLoaded: () => boolean;
+  agentLoaded: () => boolean;
+  listenerPid: () => number | undefined;
+  listenerUid: (pid: number) => number;
+  healthy: () => boolean;
+  readFile: (path: string) => Promise<string | undefined>;
+  writeFile: (path: string, contents: string) => Promise<void>;
+  rename: (from: string, to: string) => Promise<void>;
+  unlink: (path: string) => Promise<void>;
+  lint: (path: string) => void;
+  waitFor: (predicate: () => boolean, timeoutMs: number, message: string) => Promise<void>;
+  pid: number;
+};
+
+const PORT_FREE_TIMEOUT_MS = 15_000;
+
+const ownedAgentPlist = (contents: string): boolean =>
+  contents.includes(`<string>${DICTATION_LABEL}</string>`);
+
+/**
+ * Installs the per-user LaunchAgent. Refuses while the system LaunchDaemon is loaded. A previous
+ * agent is booted out and port 4242 must free (bounded) before the new one starts, and a failure
+ * restores and re-bootstraps the previous plist.
+ */
+export const performAgentInstall = async (plist: string, deps: AgentInstallDeps): Promise<void> => {
+  const target = `gui/${deps.uid}/${DICTATION_LABEL}`;
+  if (deps.daemonLoaded())
+    throw new Error(
+      `The system LaunchDaemon is still loaded. First run: sudo launchctl bootout system/${DICTATION_LABEL} && sudo rm ${DICTATION_PLIST_PATH}`,
+    );
+  const existing = await deps.readFile(deps.path);
+  if (existing !== undefined && !ownedAgentPlist(existing))
+    throw new Error(`Refusing to replace foreign ${deps.path}.`);
+  const previousLoaded = deps.agentLoaded();
+  const temporary = `${deps.path}.tmp-${deps.pid}`;
+  let replaced = false;
+  try {
+    if (previousLoaded) {
+      deps.launchctl(['bootout', target], true);
+      await deps.waitFor(
+        () => deps.listenerPid() === undefined,
+        PORT_FREE_TIMEOUT_MS,
+        'Port 4242 did not free after stopping the previous LaunchAgent.',
+      );
+    } else if (deps.listenerPid() !== undefined)
+      throw new Error('Port 4242 is occupied by another listener. Stop it first.');
+    await deps.writeFile(temporary, plist);
+    deps.lint(temporary);
+    await deps.rename(temporary, deps.path);
+    replaced = true;
+    deps.launchctl(['bootstrap', `gui/${deps.uid}`, deps.path]);
+    await deps.waitFor(
+      () => {
+        const pid = deps.listenerPid();
+        return pid !== undefined && deps.listenerUid(pid) === deps.uid && deps.healthy();
+      },
+      60_000,
+      'LaunchAgent did not own port 4242 and pass HTTPS health checks.',
+    );
+  } catch (error) {
+    await deps.unlink(temporary).catch(() => undefined);
+    if (replaced) deps.launchctl(['bootout', target], true);
+    if (replaced && existing !== undefined) await deps.writeFile(deps.path, existing);
+    else if (replaced) await deps.unlink(deps.path).catch(() => undefined);
+    if (previousLoaded && existing !== undefined) {
+      try {
+        if (replaced)
+          await deps.waitFor(
+            () => deps.listenerPid() === undefined,
+            PORT_FREE_TIMEOUT_MS,
+            'Port 4242 did not free during rollback.',
+          );
+        deps.launchctl(['bootstrap', `gui/${deps.uid}`, deps.path]);
+      } catch (rollbackError) {
+        throw new Error(
+          `LaunchAgent install failed and restoring the previous agent failed: ${String(rollbackError)}`,
+          { cause: error },
+        );
+      }
+    }
+    throw error;
+  }
+};
+
+/** Boots out the per-user LaunchAgent, waits for port 4242 to free, and removes its plist. */
+export const performAgentUninstall = async (deps: AgentInstallDeps): Promise<void> => {
+  const existing = await deps.readFile(deps.path);
+  if (existing !== undefined && !ownedAgentPlist(existing))
+    throw new Error(`Refusing to remove foreign ${deps.path}.`);
+  if (deps.agentLoaded()) {
+    deps.launchctl(['bootout', `gui/${deps.uid}/${DICTATION_LABEL}`], true);
+    await deps.waitFor(
+      () => deps.listenerPid() === undefined,
+      PORT_FREE_TIMEOUT_MS,
+      'Port 4242 did not free after stopping the LaunchAgent.',
+    );
+  }
+  if (existing !== undefined) await deps.unlink(deps.path);
+};
+
+const agentDeps = (options: InstallerOptions): AgentInstallDeps => {
+  const uid = process.getuid?.();
+  if (uid === undefined || uid === 0)
+    throw new Error('--agent install and uninstall run as the logged-in user, not root.');
+  if (
+    Number(execFileSync('/usr/bin/id', ['-u', options.user], { encoding: 'utf8' }).trim()) !== uid
+  )
+    throw new Error(`--agent install and uninstall must run as ${options.user}.`);
+  return {
+    uid,
+    path: agentPlistPath(options.user),
+    launchctl,
+    daemonLoaded: () => launchdTargetLoaded(`system/${DICTATION_LABEL}`),
+    agentLoaded: () => launchdTargetLoaded(`gui/${uid}/${DICTATION_LABEL}`),
+    listenerPid,
+    listenerUid: (pid) => listenerMetadata(pid).uid,
+    healthy: healthReady,
+    readFile: async (path) => {
+      try {
+        return await readFile(path, 'utf8');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+        throw error;
+      }
+    },
+    writeFile: (path, contents) => writeFile(path, contents, { mode: 0o644 }),
+    rename,
+    unlink,
+    lint: (path) => {
+      execFileSync('/usr/bin/plutil', ['-lint', path], { stdio: 'pipe' });
+    },
+    waitFor,
+    pid: process.pid,
+  };
+};
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const options = parseInstallerArgs(process.argv.slice(2));
-  const plist = buildLaunchDaemonPlist(options);
+  const plist = options.agent ? buildLaunchAgentPlist(options) : buildLaunchDaemonPlist(options);
   if (options.print) process.stdout.write(plist);
-  else await install(plist, options);
+  else if (options.agent && options.uninstall) await performAgentUninstall(agentDeps(options));
+  else if (options.agent) {
+    preflight(options.repository, options.user);
+    await performAgentInstall(plist, agentDeps(options));
+  } else await install(plist, options);
 }

@@ -5,6 +5,8 @@ import {
   parseListenerPid,
 } from '../scripts/install-dictation-service';
 import {
+  agentPlistPath,
+  buildLaunchAgentPlist,
   buildLaunchDaemonPlist,
   DICTATION_LABEL,
   isOwnedPlist,
@@ -76,5 +78,36 @@ describe('Whisper LaunchDaemon definition', () => {
         501,
       ),
     ).toBe(false);
+  });
+
+  it('keeps the LaunchDaemon free of clipboard access so its installed plist still matches', () => {
+    expect(buildLaunchDaemonPlist()).not.toContain('clipboard');
+  });
+
+  it('builds a gui-session LaunchAgent that points at the user-created clipboard secret', () => {
+    const plist = buildLaunchAgentPlist();
+    expect(plist).toContain(`<string>${DICTATION_LABEL}</string>`);
+    expect(plist).not.toContain('<key>UserName</key>');
+    expect(plist).toContain('<key>LimitLoadToSessionType</key>\n  <string>Aqua</string>');
+    expect(plist).toContain(
+      '<string>--clipboard-secret-file</string>\n    <string>/Users/localuser/Repos/mux-xr/.local/clipboard-secret</string>',
+    );
+    expect(plist).toContain('<string>4242</string>');
+    expect(agentPlistPath('localuser')).toBe(
+      `/Users/localuser/Library/LaunchAgents/${DICTATION_LABEL}.plist`,
+    );
+    expect(() => agentPlistPath('../root')).toThrow(/Invalid macOS user/);
+  });
+
+  it('parses agent print and install modes and never migrates listeners for agents', () => {
+    expect(parseInstallerArgs(['--print', '--agent'])).toMatchObject({ print: true, agent: true });
+    expect(parseInstallerArgs(['--install', '--agent'])).toMatchObject({
+      install: true,
+      agent: true,
+    });
+    expect(parseInstallerArgs(['--print']).agent).toBe(false);
+    expect(() =>
+      parseInstallerArgs(['--install', '--agent', '--migrate-running-listener']),
+    ).toThrow(/never migrate/);
   });
 });

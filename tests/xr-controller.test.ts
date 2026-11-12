@@ -2439,6 +2439,129 @@ describe('native XR controller event routing', () => {
       expect(left.paste).toHaveBeenCalledTimes(1);
     });
 
+    const flush = async (): Promise<void> => {
+      for (let tick = 0; tick < 6; tick += 1) await Promise.resolve();
+    };
+
+    it('types the host clipboard into the selected terminal from the keyboard panel', async () => {
+      const { workspace, actions, left, right } = setupSelection();
+      left.paste = vi.fn(() => true);
+      right.paste = vi.fn(() => true);
+      actions.readHostClipboard = vi.fn(async () => ({ ok: true as const, value: 'host 界' }));
+      workspace.showInput('keyboard');
+      hit(workspace, { inputAction: 'pasteHostClipboard' });
+      await flush();
+      expect(actions.readHostClipboard).toHaveBeenCalledTimes(1);
+      expect(left.paste).toHaveBeenCalledExactlyOnceWith('host 界');
+      expect(right.paste).not.toHaveBeenCalled();
+      expect(workspace.state.toast).toBe('Pasted host clipboard.');
+    });
+
+    it('shows the host refusal and pastes nothing when the host read fails', async () => {
+      const { workspace, actions, left } = setupSelection();
+      left.paste = vi.fn(() => true);
+      actions.readHostClipboard = vi.fn(async () => ({
+        ok: false as const,
+        code: 'disabled' as const,
+        message: 'Host clipboard sync is off on the Mac.',
+      }));
+      expect(await workspace.pasteHostClipboard('pane-a')).toBe(false);
+      expect(left.paste).not.toHaveBeenCalled();
+      expect(workspace.state.notice).toBe('Host clipboard sync is off on the Mac.');
+    });
+
+    it('sends text copied in Mux XR to the host only on a completed native gesture', async () => {
+      const { workspace, actions, start, drag, finish } = setupSelection(
+        vi.fn(() => Promise.reject(new Error('denied'))),
+      );
+      actions.writeHostClipboard = vi.fn(async (text: string) => ({
+        ok: true as const,
+        value: text.length,
+      }));
+      start();
+      drag();
+      finish();
+      await flush();
+      workspace.showInput('keyboard');
+      hit(workspace, { inputAction: 'copyToHost' });
+      expect(actions.writeHostClipboard).not.toHaveBeenCalled();
+      finish();
+      await flush();
+      expect(actions.writeHostClipboard).toHaveBeenCalledExactlyOnceWith('exact text\n界 😀');
+      expect(workspace.state.toast).toBe('Copied to host clipboard.');
+    });
+
+    it('keeps host text pasteable when the Quest clipboard refuses the write', async () => {
+      const { workspace, actions, left } = setupSelection(
+        vi.fn(() => Promise.reject(new Error('not focused'))),
+      );
+      left.paste = vi.fn(() => true);
+      actions.readHostClipboard = vi.fn(async () => ({ ok: true as const, value: 'from mac' }));
+      expect(await workspace.copyHostToQuest()).toBe(false);
+      expect(workspace.state.toast).toContain('Quest clipboard refused it');
+      expect(await workspace.pasteClipboard('pane-a')).toBe(true);
+      expect(left.paste).toHaveBeenCalledWith('from mac');
+    });
+
+    it('ignores a second Paste host press while one is in flight (F6)', async () => {
+      const { workspace, actions, left } = setupSelection();
+      left.paste = vi.fn(() => true);
+      let resolveRead!: (value: { ok: true; value: string }) => void;
+      actions.readHostClipboard = vi.fn(
+        () =>
+          new Promise<{ ok: true; value: string }>((resolve) => {
+            resolveRead = resolve;
+          }),
+      );
+      const first = workspace.pasteHostClipboard('pane-a');
+      expect(await workspace.pasteHostClipboard('pane-a')).toBe(false);
+      expect(actions.readHostClipboard).toHaveBeenCalledTimes(1);
+      resolveRead({ ok: true, value: 'host once' });
+      expect(await first).toBe(true);
+      expect(left.paste).toHaveBeenCalledExactlyOnceWith('host once');
+    });
+
+    it('drops a host paste superseded by another clipboard action (F6)', async () => {
+      const { workspace, actions, left } = setupSelection();
+      left.paste = vi.fn(() => true);
+      let resolveRead!: (value: { ok: true; value: string }) => void;
+      actions.readHostClipboard = vi.fn(
+        () =>
+          new Promise<{ ok: true; value: string }>((resolve) => {
+            resolveRead = resolve;
+          }),
+      );
+      const pending = workspace.pasteHostClipboard('pane-a');
+      void workspace.pasteClipboard('pane-a');
+      resolveRead({ ok: true, value: 'stale host text' });
+      expect(await pending).toBe(false);
+      expect(left.paste).not.toHaveBeenCalledWith('stale host text');
+    });
+
+    it('never sends kept host text back to the host (F5)', async () => {
+      const { workspace, actions } = setupSelection();
+      vi.stubGlobal('navigator', {
+        clipboard: {
+          writeText: () => Promise.reject(new Error('not focused')),
+          readText: () => Promise.reject(new Error('denied')),
+        },
+      });
+      actions.readHostClipboard = vi.fn(async () => ({ ok: true as const, value: 'from mac' }));
+      actions.writeHostClipboard = vi.fn();
+      await workspace.copyHostToQuest();
+      expect(await workspace.copyQuestToHost()).toBe(false);
+      expect(actions.writeHostClipboard).not.toHaveBeenCalled();
+    });
+
+    it('reports an empty Quest clipboard instead of sending to the host', async () => {
+      const { workspace, actions } = setupSelection();
+      vi.stubGlobal('navigator', { clipboard: { readText: async () => '' } });
+      actions.writeHostClipboard = vi.fn();
+      expect(await workspace.copyQuestToHost()).toBe(false);
+      expect(actions.writeHostClipboard).not.toHaveBeenCalled();
+      expect(workspace.state.notice).toContain('Quest clipboard is empty');
+    });
+
     it('does not paste into a different pane while an external clipboard read is pending', async () => {
       let resolveRead!: (text: string) => void;
       const { workspace, left, right } = setupSelection();

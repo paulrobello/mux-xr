@@ -12,6 +12,7 @@ import type {
 } from '../contracts';
 import { isBackgroundMode } from '../contracts';
 import { getKeyHelp } from '../control-help';
+import { HOST_CLIPBOARD_SETUP } from '../host-clipboard';
 import { createModifierState, keyboardDimensions, keyboardKeys } from '../keyboard';
 import {
   commandServerKey,
@@ -87,6 +88,11 @@ export interface UICallbacks {
   onTogglePaneConnection?(pane: PaneDescriptor): void;
   onSendText?(paneId: string, text: string): void;
   onPaste?(paneId?: string): void;
+  onHostToQuest?(): void;
+  onQuestToHost?(): void;
+  isHostClipboardPaired?(): boolean;
+  /** Saves the host clipboard pairing secret, or forgets it when given null. */
+  onHostClipboardSecret?(secret: string | null): boolean;
   onSendKey?(paneId: string, key: string, modifiers?: KeyModifiers): void;
   onRunCommand?(command: QuickCommand, paneId: string): void;
   onEnterXR?(): void;
@@ -544,7 +550,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     .querySelector('style')
     ?.append(
       document.createTextNode(
-        '.dictation-controls:not([hidden]){display:grid;gap:8px}.dictation-actions{display:flex;flex-wrap:wrap;gap:8px}.dictation-controls textarea{box-sizing:border-box;width:100%;min-height:72px;resize:vertical;background:#0b1016;color:#dce7ed;border:1px solid #3a5363;border-radius:4px;padding:8px;font:inherit}.dictation-controls textarea:focus-visible{outline:2px solid #8be0ea;outline-offset:2px}',
+        '.dictation-controls:not([hidden]){display:grid;gap:8px}.dictation-actions{display:flex;flex-wrap:wrap;gap:8px}.dictation-controls textarea{box-sizing:border-box;width:100%;min-height:72px;resize:vertical;background:#0b1016;color:#dce7ed;border:1px solid #3a5363;border-radius:4px;padding:8px;font:inherit}.dictation-controls textarea:focus-visible{outline:2px solid #8be0ea;outline-offset:2px}[data-host-clipboard]{display:grid;gap:8px}[data-host-clipboard] input{box-sizing:border-box;width:100%;margin-top:6px;background:#0b1016;border:1px solid #293746;border-radius:5px;color:#edf4f8;padding:9px;font:12px ui-monospace,SFMono-Regular,monospace}[data-host-clipboard-status]{color:#9aabb6;font-size:11px;line-height:1.5;overflow-wrap:anywhere}',
       ),
     );
   const drawer = root.querySelector<HTMLElement>('[data-drawer]');
@@ -574,6 +580,17 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   paste.textContent = 'Paste';
   paste.title = 'Paste clipboard text into the selected terminal';
   dictationControls.querySelector('.dictation-actions')?.prepend(paste);
+  const hostToQuest = document.createElement('button');
+  hostToQuest.dataset.action = 'host-to-quest';
+  hostToQuest.className = 'secondary';
+  hostToQuest.textContent = 'Host → Quest';
+  hostToQuest.title = "Copy the Mac's clipboard text into the Quest clipboard";
+  const questToHost = document.createElement('button');
+  questToHost.dataset.action = 'quest-to-host';
+  questToHost.className = 'secondary';
+  questToHost.textContent = 'Quest → Host';
+  questToHost.title = "Send the Quest clipboard text to the Mac's clipboard";
+  paste.after(hostToQuest, questToHost);
   const gazeInput = document.createElement('label');
   gazeInput.className = 'check';
   gazeInput.dataset.keyboardControls = 'true';
@@ -767,6 +784,11 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     agentControls.dataset.agentRoster = 'true';
     agentControls.innerHTML = `<legend>Agent roster</legend><label>Rows<select data-agent-rows aria-label="Agent roster rows"><option value="full">Full (state, agent, title / workspace, project, pane / message)</option><option value="default">par-mux default (state, workspace, project / agent)</option><option value="compact">Compact (state, agent)</option><option value="detailed">Detailed (state, workspace, project / agent, pane)</option><option value="verbose">Verbose (state, agent / message)</option><option value="custom">Custom</option></select></label><label data-agent-rows-custom-row>Custom rows<input data-agent-rows-custom type="text" spellcheck="false" placeholder="state_icon, workspace, project / agent" aria-label="Custom agent roster rows"><small data-agent-rows-hint></small></label><label>Order<select data-agents-sort aria-label="Agent order"><option value="pane">Pane (rows stay put)</option><option value="grouped">Grouped by workspace, urgent first</option><option value="priority">Priority, most urgent first</option></select></label>`;
     settingsPanel.insertBefore(agentControls, settingsPanel.querySelector('[data-action="reset"]'));
+    const hostClipboard = document.createElement('fieldset');
+    hostClipboard.dataset.hostClipboard = 'true';
+    hostClipboard.innerHTML =
+      '<legend>Host clipboard</legend><label>Pairing secret<input data-host-clipboard-secret type="password" autocomplete="off" spellcheck="false" aria-label="Host clipboard pairing secret" placeholder="Contents of .local/clipboard-secret"></label><div class="dictation-actions"><button data-action="host-clipboard-save" class="secondary">Save</button><button data-action="host-clipboard-forget" class="text-btn" title="Remove the pairing secret from this browser">Forget</button></div><small data-host-clipboard-status></small>';
+    settingsPanel.insertBefore(hostClipboard, settingsPanel.querySelector('[data-action="reset"]'));
     const agentRowsSelect = agentControls.querySelector<HTMLSelectElement>('[data-agent-rows]');
     const agentRowsCustom = agentControls.querySelector<HTMLInputElement>(
       '[data-agent-rows-custom]',
@@ -1021,6 +1043,16 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     if (!element) throw new Error(`Missing workspace control: ${selector}`);
     return element;
   };
+  const updateHostClipboardStatus = (message: string | null = null): void => {
+    const status = root.querySelector<HTMLElement>('[data-host-clipboard-status]');
+    if (!status) return;
+    status.textContent =
+      message ??
+      (callbacks.isHostClipboardPaired?.()
+        ? 'Paired. The secret is stored only in this browser.'
+        : `Not paired. ${HOST_CLIPBOARD_SETUP}`);
+  };
+  updateHostClipboardStatus();
   const clearGridControls = (): void => {
     qs<HTMLButtonElement>('[data-action="apply-grid"]').disabled = true;
     qs<HTMLElement>('[data-grid-caption]').textContent = 'No terminal selected';
@@ -1483,6 +1515,24 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         break;
       case 'paste-clipboard':
         callbacks.onPaste?.(capturedTarget ?? activePaneId);
+        break;
+      case 'host-to-quest':
+        callbacks.onHostToQuest?.();
+        break;
+      case 'quest-to-host':
+        callbacks.onQuestToHost?.();
+        break;
+      case 'host-clipboard-save': {
+        const input = qs<HTMLInputElement>('[data-host-clipboard-secret]');
+        const saved = callbacks.onHostClipboardSecret?.(input.value) ?? false;
+        input.value = '';
+        updateHostClipboardStatus(saved ? null : 'Enter the secret before saving.');
+        break;
+      }
+      case 'host-clipboard-forget':
+        callbacks.onHostClipboardSecret?.(null);
+        qs<HTMLInputElement>('[data-host-clipboard-secret]').value = '';
+        updateHostClipboardStatus('Forgotten. Host clipboard transfers are off in this browser.');
         break;
       case 'dictation-stop':
         callbacks.onDictationAction?.('stop');

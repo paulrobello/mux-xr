@@ -193,6 +193,10 @@ Keyboard curvature is a saved 0–100° preference. Curved backing and key geome
 - **Border:** Use slate borders for interactive controls and divider slate for structural separation.
 - **Internal Padding:** Use 8px, 12px, or 16px based on density and viewport.
 
+### Host clipboard
+
+Host clipboard actions sit with the clipboard control they extend. In the browser drawer, **Host → Quest** and **Quest → Host** follow **Paste** as secondary buttons. On the XR keyboard panel, **Paste host** and **Copy to host** flank the keyboard-curve row as raised buttons. Results use the existing clipboard toast and notice line, and failures name the fix (pair in Settings, create the secret file, check port 4242). The pairing secret is a password field under **Workspace settings → Host clipboard** with **Save** and a quiet **Forget** text button. The field is never refilled, and the status line says only whether this browser is paired.
+
 ### Hover Help
 
 Non-obvious controls explain their action on browser hover or controller-ray hover. Spatial hints use the existing dark label treatment, face the viewer and stay outside ray picking. XR tooltips keep a compact angular size by scaling with distance, appear after a 700 ms dwell, describe actions only and are hidden while gripping. There are no automatic grip instructions. Hover feedback never sends terminal input or changes its target.
