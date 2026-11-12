@@ -61,6 +61,8 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
             : 'Set temporary focus curvature; the original warp returns when focus ends';
     case 'glassOpacity':
       return 'Adjust the dark terminal background opacity';
+    case 'resetTerminalAppearance':
+      return "Forget this pane's saved glass opacity and warp so it follows the new-window defaults";
     case 'radialAction':
       return data.radialAction === 'warp'
         ? 'Adjust terminal curvature: controllers use the right stick; hands use on-panel choices'

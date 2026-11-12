@@ -214,6 +214,8 @@ export interface WorkspaceScene {
   setHierarchyStyle(style: HierarchyStyle): void;
   setTerminalOpacity(id: string, value: number): void;
   getTerminalOpacity(id: string): number;
+  /** Forget the pane's saved glass opacity and warp so it follows the new-window defaults again. */
+  resetTerminalAppearance(id: string): void;
   captureTerminalPose(id: string): SavedUIPose | null;
   captureWorkspaceState(): void;
   restoreTerminalPose(id: string, pose: SavedUIPose): void;
@@ -1150,9 +1152,14 @@ export function createWorkspaceScene(
   let fpsLabel: THREE.Mesh | null = null;
   let activePaneLabel: THREE.Mesh | null = null;
   let radialTargetId: string | null = null;
-  let warpPanelEdit: { id: string; original: number } | null = null;
+  let warpPanelEdit: { id: string; original: number; touched: boolean } | null = null;
   let radialController: THREE.Group | null = null;
-  let warpEdit: { id: string; original: number; controller: THREE.Group | null } | null = null;
+  let warpEdit: {
+    id: string;
+    original: number;
+    touched: boolean;
+    controller: THREE.Group | null;
+  } | null = null;
   let warpReadout: THREE.Mesh | null = null;
   let gridDraft: { target: string; cols: number; rows: number } | null = null;
   let gridRequestStatus = '';
@@ -3897,6 +3904,11 @@ export function createWorkspaceScene(
           button.position.set(index ? 0.7 : -0.7, -0.48, 0);
           inputRoot.add(button);
         }
+        const reset = createLabelButton('Reset to defaults', 1.1, 0.09, {
+          inputAction: 'resetTerminalAppearance',
+        });
+        reset.position.y = -0.62;
+        inputRoot.add(reset);
       }
     } else if (mode === 'warp') {
       const target = mutableState.inputTargetId;
@@ -4074,10 +4086,21 @@ export function createWorkspaceScene(
         inputRoot.userData.keyborbGlyphs = glyphs;
       }
     }
+    const terminalHasReset = Boolean(
+      mutableState.inputTargetId && panels.has(mutableState.inputTargetId),
+    );
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
     close.position.set(
       mode === 'panes' ? -1.2 : 0,
-      mode === 'panes' ? -0.9 : mode === 'display' ? -1.13 : mode === 'settings' ? -0.89 : -0.66,
+      mode === 'panes'
+        ? -0.9
+        : mode === 'display'
+          ? -1.13
+          : mode === 'settings'
+            ? -0.89
+            : mode === 'terminal' && terminalHasReset
+              ? -0.78
+              : -0.66,
       0,
     );
     inputRoot.add(close);
@@ -4087,7 +4110,11 @@ export function createWorkspaceScene(
         inputAction: 'openInput',
         mode: mode === 'filtering' ? 'display' : 'settings',
       });
-      back.position.set(-0.22, mode === 'display' ? -1.13 : -0.66, 0);
+      back.position.set(
+        -0.22,
+        mode === 'display' ? -1.13 : mode === 'terminal' && terminalHasReset ? -0.78 : -0.66,
+        0,
+      );
       inputRoot.add(back);
     }
     if (mode === 'panes') {
@@ -4472,6 +4499,11 @@ export function createWorkspaceScene(
         else startWarp(radialTargetId, radialController);
       } else if (choice !== 'cancel') showInput(choice === 'layout' ? 'arrange' : choice);
       notify();
+      return true;
+    }
+    if (action === 'resetTerminalAppearance') {
+      const id = mutableState.inputTargetId;
+      if (id) resetTerminalAppearance(id);
       return true;
     }
     if (action === 'glassOpacity') {
@@ -5680,7 +5712,8 @@ export function createWorkspaceScene(
       disarmCommand();
       if (inputMode === 'warp' && warpPanelEdit?.id !== nextId) {
         settleWarpPanel(false);
-        if (nextId) warpPanelEdit = { id: nextId, original: getTerminalCurvature(nextId) };
+        if (nextId)
+          warpPanelEdit = { id: nextId, original: getTerminalCurvature(nextId), touched: false };
       }
       refreshInputRoot(inputMode);
     }
@@ -5689,7 +5722,9 @@ export function createWorkspaceScene(
     setSelectedVisual();
     notify();
   };
-  const applyTerminalOpacity = (panel: TerminalPanel): void => {
+  const applyTerminalOpacity = (panel: TerminalPanel): void =>
+    paneFocus.rebase(panel.root, () => applyTerminalOpacityNow(panel));
+  const applyTerminalOpacityNow = (panel: TerminalPanel): void => {
     setTerminalBackgroundOpacity(panel.screen.material, panel.opacity);
     const frame = panel.frame.material;
     const transparent = panel.opacity < 1;
@@ -5711,6 +5746,24 @@ export function createWorkspaceScene(
     if (!warpStore.setOpacity(warpKey(panel.surface), panel.opacity))
       setNotice('Glass opacity could not be saved on this device');
     if (inputRoot && inputMode === 'terminal') refreshInputRoot('terminal');
+    notify();
+  };
+  const resetTerminalAppearance = (id: string): void => {
+    const panel = panels.get(id);
+    if (!panel) return;
+    // Cancel an in-flight Warp edit first so its restore cannot overwrite the defaults.
+    if (warpEdit?.id === id) finishWarp(false);
+    if (!warpStore.clear(warpKey(panel.surface)))
+      setNotice('Saved appearance could not be cleared on this device');
+    const { defaultCurvature, defaultOpacity } = mutableState.windowPreferences;
+    panel.opacity = defaultOpacity;
+    applyTerminalOpacity(panel);
+    // Focus mode shows focusCurvature on top of the base warp, which resets underneath it.
+    setTerminalCurvature(id, defaultCurvature, false);
+    // An open Warp panel stays live: Cancel returns to the reset values and Done saves from them.
+    if (warpPanelEdit?.id === id) warpPanelEdit = { id, original: panel.curvature, touched: false };
+    if (inputRoot && (inputMode === 'terminal' || inputMode === 'warp'))
+      refreshInputRoot(inputMode);
     notify();
   };
   const copyTerminalPose = (pose: SavedUIPose): SavedUIPose => ({
@@ -5789,7 +5842,10 @@ export function createWorkspaceScene(
     const panel = panels.get(edit.id);
     if (!panel) return;
     if (!commit) setTerminalCurvature(edit.id, edit.original, false);
-    else if (!warpStore.set(warpKey(panel.surface), panel.curvature))
+    else if (
+      (edit.touched || panel.curvature !== edit.original) &&
+      !warpStore.set(warpKey(panel.surface), panel.curvature)
+    )
       setNotice('Curvature could not be saved on this device');
   };
   const finishWarp = (commit: boolean): void => {
@@ -5804,7 +5860,11 @@ export function createWorkspaceScene(
     }
     if (commit) {
       const panel = panels.get(edit.id);
-      if (panel && !warpStore.set(warpKey(panel.surface), panel.curvature))
+      if (
+        panel &&
+        (edit.touched || panel.curvature !== edit.original) &&
+        !warpStore.set(warpKey(panel.surface), panel.curvature)
+      )
         setNotice('Curvature could not be saved on this device');
     } else setTerminalCurvature(edit.id, edit.original, false);
     floorCorrectionPending = true;
@@ -5828,7 +5888,7 @@ export function createWorkspaceScene(
     selectTerminal(panel.id);
     const controller =
       owner ?? controllerRoots.find((root) => controllerHandedness.get(root) === 'right') ?? null;
-    warpEdit = { id: panel.id, original: panel.curvature, controller };
+    warpEdit = { id: panel.id, original: panel.curvature, touched: false, controller };
     mutableState.warpTerminalId = panel.id;
     gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
     scrollDue.clear();
@@ -5972,6 +6032,8 @@ export function createWorkspaceScene(
     const panel = panels.get(id);
     if (!panel || !Number.isFinite(degrees)) return;
     panel.curvature = THREE.MathUtils.clamp(degrees, 0, 100);
+    if (warpEdit?.id === id) warpEdit.touched = true;
+    if (warpPanelEdit?.id === id) warpPanelEdit.touched = true;
     syncPanelGrid(panel);
     correctTerminalFloor();
     if (persist && !warpStore.set(warpKey(panel.surface), panel.curvature))
@@ -6196,7 +6258,12 @@ export function createWorkspaceScene(
     if (mode === 'panes') initializeHierarchy();
     if (mode === 'warp' && warpPanelEdit?.id !== targetId) {
       settleWarpPanel(false);
-      if (targetId) warpPanelEdit = { id: targetId, original: getTerminalCurvature(targetId) };
+      if (targetId)
+        warpPanelEdit = {
+          id: targetId,
+          original: getTerminalCurvature(targetId),
+          touched: false,
+        };
     }
     refreshInputRoot(mode);
   };
@@ -6861,6 +6928,7 @@ export function createWorkspaceScene(
     setHierarchyStyle,
     getTerminalOpacity,
     setTerminalOpacity,
+    resetTerminalAppearance,
     captureTerminalPose,
     captureWorkspaceState,
     restoreTerminalPose,

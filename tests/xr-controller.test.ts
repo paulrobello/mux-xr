@@ -2002,6 +2002,77 @@ describe('native XR controller event routing', () => {
       expect(saved()).toBe(settled);
     });
 
+    it('saves nothing when the Warp panel is opened and Done is pressed unchanged', () => {
+      const { workspace } = setup();
+      connectHand();
+      const saved = (): string => localStorage.getItem('mux-xr:terminal-warp:v1') ?? '';
+      const before = saved();
+      workspace.toggleRadialMenu(fakeXR.controllers[0] as THREE.Group);
+      fakeXR.frame?.(1000);
+      hit(workspace, { inputAction: 'radialAction', radialAction: 'warp' });
+      fakeXR.frame?.(1200);
+      hit(workspace, { inputAction: 'warpDone' });
+      expect(saved()).toBe(before);
+      expect(workspace.scene.getObjectByName('xr-warp-controls')).toBeUndefined();
+    });
+
+    it('keeps the Warp panel edit live across a reset: presets preview, Cancel and Done use the reset values', () => {
+      const { workspace } = setup();
+      connectHand();
+      const saved = (): string => localStorage.getItem('mux-xr:terminal-warp:v1') ?? '';
+      workspace.setWindowPreferences({
+        ...workspace.state.windowPreferences,
+        defaultOpacity: 0.6,
+        defaultCurvature: 30,
+      });
+      workspace.setTerminalOpacity('pane-a', 0.3);
+      workspace.setTerminalCurvature('pane-a', 70);
+      const open = (time: number): void => {
+        workspace.toggleRadialMenu(fakeXR.controllers[0] as THREE.Group);
+        fakeXR.frame?.(time);
+        hit(workspace, { inputAction: 'radialAction', radialAction: 'warp' });
+        fakeXR.frame?.(time + 200);
+      };
+      open(1000);
+      hit(workspace, { inputAction: 'curvature', degrees: 90 });
+      workspace.resetTerminalAppearance('pane-a');
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(30);
+      expect(workspace.getTerminalOpacity('pane-a')).toBe(0.6);
+      expect(workspace.scene.getObjectByName('xr-warp-controls')).toBeDefined();
+      const afterReset = saved();
+      hit(workspace, { inputAction: 'curvature', degrees: 60 });
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(60);
+      expect(saved()).toBe(afterReset);
+      hit(workspace, { inputAction: 'warpCancel' });
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(30);
+      expect(saved()).toBe(afterReset);
+      open(3000);
+      hit(workspace, { inputAction: 'curvature', degrees: 45 });
+      workspace.resetTerminalAppearance('pane-a');
+      hit(workspace, { inputAction: 'curvature', degrees: 60 });
+      hit(workspace, { inputAction: 'warpDone' });
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(60);
+      expect(Object.values(JSON.parse(saved()).values)).toEqual([60]);
+    });
+
+    it('saves a deliberately pinned default on Done when a preset was pressed', () => {
+      const { workspace } = setup();
+      connectHand();
+      const saved = (): string => localStorage.getItem('mux-xr:terminal-warp:v1') ?? '';
+      const start = workspace.getTerminalCurvature('pane-a');
+      const before = saved();
+      workspace.toggleRadialMenu(fakeXR.controllers[0] as THREE.Group);
+      fakeXR.frame?.(1000);
+      hit(workspace, { inputAction: 'radialAction', radialAction: 'warp' });
+      fakeXR.frame?.(1200);
+      hit(workspace, { inputAction: 'curvature', degrees: start === 60 ? 15 : 60 });
+      hit(workspace, { inputAction: 'curvature', degrees: start });
+      hit(workspace, { inputAction: 'warpDone' });
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(start);
+      expect(saved()).not.toBe(before);
+      expect(Object.values(JSON.parse(saved()).values)).toEqual([start]);
+    });
+
     it('leaves Focus when the hand Warp panel opens', () => {
       const { workspace } = setup();
       connectHand();
@@ -6844,6 +6915,163 @@ describe('native XR controller event routing', () => {
     expect(workspace.getTerminalCurvature('pane-a')).toBe(15);
     workspace.dispose();
     container.remove();
+  });
+
+  describe('resetting a pane to the new-window defaults', () => {
+    const prefs = (defaultOpacity: number, defaultCurvature: number, focusCurvature = 0) => ({
+      defaultOpacity,
+      defaultCurvature,
+      focusDistance: 1.5,
+      focusCurvature,
+      scrollStripSide: 'right' as const,
+      frameChin: true,
+      buttonMap: DEFAULT_BUTTON_MAP,
+    });
+    const customize = (workspace: ReturnType<typeof createWorkspaceScene>): void => {
+      workspace.setTerminalOpacity('pane-a', 0.3);
+      workspace.setTerminalCurvature('pane-a', 70);
+    };
+    const pressReset = (workspace: ReturnType<typeof createWorkspaceScene>): void => {
+      workspace.selectTerminal('pane-a');
+      workspace.showInput('terminal');
+      hit(workspace, { inputAction: 'resetTerminalAppearance' });
+    };
+
+    it('resets saved opacity 0.3 and curvature 70 to defaults 0.6 and 30 from the XR button', () => {
+      localStorage.clear();
+      const { workspace, container } = fixture();
+      workspace.setWindowPreferences(prefs(0.6, 30));
+      customize(workspace);
+      pressReset(workspace);
+      expect(workspace.getTerminalOpacity('pane-a')).toBe(0.6);
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(30);
+      const label = workspace.scene
+        .getObjectByName('xr-terminal-controls')
+        ?.children.find((child) => String(child.userData.labelText).startsWith('Glass opacity'));
+      expect(label?.userData.labelText).toBe('Glass opacity: 60%');
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('follows changed defaults after a reset and a pane reopen', () => {
+      localStorage.clear();
+      const { workspace, container } = fixture();
+      workspace.setWindowPreferences(prefs(0.6, 30));
+      customize(workspace);
+      pressReset(workspace);
+      workspace.setWindowPreferences(prefs(0.45, 55));
+      workspace.removeTerminal('pane-a');
+      workspace.addTerminal(surface(pane('pane-a')));
+      expect(workspace.getTerminalOpacity('pane-a')).toBe(0.45);
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(55);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('resets during Focus mode without corrupting the restore', () => {
+      localStorage.clear();
+      const { workspace, container } = fixture();
+      workspace.setWindowPreferences(prefs(0.6, 30, 40));
+      customize(workspace);
+      const root = workspace.scene.getObjectByName('terminal-panel-pane-a');
+      if (!root) throw new Error('Pane A root missing');
+      workspace.toggleFocusMode('pane-a');
+      expect(root.userData.curvatureDegrees).toBe(40);
+      pressReset(workspace);
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(30);
+      expect(workspace.getTerminalOpacity('pane-a')).toBe(0.6);
+      expect(root.userData.curvatureDegrees).toBe(40);
+      expect(workspace.state.focusModeTerminalId).toBe('pane-a');
+      workspace.toggleFocusMode();
+      expect(root.userData.curvatureDegrees).toBe(30);
+      workspace.setWindowPreferences(prefs(0.5, 10));
+      workspace.removeTerminal('pane-a');
+      workspace.addTerminal(surface(pane('pane-a')));
+      expect(workspace.getTerminalCurvature('pane-a')).toBe(10);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('reset or opacity changes on a faded pane survive the Focus fade restore', () => {
+      localStorage.clear();
+      const { workspace, container } = fixture();
+      workspace.setWindowPreferences(prefs(0.6, 30));
+      workspace.setTerminalOpacity('pane-b', 0.3);
+      const root = workspace.scene.getObjectByName('terminal-panel-pane-b');
+      if (!root) throw new Error('Pane B root missing');
+      const opacities = (): number[] => {
+        const values: number[] = [];
+        root.traverse((object) => {
+          const material = (object as THREE.Mesh).material as THREE.Material | undefined;
+          if (material && 'opacity' in material) values.push(material.opacity);
+        });
+        return values;
+      };
+      expect(opacities()).toContain(0.3);
+      workspace.toggleFocusMode('pane-a');
+      workspace.resetTerminalAppearance('pane-b');
+      workspace.setTerminalOpacity('pane-a', 0.8);
+      workspace.removeTerminal('pane-a');
+      expect(workspace.getTerminalOpacity('pane-b')).toBe(0.6);
+      expect(opacities()).toContain(0.6);
+      expect(opacities()).not.toContain(0.3);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('keeps Close and Back at the original height when no pane is selected', () => {
+      const { workspace, container } = fixture();
+      workspace.removeTerminal('pane-a');
+      workspace.removeTerminal('pane-b');
+      workspace.showInput('terminal');
+      const root = workspace.scene.getObjectByName('xr-terminal-controls');
+      const close = root?.children.find((child) => child.userData.labelText === 'Close');
+      expect(close?.position.y).toBe(-0.66);
+      expect(
+        root?.children.some((child) => child.userData.inputAction === 'resetTerminalAppearance'),
+      ).toBe(false);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('keeps Reset clear of every other control on the Selected terminal page', () => {
+      const { workspace, container } = fixture();
+      workspace.selectTerminal('pane-a');
+      workspace.showInput('terminal');
+      const root = workspace.scene.getObjectByName('xr-terminal-controls');
+      if (!root) throw new Error('Terminal page missing');
+      root.updateMatrixWorld(true);
+      const boxes = new Map<THREE.Object3D, THREE.Box3>();
+      root.traverse((object) => {
+        if (!object.userData.labelWidth) return;
+        const center = root.worldToLocal(object.getWorldPosition(new THREE.Vector3()));
+        const width = object.userData.labelWidth as number;
+        const height = object.userData.labelHeight as number;
+        boxes.set(
+          object,
+          new THREE.Box3(
+            new THREE.Vector3(center.x - width / 2, center.y - height / 2, -1),
+            new THREE.Vector3(center.x + width / 2, center.y + height / 2, 1),
+          ),
+        );
+      });
+      const entries = [...boxes.entries()];
+      const reset = entries.find(([o]) => o.userData.inputAction === 'resetTerminalAppearance');
+      if (!reset) throw new Error('Reset button missing');
+      for (const label of ['Back', 'Close', 'Glass opacity: 100%'])
+        expect(
+          entries.some(([o]) => String(o.userData.labelText).startsWith(label)),
+          label,
+        ).toBe(true);
+      for (let a = 0; a < entries.length; a += 1)
+        for (const [other, box] of entries.slice(a + 1))
+          expect(
+            entries[a][1].intersectsBox(box),
+            `${entries[a][0].userData.labelText} overlaps ${other.userData.labelText}`,
+          ).toBe(false);
+      workspace.dispose();
+      container.remove();
+    });
   });
 
   describe('opening an unattached pane uses the new-window defaults', () => {

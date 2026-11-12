@@ -92,6 +92,8 @@ export interface PaneFocus {
   add(root: THREE.Group): void;
   remove(root: THREE.Group): void;
   cancelMotion(root: THREE.Group): void;
+  /** Run `change` on a root's materials so a fade in progress keeps the new values as its snapshot. */
+  rebase(root: THREE.Group, change: () => void): void;
   dispose(): void;
 }
 
@@ -276,6 +278,28 @@ export function createPaneFocus(): PaneFocus {
     },
     cancelMotion(root: THREE.Group) {
       if (root === focusedRoot) motion = null;
+    },
+    rebase(root: THREE.Group, change: () => void) {
+      const fade = fades.get(root);
+      if (!fade) {
+        change();
+        return;
+      }
+      for (const value of fade.materials) {
+        value.material.opacity = value.opacity;
+        value.material.transparent = value.transparent;
+        value.material.depthWrite = value.depthWrite;
+      }
+      change();
+      for (const value of fade.materials) {
+        value.opacity = value.material.opacity;
+        value.transparent = value.material.transparent;
+        value.depthWrite = value.material.depthWrite;
+        value.material.transparent = true;
+        value.material.depthWrite = false;
+        value.material.needsUpdate = true;
+      }
+      setOpacity(fade, fade.progress);
     },
     dispose() {
       exit(true);

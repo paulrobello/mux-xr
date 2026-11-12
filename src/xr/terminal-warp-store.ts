@@ -55,6 +55,7 @@ export function createTerminalWarpStore(storage: Storage | null = defaultStorage
   set(key: string, degrees: number): boolean;
   getOpacity(key: string, fallback?: number): number;
   setOpacity(key: string, value: number): boolean;
+  clear(key: string): boolean;
 } {
   return {
     get(key, fallback = 0): number {
@@ -81,6 +82,18 @@ export function createTerminalWarpStore(storage: Storage | null = defaultStorage
       const document = readDocument(storage);
       document.opacity ??= {};
       document.opacity[key] = clampOpacity(value);
+      try {
+        storage.setItem(STORAGE_KEY, JSON.stringify(document));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    clear(key): boolean {
+      if (!storage) return false;
+      const document = readDocument(storage);
+      delete document.values[key];
+      if (document.opacity) delete document.opacity[key];
       try {
         storage.setItem(STORAGE_KEY, JSON.stringify(document));
         return true;

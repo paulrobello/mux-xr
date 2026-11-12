@@ -101,6 +101,7 @@ export interface UICallbacks {
   onResizeGrid?(paneId: string, cols: number, rows: number): boolean;
   onTerminalCurvature?(paneId: string, degrees: number): void;
   onTerminalOpacity?(paneId: string, opacity: number): void;
+  onTerminalReset?(paneId: string): void;
   onReloadApp?(): void;
   onArrange?(pattern: PanelArrangement): void;
   onMoveLayout?(direction: number): void;
@@ -934,7 +935,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     const grid = document.createElement('div');
     grid.dataset.gridControls = 'true';
     grid.innerHTML =
-      '<label>Selected terminal grid <span data-grid-caption>None selected</span></label><div class="grid-inputs"><label>Columns<input data-grid-cols type="number" min="2" max="300" step="1" aria-label="Terminal columns"></label><label>Rows<input data-grid-rows type="number" min="2" max="150" step="1" aria-label="Terminal rows"></label></div><button data-action="apply-grid" class="secondary">Apply grid</button><small data-grid-status>Resize changes the process display size and do not restart it.</small><label>Terminal curvature <span data-terminal-curvature-value>0°</span><input data-terminal-curvature type="range" min="0" max="100" step="1" value="0" aria-label="Terminal curvature in degrees"></label><label>Terminal glass opacity <span data-terminal-opacity-value>100%</span><input data-terminal-opacity type="range" min="10" max="100" step="5" value="100" aria-label="Terminal glass opacity"><small>Foreground text remains opaque.</small></label>';
+      '<label>Selected terminal grid <span data-grid-caption>None selected</span></label><div class="grid-inputs"><label>Columns<input data-grid-cols type="number" min="2" max="300" step="1" aria-label="Terminal columns"></label><label>Rows<input data-grid-rows type="number" min="2" max="150" step="1" aria-label="Terminal rows"></label></div><button data-action="apply-grid" class="secondary">Apply grid</button><small data-grid-status>Resize changes the process display size and do not restart it.</small><label>Terminal curvature <span data-terminal-curvature-value>0°</span><input data-terminal-curvature type="range" min="0" max="100" step="1" value="0" aria-label="Terminal curvature in degrees"></label><label>Terminal glass opacity <span data-terminal-opacity-value>100%</span><input data-terminal-opacity type="range" min="10" max="100" step="5" value="100" aria-label="Terminal glass opacity"><small>Foreground text remains opaque.</small></label><button data-action="reset-terminal-appearance" class="secondary" title="Forget this pane\'s saved glass opacity and warp so it follows the new-window defaults">Reset to defaults</button>';
     settingsPanel.insertBefore(
       grid,
       settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
@@ -998,6 +999,11 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         qs<HTMLElement>('[data-terminal-opacity-value]').textContent = `${opacity}%`;
         callbacks.onTerminalOpacity?.(activePaneId, opacity);
       });
+    root
+      .querySelector<HTMLButtonElement>('[data-action="reset-terminal-appearance"]')
+      ?.addEventListener('click', () => {
+        if (activePaneId) callbacks.onTerminalReset?.(activePaneId);
+      });
   }
   const editor = document.createElement('div');
   editor.className = 'command-editor';
@@ -1026,6 +1032,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     qs<HTMLInputElement>('[data-terminal-opacity]').value = '100';
     qs<HTMLElement>('[data-terminal-opacity-value]').textContent = '100%';
     qs<HTMLInputElement>('[data-terminal-opacity]').disabled = true;
+    qs<HTMLButtonElement>('[data-action="reset-terminal-appearance"]').disabled = true;
   };
   const updateCurvatureControls = (paneId: string | undefined): void => {
     const input = qs<HTMLInputElement>('[data-terminal-curvature]');
@@ -1039,6 +1046,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     const value = paneId ? (terminalOpacity.get(paneId) ?? 100) : 100;
     input.value = String(value);
     input.disabled = !paneId;
+    qs<HTMLButtonElement>('[data-action="reset-terminal-appearance"]').disabled = !paneId;
     qs<HTMLElement>('[data-terminal-opacity-value]').textContent = `${value}%`;
   };
   clearModifiers();

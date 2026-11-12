@@ -717,6 +717,44 @@ describe('mux XR local UI state', () => {
     ui.destroy();
   });
 
+  it('calls the scene reset from the per-pane button and shows the reset sliders', () => {
+    const root = document.createElement('div');
+    const resets: string[] = [];
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onTerminalReset: (id) => {
+        resets.push(id);
+        ui.setTerminalOpacity(id, 60);
+        ui.setTerminalCurvature(id, 30);
+      },
+    });
+    const button = query<HTMLButtonElement>(root, '[data-action="reset-terminal-appearance"]');
+    expect(button.disabled).toBe(true);
+    ui.update({
+      panes: [
+        {
+          id: 'pane-a',
+          workspaceId: 'w',
+          workspaceName: 'W',
+          sessionId: 's',
+          sessionName: 'S',
+          windowId: 'win',
+          windowName: 'Win',
+          title: 'pane-a',
+        },
+      ],
+    });
+    ui.setActivePane('pane-a');
+    ui.setTerminalOpacity('pane-a', 30);
+    ui.setTerminalCurvature('pane-a', 70);
+    expect(button.disabled).toBe(false);
+    button.click();
+    expect(resets).toEqual(['pane-a']);
+    expect(query<HTMLInputElement>(root, '[data-terminal-opacity]').value).toBe('60');
+    expect(query<HTMLInputElement>(root, '[data-terminal-curvature]').value).toBe('30');
+    ui.destroy();
+  });
+
   it('prefills the serving origin and restores a saved custom endpoint', () => {
     localStorage.clear();
     const root = document.createElement('div');

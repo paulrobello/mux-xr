@@ -86,4 +86,20 @@ describe('terminal warp store', () => {
     };
     expect(createTerminalWarpStore(storage).set('pane', 20)).toBe(false);
   });
+  it('clears both saved values for one key and persists the change', () => {
+    const storage = memoryStorage();
+    const store = createTerminalWarpStore(storage);
+    store.set('a', 70);
+    store.setOpacity('a', 0.3);
+    store.set('b', 20);
+    store.setOpacity('b', 0.8);
+    expect(store.clear('a')).toBe(true);
+    const reopened = createTerminalWarpStore(storage);
+    expect(reopened.get('a', 30)).toBe(30);
+    expect(reopened.getOpacity('a', 0.6)).toBe(0.6);
+    expect(reopened.get('b', 30)).toBe(20);
+    expect(reopened.getOpacity('b', 0.6)).toBe(0.8);
+    expect(store.clear('never-saved')).toBe(true);
+    expect(createTerminalWarpStore(null).clear('a')).toBe(false);
+  });
 });

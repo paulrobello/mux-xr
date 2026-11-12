@@ -496,6 +496,7 @@ ui = mountWorkspaceUI(app, {
   onSettingsChange: applySettings,
   onTerminalCurvature: (id, degrees) => scene.setTerminalCurvature(id, degrees),
   onTerminalOpacity: (id, opacity) => scene.setTerminalOpacity(id, opacity / 100),
+  onTerminalReset: (id) => scene.resetTerminalAppearance(id),
   onDismissNotice: () => {
     pendingRestoreNotice = null;
     scene.setNotice(null);
