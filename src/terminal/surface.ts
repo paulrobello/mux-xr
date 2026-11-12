@@ -544,6 +544,9 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       current?.close();
       setStatus('paused');
     },
+    get applicationCursor() {
+      return terminal.modes?.applicationCursorKeysMode ?? appCursor;
+    },
     sendText: (text) => send(createInputMessage(text)),
     sendKey: (key, modifiers) =>
       send(

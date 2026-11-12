@@ -1389,4 +1389,31 @@ describe('mux XR local UI state', () => {
     expect(root.querySelector('.tree-create-note')).toBeNull();
     expect(buttons()[0].disabled).toBe(false);
   });
+
+  it('blurs the pane button after selection so typing is not held by the tree', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    ui.update({
+      panes: [
+        {
+          id: 'pane-a',
+          workspaceId: 'w',
+          workspaceName: 'W',
+          sessionId: 's',
+          sessionName: 'S',
+          windowId: 'win',
+          windowName: 'Win',
+          title: 'pane-a',
+        },
+      ],
+    });
+    const button = query<HTMLButtonElement>(root, '.tree-pane[data-pane="pane-a"]');
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    button.click();
+    expect(document.activeElement).not.toBe(button);
+    ui.destroy();
+    root.remove();
+  });
 });

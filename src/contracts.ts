@@ -84,6 +84,7 @@ export interface TerminalSurface {
   flush?(): void;
   sendText(text: string): boolean;
   sendKey(key: string, modifiers?: KeyModifiers): boolean;
+  readonly applicationCursor?: boolean;
   sendMouse?(input: TerminalMouseInput): boolean;
   beginSelection?(cell: TerminalCellPosition): boolean;
   updateSelection?(cell: TerminalCellPosition): void;

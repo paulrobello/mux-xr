@@ -128,4 +128,26 @@ describe('desktop terminal mouse adapter', () => {
     expect(vi.mocked(canvas.setPointerCapture)).not.toHaveBeenCalled();
     desktop.dispose();
   });
+
+  it('blurs panel buttons after a pointer click but not after a keyboard activation', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const desktop = createDesktopPanels(host, () => undefined, {});
+    desktop.add(surface());
+    const buttons = [
+      ...host.querySelectorAll<HTMLButtonElement>(
+        '.desktop-terminal-heading, .desktop-terminal-action',
+      ),
+    ];
+    expect(buttons.length).toBeGreaterThanOrEqual(3);
+    for (const button of buttons) {
+      button.focus();
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+      expect(document.activeElement).toBe(button);
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+      expect(document.activeElement).not.toBe(button);
+    }
+    desktop.dispose();
+    host.remove();
+  });
 });

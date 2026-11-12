@@ -12,6 +12,8 @@ import { createDemoSurface, demoAgents, demoSnapshot } from './demo';
 import { createDesktopPanels, type DesktopPanels } from './desktop/panels';
 import { createEnvironmentManager, loadObservatory } from './environment';
 import { createHostClipboardClient, createHostClipboardSecretStore } from './host-clipboard';
+import { createKeyFlash, formatKeyIndicator, mountPageKeyIndicator } from './key-indicator';
+import { installKeyboardRouter } from './keyboard-router';
 import { createLocalSpeechRecognition, isLocalSpeechSupported } from './local-speech';
 import { executeQuickCommand, loadSharedCommands } from './quick-commands';
 import { reloadAfterXR } from './reload';
@@ -559,6 +561,21 @@ const pictures = createPictureController({
 scene = createWorkspaceScene(ui.sceneHost, actions, {
   onPictureClosed: (id) => pictures.closed(id),
 });
+const setPageKey = mountPageKeyIndicator(document.body);
+const keyFlash = createKeyFlash((text) => {
+  setPageKey(text);
+  scene.setKeyIndicator(text?.replace('⌨', 'Key') ?? null);
+});
+const disposeKeyboardRouter = installKeyboardRouter(document, {
+  selectedPaneId: () => selectedId,
+  isConnected: (id) => surfaces.get(id)?.status === 'connected',
+  applicationCursor: (id) => surfaces.get(id)?.applicationCursor ?? false,
+  sendBytes: sendText,
+  textEntryActive: () => scene.isTextEntryActive(),
+  xrPresenting: () => scene.state.xrMode !== 'desktop',
+  xrEntryFallbackArmed: () => xrEntry.isFallbackArmed(),
+  onKey: (label, sent) => keyFlash.flash(formatKeyIndicator(label, sent)),
+});
 const sidebar = app.querySelector<HTMLElement>('.sidebar');
 if (sidebar)
   mountPicturePicker(sidebar, {
@@ -674,6 +691,8 @@ window.addEventListener(
     if (scene.state.xrMode !== 'desktop') scene.captureWorkspaceState();
     persistOpenViews();
     xrEntry.dispose();
+    disposeKeyboardRouter();
+    keyFlash.dispose();
     updateChecker?.dispose();
     environmentAbort.abort();
     speechInput?.dispose();

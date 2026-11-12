@@ -278,6 +278,10 @@ export interface WorkspaceScene {
   exitXR(): Promise<void>;
   setUpdateAvailable(available: boolean): void;
   setNotice(message: string | null, options?: NoticeOptions): void;
+  /** Last physical-keyboard key shown in the HUD; null hides it. */
+  setKeyIndicator(text: string | null): void;
+  /** True while an in-scene text field is taking input. */
+  isTextEntryActive(): boolean;
   pasteClipboard(paneId?: string): Promise<boolean>;
   /** Types the host (Mac) clipboard into the selected terminal through the guarded paste path. */
   pasteHostClipboard(paneId?: string): Promise<boolean>;
@@ -1221,6 +1225,7 @@ export function createWorkspaceScene(
     for (const widget of widgets.values()) widget.resetPerf?.();
   };
   let fpsLabel: THREE.Mesh | null = null;
+  let keyLabel: THREE.Mesh | null = null;
   let activePaneLabel: THREE.Mesh | null = null;
   let radialTargetId: string | null = null;
   let warpPanelEdit: { id: string; original: number; touched: boolean } | null = null;
@@ -4587,10 +4592,30 @@ export function createWorkspaceScene(
     fpsLabel.name = 'xr-fps-counter';
     fpsLabel.position.set(0.6, 0.13, 0);
     hudRoot.add(fpsLabel);
-    for (const overlay of [toastLabel, updateNotice, statusNotice, statusDismiss, fpsLabel])
+    keyLabel = createLabelButton('', 0.6, 0.075, { inputAction: 'noop' });
+    keyLabel.name = 'xr-last-key';
+    keyLabel.raycast = () => undefined;
+    keyLabel.position.set(0, -0.12, 0);
+    keyLabel.visible = false;
+    hudRoot.add(keyLabel);
+    for (const overlay of [
+      toastLabel,
+      updateNotice,
+      statusNotice,
+      statusDismiss,
+      fpsLabel,
+      keyLabel,
+    ])
       setHudOverlay(overlay, HUD_OVERLAY_RENDER_ORDER);
     scene.add(hudRoot);
   };
+  const setKeyIndicator = (text: string | null): void => {
+    if (!keyLabel) return;
+    keyLabel.visible = text !== null;
+    if (text !== null) updateLabel(keyLabel, text);
+  };
+  const isTextEntryActive = (): boolean =>
+    inputRoot !== null && inputMode === 'command-editor' && commandDraft !== null;
   const setUpdateAvailable = (available: boolean): void => {
     if (mutableState.updateAvailable === available) return;
     mutableState.updateAvailable = available;
@@ -7315,6 +7340,8 @@ export function createWorkspaceScene(
     enterXR,
     exitXR,
     setUpdateAvailable,
+    setKeyIndicator,
+    isTextEntryActive,
     setNotice,
     addPicture: (id, image) => showPicture(id, image, false),
     restorePictures: (pictures) => {

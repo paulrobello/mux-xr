@@ -66,6 +66,8 @@ The endpoint is prefilled from the page origin, and a custom endpoint is remembe
 
 Mouse clicks in 3D preview and controller triggers in VR use the same actions, with one input presenter per mode. Browser Keyboard/Commands use the compact DOM drawer; immersive VR uses spatial controls only. Hover with the mouse or aim a controller ray at a non-obvious control to see its explanation. DOM icon and modifier buttons also have browser hover titles.
 
+A paired Bluetooth or USB keyboard types into the selected connected terminal, on the page and in immersive XR, unless focus is in a text field or the in-scene command editor is open. On the 2D page the text-field rule applies, so keys typed into inputs stay there. In immersive XR, keys go to the selected terminal. A brief indicator shows each key received (marked "not sent" when filtered), which also proves whether Quest Browser delivers keys during a session. Alt and Option act as Meta (an Esc prefix), so Option-composed characters on non-US macOS layouts are not typed. Cmd shortcuts stay with the browser.
+
 | Radial item | Owns |
 | --- | --- |
 | Keyboard | Keys, modifier locks, target readout, Gaze input and Backing. |

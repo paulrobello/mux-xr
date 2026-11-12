@@ -1389,6 +1389,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     const paneId = button.dataset.pane ?? button.dataset.select;
     if (paneId) {
       selectPane(paneId);
+      button.blur();
       return;
     }
     if (button.dataset.close) {

@@ -24,6 +24,8 @@ export interface XrEntryControllerOptions {
 export interface XrEntryController {
   start(mode: XrEntryMode, automatic?: boolean): Promise<void>;
   enableAutoStart(): Promise<void>;
+  /** True while the first-gesture fallback listeners are waiting to enter XR. */
+  isFallbackArmed(): boolean;
   dispose(): void;
 }
 
@@ -101,6 +103,7 @@ export function createXREntryController(options: XrEntryControllerOptions): XrEn
           options.onActivationRequired?.();
           return;
         }
+        removeFallbackListeners();
         options.onError(error);
         throw error;
       });
@@ -123,6 +126,7 @@ export function createXREntryController(options: XrEntryControllerOptions): XrEn
   return {
     start,
     enableAutoStart,
+    isFallbackArmed: () => autoFallbackArmed,
     dispose: (): void => {
       if (disposed) return;
       disposed = true;

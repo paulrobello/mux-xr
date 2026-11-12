@@ -2949,6 +2949,18 @@ describe('native XR controller event routing', () => {
       hud.updateMatrixWorld(true);
     };
 
+    it('reports in-scene text entry only while the command editor is open', () => {
+      const { workspace, container } = fixture();
+      expect(workspace.isTextEntryActive()).toBe(false);
+      workspace.showInput('commands');
+      hit(workspace, { inputAction: 'newCommand' });
+      expect(workspace.isTextEntryActive()).toBe(true);
+      workspace.hideInput();
+      expect(workspace.isTextEntryActive()).toBe(false);
+      workspace.dispose();
+      container.remove();
+    });
+
     it('draws notice, toast, dismiss and Reload above widgets', () => {
       const { workspace, container } = fixture();
       const hud = workspace.scene.getObjectByName('xr-workspace-hud');
@@ -2956,6 +2968,7 @@ describe('native XR controller event routing', () => {
       expect(overlays.map((child) => String(child.userData.inputAction)).sort()).toEqual([
         'dismissNotice',
         'dismissNotice',
+        'noop',
         'noop',
         'noop',
         'reloadUpdate',

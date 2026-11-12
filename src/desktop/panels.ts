@@ -100,6 +100,9 @@ export function createDesktopPanels(
     canvas.style.imageRendering = 'auto';
     canvas.style.display = 'block';
   };
+  const blurAfterPointerClick = (event: MouseEvent): void => {
+    if (event.detail > 0) (event.currentTarget as HTMLElement).blur();
+  };
   const add = (surface: TerminalSurface): void => {
     if (panels.has(surface.pane.id)) return;
     const panel = document.createElement('article');
@@ -119,6 +122,7 @@ export function createDesktopPanels(
     updateHeading();
     heading.className = 'desktop-terminal-heading';
     heading.addEventListener('click', () => onSelect(surface.pane.id));
+    heading.addEventListener('click', blurAfterPointerClick);
     const bell = document.createElement('span');
     bell.className = 'desktop-terminal-bell';
     bell.textContent = 'BELL';
@@ -136,6 +140,7 @@ export function createDesktopPanels(
     const connection = document.createElement('button');
     connection.type = 'button';
     connection.className = 'desktop-terminal-action';
+    connection.addEventListener('click', blurAfterPointerClick);
     connection.addEventListener('click', (event) => {
       event.stopPropagation();
       callbacks.onToggleConnection?.(surface.pane.id);
@@ -145,6 +150,7 @@ export function createDesktopPanels(
     close.className = 'desktop-terminal-action';
     close.textContent = 'Close view';
     close.title = `Close ${surface.pane.title} view and keep the terminal running`;
+    close.addEventListener('click', blurAfterPointerClick);
     close.addEventListener('click', (event) => {
       event.stopPropagation();
       callbacks.onClose?.(surface.pane.id);

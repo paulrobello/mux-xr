@@ -234,4 +234,52 @@ describe('XR entry coordinator', () => {
     await Promise.resolve();
     expect(enter).toHaveBeenCalledTimes(1);
   });
+
+  it('reports whether the first-gesture fallback is armed', async () => {
+    const target = events();
+    const enter = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error('needs activation'), { name: 'NotAllowedError' }),
+      )
+      .mockResolvedValueOnce(undefined);
+    const controller = createXREntryController({
+      enter,
+      isActive: () => false,
+      onError: vi.fn(),
+      xr: { isSessionSupported: async () => true },
+      eventTarget: target,
+    });
+    expect(controller.isFallbackArmed()).toBe(false);
+    await controller.enableAutoStart();
+    expect(controller.isFallbackArmed()).toBe(true);
+    target.dispatchEvent(new Event('keydown'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(controller.isFallbackArmed()).toBe(false);
+  });
+
+  it('disarms the fallback when entry fails with a non-activation error', async () => {
+    const target = events();
+    const enter = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error('needs activation'), { name: 'NotAllowedError' }),
+      )
+      .mockRejectedValueOnce(new Error('renderer exploded'));
+    const onError = vi.fn();
+    const controller = createXREntryController({
+      enter,
+      isActive: () => false,
+      onError,
+      xr: { isSessionSupported: async () => true },
+      eventTarget: target,
+    });
+    await controller.enableAutoStart();
+    expect(controller.isFallbackArmed()).toBe(true);
+    target.dispatchEvent(new Event('keydown'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(controller.isFallbackArmed()).toBe(false);
+  });
 });
