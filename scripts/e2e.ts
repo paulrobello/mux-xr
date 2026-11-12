@@ -15,6 +15,8 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import { layoutWidgetPanel } from '../src/xr/widget-panel-layout';
+import { WIDGET_REGISTRY } from '../src/xr/widget-registry';
 
 type Viewport = { name: string; width: number; height: number };
 type Frame = { paneId: string; case: string; data?: string; cols?: number; rows?: number };
@@ -338,8 +340,9 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
     );
     await page.locator('[data-action="widgets"]').click();
     assert(
-      (await currentHints()).filter((hint) => hint.inputAction === 'toggleWidget').length === 2,
-      'Desktop Widgets did not open native clock choices',
+      (await currentHints()).filter((hint) => hint.inputAction === 'toggleWidget').length ===
+        layoutWidgetPanel(WIDGET_REGISTRY.length).buttons.length,
+      'Desktop Widgets did not open the first page of widget choices',
     );
     const closeWidgets = (await currentHints()).find((hint) => hint.inputAction === 'close');
     assert(closeWidgets, 'Widgets close target missing');
