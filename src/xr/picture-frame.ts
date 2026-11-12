@@ -37,6 +37,8 @@ function addPickerChoices(parent: THREE.Object3D, y: number): void {
 }
 
 const BORDER = 0.022;
+/** The corner icon buttons: close, change and 3D. */
+const CORNER_SIZE = 0.075;
 const DEPTH = 0.024;
 const FRAME_COLOR = 0x0c1117;
 
@@ -74,9 +76,12 @@ const DEPTH_VERTEX = /* glsl */ `
     float gx = abs(near(uv + vec2(texel.x, 0.0)) - near(uv - vec2(texel.x, 0.0)));
     float gy = abs(near(uv + vec2(0.0, texel.y)) - near(uv - vec2(0.0, texel.y)));
     vEdge = max(gx, gy);
+    // The outermost ring stays on the frame plane, stretching the picture's edge to the border.
+    float rim = step(uv.x, 0.0001) + step(0.9999, uv.x) + step(uv.y, 0.0001) + step(0.9999, uv.y);
+    float scale = rim > 0.0 ? 0.0 : depthScale;
     // Bright is near. Anchor 1 keeps the nearest pixels on the frame plane and recedes the rest;
     // anchor 0.5 centres the depth on the frame, so near pixels pop out in front of it.
-    vec3 p = position + normal * (d - depthAnchor) * depthScale;
+    vec3 p = position + normal * (d - depthAnchor) * scale;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
   }`;
 const DEPTH_FRAGMENT = /* glsl */ `
@@ -175,10 +180,11 @@ export function createPictureFrameWidget(
     root.add(hint);
   }
   if (image) {
-    const change = createScalableLabel('Change', 0.2, 0.08, { background: '#223946' });
+    const change = createScalableLabel('🖼', CORNER_SIZE, CORNER_SIZE, { background: '#223946' });
     change.name = 'picture-change';
-    // Inside the bottom-left corner, so the frame's footprint (and slot clearance) is unchanged.
-    change.position.set(-size.width / 2 + 0.11, -size.height / 2 + 0.05, 0.012);
+    // On the top-left corner, like close. The top edge already reaches past the border for close;
+    // a bottom icon would grow the frame's footprint into the slot below.
+    change.position.set(-size.width / 2 - BORDER / 2, size.height / 2 + BORDER / 2, 0.012);
     change.userData.inputAction = 'pictureChange';
     change.userData.helpText = 'Replace this picture';
     root.add(change);
@@ -193,10 +199,14 @@ export function createPictureFrameWidget(
   let depthOptions: THREE.Group | null = null;
   const depthLabels = new Map<string, THREE.Mesh>();
   if (image) {
-    const toggle = createScalableLabel('3D', 0.1, 0.08, { background: '#223946' });
+    const toggle = createScalableLabel('3D', CORNER_SIZE, CORNER_SIZE, { background: '#223946' });
     toggle.name = 'picture-depth';
-    // Inside the bottom-right corner, mirroring Change.
-    toggle.position.set(size.width / 2 - 0.06, -size.height / 2 + 0.05, 0.012);
+    // Beside close on the top edge.
+    toggle.position.set(
+      size.width / 2 + BORDER / 2 - CORNER_SIZE - 0.01,
+      size.height / 2 + BORDER / 2,
+      0.012,
+    );
     toggle.userData.inputAction = 'widgetControl';
     toggle.userData.pictureDepthCommand = 'options';
     toggle.userData.helpText = '3D picture options';
@@ -209,7 +219,7 @@ export function createPictureFrameWidget(
     controls.push(root.getObjectByName('picture-change-choices') as THREE.Object3D);
   }
 
-  const close = createScalableLabel('×', 0.075, 0.075, { background: '#223946' });
+  const close = createScalableLabel('×', CORNER_SIZE, CORNER_SIZE, { background: '#223946' });
   close.name = 'picture-close';
   // Sits on the frame's top-right corner so it never covers the picture.
   close.position.set(size.width / 2 + BORDER / 2, size.height / 2 + BORDER / 2, 0.012);
@@ -372,30 +382,19 @@ export function createPictureFrameWidget(
 }
 
 /**
- * The 3D options panel, hidden until the frame's 3D button opens it. Two columns on a frame wide
- * enough, else one; every target is at least 0.07 m local, 0.042 m at the smallest frame scale.
+ * The 3D options panel, hidden until the frame's 3D button opens it, centred on the picture:
+ * 3D and mode side by side, then depth strength and edges across the full width.
  */
 function createDepthOptions(width: number, labels: Map<string, THREE.Mesh>): THREE.Group {
   const panel = new THREE.Group();
   panel.name = 'picture-depth-options';
   panel.visible = false;
   panel.position.z = 0.008;
-  const cellHeight = 0.08;
-  const gap = 0.012;
-  const columns = width >= 0.54 ? 2 : 1;
-  const cellWidth = Math.min(0.25, (width - 0.04 - gap * (columns - 1)) / columns);
-  const rows = Math.ceil(4 / columns);
-  const panelHeight = rows * cellHeight + (rows - 1) * gap;
-  // Centred in the picture above the bottom-row buttons.
-  const centreY = 0.05;
-  const cell = (index: number): { x: number; y: number } => {
-    const column = index % columns;
-    const row = Math.floor(index / columns);
-    return {
-      x: (column - (columns - 1) / 2) * (cellWidth + gap),
-      y: centreY + panelHeight / 2 - cellHeight / 2 - row * (cellHeight + gap),
-    };
-  };
+  const rowHeight = 0.075;
+  const gap = 0.01;
+  const panelWidth = Math.min(0.5, width - 0.06);
+  const half = (panelWidth - gap) / 2;
+  const rowY = (row: number): number => rowHeight + gap - row * (rowHeight + gap);
   const button = (
     name: string,
     text: string,
@@ -405,7 +404,7 @@ function createDepthOptions(width: number, labels: Map<string, THREE.Mesh>): THR
     command: string,
     help: string,
   ): THREE.Mesh => {
-    const control = createScalableLabel(text, w, cellHeight, { background: '#223946' });
+    const control = createScalableLabel(text, w, rowHeight, { background: '#223946' });
     control.name = `picture-depth-${name}`;
     control.position.set(x, y, 0);
     control.userData.inputAction = 'widgetControl';
@@ -414,60 +413,35 @@ function createDepthOptions(width: number, labels: Map<string, THREE.Mesh>): THR
     panel.add(control);
     return control;
   };
-  const toggle = cell(0);
+  const left = -(half + gap) / 2;
+  const right = (half + gap) / 2;
   labels.set(
     'enabled',
-    button('enabled', '3D: On', cellWidth, toggle.x, toggle.y, 'enabled', 'Turn 3D on or off'),
+    button('enabled', '3D: On', half, left, rowY(0), 'enabled', 'Turn 3D on or off'),
   );
-  const strength = cell(1);
-  const step = 0.07;
-  button(
-    'weaker',
-    '−',
-    step,
-    strength.x - (cellWidth - step) / 2,
-    strength.y,
-    'weaker',
-    'Less depth',
+  labels.set(
+    'mode',
+    button('mode', 'Inward', half, right, rowY(0), 'mode', 'Recede behind the frame or pop out'),
   );
-  button(
-    'stronger',
-    '+',
-    step,
-    strength.x + (cellWidth - step) / 2,
-    strength.y,
-    'stronger',
-    'More depth',
-  );
-  const value = createScalableLabel('Depth 0.25', cellWidth - step * 2 - 0.01, cellHeight, {
+  const step = 0.075;
+  const edge = (panelWidth - step) / 2;
+  button('weaker', '−', step, -edge, rowY(1), 'weaker', 'Less depth');
+  button('stronger', '+', step, edge, rowY(1), 'stronger', 'More depth');
+  const value = createScalableLabel('Depth 0.25', panelWidth - step * 2 - gap * 2, rowHeight, {
     background: '#15232b',
   });
   value.name = 'picture-depth-strength';
-  value.position.set(strength.x, strength.y, 0);
+  value.position.set(0, rowY(1), 0);
   panel.add(value);
   labels.set('strength', value);
-  const mode = cell(2);
-  labels.set(
-    'mode',
-    button(
-      'mode',
-      'Inward',
-      cellWidth,
-      mode.x,
-      mode.y,
-      'mode',
-      'Recede behind the frame or pop out',
-    ),
-  );
-  const edges = cell(3);
   labels.set(
     'edges',
     button(
       'edges',
       'Edges: Stretch',
-      cellWidth,
-      edges.x,
-      edges.y,
+      panelWidth,
+      0,
+      rowY(2),
       'edges',
       'Stretch or cut the picture where its depth jumps',
     ),

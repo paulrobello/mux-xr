@@ -342,6 +342,35 @@ describe('picture frame 3D', () => {
     widget.dispose();
   });
 
+  it.each([
+    [1600, 900],
+    [900, 1600],
+  ])('fits every option label on a %ix%i frame without truncating it', (width, height) => {
+    const widget = createPictureFrameWidget(null, { id: 'pic-3', image: image(width, height) });
+    const panel = widget.root.getObjectByName('picture-depth-options');
+    const texts: string[] = [];
+    panel?.traverse((child) => {
+      const text = child.userData.labelTextObject as { text?: string } | undefined;
+      if (text?.text) texts.push(text.text);
+    });
+    expect(texts).toContain('Depth 0.25');
+    expect(texts.filter((text) => text.includes('…'))).toEqual([]);
+    widget.dispose();
+  });
+
+  it('puts change and 3D on the top edge with close, off the picture', () => {
+    const { widget } = frame();
+    const plane = widget.root.getObjectByName('picture-frame-image') as THREE.Mesh;
+    const { width, height } = (plane.geometry as THREE.PlaneGeometry).parameters;
+    for (const name of ['picture-change', 'picture-depth', 'picture-close'])
+      expect(widget.root.getObjectByName(name)?.position.y).toBeGreaterThan(height / 2);
+    for (const name of ['picture-change', 'picture-close'])
+      expect(Math.abs(widget.root.getObjectByName(name)?.position.x ?? 0)).toBeGreaterThan(
+        width / 2,
+      );
+    widget.dispose();
+  });
+
   it('opens with a stored view and depth', () => {
     const widget = createPictureFrameWidget(null, {
       id: 'pic-2',
