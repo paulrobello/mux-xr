@@ -1,19 +1,19 @@
 {
-  "version": "0.78.1",
-  "commit": "b52c58bf7686645f7ae541b7385b82883205a60e",
-  "releaseUrl": "https://github.com/paulrobello/par-term-emu-core-rust/releases/tag/v0.78.1",
+  "version": "0.81.0",
+  "commit": "8b3cc8d61f787b90b673180764ad6d2a3cb4b35b",
+  "releaseUrl": "https://github.com/paulrobello/par-term-emu-core-rust/releases/tag/v0.81.0",
   "macosArm64": {
     "streamer": {
       "asset": "par-term-streamer-mux-macos-aarch64",
-      "sha256": "7a3cd8a5e1517c53b0e892e72cf21e74f76fb6856b5a2a09933d4c64391fd3b1"
+      "sha256": "3a24b4aa291922a107760be43ab675f566113a7279f914d4728e60f2f7ea9009"
     },
     "muxArchive": {
-      "asset": "par-mux-v0.78.1-aarch64-apple-darwin.tar.gz",
-      "sha256": "6171491ab2dd3f5fe9f1b39127896de2be4915bf726f12fc160a336039b2d483"
+      "asset": "par-mux-v0.81.0-aarch64-apple-darwin.tar.gz",
+      "sha256": "8591bf8598501a82512d9042788b6e56ddfdd9c544da601173fca0e0581cab85"
     }
   },
   "generatedProtocol": {
     "path": "web-terminal-frontend/lib/proto/terminal_pb.ts",
-    "sha256": "74568289834b31bf654307ce151f5928472f1b33a9a92f5b1b8c4fd0dba894fe"
+    "sha256": "a726195a354a549da216b5a6ffd1faa8359a4e8f10d98d5e32bf56fb67d6c35b"
   }
 }

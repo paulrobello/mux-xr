@@ -391,7 +391,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             ready = true;
             readonly = connected.readonly ?? false;
             cwd = connected.cwd?.startsWith('/') ? connected.cwd : null;
-            cwdHost = null;
+            cwdHost = cwd ? (connected.cwdHostname ?? null) : null;
             mouseTrackingFallback = 'none';
             mouseTrackingDisabled = false;
             serverMouseMode = null;

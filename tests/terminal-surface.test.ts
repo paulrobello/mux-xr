@@ -367,6 +367,23 @@ describe('terminal surface lifecycle', () => {
     change('relative', 'build-box');
     expect(surface.cwd).toBeNull();
     expect(surface.cwdHost).toBeNull();
+    // Core 0.81 streamers send the cwd's OSC 7 hostname in the handshake.
+    const connect = (cwd: string, cwdHostname?: string) =>
+      ws.message(
+        frame(
+          create(ServerMessageSchema, {
+            message: {
+              case: 'connected',
+              value: create(ConnectedSchema, { cols: 80, rows: 24, cwd, cwdHostname }),
+            },
+          }),
+        ),
+      );
+    connect('/home/me/remote', 'build-box');
+    expect(surface.cwd).toBe('/home/me/remote');
+    expect(surface.cwdHost).toBe('build-box');
+    connect('relative', 'build-box');
+    expect(surface.cwdHost).toBeNull();
     surface.dispose();
   });
 
