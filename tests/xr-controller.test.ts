@@ -7277,6 +7277,53 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('brings the keyboard in front of the viewer when its button is held', () => {
+    const { workspace, container } = fixture();
+    workspace.setWindowPreferences({
+      ...workspace.state.windowPreferences,
+      buttonMap: { ...DEFAULT_BUTTON_MAP, leftY: 'keyboard' },
+    });
+    const left = connectController(0, [0, 0, 0, 0], 'left');
+    let time = 0;
+    const press = (down: boolean, after = 16) => {
+      time += after;
+      (left.buttons[5] as { pressed: boolean }).pressed = down;
+      fakeXR.frame?.(time);
+    };
+    const hold = () => {
+      for (let frame = 0; frame < 45; frame += 1) press(true);
+    };
+    press(true, 0);
+    press(false);
+    const keyboard = () => workspace.scene.getObjectByName('xr-keyboard-controls');
+    const front = keyboard()?.position.clone();
+    expect(front).toBeDefined();
+    keyboard()?.position.set(4, 2, 3);
+    // A short press still toggles, wherever the keyboard was left.
+    press(true, 100);
+    press(false);
+    expect(keyboard()).toBeUndefined();
+    press(true, 100);
+    press(false);
+    expect(keyboard()?.position.distanceTo(new THREE.Vector3(4, 2, 3))).toBeLessThan(1e-6);
+    // Held past the threshold, it lands in front again, from shown or hidden.
+    press(true, 100);
+    hold();
+    press(false);
+    expect(keyboard()?.position.distanceTo(front as THREE.Vector3)).toBeLessThan(1e-3);
+    keyboard()?.position.set(-3, 1, 2);
+    press(true, 100);
+    press(false);
+    expect(keyboard()).toBeUndefined();
+    press(true, 100);
+    hold();
+    expect(keyboard()?.position.distanceTo(front as THREE.Vector3)).toBeLessThan(1e-3);
+    press(false);
+    expect(keyboard()).toBeDefined();
+    workspace.dispose();
+    container.remove();
+  });
+
   it('keeps right A save and right B cancel during Warp whatever they are mapped to', () => {
     const { workspace, container } = fixture();
     const pad = connectController(0, [0, 0, 0, 0], 'right');

@@ -553,6 +553,8 @@ const FACE_BUTTONS: Record<'left' | 'right', Array<[number, ControllerButton]>> 
     [5, 'leftY'],
   ],
 };
+/** Holding a Keyboard-mapped button this long brings the keyboard in front of the viewer. */
+const KEYBOARD_SUMMON_HOLD_SECONDS = 0.5;
 const BUTTON_TRAVEL = 0.016;
 const BUTTON_PRESS_MS = 140;
 const BUTTON_RELEASE_MS = 80;
@@ -1387,6 +1389,10 @@ export function createWorkspaceScene(
     }
   >();
   const radialButtonDown = new Set<THREE.Group>();
+  const keyboardHolds = new Map<
+    string,
+    { controller: THREE.Group; index: number; seconds: number; summoned: boolean }
+  >();
   const scrollDue = new Map<THREE.Group, number>();
   // A pinch on a pane's edge strip scrolls it by the ray's movement along the pane's own up axis,
   // in a plane fixed at pinch start so the ray may leave the strip mid-drag.
@@ -2843,6 +2849,31 @@ export function createWorkspaceScene(
         const choice = functionOf(button);
         if (choice === 'menu' && others) continue;
         runButtonFunction(choice, controller);
+        if (choice === 'keyboard') {
+          const hand = controllerHandedness.get(controller);
+          const index =
+            hand === 'left' || hand === 'right'
+              ? FACE_BUTTONS[hand].find(([, name]) => name === button)?.[0]
+              : undefined;
+          if (index !== undefined)
+            keyboardHolds.set(`${controller.uuid}:${button}`, {
+              controller,
+              index,
+              seconds: 0,
+              summoned: false,
+            });
+        }
+      }
+      for (const [key, hold] of keyboardHolds) {
+        const pressed = controllerGamepads.get(hold.controller)?.buttons[hold.index]?.pressed;
+        if (!pressed || !hold.controller.visible || disconnectedControllers.has(hold.controller)) {
+          keyboardHolds.delete(key);
+          continue;
+        }
+        hold.seconds += deltaSeconds;
+        if (hold.summoned || hold.seconds < KEYBOARD_SUMMON_HOLD_SECONDS) continue;
+        hold.summoned = true;
+        summonKeyboard();
       }
       if (warpEdit && !gripActive()) {
         const controller = warpEdit.controller;
@@ -7129,6 +7160,16 @@ export function createWorkspaceScene(
         };
     }
     refreshInputRoot(mode);
+  };
+  const summonKeyboard = (): void => {
+    closeRadial();
+    if (!inputRoot || !isTypingMode(inputMode)) toggleKeyboard();
+    if (!inputRoot || !isTypingMode(inputMode)) return;
+    for (const controller of [...dragStates.keys()])
+      if (dragStates.get(controller)?.object === inputRoot) releaseGrab(controller);
+    resetInputPose();
+    saveKeyboardPose(inputRoot);
+    notify();
   };
   const toggleKeyboard = (): void => {
     modifierPresses.clear();
