@@ -754,6 +754,8 @@ Object.assign(window, {
       })),
     }),
     getControlHints: () => scene.getControlHints(),
+    // scripts/quest-frame-probe.ts hides scene groups through this to price them on the headset.
+    getThreeScene: () => scene.scene,
     checkForUpdate: () => updateChecker?.poll() ?? Promise.resolve(),
     startDemo,
     connect,
