@@ -6,7 +6,12 @@ export const DEFAULT_REPOSITORY = '/Users/localuser/Repos/mux-xr';
 export const DEFAULT_USER = 'localuser';
 export const DICTATION_PORT = 4242;
 
-export type DictationLaunchdOptions = { repository?: string; user?: string };
+export type DictationLaunchdOptions = {
+  repository?: string;
+  user?: string;
+  /** Opts the agent into `/repo-status`, which runs git and gh; off unless asked for. */
+  repoStatus?: boolean;
+};
 
 const xml = (value: string): string =>
   value
@@ -110,6 +115,7 @@ export const buildLaunchAgentPlist = (options: DictationLaunchdOptions = {}): st
     ...serverArguments(repository),
     '--clipboard-secret-file',
     clipboardSecretPath(repository),
+    ...(options.repoStatus ? ['--repo-status', 'on'] : []),
   ]);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

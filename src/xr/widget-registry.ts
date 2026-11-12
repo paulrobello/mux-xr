@@ -4,6 +4,7 @@ import { createBellFeedWidget } from './bell-feed';
 import { createHostLoadWidget } from './host-load';
 import { createPerfGaugeWidget } from './perf-gauge';
 import { createPictureFrameWidget } from './picture-frame';
+import { createRepoStatusWidget } from './repo-status-widget';
 import { createTimerWidget } from './timer-widget';
 import { createClockWidget, type Widget } from './widgets';
 
@@ -78,6 +79,16 @@ export const WIDGET_REGISTRY = [
     spawnScale: 0.7,
     faceViewer: true,
     create: (envMap) => createHostLoadWidget(envMap),
+  },
+  {
+    kind: 'repo-status',
+    displayName: 'Git & CI',
+    // Right of the board, below the analog clock, near eye level; the only clear spot at this
+    // scale once host load took the space above the perf gauge.
+    spawnOffset: [0.6, -0.1, -1.4],
+    spawnScale: 0.7,
+    faceViewer: true,
+    create: (envMap) => createRepoStatusWidget(envMap),
   },
   {
     kind: 'picture',

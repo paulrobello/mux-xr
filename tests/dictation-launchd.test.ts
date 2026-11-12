@@ -99,6 +99,17 @@ describe('Whisper LaunchDaemon definition', () => {
     expect(() => agentPlistPath('../root')).toThrow(/Invalid macOS user/);
   });
 
+  it('leaves /repo-status off unless the agent install opts in', () => {
+    expect(buildLaunchAgentPlist()).not.toContain('--repo-status');
+    expect(buildLaunchDaemonPlist()).not.toContain('--repo-status');
+    expect(buildLaunchAgentPlist({ repoStatus: true })).toContain(
+      '<string>--repo-status</string>\n    <string>on</string>',
+    );
+    expect(parseInstallerArgs(['--print', '--agent']).repoStatus).toBe(false);
+    expect(parseInstallerArgs(['--print', '--agent', '--repo-status']).repoStatus).toBe(true);
+    expect(() => parseInstallerArgs(['--print', '--repo-status'])).toThrow(/only supported/);
+  });
+
   it('parses agent print and install modes and never migrates listeners for agents', () => {
     expect(parseInstallerArgs(['--print', '--agent'])).toMatchObject({ print: true, agent: true });
     expect(parseInstallerArgs(['--install', '--agent'])).toMatchObject({

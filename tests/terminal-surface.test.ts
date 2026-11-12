@@ -2,6 +2,7 @@ import { create, toBinary } from '@bufbuild/protobuf';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ConnectedSchema,
+  CwdChangedSchema,
   OutputSchema,
   ResizeSchema,
   ServerMessageSchema,
@@ -327,6 +328,45 @@ describe('terminal surface lifecycle', () => {
     expect(surface.revision).toBe(revision + 1);
     surface.dispose();
     vi.useRealTimers();
+  });
+
+  it('tracks the cwd and its OSC 7 host from connect and OSC 7 changes', async () => {
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    expect(surface.cwd).toBeNull();
+    surface.connect();
+    const ws = MockSocket.instances[0];
+    ws.open();
+    ws.message(
+      frame(
+        create(ServerMessageSchema, {
+          message: {
+            case: 'connected',
+            value: create(ConnectedSchema, { cols: 80, rows: 24, cwd: '/Users/me/repo' }),
+          },
+        }),
+      ),
+    );
+    expect(surface.cwd).toBe('/Users/me/repo');
+    expect(surface.cwdHost).toBeNull();
+    const change = (newCwd: string, hostname?: string) =>
+      ws.message(
+        frame(
+          create(ServerMessageSchema, {
+            message: { case: 'cwdChanged', value: create(CwdChangedSchema, { newCwd, hostname }) },
+          }),
+        ),
+      );
+    change('/Users/me/other');
+    expect(surface.cwd).toBe('/Users/me/other');
+    expect(surface.cwdHost).toBeNull();
+    change('/home/me/remote', 'build-box');
+    expect(surface.cwd).toBe('/home/me/remote');
+    expect(surface.cwdHost).toBe('build-box');
+    change('relative', 'build-box');
+    expect(surface.cwd).toBeNull();
+    expect(surface.cwdHost).toBeNull();
+    surface.dispose();
   });
 
   it('passes streamed damage to the painter and full-scans damage-less frames', async () => {

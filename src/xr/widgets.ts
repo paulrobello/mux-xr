@@ -23,6 +23,8 @@ export interface Widget {
   setPerfSample?: (sample: PerfSample) => void;
   /** Drops frame-time history; called when an XR session starts. */
   resetPerf?: () => void;
+  /** Receives the focused pane, its OSC 7 cwd and hostname every frame; widgets dedupe repeats. */
+  setFocusedPane?: (paneId: string | null, cwd: string | null, host?: string | null) => void;
   /** Applies a new texture anisotropy, already capped to the renderer maximum. */
   setTextureAnisotropy?: (anisotropy: number) => void;
 }

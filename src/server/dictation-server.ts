@@ -18,6 +18,11 @@ import {
   HOST_STATS_PATH,
   type HostStatsRouteOptions,
 } from './host-stats-server';
+import {
+  createRepoStatusRoute,
+  REPO_STATUS_PATH,
+  type RepoStatusRouteOptions,
+} from './repo-status-server';
 
 const execFile = promisify(execFileCallback);
 const MAX_PAYLOAD = 8 * 1024 * 1024;
@@ -45,6 +50,11 @@ export type DictationServerOptions = {
     | 'maxConnectionsPerClient'
     | 'onEvent'
   >;
+  /**
+   * Git and CI status on `/repo-status`. It runs git and gh on paths a paired client names, so it
+   * stays off unless `enabled`, even with clipboard pairing set up, and then also needs that secret.
+   */
+  repoStatus?: { enabled: boolean } & Omit<RepoStatusRouteOptions, 'allowedOrigins' | 'loadSecret'>;
   telemetry?: Pick<
     DictationTelemetry,
     'connected' | 'disconnected' | 'rejected' | 'beginTranscription'
@@ -154,6 +164,14 @@ export const attachDictationServer = (
     now: options.clipboard?.now,
     allowedOrigins: options.allowedOrigins,
   });
+  const repoStatusRoute = createRepoStatusRoute({
+    ...options.repoStatus,
+    loadSecret: options.repoStatus?.enabled
+      ? loadSecret
+      : () => ({ enabled: false, reason: 'repo status not enabled (--repo-status on)' }),
+    limiter: authLimiter,
+    allowedOrigins: options.allowedOrigins,
+  });
 
   const handleUpgrade = (
     request: import('node:http').IncomingMessage,
@@ -175,6 +193,10 @@ export const attachDictationServer = (
     }
     if (requestUrl.pathname === HOST_STATS_PATH && !requestUrl.search) {
       hostStatsRoute.handleUpgrade(request, socket, head);
+      return;
+    }
+    if (requestUrl.pathname === REPO_STATUS_PATH && !requestUrl.search) {
+      repoStatusRoute.handleUpgrade(request, socket, head);
       return;
     }
     const origin = request.headers.origin;
@@ -303,6 +325,7 @@ export const attachDictationServer = (
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await clipboardRoute.close();
       await hostStatsRoute.close();
+      await repoStatusRoute.close();
     },
   };
 };

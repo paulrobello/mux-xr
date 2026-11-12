@@ -2621,7 +2621,16 @@ export function createWorkspaceScene(
       notify();
     }
     const nowMs = Date.now();
-    for (const widget of widgets.values()) widget.update(nowMs);
+    const focusedPanel = panels.get(mutableState.focusedTerminalId ?? '');
+    const focusedCwd = focusedPanel?.surface.cwd ?? null;
+    for (const widget of widgets.values()) {
+      widget.setFocusedPane?.(
+        focusedPanel?.id ?? null,
+        focusedCwd,
+        focusedPanel?.surface.cwdHost ?? null,
+      );
+      widget.update(nowMs);
+    }
     hierarchyNavigator?.update(
       deltaSeconds,
       renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera,

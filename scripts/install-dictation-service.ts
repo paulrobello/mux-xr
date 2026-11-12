@@ -25,6 +25,7 @@ type InstallerOptions = {
   migrateRunningListener: boolean;
   repository: string;
   user: string;
+  repoStatus: boolean;
 };
 export type ListenerMetadata = {
   uid: number;
@@ -42,6 +43,7 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
   let user = DEFAULT_USER;
   let migrateRunningListener = false;
   let agent = false;
+  let repoStatus = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--install') install = true;
@@ -49,6 +51,7 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
     else if (argument === '--print') print = true;
     else if (argument === '--migrate-running-listener') migrateRunningListener = true;
     else if (argument === '--agent') agent = true;
+    else if (argument === '--repo-status') repoStatus = true;
     else if (argument === '--repo') repository = argv[++index] ?? '';
     else if (argument === '--user') user = argv[++index] ?? '';
     else throw new Error(`Unknown argument: ${argument}`);
@@ -57,6 +60,7 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
   if ([install, print, uninstall].filter(Boolean).length > 1)
     throw new Error('Choose only one of --print, --install or --uninstall.');
   if (!install && !print && !uninstall) print = true;
+  if (repoStatus && !agent) throw new Error('--repo-status is only supported with --agent.');
   if (agent && migrateRunningListener)
     throw new Error('--agent installs never migrate a running listener.');
   return {
@@ -67,6 +71,7 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
     migrateRunningListener,
     repository: validateRepository(repository),
     user: validateUser(user),
+    repoStatus,
   };
 };
 

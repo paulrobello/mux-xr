@@ -80,6 +80,10 @@ export interface TerminalSurface {
   readonly error: string | null;
   /** Held-pane process lifecycle, independent of stream `status`. */
   readonly process?: PaneProcess;
+  /** Working directory from OSC 7; null when unreported. */
+  readonly cwd?: string | null;
+  /** The OSC 7 hostname for `cwd`; null when the shell sent none. The host decides if it is local. */
+  readonly cwdHost?: string | null;
   readonly bellPending?: boolean;
   acknowledgeBell?(): void;
   readonly canResizeGrid: boolean;

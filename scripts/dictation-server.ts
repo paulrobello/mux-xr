@@ -56,6 +56,10 @@ const server = createServer(
   },
 );
 const clipboardSecretFile = parsed.get('--clipboard-secret-file');
+const repoStatusFlag = parsed.get('--repo-status') ?? 'off';
+if (repoStatusFlag !== 'on' && repoStatusFlag !== 'off')
+  throw new Error('--repo-status takes on or off.');
+console.log(`Repo status ${repoStatusFlag === 'on' ? 'enabled' : 'disabled'}.`);
 const clipboardAtStart = loadClipboardSecret(clipboardSecretFile);
 console.log(
   clipboardAtStart.enabled
@@ -66,6 +70,8 @@ const attached = attachDictationServer(server, {
   allowedOrigins: origins,
   model,
   telemetry,
+  // Runs git and gh on paths a paired client names, so it needs its own explicit opt-in.
+  repoStatus: { enabled: repoStatusFlag === 'on' },
   clipboard: {
     loadSecret: () => loadClipboardSecret(clipboardSecretFile),
     // Counts and sizes only: clipboard text and the secret never reach the log.
