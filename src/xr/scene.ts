@@ -73,6 +73,7 @@ import {
 import { calculateArrangement } from './arrangements';
 import { createBellFeedStore } from './bell-feed';
 import type { CartoonHand } from './cartoon-hand';
+import { clusteredRaycast } from './clustered-raycast';
 import {
   type CommandDraft,
   commandFromDraft,
@@ -6376,6 +6377,8 @@ export function createWorkspaceScene(
     );
     frame.name = 'terminal-frame';
     frame.position.z = -0.025;
+    // Controller rays reach the pane every frame; the bezel has over 1,500 triangles.
+    frame.raycast = clusteredRaycast;
     root.add(frame);
     const frameAccent = new THREE.Mesh(
       createTerminalFrameAccentGeometry(
