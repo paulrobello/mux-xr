@@ -1,3 +1,10 @@
+import type { PictureDepthEstimator } from '../host-picture-depth';
+import {
+  DEFAULT_DEPTH_VIEW,
+  depthFailureNotice,
+  normalizeDepthView,
+  type PictureDepthView,
+} from '../xr/picture-depth';
 import {
   createPictureThumbnail,
   loadPictureFile,
@@ -8,6 +15,7 @@ import {
 } from '../xr/picture-image';
 import { PictureLoadError, pictureErrorNotice } from '../xr/picture-sizing';
 import type { PictureLibrary, RecentPictureLibrary } from '../xr/picture-store';
+import type { RestoredPicture } from '../xr/scene';
 
 export interface PictureSceneTarget {
   /**
@@ -15,8 +23,10 @@ export interface PictureSceneTarget {
    * open; returns the ids of older frames removed to keep the frame cap.
    */
   addPicture(id: string, image: PictureImage, target?: string): string[];
-  restorePictures(pictures: ReadonlyArray<{ id: string; image: PictureImage }>): void;
+  restorePictures(pictures: ReadonlyArray<RestoredPicture>): void;
   removePicture(id: string): void;
+  /** Gives an open frame its depth map; ignored when the frame is gone. */
+  setPictureDepth(id: string, depth: PictureImage): void;
 }
 
 export interface PictureLoaders {
@@ -54,6 +64,11 @@ export interface PictureController {
   restore(): Promise<void>;
   /** The user closed a frame in XR; its live blob goes, its Recent entry stays. */
   closed(id: string): void;
+  /**
+   * The user changed a frame's 3D options: stores them, and when 3D is on without a depth map
+   * asks the Mac for one, reporting a failure.
+   */
+  setDepthView(id: string, view: PictureDepthView): void;
 }
 
 function newPictureId(): string {
@@ -71,6 +86,8 @@ export function createPictureController(options: {
   scene: () => PictureSceneTarget | null;
   notify: (message: string) => void;
   loaders?: Partial<PictureLoaders>;
+  /** Makes depth maps on the paired Mac; omitted, pictures stay flat. */
+  depth?: PictureDepthEstimator;
   now?: () => number;
   createId?: () => string;
 }): PictureController {
@@ -79,7 +96,6 @@ export function createPictureController(options: {
   const createId = options.createId ?? newPictureId;
   const recent = options.recent;
   let recentEvictionNoticed = false;
-
   // Adds and the restore run one at a time, so the frame cap holds and a restore never shows a
   // picture an overlapping add already evicted.
   let queue: Promise<unknown> = Promise.resolve();
@@ -87,6 +103,56 @@ export function createPictureController(options: {
     const run = queue.then(work, work);
     queue = run.catch(() => {});
     return run;
+  };
+
+  let depthFailureNoticed = false;
+  /** Frames with a depth map shown, or one on its way. */
+  const depthKnown = new Set<string>();
+
+  // One depth request at a time: the Mac runs one inference at a time anyway, and a queue of
+  // background requests must not hold up adding pictures.
+  let depthQueue: Promise<unknown> = Promise.resolve();
+  const requestDepth = (id: string, blob: Blob, asked: boolean): void => {
+    const estimate = options.depth;
+    if (!estimate || depthKnown.has(id)) return;
+    depthKnown.add(id);
+    const run = async (): Promise<void> => {
+      const result = await estimate(blob);
+      if (!result.ok) {
+        depthKnown.delete(id);
+        // A background request on an unpaired or depth-off Mac stays quiet: the frame is flat.
+        const quiet = !asked && (result.code === 'no-secret' || result.code === 'disabled');
+        if (asked || (!quiet && !depthFailureNoticed)) {
+          depthFailureNoticed = true;
+          options.notify(depthFailureNotice(result.code));
+        }
+        return;
+      }
+      let depth: PictureImage;
+      try {
+        depth = await loaders.stored(result.depth, 'depth');
+      } catch {
+        depthKnown.delete(id);
+        return;
+      }
+      // The Mac's reply is unsigned: a map whose pixels disagree with its header is not stored.
+      if (depth.width !== result.width || depth.height !== result.height) {
+        depth.source.width = 0;
+        depth.source.height = 0;
+        depthKnown.delete(id);
+        return;
+      }
+      // Library writes share the add queue: an update read before a close's delete must not
+      // write the closed picture back.
+      const stored = await serial(() =>
+        options.library.update(id, { depth: result.depth }).catch(() => false),
+      );
+      // A frame closed or replaced while its depth was made has nothing to show it on.
+      if (stored) options.scene()?.setPictureDepth(id, depth);
+      else depthKnown.delete(id);
+    };
+    const next = depthQueue.then(run, run);
+    depthQueue = next.catch(() => {});
   };
 
   const failed = (source: string, error: unknown): false => {
@@ -112,8 +178,10 @@ export function createPictureController(options: {
     if (recent && 'sourceKey' in remember)
       thumbnail = await loaders.thumbnail(picture).catch(() => null);
     // Changing a filled frame replaces it, so its live record goes before the cap is planned.
-    if (target && !target.startsWith('placeholder-'))
+    if (target && !target.startsWith('placeholder-')) {
+      depthKnown.delete(target);
       await options.library.delete(target).catch(() => {});
+    }
     let evicted: string[] = [];
     try {
       evicted = await options.library.add({
@@ -169,6 +237,7 @@ export function createPictureController(options: {
       }
     }
     if (notices.length) options.notify(notices.join('. '));
+    if (DEFAULT_DEPTH_VIEW.enabled) requestDepth(id, picture.blob, false);
     return true;
   };
 
@@ -244,7 +313,25 @@ export function createPictureController(options: {
     },
     restore: () => serial(restore),
     closed(id): void {
-      options.library.delete(id).catch(() => {});
+      depthKnown.delete(id);
+      void serial(() => options.library.delete(id).catch(() => {}));
+    },
+    setDepthView(id, view): void {
+      const depthView = normalizeDepthView(view);
+      void (async () => {
+        const stored = await serial(() =>
+          options.library.update(id, { depthView }).catch(() => false),
+        );
+        if (!stored || !depthView.enabled || depthKnown.has(id)) return;
+        if (!options.depth) {
+          options.notify(depthFailureNotice('unavailable'));
+          return;
+        }
+        const record = (await options.library.list().catch(() => [])).find(
+          (entry) => entry.id === id,
+        );
+        if (record) requestDepth(id, record.blob, true);
+      })();
     },
   };
 
@@ -255,17 +342,29 @@ export function createPictureController(options: {
     } catch {
       return;
     }
-    const restored: Array<{ id: string; image: PictureImage }> = [];
+    const restored: RestoredPicture[] = [];
+    const missingDepth: Array<{ id: string; blob: Blob }> = [];
     let broken = 0;
     for (const record of records) {
+      let image: PictureImage;
       try {
-        restored.push({ id: record.id, image: await loaders.stored(record.blob, record.name) });
+        image = await loaders.stored(record.blob, record.name);
       } catch {
         broken += 1;
         await options.library.delete(record.id).catch(() => {});
+        continue;
       }
+      const depthView = normalizeDepthView(record.depthView);
+      // A stored depth map that no longer decodes is made again, not a reason to drop the picture.
+      const depth = record.depth
+        ? await loaders.stored(record.depth, 'depth').catch(() => undefined)
+        : undefined;
+      if (depth) depthKnown.add(record.id);
+      else if (depthView.enabled) missingDepth.push({ id: record.id, blob: record.blob });
+      restored.push({ id: record.id, image, depthView, ...(depth ? { depth } : {}) });
     }
     options.scene()?.restorePictures(restored);
+    for (const { id, blob } of missingDepth) requestDepth(id, blob, false);
     if (broken)
       options.notify(
         `${broken === 1 ? 'A saved picture' : `${broken} saved pictures`} could not be decoded and ${broken === 1 ? 'was' : 'were'} removed`,

@@ -12,6 +12,7 @@ import { createDemoSurface, demoAgents, demoSnapshot } from './demo';
 import { createDesktopPanels, type DesktopPanels } from './desktop/panels';
 import { createEnvironmentManager, loadObservatory } from './environment';
 import { createHostClipboardClient, createHostClipboardSecretStore } from './host-clipboard';
+import { createDefaultPictureDepth } from './host-picture-depth';
 import { createKeyFlash, formatKeyIndicator, mountPageKeyIndicator } from './key-indicator';
 import { installKeyboardRouter } from './keyboard-router';
 import { createLocalSpeechRecognition, isLocalSpeechSupported } from './local-speech';
@@ -567,9 +568,11 @@ const pictures = createPictureController({
   recent: createRecentPictureLibrary(createIndexedDBRecentPictureStorage()),
   scene: () => scene ?? null,
   notify: (message) => scene?.notifyPicture(message),
+  depth: createDefaultPictureDepth(),
 });
 scene = createWorkspaceScene(ui.sceneHost, actions, {
   onPictureClosed: (id) => pictures.closed(id),
+  onPictureDepthView: (id, view) => pictures.setDepthView(id, view),
   pictures,
 });
 const setPageKey = mountPageKeyIndicator(document.body);

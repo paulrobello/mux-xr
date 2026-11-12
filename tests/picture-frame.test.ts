@@ -494,6 +494,7 @@ describe('picture controller', () => {
       addPicture: vi.fn((): string[] => []),
       restorePictures: vi.fn(),
       removePicture: vi.fn(),
+      setPictureDepth: vi.fn(),
     };
     const notify = vi.fn();
     let id = 0;
@@ -569,7 +570,11 @@ describe('picture controller', () => {
     await storage.put(record('broken', 2));
     await controller.restore();
     expect(scene.restorePictures).toHaveBeenCalledWith([
-      { id: 'good', image: expect.objectContaining({ name: 'good' }) },
+      {
+        id: 'good',
+        image: expect.objectContaining({ name: 'good' }),
+        depthView: expect.objectContaining({ enabled: true }),
+      },
     ]);
     expect([...storage.records.keys()]).toEqual(['good']);
     expect(notify).toHaveBeenCalledWith('A saved picture could not be decoded and was removed');
@@ -822,6 +827,7 @@ describe('picture controller recent gallery', () => {
       addPicture: vi.fn((): string[] => []),
       restorePictures: vi.fn(),
       removePicture: vi.fn(),
+      setPictureDepth: vi.fn(),
     };
     const notify = vi.fn();
     let id = 0;

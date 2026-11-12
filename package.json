@@ -18,7 +18,9 @@
     "@bufbuild/protobuf": "2.16.0",
     "@xterm/xterm": "6.0.0",
     "libheif-js": "1.23.5",
+    "onnxruntime-node": "1.31.1",
     "pako": "3.0.3",
+    "sharp": "0.35.5",
     "three": "0.186.1",
     "troika-three-text": "0.52.5",
     "ws": "8.22.1"

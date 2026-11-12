@@ -19,6 +19,11 @@ import {
   type HostStatsRouteOptions,
 } from './host-stats-server';
 import {
+  createPictureDepthRoute,
+  PICTURE_DEPTH_PATH,
+  type PictureDepthRouteOptions,
+} from './picture-depth-server';
+import {
   createPictureFetchRoute,
   PICTURE_FETCH_PATH,
   type PictureFetchRouteOptions,
@@ -66,6 +71,14 @@ export type DictationServerOptions = {
    */
   pictureProxy?: { enabled: boolean } & Omit<
     PictureFetchRouteOptions,
+    'allowedOrigins' | 'loadSecret'
+  >;
+  /**
+   * Depth estimation on `/picture-depth` for 3D picture frames. The Mac decodes images a paired
+   * client uploads, so it stays off unless `enabled`, and then also needs the secret.
+   */
+  pictureDepth?: { enabled: boolean } & Omit<
+    PictureDepthRouteOptions,
     'allowedOrigins' | 'loadSecret'
   >;
   telemetry?: Pick<
@@ -193,6 +206,14 @@ export const attachDictationServer = (
     limiter: authLimiter,
     allowedOrigins: options.allowedOrigins,
   });
+  const pictureDepthRoute = createPictureDepthRoute({
+    ...options.pictureDepth,
+    loadSecret: options.pictureDepth?.enabled
+      ? loadSecret
+      : () => ({ enabled: false, reason: 'picture depth not enabled (--picture-depth on)' }),
+    limiter: authLimiter,
+    allowedOrigins: options.allowedOrigins,
+  });
 
   const handleUpgrade = (
     request: import('node:http').IncomingMessage,
@@ -222,6 +243,10 @@ export const attachDictationServer = (
     }
     if (requestUrl.pathname === PICTURE_FETCH_PATH && !requestUrl.search) {
       pictureFetchRoute.handleUpgrade(request, socket, head);
+      return;
+    }
+    if (requestUrl.pathname === PICTURE_DEPTH_PATH && !requestUrl.search) {
+      pictureDepthRoute.handleUpgrade(request, socket, head);
       return;
     }
     const origin = request.headers.origin;
@@ -352,6 +377,7 @@ export const attachDictationServer = (
       await hostStatsRoute.close();
       await repoStatusRoute.close();
       await pictureFetchRoute.close();
+      await pictureDepthRoute.close();
     },
   };
 };

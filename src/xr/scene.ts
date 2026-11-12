@@ -109,6 +109,7 @@ import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from '
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
 import { countsAsFrame } from './perf-gauge';
+import type { PictureDepthView } from './picture-depth';
 import { createPictureFrameWidget, PICTURE_KIND } from './picture-frame';
 import type { PictureImage } from './picture-image';
 import {
@@ -282,8 +283,10 @@ export interface WorkspaceScene {
    */
   addPicture(id: string, image: PictureImage, target?: string): string[];
   /** Shows stored pictures at their saved poses and drops saved poses with no picture. */
-  restorePictures(pictures: ReadonlyArray<{ id: string; image: PictureImage }>): void;
+  restorePictures(pictures: ReadonlyArray<RestoredPicture>): void;
   removePicture(id: string): void;
+  /** Gives an open frame its depth map; ignored when the frame is gone. */
+  setPictureDepth(id: string, depth: PictureImage): void;
   showInput(mode: InputMode): void;
   hideInput(): void;
   enterXR(mode: 'vr' | 'ar'): Promise<void>;
@@ -801,6 +804,14 @@ export interface RecentPictureEntry {
   thumbnail: PictureImage;
 }
 
+/** A stored picture to show again, with its depth map when the Mac made one. */
+export interface RestoredPicture {
+  id: string;
+  image: PictureImage;
+  depth?: PictureImage;
+  depthView?: PictureDepthView;
+}
+
 /** An open "Add Picture" placeholder's pose key; it restores as a placeholder, not a picture. */
 const isPlaceholderKey = (key: string): boolean => key.startsWith(`${PICTURE_KIND}:placeholder-`);
 
@@ -813,6 +824,8 @@ export function createWorkspaceScene(
     onPictureClosed?: (id: string) => void;
     /** In-XR picture picking; without it the frame's Enter URL and Recent actions do nothing. */
     pictures?: ScenePicturePicker;
+    /** The user changed a picture frame's 3D options. */
+    onPictureDepthView?: (id: string, view: PictureDepthView) => void;
   } = {},
 ): WorkspaceScene {
   const feedback = options.feedback ?? createUIFeedback();
@@ -3614,6 +3627,7 @@ export function createWorkspaceScene(
     image: PictureImage,
     restore: boolean,
     target?: string,
+    depth?: { depth?: PictureImage; depthView?: PictureDepthView },
   ): string[] => {
     if (disposed) return [];
     const key = widgetKey(PICTURE_KIND, id);
@@ -3628,6 +3642,9 @@ export function createWorkspaceScene(
       id,
       image,
       anisotropy: pictureAnisotropy(),
+      depth: depth?.depth,
+      depthView: depth?.depthView,
+      onDepthView: (view) => options.onPictureDepthView?.(id, view),
     });
     const saved = widgetPoseStore.read()[key];
     // A filled placeholder keeps its pose and spot and takes no slot.
@@ -7884,9 +7901,18 @@ export function createWorkspaceScene(
           !widgets.has(key)
         )
           widgetPoseStore.remove(key);
-      for (const { id, image } of pictures) showPicture(id, image, true);
+      for (const { id, image, depth, depthView } of pictures)
+        showPicture(id, image, true, undefined, { depth, depthView });
     },
     removePicture: (id) => removeWidget(widgetKey(PICTURE_KIND, id)),
+    setPictureDepth: (id, depth) => {
+      const widget = widgets.get(widgetKey(PICTURE_KIND, id));
+      if (widget?.setPictureDepth) widget.setPictureDepth(depth);
+      else {
+        depth.source.width = 0;
+        depth.source.height = 0;
+      }
+    },
     pasteClipboard: (paneId?: string) => pasteClipboard(paneId, null),
     pasteHostClipboard: (paneId?: string) => pasteHostClipboard(paneId, null),
     copyHostToQuest: () => copyHostToQuest(null),

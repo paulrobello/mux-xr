@@ -13,6 +13,8 @@ export type DictationLaunchdOptions = {
   repoStatus?: boolean;
   /** Opts the agent into `/picture-fetch`, which fetches URLs for a paired client; off unless asked for. */
   pictureProxy?: boolean;
+  /** Opts the agent into `/picture-depth`, which decodes images a paired client uploads; off unless asked for. */
+  pictureDepth?: boolean;
 };
 
 const xml = (value: string): string =>
@@ -66,6 +68,10 @@ const plistArray = (args: string[]): string =>
   args.map((argument) => `    <string>${xml(argument)}</string>`).join('\n');
 
 /** The pairing secret the user creates; the server never creates or defaults it. */
+/** The pinned Depth Anything V2 Small model that `scripts/fetch-depth-model.ts` installs. */
+export const depthModelPath = (repository: string): string =>
+  `${repository}/.local/models/depth-anything-v2-small.onnx`;
+
 export const clipboardSecretPath = (repository: string): string =>
   `${repository}/.local/clipboard-secret`;
 
@@ -119,6 +125,9 @@ export const buildLaunchAgentPlist = (options: DictationLaunchdOptions = {}): st
     clipboardSecretPath(repository),
     ...(options.repoStatus ? ['--repo-status', 'on'] : []),
     ...(options.pictureProxy ? ['--picture-proxy', 'on'] : []),
+    ...(options.pictureDepth
+      ? ['--picture-depth', 'on', '--depth-model', depthModelPath(repository)]
+      : []),
   ]);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

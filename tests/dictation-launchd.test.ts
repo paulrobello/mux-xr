@@ -121,6 +121,17 @@ describe('Whisper LaunchDaemon definition', () => {
     expect(() => parseInstallerArgs(['--print', '--picture-proxy'])).toThrow(/only supported/);
   });
 
+  it('leaves /picture-depth off unless the agent install opts in, and passes the model path', () => {
+    expect(buildLaunchAgentPlist()).not.toContain('--picture-depth');
+    expect(buildLaunchDaemonPlist()).not.toContain('--picture-depth');
+    expect(buildLaunchAgentPlist({ pictureDepth: true })).toContain(
+      '<string>--picture-depth</string>\n    <string>on</string>\n    <string>--depth-model</string>\n    <string>/Users/localuser/Repos/mux-xr/.local/models/depth-anything-v2-small.onnx</string>',
+    );
+    expect(parseInstallerArgs(['--print', '--agent']).pictureDepth).toBe(false);
+    expect(parseInstallerArgs(['--print', '--agent', '--picture-depth']).pictureDepth).toBe(true);
+    expect(() => parseInstallerArgs(['--print', '--picture-depth'])).toThrow(/only supported/);
+  });
+
   it('parses agent print and install modes and never migrates listeners for agents', () => {
     expect(parseInstallerArgs(['--print', '--agent'])).toMatchObject({ print: true, agent: true });
     expect(parseInstallerArgs(['--install', '--agent'])).toMatchObject({

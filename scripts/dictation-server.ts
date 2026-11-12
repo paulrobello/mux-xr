@@ -2,6 +2,7 @@ import { accessSync, constants, readFileSync } from 'node:fs';
 import { createServer } from 'node:https';
 import { resolve } from 'node:path';
 import { loadClipboardSecret } from '../src/server/clipboard-server';
+import { createOnnxDepthEstimator } from '../src/server/depth-estimator';
 import { attachDictationServer } from '../src/server/dictation-server';
 import { createDictationTelemetry } from '../src/server/dictation-telemetry';
 
@@ -64,6 +65,15 @@ const pictureProxyFlag = parsed.get('--picture-proxy') ?? 'off';
 if (pictureProxyFlag !== 'on' && pictureProxyFlag !== 'off')
   throw new Error('--picture-proxy takes on or off.');
 console.log(`Picture proxy ${pictureProxyFlag === 'on' ? 'enabled' : 'disabled'}.`);
+const pictureDepthFlag = parsed.get('--picture-depth') ?? 'off';
+if (pictureDepthFlag !== 'on' && pictureDepthFlag !== 'off')
+  throw new Error('--picture-depth takes on or off.');
+const depthModel = resolve(
+  parsed.get('--depth-model') ?? '.local/models/depth-anything-v2-small.onnx',
+);
+// Fail at start, not on the first request, when depth is on but the model was never fetched.
+if (pictureDepthFlag === 'on') accessSync(depthModel, constants.R_OK);
+console.log(`Picture depth ${pictureDepthFlag === 'on' ? 'enabled' : 'disabled'}.`);
 const clipboardAtStart = loadClipboardSecret(clipboardSecretFile);
 console.log(
   clipboardAtStart.enabled
@@ -85,6 +95,18 @@ const attached = attachDictationServer(server, {
         event.kind === 'transfer'
           ? `Picture proxy: ${event.bytes} bytes`
           : `Picture proxy refused: ${event.code}`,
+      ),
+  },
+  // Decodes images a paired client uploads, so it needs its own explicit opt-in.
+  pictureDepth: {
+    enabled: pictureDepthFlag === 'on',
+    estimator:
+      pictureDepthFlag === 'on' ? createOnnxDepthEstimator({ modelPath: depthModel }) : undefined,
+    onEvent: (event) =>
+      console.log(
+        event.kind === 'depth'
+          ? `Picture depth: ${event.bytes} bytes in ${event.ms} ms`
+          : `Picture depth refused: ${event.code}`,
       ),
   },
   clipboard: {

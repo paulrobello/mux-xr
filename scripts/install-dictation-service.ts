@@ -11,6 +11,7 @@ import {
   DEFAULT_USER,
   DICTATION_LABEL,
   DICTATION_PLIST_PATH,
+  depthModelPath,
   isOwnedPlist,
   validateRepository,
   validateUser,
@@ -27,6 +28,7 @@ type InstallerOptions = {
   user: string;
   repoStatus: boolean;
   pictureProxy: boolean;
+  pictureDepth: boolean;
 };
 export type ListenerMetadata = {
   uid: number;
@@ -46,6 +48,7 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
   let agent = false;
   let repoStatus = false;
   let pictureProxy = false;
+  let pictureDepth = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--install') install = true;
@@ -55,6 +58,7 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
     else if (argument === '--agent') agent = true;
     else if (argument === '--repo-status') repoStatus = true;
     else if (argument === '--picture-proxy') pictureProxy = true;
+    else if (argument === '--picture-depth') pictureDepth = true;
     else if (argument === '--repo') repository = argv[++index] ?? '';
     else if (argument === '--user') user = argv[++index] ?? '';
     else throw new Error(`Unknown argument: ${argument}`);
@@ -65,6 +69,7 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
   if (!install && !print && !uninstall) print = true;
   if (repoStatus && !agent) throw new Error('--repo-status is only supported with --agent.');
   if (pictureProxy && !agent) throw new Error('--picture-proxy is only supported with --agent.');
+  if (pictureDepth && !agent) throw new Error('--picture-depth is only supported with --agent.');
   if (agent && migrateRunningListener)
     throw new Error('--agent installs never migrate a running listener.');
   return {
@@ -77,6 +82,7 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
     user: validateUser(user),
     repoStatus,
     pictureProxy,
+    pictureDepth,
   };
 };
 
@@ -246,7 +252,7 @@ const restoreListener = async (metadata: ListenerMetadata, user: string): Promis
   }
 };
 
-const preflight = (repository: string, user: string): void => {
+const preflight = (repository: string, user: string, pictureDepth = false): void => {
   const uid = Number(execFileSync('/usr/bin/id', ['-u', user], { encoding: 'utf8' }).trim());
   if (!Number.isInteger(uid) || uid <= 0)
     throw new Error(`User ${user} must exist with a non-root uid.`);
@@ -255,6 +261,8 @@ const preflight = (repository: string, user: string): void => {
     `${repository}/scripts/dictation-server.ts`,
     `${repository}/.local/models/ggml-base.en.bin`,
     `${repository}/.local/https/_cert.pem`,
+    // Only an install that turns depth on needs the model, so existing installs keep working.
+    ...(pictureDepth ? [depthModelPath(repository)] : []),
   ])
     accessSync(path, constants.R_OK);
 };
@@ -521,7 +529,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (options.print) process.stdout.write(plist);
   else if (options.agent && options.uninstall) await performAgentUninstall(agentDeps(options));
   else if (options.agent) {
-    preflight(options.repository, options.user);
+    preflight(options.repository, options.user, options.pictureDepth);
     await performAgentInstall(plist, agentDeps(options));
   } else await install(plist, options);
 }

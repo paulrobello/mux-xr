@@ -1,3 +1,5 @@
+import type { PictureDepthView } from './picture-depth';
+
 /** A stored picture: the downscaled re-encoded blob, keyed by its frame id. */
 export interface PictureRecord {
   id: string;
@@ -6,6 +8,10 @@ export interface PictureRecord {
   width: number;
   height: number;
   createdAt: number;
+  /** The depth map from the paired Mac (8-bit PNG, near bright); absent until estimated. */
+  depth?: Blob;
+  /** How the frame shows its depth; absent means the default view. */
+  depthView?: PictureDepthView;
 }
 
 export interface PictureLimits {
@@ -26,7 +32,10 @@ interface Footprint {
   id: string;
   createdAt: number;
   blob: { size: number };
+  depth?: { size: number };
 }
+
+const footprintBytes = (record: Footprint): number => record.blob.size + (record.depth?.size ?? 0);
 
 /**
  * Ids to evict, oldest first, so `existing` plus one more picture of `incomingBytes` fits
@@ -39,14 +48,14 @@ export function planEviction(
 ): string[] {
   if (incomingBytes > limits.maxBytes) throw new RangeError('Picture exceeds the storage budget');
   const remaining = [...existing].sort((a, b) => a.createdAt - b.createdAt);
-  let bytes = remaining.reduce((total, record) => total + record.blob.size, 0);
+  let bytes = remaining.reduce((total, record) => total + footprintBytes(record), 0);
   const evicted: string[] = [];
   while (
     remaining.length > 0 &&
     (remaining.length + 1 > limits.maxFrames || bytes + incomingBytes > limits.maxBytes)
   ) {
     const oldest = remaining.shift() as Footprint;
-    bytes -= oldest.blob.size;
+    bytes -= footprintBytes(oldest);
     evicted.push(oldest.id);
   }
   return evicted;
@@ -57,6 +66,8 @@ export interface PictureLibrary {
   list(): Promise<PictureRecord[]>;
   /** Stores `record`, first evicting the oldest pictures the limits require; returns their ids. */
   add(record: PictureRecord): Promise<string[]>;
+  /** Stores a depth map or view for an existing picture; false when the picture is gone. */
+  update(id: string, patch: Pick<PictureRecord, 'depth' | 'depthView'>): Promise<boolean>;
   delete(id: string): Promise<void>;
 }
 
@@ -74,6 +85,17 @@ export function createPictureLibrary(
       for (const id of evicted) await storage.delete(id);
       await storage.put(record);
       return evicted;
+    },
+    async update(id, patch): Promise<boolean> {
+      const record = (await storage.list()).find((entry) => entry.id === id);
+      if (!record) return false;
+      // A depth map is a few hundred kB; it rides on the picture's own slot, never evicting another.
+      await storage.put({
+        ...record,
+        ...(patch.depth ? { depth: patch.depth } : {}),
+        ...(patch.depthView ? { depthView: patch.depthView } : {}),
+      });
+      return true;
     },
     delete: (id) => storage.delete(id),
   };

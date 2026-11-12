@@ -3,6 +3,7 @@ import type { AgentRosterRow } from '../workspace/agent-roster';
 import type { BellFeedEntry } from './bell-feed';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import type { PerfSample } from './perf-gauge';
+import type { PictureImage } from './picture-image';
 import { applyUIEnvironment } from './ui-environment';
 
 export type ClockKind = 'digital-clock' | 'analog-clock';
@@ -27,6 +28,8 @@ export interface Widget {
   setFocusedPane?: (paneId: string | null, cwd: string | null, host?: string | null) => void;
   /** Applies a new texture anisotropy, already capped to the renderer maximum. */
   setTextureAnisotropy?: (anisotropy: number) => void;
+  /** Gives a picture frame its depth map; frames take ownership of the image's canvas. */
+  setPictureDepth?: (depth: PictureImage) => void;
 }
 
 let nextWidgetId = 1;
