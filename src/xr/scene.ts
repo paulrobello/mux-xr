@@ -555,6 +555,8 @@ const FACE_BUTTONS: Record<'left' | 'right', Array<[number, ControllerButton]>> 
 };
 /** Holding a Keyboard-mapped button this long brings the keyboard in front of the viewer. */
 const KEYBOARD_SUMMON_HOLD_SECONDS = 0.5;
+/** A summoned keyboard lands this fraction closer to the head than a normal spawn. */
+const KEYBOARD_SUMMON_CLOSER = 0.2;
 const BUTTON_TRAVEL = 0.016;
 const BUTTON_PRESS_MS = 140;
 const BUTTON_RELEASE_MS = 80;
@@ -7168,6 +7170,8 @@ export function createWorkspaceScene(
     for (const controller of [...dragStates.keys()])
       if (dragStates.get(controller)?.object === inputRoot) releaseGrab(controller);
     resetInputPose();
+    const head = trackedHead().getWorldPosition(new THREE.Vector3());
+    inputRoot.position.lerp(head, KEYBOARD_SUMMON_CLOSER);
     saveKeyboardPose(inputRoot);
     notify();
   };

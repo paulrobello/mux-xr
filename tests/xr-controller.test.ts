@@ -7296,8 +7296,10 @@ describe('native XR controller event routing', () => {
     press(true, 0);
     press(false);
     const keyboard = () => workspace.scene.getObjectByName('xr-keyboard-controls');
-    const front = keyboard()?.position.clone();
-    expect(front).toBeDefined();
+    const spawn = keyboard()?.position.clone();
+    expect(spawn).toBeDefined();
+    const head = workspace.camera.getWorldPosition(new THREE.Vector3());
+    const front = (spawn as THREE.Vector3).clone().lerp(head, 0.2);
     keyboard()?.position.set(4, 2, 3);
     // A short press still toggles, wherever the keyboard was left.
     press(true, 100);
