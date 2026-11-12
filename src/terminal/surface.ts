@@ -166,7 +166,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   let selectionMarker: { line: number; dispose(): void } | undefined;
   let selectionBufferType: string | undefined;
   let error: string | null = null;
-  let processState: PaneProcess = RUNNING_PROCESS;
+  let processState: PaneProcess = pane.process ?? RUNNING_PROCESS;
   const listeners = new Set<() => void>();
   const notify = (): void => {
     for (const listener of listeners) listener();
@@ -387,7 +387,8 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             serverMouseMode = null;
             serverMouseModeKnown = false;
             retries = 0;
-            // A pre-lifecycle server never sends the state, so a fresh connection must not inherit a held one.
+            // The server replays only a stored PaneProcessState and stores none for a pane that never changed state, so silence means running.
+            // The tree seed covers only the connecting phase before this message.
             processState = RUNNING_PROCESS;
             if (validGrid(connected.cols, connected.rows)) {
               cols = connected.cols;

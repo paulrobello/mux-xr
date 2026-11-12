@@ -30,6 +30,7 @@ import {
   type TerminalFiltering,
   validateTerminalFiltering,
 } from '../terminal/filtering';
+import { type PaneProcess, processBadge } from '../terminal/lifecycle';
 import { terminalKeyLabel } from '../terminal/protocol';
 import {
   AGE_TOKENS,
@@ -173,7 +174,7 @@ export interface WorkspaceUI {
   setTerminalGrid(paneId: string, cols: number, rows: number, canResize: boolean): void;
   setTerminalCurvature(paneId: string, degrees: number): void;
   setTerminalOpacity(paneId: string, value: number): void;
-  setPaneStatus?(paneId: string, status: TerminalStatus): void;
+  setPaneStatus?(paneId: string, status: TerminalStatus, process?: PaneProcess): void;
   setTerminalColorMode(mode: TerminalColorMode, persist?: boolean): void;
   setKeyboardBackgroundEnabled(enabled: boolean, persist?: boolean): void;
   getCommandsForPane(paneId: string): QuickCommandEntry[];
@@ -494,6 +495,9 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   let agentRenderedOrder = '';
   let agentRenderedAges = '';
   const paneStatuses = new Map<string, TerminalStatus>();
+  const paneProcesses = new Map<string, PaneProcess>();
+  const paneBadge = (paneId: string): string | null =>
+    processBadge(paneProcesses.get(paneId), paneStatuses.get(paneId));
   let commands: QuickCommand[] = [];
   let sharedCommands: QuickCommand[] = [];
   let commandScope = 'global';
@@ -1163,6 +1167,10 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     if (agentRenderDeferred || (agentRows.length && agentAgesKey() !== agentRenderedAges))
       renderAgents();
   }, AGENT_AGE_REFRESH_MS);
+  const exitBadge = (paneId: string): string => {
+    const badge = paneBadge(paneId);
+    return badge ? `<small class="pane-exit-badge">${escapeHtml(badge)}</small>` : '';
+  };
   const renderTree = (): void => {
     renderAgents();
     const tree = qs<HTMLElement>('[data-tree]');
@@ -1218,7 +1226,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
                       window
                         .map(
                           (pane) =>
-                            `<button class="tree-pane ${pane.id === activePaneId ? 'selected' : ''}" data-pane="${escapeHtml(pane.id)}"><span class="pane-pip"></span><span><b>${escapeHtml(pane.title)}</b><small>${escapeHtml(pane.id)}</small></span></button>`,
+                            `<button class="tree-pane ${pane.id === activePaneId ? 'selected' : ''}" data-pane="${escapeHtml(pane.id)}"><span class="pane-pip"></span><span><b>${escapeHtml(pane.title)}</b><small>${escapeHtml(pane.id)}</small>${exitBadge(pane.id)}</span></button>`,
                         )
                         .join(''),
                     ),
@@ -1238,7 +1246,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       ? attached
           .map(
             (pane) =>
-              `<div class="attached-selector ${pane.id === activePaneId ? 'active' : ''}"><button data-select="${escapeHtml(pane.id)}">${escapeHtml(pane.title)}</button><button class="text-btn" data-toggle-connection="${escapeHtml(pane.id)}" aria-label="${escapeHtml(connectionActionLabel(paneStatuses.get(pane.id)))} ${escapeHtml(pane.title)}" title="${escapeHtml(connectionActionTitle(pane.title, paneStatuses.get(pane.id)))}">${escapeHtml(connectionActionLabel(paneStatuses.get(pane.id)))}</button><button class="icon-btn" data-close="${escapeHtml(pane.id)}" aria-label="Close view for ${escapeHtml(pane.title)}" title="Close this viewer and keep the terminal running">${icon('close')}</button></div>`,
+              `<div class="attached-selector ${pane.id === activePaneId ? 'active' : ''}"><button data-select="${escapeHtml(pane.id)}">${escapeHtml(pane.title)}</button>${exitBadge(pane.id)}<button class="text-btn" data-toggle-connection="${escapeHtml(pane.id)}" aria-label="${escapeHtml(connectionActionLabel(paneStatuses.get(pane.id)))} ${escapeHtml(pane.title)}" title="${escapeHtml(connectionActionTitle(pane.title, paneStatuses.get(pane.id)))}">${escapeHtml(connectionActionLabel(paneStatuses.get(pane.id)))}</button><button class="icon-btn" data-close="${escapeHtml(pane.id)}" aria-label="Close view for ${escapeHtml(pane.title)}" title="Close this viewer and keep the terminal running">${icon('close')}</button></div>`,
           )
           .join('')
       : '<div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div>';
@@ -1859,6 +1867,12 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     sceneHost,
     update(next) {
       snapshot = next;
+      const present = new Set(next.panes.map((pane) => pane.id));
+      for (const id of paneProcesses.keys()) if (!present.has(id)) paneProcesses.delete(id);
+      // An attached pane's live surface is authoritative; the tree only speaks for unattached ones.
+      for (const pane of next.panes)
+        if (pane.process && !attachedPaneIds.includes(pane.id))
+          paneProcesses.set(pane.id, pane.process);
       if (activePaneId && !next.panes.some((pane) => pane.id === activePaneId)) {
         activePaneId = undefined;
         clearGridControls();
@@ -1872,10 +1886,14 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       qs<HTMLElement>('.status-copy').textContent = detail;
       qs<HTMLElement>('.status-dot').className = `status-dot ${nextStatus}`;
     },
-    setPaneStatus(paneId, status) {
-      if (paneStatuses.get(paneId) === status) return;
+    setPaneStatus(paneId, status, process) {
+      const before = paneBadge(paneId);
+      const changed = paneStatuses.get(paneId) !== status;
       paneStatuses.set(paneId, status);
+      if (process) paneProcesses.set(paneId, process);
+      if (!changed && paneBadge(paneId) === before) return;
       renderPanes();
+      if (paneBadge(paneId) !== before) renderTree();
     },
     setPaneCreation(state) {
       paneCreation = { ...state };
@@ -1914,6 +1932,10 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       }
     },
     setAttachedPaneIds(ids) {
+      for (const id of attachedPaneIds) {
+        if (ids.includes(id)) continue;
+        paneStatuses.delete(id);
+      }
       attachedPaneIds = [...ids];
       if (activePaneId && !ids.includes(activePaneId)) {
         activePaneId = undefined;
@@ -1921,6 +1943,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       }
       if (capturedTarget && !ids.includes(capturedTarget)) closeInput();
       renderPanes();
+      renderTree();
       updateArrangementAvailability();
     },
     openInput(mode) {

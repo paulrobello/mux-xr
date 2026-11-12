@@ -13,6 +13,8 @@ export interface PaneDescriptor {
   rows?: number;
   active?: boolean;
   windowActive?: boolean;
+  /** From the mux tree snapshot; absent when the producer sent an unknown state. */
+  process?: PaneProcess;
 }
 
 export type TerminalStatus =

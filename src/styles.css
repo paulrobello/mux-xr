@@ -315,3 +315,11 @@ textarea {
 .mux-ui [data-agent-rows-hint].warn {
   color: var(--amber);
 }
+.mux-ui .pane-exit-badge {
+  display: block;
+  color: var(--amber);
+  font-size: 11px;
+}
+.mux-ui .attached-selector > .pane-exit-badge {
+  display: inline;
+}

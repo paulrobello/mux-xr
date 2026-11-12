@@ -68,6 +68,7 @@ const runningBuildId =
   document.querySelector<HTMLMetaElement>('meta[name="build-fingerprint"]')?.content ??
   'development';
 const surfaces = new Map<string, TerminalSurface>();
+const surfaceUnsubscribes = new Map<string, () => void>();
 let snapshot: WorkspaceSnapshot = { panes: [] };
 let selectedId: string | null = null;
 let endpoint = '';
@@ -219,16 +220,17 @@ function selectPane(id: string): void {
     surfaces.set(id, surface);
     desktop.add(surface);
     scene.addTerminal(surface);
-    surface.subscribe(() => {
+    const unsubscribe = surface.subscribe(() => {
       if (selectedId === id)
         ui.setConnection(surface.status, `${pane.title} · ${surface.error ?? surface.status}`);
-      ui.setPaneStatus?.(id, surface.status);
+      ui.setPaneStatus?.(id, surface.status, surface.process);
       ui.setTerminalGrid(id, surface.cols, surface.rows, surface.canResizeGrid);
     });
+    surfaceUnsubscribes.set(id, unsubscribe);
     surface.setColorMode(ui.getSettings().colorMode);
     ui.setTerminalGrid(id, surface.cols, surface.rows, surface.canResizeGrid);
     surface.connect();
-    ui.setPaneStatus?.(id, surface.status);
+    ui.setPaneStatus?.(id, surface.status, surface.process);
     ui.setAttachedPaneIds([...surfaces.keys()]);
   }
   surfaces.get(id)?.acknowledgeBell?.();
@@ -249,6 +251,8 @@ function closePane(id: string): void {
   if (selectedId === id) speechInput?.dispatch('cancel');
   desktop.remove(id);
   scene.removeTerminal(id);
+  surfaceUnsubscribes.get(id)?.();
+  surfaceUnsubscribes.delete(id);
   surfaces.get(id)?.dispose();
   surfaces.delete(id);
   if (selectedId === id) selectedId = null;

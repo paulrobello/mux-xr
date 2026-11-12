@@ -1,5 +1,6 @@
 import { create } from '@bufbuild/protobuf';
 import type { PaneDescriptor, WorkspaceSnapshot } from '../contracts';
+import { parsePaneProcess } from '../terminal/lifecycle';
 import { decodeServerMessage, encodeClientMessage } from '../terminal/protocol';
 import {
   type AgentEntry,
@@ -14,6 +15,7 @@ export function normalizeTree(tree: MuxTreeSnapshot): WorkspaceSnapshot {
     for (const session of workspace.sessions) {
       for (const window of session.windows) {
         for (const pane of window.panes) {
+          const process = parsePaneProcess(pane.processState, pane.exitCode);
           panes.push({
             id: pane.id,
             workspaceId: workspace.id,
@@ -27,6 +29,7 @@ export function normalizeTree(tree: MuxTreeSnapshot): WorkspaceSnapshot {
             rows: pane.rows,
             active: pane.active,
             windowActive: window.active,
+            ...(process ? { process } : {}),
           });
         }
       }

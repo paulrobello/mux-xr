@@ -1,5 +1,6 @@
 import { create, toBinary } from '@bufbuild/protobuf';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PaneProcess } from '../src/terminal/lifecycle';
 import {
   ConnectedSchema,
   OutputSchema,
@@ -163,9 +164,12 @@ function pane() {
   };
 }
 
-async function connectedSurface(initialScreen?: string) {
+async function connectedSurface(initialScreen?: string, seed?: PaneProcess) {
   const { createTerminalSurface } = await import('../src/terminal/surface');
-  const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+  const surface = createTerminalSurface('http://127.0.0.1:9', {
+    ...pane(),
+    ...(seed ? { process: seed } : {}),
+  });
   surface.connect();
   const socket = MockSocket.instances.at(-1);
   const terminal = terminals.at(-1);
@@ -252,6 +256,26 @@ describe('held-pane process lifecycle on the terminal surface', () => {
     socket.message(processState('exited', 3));
     socket.message(connected());
     expect(surface.process).toEqual({ state: 'running' });
+  });
+
+  it('shows the tree seed while connecting, and the first connected without a replay means running', async () => {
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', {
+      ...pane(),
+      process: { state: 'exited', exitCode: 6 },
+    });
+    surface.connect();
+    expect(surface.process).toEqual({ state: 'exited', exitCode: 6 });
+    const socket = MockSocket.instances.at(-1);
+    socket?.open();
+    socket?.message(connected());
+    expect(surface.process).toEqual({ state: 'running' });
+  });
+
+  it('ends exited when a seeded pane connects and the exited state is replayed', async () => {
+    const { surface, socket } = await connectedSurface(undefined, { state: 'exited', exitCode: 6 });
+    socket.message(processState('exited', 6));
+    expect(surface.process).toEqual({ state: 'exited', exitCode: 6 });
   });
 
   it('reads a legacy empty state as running', async () => {

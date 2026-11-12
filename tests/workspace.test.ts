@@ -111,8 +111,50 @@ describe('workspace metadata connection', () => {
       rows: 30,
       active: false,
       windowActive: false,
+      process: { state: 'running' },
     });
     expect(normalizeTree(create(MuxTreeSnapshotSchema)).panes).toEqual([]);
+  });
+
+  it('reads held-pane process state from the tree and keeps unknown states unset', () => {
+    const treeOf = (...panes: Parameters<typeof create<typeof MuxTreePaneSchema>>[1][]) =>
+      create(MuxTreeSnapshotSchema, {
+        workspaces: [
+          create(MuxTreeWorkspaceSchema, {
+            id: '+1',
+            name: 'Work',
+            sessions: [
+              create(MuxTreeSessionSchema, {
+                id: '$2',
+                name: 'Dev',
+                windows: [
+                  create(MuxTreeWindowSchema, {
+                    id: '@3',
+                    name: 'Build',
+                    panes: panes.map((pane) => create(MuxTreePaneSchema, pane)),
+                  }),
+                ],
+              }),
+            ],
+          }),
+        ],
+      });
+    const processes = normalizeTree(
+      treeOf(
+        { id: '%1', processState: 'exited', exitCode: 2 },
+        { id: '%2', processState: 'exited' },
+        { id: '%3', processState: 'running' },
+        { id: '%4', processState: '' },
+        { id: '%5', processState: 'future-state' },
+      ),
+    ).panes.map((pane) => pane.process);
+    expect(processes).toEqual([
+      { state: 'exited', exitCode: 2 },
+      { state: 'exited' },
+      { state: 'running' },
+      { state: 'running' },
+      undefined,
+    ]);
   });
 
   it('requests fresh snapshots after reconnect and replaces the prior structure', async () => {
