@@ -71,6 +71,7 @@ import {
   type WindowPreferences,
 } from '../workspace/window-preferences';
 import { calculateArrangement } from './arrangements';
+import { installBatchedHandPoses } from './batched-hand-poses';
 import { createBellFeedStore } from './bell-feed';
 import type { CartoonHand } from './cartoon-hand';
 import { clusteredRaycast } from './clustered-raycast';
@@ -863,6 +864,7 @@ export function createWorkspaceScene(
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.xr.enabled = true;
+    installBatchedHandPoses();
     renderer.setTransparentSort(labelBatchTransparentSort);
   } catch (error) {
     rendererError = error instanceof Error ? error.message : 'WebGL renderer initialization failed';
