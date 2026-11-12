@@ -240,6 +240,8 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     deviceScaleFactor: viewport.name === 'desktop' ? 2 : 1,
+    // The LAN streamer serves HTTPS with a self-signed certificate.
+    ignoreHTTPSErrors: true,
   });
   const page = await context.newPage();
   const errors: string[] = [];
