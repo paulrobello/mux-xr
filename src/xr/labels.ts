@@ -23,6 +23,8 @@ export interface ScalableLabelOptions {
   backplate?: boolean;
   /** Horizontal text alignment inside the plane; centered by default. */
   align?: 'center' | 'left';
+  /** Fixed font size in metres, so sibling labels match; the fit-to-width shrink is skipped. */
+  fontSize?: number;
 }
 
 interface LabelUserData {
@@ -31,6 +33,7 @@ interface LabelUserData {
   labelHeight: number;
   labelWrap: boolean;
   labelAlign: 'center' | 'left';
+  labelFontSize?: number;
   labelTextObject: Text;
   labelBackgroundTexture: THREE.DataTexture;
   labelDisposed: boolean;
@@ -95,7 +98,9 @@ function fitLabel(
   label: string,
   width: number,
   height: number,
+  fixedFontSize?: number,
 ): { text: string; fontSize: number } {
+  if (fixedFontSize !== undefined) return { text: label, fontSize: fixedFontSize };
   const maxWidth = Math.max(width * LABEL_MAX_WIDTH_RATIO, 0.01);
   const minFontSize = height * LABEL_MIN_FONT_SIZE_RATIO;
   const fullLength = Math.max(1, Array.from(label).length);
@@ -127,8 +132,9 @@ function configureText(
   height: number,
   wrap: boolean,
   align: 'center' | 'left' = 'center',
+  fontSize?: number,
 ): void {
-  const fitted = fitLabel(label, width, height);
+  const fitted = fitLabel(label, width, height, fontSize);
   const arrows: Record<string, string> = { '←': '⇦', '↑': '⇧', '→': '⇨', '↓': '⇩' };
   textMesh.text = Array.from(fitted.text)
     .map((character) => arrows[character] ?? character)
@@ -211,6 +217,7 @@ export function createScalableLabel(
     safeHeight,
     options.wrap ?? false,
     options.align ?? 'center',
+    options.fontSize,
   );
   textMesh.raycast = () => undefined;
   root.add(textMesh);
@@ -222,6 +229,7 @@ export function createScalableLabel(
   userData.labelHeight = safeHeight;
   userData.labelWrap = options.wrap ?? false;
   userData.labelAlign = options.align ?? 'center';
+  userData.labelFontSize = options.fontSize;
   userData.labelTextObject = textMesh;
   userData.labelBackgroundTexture = texture;
   userData.labelDisposed = false;
@@ -257,6 +265,7 @@ export function updateScalableLabel(root: THREE.Mesh, label: string): void {
     data.labelHeight ?? root.scale.y,
     data.labelWrap ?? false,
     data.labelAlign ?? 'center',
+    data.labelFontSize,
   );
   data.labelText = label;
   data.labelSyncPromise = syncText(

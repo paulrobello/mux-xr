@@ -2866,6 +2866,60 @@ describe('native XR controller event routing', () => {
       });
     }
 
+    for (const eyeHeight of [1.1, 1.35, 1.52, 1.8]) {
+      it(`keeps the timer clear of every HUD control at the default and recentered poses, eye ${eyeHeight} m`, () => {
+        const { workspace, container } = fixture();
+        const roots = spawnAll(workspace);
+        const timer = roots[WIDGET_REGISTRY.findIndex((entry) => entry.kind === 'timer')];
+        const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+        if (!timer || !hud) throw new Error('timer or HUD missing');
+        let checked = 0;
+        for (const offsetY of [0.78 - eyeHeight, -0.65]) {
+          hud.position.set(EYE.x, EYE.y + offsetY, EYE.z - 1.35);
+          hud.quaternion.identity();
+          hud.updateMatrixWorld(true);
+          for (const child of hud.children) {
+            const target = child.getWorldPosition(new THREE.Vector3());
+            expect(firstWidgetHit([timer], target), String(child.userData.inputAction)).toBe(
+              undefined,
+            );
+            checked += 1;
+          }
+        }
+        expect(checked).toBeGreaterThan(10);
+        workspace.dispose();
+        container.remove();
+      });
+    }
+
+    it('presses timer buttons through a real select on the widgetControl branch', () => {
+      const { workspace, container } = fixture();
+      const roots = spawnAll(workspace);
+      const timer = roots[WIDGET_REGISTRY.findIndex((entry) => entry.kind === 'timer')];
+      if (!timer) throw new Error('timer missing');
+      const label = (name: string): unknown => timer.getObjectByName(name)?.userData.labelText;
+      const press = (name: string): void => {
+        const button = timer.getObjectByName(name);
+        if (!button) throw new Error(`${name} missing`);
+        workspace.scene.updateMatrixWorld(true);
+        const controller = aim(workspace, button.getWorldPosition(new THREE.Vector3()));
+        controller.dispatchEvent({ type: 'selectstart' } as never);
+        controller.dispatchEvent({ type: 'selectend' } as never);
+      };
+      expect(label('timer-run')).toBe('Start');
+      press('timer-run');
+      expect(label('timer-run')).toBe('Pause');
+      press('timer-run');
+      expect(label('timer-run')).toBe('Resume');
+      press('timer-preset-15');
+      expect(label('timer-run')).toBe('Start');
+      expect(label('timer-display')).toBe('15:00');
+      press('timer-mode');
+      expect(label('timer-mode')).toBe('Stopwatch');
+      workspace.dispose();
+      container.remove();
+    });
+
     it('sends a ray through the board to the Reload button behind it', () => {
       const { workspace, actions, container } = fixture();
       spawnAll(workspace);

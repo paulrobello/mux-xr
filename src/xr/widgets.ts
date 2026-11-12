@@ -11,6 +11,8 @@ export interface Widget {
   dispose: () => void;
   /** Receives every roster change; widgets that do not show agents omit it. */
   setAgentRoster?: (rows: readonly AgentRosterRow[]) => void;
+  /** Handles a press on one of the widget's `widgetControl` buttons. */
+  activate?: (target: THREE.Object3D) => void;
 }
 
 let nextWidgetId = 1;

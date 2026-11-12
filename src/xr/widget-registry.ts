@@ -1,5 +1,6 @@
 import type * as THREE from 'three';
 import { createAgentBoardWidget } from './agent-board';
+import { createTimerWidget } from './timer-widget';
 import { createClockWidget, type Widget } from './widgets';
 
 export interface WidgetEntry {
@@ -35,6 +36,13 @@ export const WIDGET_REGISTRY = [
     spawnOffset: [0, -0.27, -1.25],
     spawnScale: 0.8,
     create: (envMap) => createAgentBoardWidget(envMap),
+  },
+  {
+    kind: 'timer',
+    displayName: 'Timer',
+    // Centred in the gap between the clock bodies (-0.14 to 0.16, so x +0.01); the widget is 0.27 m wide.
+    spawnOffset: [0.01, 0.3, -1.25],
+    create: (envMap) => createTimerWidget(envMap),
   },
 ] as const satisfies readonly WidgetEntry[];
 

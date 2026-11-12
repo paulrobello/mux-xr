@@ -4608,6 +4608,10 @@ export function createWorkspaceScene(
       if (kind) removeWidget(kind);
       return true;
     }
+    if (action === 'widgetControl') {
+      widgetOwning(hit)?.[1].activate?.(hit);
+      return true;
+    }
     if (action === 'grabWidget') return true;
     if (action === 'curvature' || action === 'curvatureStep') {
       const id = mutableState.inputTargetId;

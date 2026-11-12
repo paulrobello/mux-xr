@@ -51,8 +51,9 @@ describe('widget registry', () => {
       ['digital-clock', 'Digital clock', [-0.45, 0.3, -1.25]],
       ['analog-clock', 'Analog clock', [0.45, 0.3, -1.25]],
       ['agent-board', 'Agent board', [0, -0.27, -1.25]],
+      ['timer', 'Timer', [0.01, 0.3, -1.25]],
     ]);
-    expect(widgetKinds()).toEqual(['digital-clock', 'analog-clock', 'agent-board']);
+    expect(widgetKinds()).toEqual(['digital-clock', 'analog-clock', 'agent-board', 'timer']);
   });
 
   // Eye at the origin, as placeWidget measures offsets. Each box projects onto the z = -1 image
@@ -92,6 +93,21 @@ describe('widget registry', () => {
         expect(left.box.intersectsBox(right.box), `${left.kind} and ${right.kind}`).toBe(false);
         expect(overlaps(left.box, right.box), `${left.kind} and ${right.kind}`).toBe(false);
       }
+  });
+
+  it('fits the timer in the gap between the clocks, clear of the board and with margin', () => {
+    const boxes = new Map(spawnBoxes().map(({ kind, box }) => [kind, box]));
+    const timer = boxes.get('timer');
+    const digital = boxes.get('digital-clock');
+    const analog = boxes.get('analog-clock');
+    const board = boxes.get('agent-board');
+    if (!timer || !digital || !analog || !board) throw new Error('missing spawn box');
+    expect(timer.min.x).toBeGreaterThan(digital.max.x + 0.01);
+    expect(timer.max.x).toBeLessThan(analog.min.x - 0.01);
+    expect(timer.min.y).toBeGreaterThan(board.max.y);
+    const gapCentre = (digital.max.x + analog.min.x) / 2;
+    expect(timer.getCenter(new THREE.Vector3()).x).toBeCloseTo(gapCentre, 6);
+    expect(timer.min.x - digital.max.x).toBeCloseTo(analog.min.x - timer.max.x, 6);
   });
 
   it('looks entries up by kind and rejects unknown kinds', () => {
