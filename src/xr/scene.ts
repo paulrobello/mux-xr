@@ -156,6 +156,7 @@ import {
   type UIPoseName,
   validPose,
 } from './ui-poses';
+import { updateVisibleMatrixWorld } from './visible-matrix-world';
 import { layoutWidgetPanel } from './widget-panel-layout';
 import { createWidgetPoseStore, type WidgetPose } from './widget-poses';
 import {
@@ -2305,12 +2306,13 @@ export function createWorkspaceScene(
     const targetId = mutableState.inputTargetId;
     const keyboard = keyborbKeyboard();
     keyborbInput.begin(keyboard);
+    const raysLive = Boolean(keyboard) && !keyboardRaysBlocked;
+    if (raysLive) updateVisibleMatrixWorld(scene);
     for (const controller of controllerRoots) {
       const hand = activeHand(controller);
       const visual = contactVisual(controller);
       const gesture = hand ? sampleHand(controller) : null;
-      const ray =
-        keyboard && hand && !keyboardRaysBlocked ? targetFromController(controller) : null;
+      const ray = raysLive && hand ? targetFromController(controller, false) : null;
       const rayKey = ray?.object?.userData.keyborb ? (ray.object as THREE.Mesh) : null;
       const tipsTracked = visual && (!hand || gesture?.tracked);
       const sample = keyborbInput.sample(
@@ -3136,7 +3138,8 @@ export function createWorkspaceScene(
     updatePanePulls();
     correctTerminalFloor();
     if (renderer?.xr.isPresenting) {
-      scene.updateMatrixWorld(true);
+      // Rays and gaze below only use visible objects; the renderer's pass catches hidden ones up.
+      updateVisibleMatrixWorld(scene);
       const fidelityView = renderer.xr.getCamera();
       fidelityView.updateWorldMatrix(true, false);
       fidelityView.getWorldPosition(fidelityEye);
@@ -5876,7 +5879,7 @@ export function createWorkspaceScene(
       root.userData.rayDistance = 0;
       return null;
     }
-    if (updateWorld) scene.updateMatrixWorld(true);
+    if (updateWorld) updateVisibleMatrixWorld(scene);
     tempMatrix.identity().extractRotation(root.matrixWorld);
     raycaster.ray.origin.setFromMatrixPosition(root.matrixWorld);
     raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix).normalize();
