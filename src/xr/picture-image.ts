@@ -1,10 +1,16 @@
 import {
+  createDefaultPictureProxy,
+  type PictureProxyFailure,
+  type PictureProxyFetcher,
+} from '../host-picture-fetch';
+import {
   fitWithin,
   MAX_PICTURE_SOURCE_BYTES,
   MAX_PICTURE_SOURCE_EDGE,
   MAX_PICTURE_SOURCE_PIXELS,
   MAX_UNPROBED_PICTURE_BYTES,
   PICTURE_FETCH_TIMEOUT_MS,
+  type PictureErrorCode,
   PictureLoadError,
   probeImageSize,
 } from './picture-sizing';
@@ -34,6 +40,8 @@ export interface PictureLoaderDeps {
   createCanvas: (width: number, height: number) => HTMLCanvasElement;
   /** The page's protocol, for refusing http: URLs from an https: page. */
   pageProtocol?: string;
+  /** Fetches through the dictation server when the direct CORS fetch is refused; absent means never. */
+  proxy?: PictureProxyFetcher;
 }
 
 /** Refuses a source whose edge or area is over the decode limits. */
@@ -50,6 +58,7 @@ function browserDeps(): PictureLoaderDeps {
     fetch: (input, init) => fetch(input, init),
     decode: (blob) => createImageBitmap(blob, { imageOrientation: 'from-image' }),
     pageProtocol: typeof location === 'undefined' ? undefined : location.protocol,
+    proxy: typeof window === 'undefined' ? undefined : createDefaultPictureProxy(),
     createCanvas: (width, height) => {
       const canvas = document.createElement('canvas');
       canvas.width = width;
@@ -135,7 +144,7 @@ export function loadPictureFile(file: File, deps?: PictureLoaderDeps): Promise<P
   return preparePicture(file, file.name || 'image', deps);
 }
 
-/** Fetches `url` with CORS (never proxied) and loads it. */
+/** Fetches `url` with CORS, falling back to the paired Mac's picture proxy, and loads it. */
 export async function loadPictureUrl(
   url: string,
   deps: PictureLoaderDeps = browserDeps(),
@@ -149,8 +158,32 @@ export async function loadPictureUrl(
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')
     throw new PictureLoadError('bad-url', url);
   const pageProtocol = 'pageProtocol' in deps ? deps.pageProtocol : browserDeps().pageProtocol;
-  if (parsed.protocol === 'http:' && pageProtocol === 'https:')
-    throw new PictureLoadError('mixed-content', parsed.href);
+  let blob: Blob;
+  if (parsed.protocol === 'http:' && pageProtocol === 'https:') {
+    // The browser blocks a direct http: fetch from an https: page, so only the paired Mac can load it.
+    const mixed = new PictureLoadError('mixed-content', parsed.href);
+    if (!deps.proxy) throw mixed;
+    blob = await fetchViaProxy(parsed, deps.proxy, mixed);
+  } else {
+    try {
+      blob = await fetchDirect(parsed, deps);
+    } catch (error) {
+      if (!(error instanceof PictureLoadError) || error.code !== 'cors' || !deps.proxy) throw error;
+      blob = await fetchViaProxy(parsed, deps.proxy, error);
+    }
+  }
+  const name = parsed.pathname.split('/').pop() || parsed.host;
+  let decoded = name;
+  try {
+    decoded = decodeURIComponent(name);
+  } catch {
+    // Keep the raw path segment.
+  }
+  return preparePicture(blob, decoded, deps);
+}
+
+/** The direct browser fetch; a failure that may be CORS surfaces as a `cors` error. */
+async function fetchDirect(parsed: URL, deps: PictureLoaderDeps): Promise<Blob> {
   // The signal also aborts the body read below, so a server that stalls mid-body times out too.
   const signal = AbortSignal.timeout(PICTURE_FETCH_TIMEOUT_MS);
   let response: Response;
@@ -165,15 +198,32 @@ export async function loadPictureUrl(
   const length = Number(response.headers.get('content-length'));
   if (Number.isFinite(length) && length > MAX_PICTURE_SOURCE_BYTES)
     throw new PictureLoadError('too-large', `${Math.round(length / 1048576)} MB`);
-  const blob = await readCapped(response, parsed.host, signal);
-  const name = parsed.pathname.split('/').pop() || parsed.host;
-  let decoded = name;
-  try {
-    decoded = decodeURIComponent(name);
-  } catch {
-    // Keep the raw path segment.
-  }
-  return preparePicture(blob, decoded, deps);
+  return readCapped(response, parsed.host, signal);
+}
+
+const PROXY_ERRORS: Partial<Record<PictureProxyFailure, PictureErrorCode>> = {
+  disabled: 'proxy-disabled',
+  auth: 'proxy-auth',
+  'rate-limited': 'proxy-rate-limited',
+  blocked: 'proxy-blocked',
+  'too-large': 'proxy-too-large',
+  'not-image': 'proxy-not-image',
+  timeout: 'proxy-timeout',
+  failed: 'proxy-failed',
+  'bad-url': 'bad-url',
+};
+
+/** Not paired or unreachable keeps the original error (CORS or mixed content), since the proxy is not available. */
+async function fetchViaProxy(
+  parsed: URL,
+  proxy: PictureProxyFetcher,
+  direct: PictureLoadError,
+): Promise<Blob> {
+  const result = await proxy(parsed.href);
+  if (result.ok) return result.blob;
+  const code = PROXY_ERRORS[result.code];
+  if (!code) throw direct;
+  throw new PictureLoadError(code, parsed.host);
 }
 
 /** Reads a response body, aborting once it passes MAX_PICTURE_SOURCE_BYTES. */

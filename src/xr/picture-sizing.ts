@@ -150,7 +150,15 @@ export type PictureErrorCode =
   | 'bad-url'
   | 'mixed-content'
   | 'timeout'
-  | 'storage';
+  | 'storage'
+  | 'proxy-disabled'
+  | 'proxy-auth'
+  | 'proxy-rate-limited'
+  | 'proxy-blocked'
+  | 'proxy-too-large'
+  | 'proxy-not-image'
+  | 'proxy-timeout'
+  | 'proxy-failed';
 
 export class PictureLoadError extends Error {
   constructor(
@@ -191,6 +199,22 @@ export function pictureErrorNotice(code: PictureErrorCode, source: string, detai
       return 'Mixed content blocked: use an https URL';
     case 'timeout':
       return `Image request timed out after ${PICTURE_FETCH_TIMEOUT_MS / 1000} s: ${hostOf(source)}`;
+    case 'proxy-disabled':
+      return `Image blocked by CORS: ${hostOf(source)}. The picture proxy is off on the Mac (start the dictation server with --picture-proxy on)`;
+    case 'proxy-auth':
+      return 'The picture proxy rejected the pairing secret. Check it in Settings → Host clipboard';
+    case 'proxy-rate-limited':
+      return 'Too many picture proxy requests. Wait a minute and try again';
+    case 'proxy-blocked':
+      return `Picture proxy refused a private or local address: ${hostOf(source)}`;
+    case 'proxy-too-large':
+      return `Image is over the proxy's 10 MB limit: ${hostOf(source)}`;
+    case 'proxy-not-image':
+      return `Not a PNG, JPEG, GIF or WebP image: ${hostOf(source)}`;
+    case 'proxy-timeout':
+      return `Picture proxy timed out fetching: ${hostOf(source)}`;
+    case 'proxy-failed':
+      return `Picture proxy could not fetch the image${detail ? ` (${detail})` : ''}: ${hostOf(source)}`;
     case 'storage':
       return `Picture shown but not saved on this device${detail ? `: ${detail}` : ''}`;
   }

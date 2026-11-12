@@ -110,6 +110,17 @@ describe('Whisper LaunchDaemon definition', () => {
     expect(() => parseInstallerArgs(['--print', '--repo-status'])).toThrow(/only supported/);
   });
 
+  it('leaves /picture-fetch off unless the agent install opts in', () => {
+    expect(buildLaunchAgentPlist()).not.toContain('--picture-proxy');
+    expect(buildLaunchDaemonPlist()).not.toContain('--picture-proxy');
+    expect(buildLaunchAgentPlist({ pictureProxy: true })).toContain(
+      '<string>--picture-proxy</string>\n    <string>on</string>',
+    );
+    expect(parseInstallerArgs(['--print', '--agent']).pictureProxy).toBe(false);
+    expect(parseInstallerArgs(['--print', '--agent', '--picture-proxy']).pictureProxy).toBe(true);
+    expect(() => parseInstallerArgs(['--print', '--picture-proxy'])).toThrow(/only supported/);
+  });
+
   it('parses agent print and install modes and never migrates listeners for agents', () => {
     expect(parseInstallerArgs(['--print', '--agent'])).toMatchObject({ print: true, agent: true });
     expect(parseInstallerArgs(['--install', '--agent'])).toMatchObject({

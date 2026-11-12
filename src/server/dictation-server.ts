@@ -19,6 +19,11 @@ import {
   type HostStatsRouteOptions,
 } from './host-stats-server';
 import {
+  createPictureFetchRoute,
+  PICTURE_FETCH_PATH,
+  type PictureFetchRouteOptions,
+} from './picture-fetch-server';
+import {
   createRepoStatusRoute,
   REPO_STATUS_PATH,
   type RepoStatusRouteOptions,
@@ -55,6 +60,14 @@ export type DictationServerOptions = {
    * stays off unless `enabled`, even with clipboard pairing set up, and then also needs that secret.
    */
   repoStatus?: { enabled: boolean } & Omit<RepoStatusRouteOptions, 'allowedOrigins' | 'loadSecret'>;
+  /**
+   * Image fetching on `/picture-fetch` for hosts that send no CORS headers. The Mac makes outbound
+   * requests for a paired client, so it stays off unless `enabled`, and then also needs the secret.
+   */
+  pictureProxy?: { enabled: boolean } & Omit<
+    PictureFetchRouteOptions,
+    'allowedOrigins' | 'loadSecret'
+  >;
   telemetry?: Pick<
     DictationTelemetry,
     'connected' | 'disconnected' | 'rejected' | 'beginTranscription'
@@ -172,6 +185,14 @@ export const attachDictationServer = (
     limiter: authLimiter,
     allowedOrigins: options.allowedOrigins,
   });
+  const pictureFetchRoute = createPictureFetchRoute({
+    ...options.pictureProxy,
+    loadSecret: options.pictureProxy?.enabled
+      ? loadSecret
+      : () => ({ enabled: false, reason: 'picture proxy not enabled (--picture-proxy on)' }),
+    limiter: authLimiter,
+    allowedOrigins: options.allowedOrigins,
+  });
 
   const handleUpgrade = (
     request: import('node:http').IncomingMessage,
@@ -197,6 +218,10 @@ export const attachDictationServer = (
     }
     if (requestUrl.pathname === REPO_STATUS_PATH && !requestUrl.search) {
       repoStatusRoute.handleUpgrade(request, socket, head);
+      return;
+    }
+    if (requestUrl.pathname === PICTURE_FETCH_PATH && !requestUrl.search) {
+      pictureFetchRoute.handleUpgrade(request, socket, head);
       return;
     }
     const origin = request.headers.origin;
@@ -326,6 +351,7 @@ export const attachDictationServer = (
       await clipboardRoute.close();
       await hostStatsRoute.close();
       await repoStatusRoute.close();
+      await pictureFetchRoute.close();
     },
   };
 };

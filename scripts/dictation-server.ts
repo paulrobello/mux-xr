@@ -60,6 +60,10 @@ const repoStatusFlag = parsed.get('--repo-status') ?? 'off';
 if (repoStatusFlag !== 'on' && repoStatusFlag !== 'off')
   throw new Error('--repo-status takes on or off.');
 console.log(`Repo status ${repoStatusFlag === 'on' ? 'enabled' : 'disabled'}.`);
+const pictureProxyFlag = parsed.get('--picture-proxy') ?? 'off';
+if (pictureProxyFlag !== 'on' && pictureProxyFlag !== 'off')
+  throw new Error('--picture-proxy takes on or off.');
+console.log(`Picture proxy ${pictureProxyFlag === 'on' ? 'enabled' : 'disabled'}.`);
 const clipboardAtStart = loadClipboardSecret(clipboardSecretFile);
 console.log(
   clipboardAtStart.enabled
@@ -72,6 +76,17 @@ const attached = attachDictationServer(server, {
   telemetry,
   // Runs git and gh on paths a paired client names, so it needs its own explicit opt-in.
   repoStatus: { enabled: repoStatusFlag === 'on' },
+  // Fetches URLs a paired client names, so it needs its own explicit opt-in.
+  pictureProxy: {
+    enabled: pictureProxyFlag === 'on',
+    // Codes and byte counts only: a requested URL never reaches the log.
+    onEvent: (event) =>
+      console.log(
+        event.kind === 'transfer'
+          ? `Picture proxy: ${event.bytes} bytes`
+          : `Picture proxy refused: ${event.code}`,
+      ),
+  },
   clipboard: {
     loadSecret: () => loadClipboardSecret(clipboardSecretFile),
     // Counts and sizes only: clipboard text and the secret never reach the log.

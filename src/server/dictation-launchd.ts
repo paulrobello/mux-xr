@@ -11,6 +11,8 @@ export type DictationLaunchdOptions = {
   user?: string;
   /** Opts the agent into `/repo-status`, which runs git and gh; off unless asked for. */
   repoStatus?: boolean;
+  /** Opts the agent into `/picture-fetch`, which fetches URLs for a paired client; off unless asked for. */
+  pictureProxy?: boolean;
 };
 
 const xml = (value: string): string =>
@@ -116,6 +118,7 @@ export const buildLaunchAgentPlist = (options: DictationLaunchdOptions = {}): st
     '--clipboard-secret-file',
     clipboardSecretPath(repository),
     ...(options.repoStatus ? ['--repo-status', 'on'] : []),
+    ...(options.pictureProxy ? ['--picture-proxy', 'on'] : []),
   ]);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
