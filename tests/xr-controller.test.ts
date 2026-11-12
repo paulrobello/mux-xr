@@ -66,6 +66,7 @@ import * as THREE from 'three';
 import type { PaneDescriptor, TerminalSurface, WorkspaceActions } from '../src/contracts';
 import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
 import { createPictureController, type PictureLoaders } from '../src/workspace/pictures';
+import { HAND_COLOR_PRESETS } from '../src/xr/hand-colors';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
 import { PictureLoadError, pictureErrorNotice } from '../src/xr/picture-sizing';
 import {
@@ -4820,6 +4821,38 @@ describe('native XR controller event routing', () => {
     workspace.dispose();
     container.remove();
     vi.unstubAllGlobals();
+  });
+
+  it('picks a hand color from World swatches and restores the default', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('settings');
+    hit(workspace, { inputAction: 'openInput', mode: 'world' });
+    const swatches = (): THREE.Object3D[] => {
+      const found: THREE.Object3D[] = [];
+      workspace.scene.traverse((object) => {
+        if (object.userData.inputAction === 'handColor') found.push(object);
+      });
+      return found;
+    };
+    expect(swatches().map((swatch) => swatch.userData.handColor)).toEqual(
+      HAND_COLOR_PRESETS.map((preset) => preset.color),
+    );
+    hit(workspace, { inputAction: 'handColor', handColor: '#3b82f6' });
+    expect(workspace.state.handColor).toBe('#3b82f6');
+    const selected = swatches().filter((swatch) => swatch.userData.labelBorder === '#ffffff');
+    expect(selected.map((swatch) => swatch.userData.handColor)).toEqual(['#3b82f6']);
+    const arms: THREE.MeshStandardMaterial[] = [];
+    workspace.scene.traverse((object) => {
+      if (object.name === 'elastic-hand-arm')
+        arms.push((object as THREE.Mesh).material as THREE.MeshStandardMaterial);
+    });
+    expect(arms.length).toBeGreaterThan(0);
+    for (const material of arms) expect(material.color.getHex()).toBe(0x3b82f6);
+    hit(workspace, { inputAction: 'handColor', handColor: '' });
+    expect(workspace.state.handColor).toBe('');
+    for (const material of arms) expect(material.color.getHex()).not.toBe(0x3b82f6);
+    workspace.dispose();
+    container.remove();
   });
 
   it('owns the background selector only in World and closes it after selection', () => {

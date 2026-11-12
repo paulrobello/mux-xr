@@ -659,6 +659,7 @@ const stopPresentation = scene.subscribe((state) => {
     ui.setHierarchyStyle(state.hierarchyStyle, true);
     ui.setKeyborbMode(state.keyborbMode, true);
     ui.setUISounds(state.uiSounds, true);
+    ui.setHandColor(state.handColor, true);
     ui.setFilteringCapabilities(Number(scene.scene.userData.maxAnisotropy ?? 1));
     for (const id of surfaces.keys()) {
       ui.setTerminalCurvature(id, scene.getTerminalCurvature(id));

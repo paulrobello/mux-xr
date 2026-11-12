@@ -66,6 +66,10 @@ import {
 import { validateKeyboardCurvature } from '../workspace/keyboard-curvature';
 import type { KeyborbMode } from '../workspace/keyborb';
 import { validateKeyborbMode } from '../workspace/keyborb';
+import { validateHandColor } from '../xr/hand-colors';
+
+export { validateHandColor };
+
 import type { PaneCreationState } from '../workspace/pane-create';
 import {
   DEFAULT_WINDOW_PREFERENCES,
@@ -191,6 +195,8 @@ export interface WorkspaceUI {
   setHierarchyStyle(style: HierarchyStyle, persist?: boolean): void;
   setKeyborbMode(mode: KeyborbMode, persist?: boolean): void;
   setUISounds(enabled: boolean, persist?: boolean): void;
+  /** Applies a hand color chosen in XR; empty restores the default color. */
+  setHandColor(color: string, persist?: boolean): void;
   setBackground(mode: BackgroundMode, persist?: boolean): void;
   setFilteringCapabilities(maxAnisotropy: number): void;
   setDictationState(state: DictationState): void;
@@ -351,11 +357,6 @@ export function reorderCommands(
   const [command] = result.splice(from, 1);
   result.splice(to, 0, command);
   return result;
-}
-
-/** A lowercase `#rrggbb` color, or empty (the default) for anything else. */
-export function validateHandColor(value: unknown): string {
-  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : '';
 }
 
 export function validateSettings(value: unknown): WorkspaceSettings {
@@ -657,6 +658,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   let keyborbModeSelect: HTMLSelectElement | null = null;
   let filteringMaxAnisotropy = 16;
   let updateWindowPreferenceControls = (): void => undefined;
+  let updateHandColorControls = (): void => undefined;
   const updateArrangementAvailability = (): void => {
     if (arrangementApply) arrangementApply.disabled = attachedPaneIds.length === 0;
   };
@@ -754,6 +756,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       saveSettings();
     });
     updateHandColor();
+    updateHandColorControls = updateHandColor;
     const filteringControls = document.createElement('div');
     filteringControls.innerHTML =
       '<label>Terminal filtering<select data-filter-mode aria-label="Terminal filtering"><option value="nearest">Nearest pixels</option><option value="linear">Linear (sharp)</option><option value="mipmap-nearest">Mipmap bilinear</option><option value="mipmap-linear">Mipmap trilinear (smooth)</option></select></label><label data-filter-anisotropy-row>Anisotropy (mipmap modes)<select data-filter-anisotropy aria-label="Terminal anisotropy"><option value="1">Off</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option><option value="16">16x</option></select><span>Anisotropy matters for oblique minification. 8x and 16x may look the same front-facing.</span></label><label class="check"><input type="checkbox" data-filter-gaze> Sharper gazed terminal <span>Use sharp linear sampling while looking at a terminal.</span></label><label data-filter-distance-row>Gaze max distance<input data-filter-distance type="number" min="0.25" max="20" step="0.25" aria-label="Gaze maximum distance in meters"><span>Sharper gaze ignores mipmaps within this distance.</span></label>';
@@ -2108,6 +2111,13 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       if (settings.background === mode) return;
       settings = { ...settings, background: mode };
       qs<HTMLSelectElement>('[data-background]').value = mode;
+      if (persist) saveSettings();
+    },
+    setHandColor(color, persist = false) {
+      const next = validateHandColor(color);
+      if (settings.handColor === next) return;
+      settings = { ...settings, handColor: next };
+      updateHandColorControls();
       if (persist) saveSettings();
     },
     setUISounds(enabled, persist = false) {

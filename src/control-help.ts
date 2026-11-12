@@ -138,6 +138,10 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
         : data.keyborbMode === 'on'
           ? 'Use spherical keys; trigger or pinch to type'
           : 'Use the standard keyboard';
+    case 'handColor':
+      return data.handColor
+        ? 'Tint both hands and arms with this color'
+        : 'Restore the default hand color';
     case 'uiSounds':
       return 'Turn interface clicks and controller pulses on or off';
     case 'terminalColors':

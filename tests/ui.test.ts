@@ -162,6 +162,12 @@ describe('mux XR local UI state', () => {
     expect(ui.getSettings().handColor).toBe('');
     expect(reset.disabled).toBe(true);
     expect(changes).toEqual(['#123456', '']);
+    ui.setHandColor('#3B82F6', true);
+    expect(input.value).toBe('#3b82f6');
+    expect(reset.disabled).toBe(false);
+    expect(JSON.parse(localStorage.getItem('mux-xr:settings:v1') ?? '{}').handColor).toBe(
+      '#3b82f6',
+    );
     ui.destroy();
     localStorage.clear();
   });

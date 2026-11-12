@@ -89,6 +89,7 @@ import {
   workspacePaneSafeRadius,
 } from './floor-layout';
 import { createFrameCounter } from './fps';
+import { HAND_COLOR_PRESETS, validateHandColor } from './hand-colors';
 import { createHandContact, type HandContact, type HandContactSample } from './hand-contact';
 import { type HandInputState, updateHandInput } from './hand-input';
 import { type HandReel, rebaseHandReel, reelOffset, startHandReel } from './hand-reel';
@@ -226,6 +227,8 @@ export interface WorkspaceSceneState {
   keyborbMode: KeyborbMode;
   keyborbEnabled: boolean;
   uiSounds: boolean;
+  /** `#rrggbb` hand and arm tint, or empty for the default color. */
+  handColor: string;
   dictation: DictationState;
   fps: number | null;
   xrMode: 'desktop' | 'vr' | 'ar';
@@ -959,6 +962,7 @@ export function createWorkspaceScene(
     keyborbMode: 'auto',
     keyborbEnabled: false,
     uiSounds: true,
+    handColor: '',
     dictation: { supported: false, status: 'idle', transcript: '', error: null },
     fps: null,
     xrMode: 'desktop',
@@ -986,7 +990,6 @@ export function createWorkspaceScene(
   const controllerRoots: THREE.Group[] = [];
   const handRoots = new Map<THREE.Group, THREE.Group>();
   const handVisuals = new Map<THREE.Group, CartoonHand>();
-  let handColor: string | null = null;
   const handContacts = new Map<THREE.Group, HandContact>();
   const keyboardProximity = new Map<THREE.Group, HandContact>();
   const keyborbInput = createKeyborbInput();
@@ -4261,6 +4264,20 @@ export function createWorkspaceScene(
         setModifierVisual(button, mutableState.xrMode === xrMode);
         inputRoot.add(button);
       }
+      const handCaption = createLabelButton('Hand color', 0.6, 0.08, { inputAction: 'noop' });
+      handCaption.position.y = -0.27;
+      inputRoot.add(handCaption);
+      // Each swatch shows its own color; a white border marks the current one.
+      for (const [index, { name, color }] of HAND_COLOR_PRESETS.entries()) {
+        const swatch = createLabelButton(name, 0.2, 0.1, {
+          inputAction: 'handColor',
+          handColor: color,
+          labelBackground: color || '#1c2a35',
+          ...(mutableState.handColor === color ? { labelBorder: '#ffffff' } : {}),
+        });
+        swatch.position.set((index - (HAND_COLOR_PRESETS.length - 1) / 2) * 0.23, -0.4, 0);
+        inputRoot.add(swatch);
+      }
     } else if (mode === 'display') {
       (
         [
@@ -5160,6 +5177,10 @@ export function createWorkspaceScene(
     if (action === 'scrollStrip') return true;
     if (action === 'keyborbMode') {
       setKeyborbMode(validateKeyborbMode(hit.userData.keyborbMode));
+      return true;
+    }
+    if (action === 'handColor') {
+      setHandColor(String(hit.userData.handColor ?? '') || null);
       return true;
     }
     if (action === 'uiSounds') {
@@ -6268,7 +6289,7 @@ export function createWorkspaceScene(
       handContacts.set(root, createHandContact());
       keyboardProximity.set(root, createHandContact());
       const visual = createStandardHand();
-      visual.setColor(handColor);
+      visual.setColor(mutableState.handColor || null);
       handVisuals.set(root, visual);
       scene.add(visual.root);
       if (typeof renderer.xr.getControllerGrip === 'function') {
@@ -7084,8 +7105,12 @@ export function createWorkspaceScene(
     notify();
   };
   const setHandColor = (color: string | null): void => {
-    handColor = color;
-    for (const visual of handVisuals.values()) visual.setColor(color);
+    const next = validateHandColor(color);
+    if (next === mutableState.handColor) return;
+    mutableState.handColor = next;
+    for (const visual of handVisuals.values()) visual.setColor(next || null);
+    if (inputRoot && inputMode === 'world') refreshInputRoot(inputMode);
+    notify();
   };
   const setDictationState = (state: DictationState): void => {
     const previous = mutableState.dictation;
