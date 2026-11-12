@@ -2307,11 +2307,16 @@ export function createWorkspaceScene(
     const keyboard = keyborbKeyboard();
     keyborbInput.begin(keyboard);
     const raysLive = Boolean(keyboard) && !keyboardRaysBlocked;
-    if (raysLive) updateVisibleMatrixWorld(scene);
+    let worldFresh = false;
     for (const controller of controllerRoots) {
       const hand = activeHand(controller);
       const visual = contactVisual(controller);
       const gesture = hand ? sampleHand(controller) : null;
+      if (raysLive && hand && !worldFresh) {
+        // One matrix pass serves both hands' rays.
+        updateVisibleMatrixWorld(scene);
+        worldFresh = true;
+      }
       const ray = raysLive && hand ? targetFromController(controller, false) : null;
       const rayKey = ray?.object?.userData.keyborb ? (ray.object as THREE.Mesh) : null;
       const tipsTracked = visual && (!hand || gesture?.tracked);
