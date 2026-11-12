@@ -83,8 +83,15 @@ export function createHandContact(): HandContact {
   let activeId: string | undefined;
 
   const prepare = (keyboard: THREE.Group | null): void => {
-    keyboard?.updateWorldMatrix(true, true);
-    if (cachedKeyboard === keyboard) return;
+    if (cachedKeyboard !== keyboard) collect(keyboard);
+    if (!keyboard) return;
+    // Contact reads only these direct children, so refreshing the keyboard's whole subtree (over
+    // 160 nodes with the Keyborb) on every call is wasted; it ran several times a frame per hand.
+    keyboard.updateWorldMatrix(true, false);
+    for (const mesh of keys) mesh.updateWorldMatrix(false, false);
+    for (const mesh of bodies) if (!keys.includes(mesh)) mesh.updateWorldMatrix(false, false);
+  };
+  const collect = (keyboard: THREE.Group | null): void => {
     cachedKeyboard = keyboard;
     keys.length = 0;
     bodies.length = 0;
