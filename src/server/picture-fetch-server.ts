@@ -6,6 +6,7 @@ import { isIP } from 'node:net';
 import { type NetworkInterfaceInfo, networkInterfaces as osNetworkInterfaces } from 'node:os';
 import type { Duplex } from 'node:stream';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
+import { isHeif } from '../image-format';
 import {
   type ClipboardSecret,
   clientKey,
@@ -39,7 +40,12 @@ export type PictureFetchErrorCode =
   | 'timeout'
   | 'failed';
 
-export type PictureContentType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+export type PictureContentType =
+  | 'image/png'
+  | 'image/jpeg'
+  | 'image/gif'
+  | 'image/webp'
+  | 'image/heif';
 
 const CONTROL_CHARS = /\p{Cc}/u;
 
@@ -225,7 +231,7 @@ export const defaultTransport: PictureTransport = ({ url, address, signal }) =>
         agent: false,
         signal,
         headers: {
-          accept: 'image/png,image/jpeg,image/gif,image/webp',
+          accept: 'image/png,image/jpeg,image/gif,image/webp,image/heic,image/heif',
           'accept-encoding': 'identity',
           'user-agent': 'mux-xr-picture-proxy',
         },
@@ -277,10 +283,19 @@ export const sniffImageType = (bytes: Uint8Array): PictureContentType | null => 
   if (at(0) === 0xff && at(1) === 0xd8 && at(2) === 0xff) return 'image/jpeg';
   if (ascii(0, 'GIF87a') || ascii(0, 'GIF89a')) return 'image/gif';
   if (ascii(0, 'RIFF') && ascii(8, 'WEBP')) return 'image/webp';
+  if (isHeif(bytes)) return 'image/heif';
   return null;
 };
 
-const ALLOWED_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+const ALLOWED_TYPES: readonly string[] = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/heif',
+];
+/** Servers label HEVC HEIF as either type; both are checked against the same sniffed format. */
+const normalizeType = (type: string): string => (type === 'image/heic' ? 'image/heif' : type);
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 
 export type PictureFetchResult =
@@ -395,7 +410,7 @@ export const fetchPicture = async (
       break;
     }
     if (hop.status < 200 || hop.status > 299) throw new Refusal('failed');
-    const declared = (hop.contentType ?? '').split(';')[0].trim().toLowerCase();
+    const declared = normalizeType((hop.contentType ?? '').split(';')[0].trim().toLowerCase());
     if (!ALLOWED_TYPES.includes(declared)) throw new Refusal('not_image');
     if (hop.contentLength !== undefined && hop.contentLength > maxBytes)
       throw new Refusal('too_large');

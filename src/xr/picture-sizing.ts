@@ -210,7 +210,7 @@ export function pictureErrorNotice(code: PictureErrorCode, source: string, detai
     case 'proxy-too-large':
       return `Image is over the proxy's 10 MB limit: ${hostOf(source)}`;
     case 'proxy-not-image':
-      return `Not a PNG, JPEG, GIF or WebP image: ${hostOf(source)}`;
+      return `Not a PNG, JPEG, GIF, WebP or HEIF image: ${hostOf(source)}`;
     case 'proxy-timeout':
       return `Picture proxy timed out fetching: ${hostOf(source)}`;
     case 'proxy-failed':

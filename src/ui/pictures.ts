@@ -15,7 +15,7 @@ export function mountPicturePicker(
   section.innerHTML =
     '<label for="picture-url">Pictures</label>' +
     '<div class="endpoint-row"><input id="picture-url" type="url" placeholder="https://example.com/photo.jpg" autocomplete="url" data-picture-url aria-label="Image URL"><button type="button" class="connect-btn" data-action="add-picture-url" title="Add a picture frame from this URL">Add</button></div>' +
-    '<div class="endpoint-row picture-pick-row"><button type="button" class="secondary" data-action="pick-picture-file" title="Choose an image file for a picture frame">Choose image…</button><input type="file" accept="image/*" data-picture-file hidden></div>' +
+    '<div class="endpoint-row picture-pick-row"><button type="button" class="secondary" data-action="pick-picture-file" title="Choose an image file for a picture frame">Choose image…</button><input type="file" accept="image/*,image/heic,image/heif,.heic,.heif" data-picture-file hidden></div>' +
     '<p class="hint">Frames appear in XR; grab to place them. URLs must allow CORS.</p>';
   const url = section.querySelector('[data-picture-url]') as HTMLInputElement;
   const file = section.querySelector('[data-picture-file]') as HTMLInputElement;

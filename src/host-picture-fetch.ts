@@ -6,7 +6,7 @@ const PROTOCOL = 'mux-xr-picture-fetch-v1';
 const DEFAULT_TIMEOUT_MS = 15_000;
 const NONCE_FORMAT = /^[A-Za-z0-9+/]{43}=$/;
 const CONTROL_CHARS = /\p{Cc}/u;
-const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/heif'];
 
 export type PictureProxyFailure =
   | 'no-secret'

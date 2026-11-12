@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { NetworkInterfaceInfo } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -432,6 +433,26 @@ describe('fetchPicture', () => {
     }
   });
 
+  it('accepts HEVC HEIF declared as image/heic or image/heif, and reports it as image/heif', async () => {
+    const heif = readFileSync('tests/fixtures/gradient.heic');
+    expect(sniffImageType(heif)).toBe('image/heif');
+    for (const contentType of ['image/heic', 'image/heif', 'image/HEIC; charset=binary']) {
+      const { transport } = scripted({ body: heif, contentType });
+      const result = await fetchPicture('https://img.example.com/a.heic', {
+        resolve: publicResolver,
+        transport,
+      });
+      expect(result.ok && result.contentType, contentType).toBe('image/heif');
+    }
+    const mislabelled = scripted({ body: PNG, contentType: 'image/heic' });
+    expect(
+      await fetchPicture('https://img.example.com/a', {
+        resolve: publicResolver,
+        transport: mislabelled.transport,
+      }),
+    ).toEqual({ ok: false, code: 'not_image' });
+  });
+
   it('refuses an oversized body by Content-Length and by streaming', async () => {
     const declared = scripted({ contentLength: 11, body: PNG });
     expect(
@@ -823,7 +844,7 @@ describe('picture loading with the proxy fallback', () => {
       ['rate-limited', 'proxy-rate-limited', /Too many/],
       ['blocked', 'proxy-blocked', /private or local address/],
       ['too-large', 'proxy-too-large', /10 MB/],
-      ['not-image', 'proxy-not-image', /PNG, JPEG, GIF or WebP/],
+      ['not-image', 'proxy-not-image', /PNG, JPEG, GIF, WebP or HEIF/],
       ['timeout', 'proxy-timeout', /timed out/],
       ['failed', 'proxy-failed', /could not fetch/],
     ];

@@ -3,6 +3,7 @@ import {
   type PictureProxyFailure,
   type PictureProxyFetcher,
 } from '../host-picture-fetch';
+import { isHeif } from '../image-format';
 import {
   fitWithin,
   MAX_PICTURE_SOURCE_BYTES,
@@ -37,6 +38,8 @@ interface DecodedImage {
 export interface PictureLoaderDeps {
   fetch: (input: string, init?: RequestInit) => Promise<Response>;
   decode: (blob: Blob) => Promise<DecodedImage>;
+  /** Decodes HEIF, which the browser cannot; absent means HEIF fails as undecodable. */
+  decodeHeif?: (blob: Blob) => Promise<DecodedImage>;
   createCanvas: (width: number, height: number) => HTMLCanvasElement;
   /** The page's protocol, for refusing http: URLs from an https: page. */
   pageProtocol?: string;
@@ -57,6 +60,7 @@ function browserDeps(): PictureLoaderDeps {
   return {
     fetch: (input, init) => fetch(input, init),
     decode: (blob) => createImageBitmap(blob, { imageOrientation: 'from-image' }),
+    decodeHeif: async (blob) => (await import('./heif-decode')).decodeHeifInWorker(blob),
     pageProtocol: typeof location === 'undefined' ? undefined : location.protocol,
     proxy: typeof window === 'undefined' ? undefined : createDefaultPictureProxy(),
     createCanvas: (width, height) => {
@@ -108,18 +112,23 @@ export async function preparePicture(
     throw new PictureLoadError('too-large', `${Math.round(blob.size / 1048576)} MB`);
   if (blob.type && !blob.type.startsWith('image/'))
     throw new PictureLoadError('not-image', blob.type);
-  // Refuse an oversized image from its header so the browser never decodes it in full.
-  const probed = probeImageSize(await headBytes(blob));
+  const head = await headBytes(blob);
+  const heif = isHeif(head);
+  // Refuse an oversized image from its header so the browser never decodes it in full. The HEIF
+  // decoder reads the size from the container itself and refuses before decoding any tiles.
+  const probed = heif ? null : probeImageSize(head);
   if (probed) checkSourceSize(probed.width, probed.height);
-  else if (blob.size > MAX_UNPROBED_PICTURE_BYTES)
+  else if (!heif && blob.size > MAX_UNPROBED_PICTURE_BYTES)
     throw new PictureLoadError(
       'too-large',
       `size unreadable from the header and over ${MAX_UNPROBED_PICTURE_BYTES / 1048576} MB`,
     );
   let image: DecodedImage;
   try {
-    image = await deps.decode(blob);
-  } catch {
+    if (heif && !deps.decodeHeif) throw new PictureLoadError('decode', name);
+    image = heif && deps.decodeHeif ? await deps.decodeHeif(blob) : await deps.decode(blob);
+  } catch (error) {
+    if (error instanceof PictureLoadError && error.code === 'too-large') throw error;
     throw new PictureLoadError('decode', name);
   }
   try {
