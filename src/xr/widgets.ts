@@ -126,7 +126,7 @@ export function createClockWidget(kind: ClockKind, envMap: THREE.Texture | null 
 
   const close = createScalableLabel('×', 0.055, 0.055, { background: '#223946' });
   close.name = 'clock-close';
-  close.position.set(width / 2 - 0.045, height / 2 - 0.045, 0.04);
+  close.position.set(width / 2 - 0.055 / 2, height / 2 - 0.055 / 2, 0.04);
   close.userData.inputAction = 'closeWidget';
   close.userData.helpText = 'Close this clock widget';
   root.add(close);

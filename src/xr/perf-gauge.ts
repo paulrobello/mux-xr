@@ -186,7 +186,7 @@ export function createPerfGaugeWidget(envMap: THREE.Texture | null = null): Widg
 
   const close = createScalableLabel('×', 0.05, 0.05, { background: '#223946' });
   close.name = 'perf-gauge-close';
-  close.position.set(PERF_GAUGE_WIDTH / 2 - 0.04, TOP - 0.04, 0.04);
+  close.position.set(PERF_GAUGE_WIDTH / 2 - 0.05 / 2, TOP - 0.05 / 2, 0.04);
   close.userData.inputAction = 'closeWidget';
   close.userData.helpText = 'Close the performance gauge';
   root.add(close);

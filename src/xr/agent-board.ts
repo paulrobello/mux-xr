@@ -128,7 +128,7 @@ export function createAgentBoardWidget(envMap: THREE.Texture | null = null): Wid
 
   const close = createScalableLabel('×', 0.055, 0.055, { background: '#223946' });
   close.name = 'agent-board-close';
-  close.position.set(AGENT_BOARD_WIDTH / 2 - 0.045, TOP - 0.045, 0.04);
+  close.position.set(AGENT_BOARD_WIDTH / 2 - 0.055 / 2, TOP - 0.055 / 2, 0.04);
   close.userData.inputAction = 'closeWidget';
   close.userData.helpText = 'Close the agent board';
   root.add(close);

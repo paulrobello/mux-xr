@@ -179,7 +179,7 @@ export function createRepoStatusWidget(
 
   const close = createScalableLabel('×', 0.05, 0.05, { background: '#223946' });
   close.name = 'repo-status-close';
-  close.position.set(REPO_STATUS_WIDTH / 2 - 0.04, TOP - 0.04, 0.04);
+  close.position.set(REPO_STATUS_WIDTH / 2 - 0.05 / 2, TOP - 0.05 / 2, 0.04);
   close.userData.inputAction = 'closeWidget';
   close.userData.helpText = 'Close the git and CI status';
   root.add(close);

@@ -226,10 +226,10 @@ describe('timer widget', () => {
     };
   };
 
-  it('keeps every control 0.02 m inside the face top and bottom in both modes', () => {
+  it('keeps every control but close 0.02 m inside the face top and bottom in both modes', () => {
     const { widget, press } = setup();
     const faceTop = (TIMER_HEIGHT - 0.02) / 2;
-    const names = ['timer-mode', 'timer-close', 'timer-display-plate', 'timer-run', 'timer-reset'];
+    const names = ['timer-mode', 'timer-display-plate', 'timer-run', 'timer-reset'];
     for (const mode of ['countdown', 'stopwatch']) {
       const all = mode === 'countdown' ? [...names, 'timer-preset-1', 'timer-preset-25'] : names;
       for (const name of all) {

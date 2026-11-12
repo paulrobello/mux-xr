@@ -136,7 +136,7 @@ export function createTimerWidget(envMap: THREE.Texture | null = null): Widget {
   );
   const close = createScalableLabel('×', CLOSE_SIZE, CLOSE_SIZE, { background: BUTTON_BACKGROUND });
   close.name = 'timer-close';
-  close.position.set(CONTENT_WIDTH / 2 - CLOSE_SIZE / 2, TOP_Y, 0.034);
+  close.position.set(TIMER_WIDTH / 2 - CLOSE_SIZE / 2, TIMER_HEIGHT / 2 - CLOSE_SIZE / 2, 0.034);
   close.userData.inputAction = 'closeWidget';
   close.userData.helpText = 'Close the timer';
   root.add(close);
