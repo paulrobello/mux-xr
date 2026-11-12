@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { AgentRosterRow } from '../workspace/agent-roster';
 import type { BellFeedEntry } from './bell-feed';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
@@ -147,19 +148,25 @@ export function createClockWidget(kind: ClockKind, envMap: THREE.Texture | null 
     root.add(display);
   } else {
     const radius = 0.23;
-    const markerMaterial = lit({ color: ACCENT_COLOR, roughness: 0.65 });
-    for (let index = 0; index < 12; index += 1) {
+    // One mesh for all twelve markers: each draw costs about 0.02 ms of Quest main thread.
+    const placement = new THREE.Object3D();
+    const markerGeometries = Array.from({ length: 12 }, (_, index) => {
       const angle = (index * Math.PI * 2) / 12;
-      const marker = new THREE.Mesh(
-        new THREE.BoxGeometry(0.012, index % 3 === 0 ? 0.045 : 0.025, 0.012),
-        markerMaterial,
+      placement.position.set(Math.sin(angle) * radius, Math.cos(angle) * radius, 0.04);
+      placement.rotation.z = -angle;
+      placement.updateMatrix();
+      return new THREE.BoxGeometry(0.012, index % 3 === 0 ? 0.045 : 0.025, 0.012).applyMatrix4(
+        placement.matrix,
       );
-      marker.name = `clock-marker-${index + 1}`;
-      marker.position.set(Math.sin(angle) * radius, Math.cos(angle) * radius, 0.04);
-      marker.rotation.z = -angle;
-      marker.userData.inputAction = 'grabWidget';
-      root.add(marker);
-    }
+    });
+    const markers = new THREE.Mesh(
+      mergeGeometries(markerGeometries),
+      lit({ color: ACCENT_COLOR, roughness: 0.65 }),
+    );
+    for (const geometry of markerGeometries) geometry.dispose();
+    markers.name = 'clock-markers';
+    markers.userData.inputAction = 'grabWidget';
+    root.add(markers);
     const handMaterial = lit({
       color: 0xe8f7f8,
       roughness: 0.65,

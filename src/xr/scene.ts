@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createClipboardBridge } from '../clipboard';
 import type {
   BackgroundMode,
@@ -6406,16 +6407,20 @@ export function createWorkspaceScene(
         excludeFromBounds: true,
         helpText: getControlHelp({ inputAction: 'scrollStrip' }),
       });
-      for (const offset of [-0.025, 0, 0.025]) {
-        const grip = new THREE.Mesh(
-          new THREE.PlaneGeometry(SCROLL_STRIP_WIDTH * 0.5, 0.006),
-          new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.7 }),
-        );
-        grip.position.set(0, offset, 0.001);
-        grip.userData.excludeFromBounds = true;
-        grip.raycast = () => undefined;
-        strip.add(grip);
-      }
+      // The three grip marks share one mesh, one draw instead of three.
+      const marks = [-0.025, 0, 0.025].map((offset) =>
+        new THREE.PlaneGeometry(SCROLL_STRIP_WIDTH * 0.5, 0.006).translate(0, offset, 0),
+      );
+      const grip = new THREE.Mesh(
+        mergeGeometries(marks),
+        new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.7 }),
+      );
+      for (const mark of marks) mark.dispose();
+      grip.name = 'terminal-scroll-strip-grip';
+      grip.position.z = 0.001;
+      grip.userData.excludeFromBounds = true;
+      grip.raycast = () => undefined;
+      strip.add(grip);
       root.add(strip);
       return strip;
     };
