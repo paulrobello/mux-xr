@@ -330,6 +330,7 @@ function applySettings(settings: WorkspaceSettings): void {
     scene.setHierarchyStyle(settings.hierarchyStyle);
     scene.setKeyborbMode(settings.keyborbMode);
     scene.setUISounds(settings.uiSounds);
+    scene.setHandColor(settings.handColor || null);
     scene.setBackground(settings.background);
     for (const surface of surfaces.values()) surface.setColorMode(settings.colorMode);
     rosterLayout = agentRosterLayout(settings);

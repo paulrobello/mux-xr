@@ -7,6 +7,7 @@ import {
   mergeImportedCommands,
   mountWorkspaceUI,
   reorderCommands,
+  validateHandColor,
   validateSettings,
   workspaceScope,
 } from '../src/ui';
@@ -133,6 +134,36 @@ describe('mux XR local UI state', () => {
     expect(validateSettings({ arrangement: 'invalid' }).arrangement).toBe('arc');
     expect(validateSettings({ keyborbMode: 'invalid' }).keyborbMode).toBe('auto');
     expect(validateSettings({ keyborbMode: 'on' }).keyborbMode).toBe('on');
+  });
+
+  it('validates and persists the hand color, with a default reset', () => {
+    expect(validateSettings(null).handColor).toBe('');
+    expect(validateHandColor('#AABBCC')).toBe('#aabbcc');
+    expect(validateHandColor('red')).toBe('');
+    expect(validateHandColor('#abc')).toBe('');
+    localStorage.clear();
+    const root = document.createElement('div');
+    const changes: string[] = [];
+    const ui = mountWorkspaceUI(root, {
+      onConnect: () => undefined,
+      onSettingsChange: (settings) => changes.push(settings.handColor),
+    });
+    const input = query<HTMLInputElement>(root, '[data-settings] [data-hand-color]');
+    const reset = query<HTMLButtonElement>(root, '[data-action="hand-color-default"]');
+    expect(reset.disabled).toBe(true);
+    input.value = '#123456';
+    input.dispatchEvent(new Event('input'));
+    expect(ui.getSettings().handColor).toBe('#123456');
+    expect(JSON.parse(localStorage.getItem('mux-xr:settings:v1') ?? '{}').handColor).toBe(
+      '#123456',
+    );
+    expect(reset.disabled).toBe(false);
+    reset.click();
+    expect(ui.getSettings().handColor).toBe('');
+    expect(reset.disabled).toBe(true);
+    expect(changes).toEqual(['#123456', '']);
+    ui.destroy();
+    localStorage.clear();
   });
 
   it('defaults UI sounds on and persists the browser and XR toggle', () => {

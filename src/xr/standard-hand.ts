@@ -264,6 +264,31 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
   const models: Partial<Record<HandSide, SideModel>> = {};
   let loaded = false;
   let disposed = false;
+  let customColor: THREE.ColorRepresentation | null = null;
+  // Each loaded side's own color, restored when the custom color is cleared.
+  const modelColors: Partial<Record<HandSide, THREE.Color>> = {};
+  // Hand, wrist cap and arm (the fallback skin material the arm shares) take one color, lit
+  // by an equal emissive share so the dim scene keeps them readable.
+  const tint = (material: THREE.Material | THREE.Material[], modelColor: THREE.Color): void => {
+    if (Array.isArray(material) || !(material as THREE.MeshStandardMaterial).isMeshStandardMaterial)
+      return;
+    const standard = material as THREE.MeshStandardMaterial;
+    standard.color.set(customColor ?? modelColor);
+    standard.emissive.copy(standard.color);
+  };
+  const applyColor = (): void => {
+    if (!loaded) {
+      fallback.setColor(customColor);
+      return;
+    }
+    for (const [side, model] of Object.entries(models) as [HandSide, SideModel][]) {
+      const modelColor = modelColors[side] ?? new THREE.Color();
+      if (skin) tint(skin.material, modelColor);
+      tint(model.mesh.material, modelColor);
+      const cap = model.root.getObjectByName(`standard-hand-wrist-cap-${side}`);
+      if (cap instanceof THREE.Mesh) tint(cap.material, modelColor);
+    }
+  };
   const curls = [0, 0, 0];
   // The controller hand is posed as a tracked hand with every joint visible.
   const synthetic = new THREE.Group() as TrackedHand & { joints: Record<string, THREE.Group> };
@@ -373,6 +398,7 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
         const material = ready.mesh.material as THREE.MeshStandardMaterial;
         // The scene is lit dimly; a self-lit share keeps the gray hand readable.
         if (material.isMeshStandardMaterial) {
+          modelColors[side] = material.color.clone();
           material.emissive.copy(material.color);
           material.emissiveIntensity = 0.6;
           if (skin) (skin.material as THREE.MeshStandardMaterial).copy(material);
@@ -386,6 +412,7 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
       }
       if (skin) skin.visible = false;
       loaded = true;
+      applyColor();
       fallback.root.userData.handAsset = 'loaded';
       return true;
     })
@@ -520,6 +547,10 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
       curls.fill(0);
       for (const model of Object.values(models)) model.root.visible = false;
       fallback.root.userData.keyborbPoint = undefined;
+    },
+    setColor(color) {
+      customColor = color;
+      applyColor();
     },
     dispose() {
       if (disposed) return;

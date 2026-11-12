@@ -279,6 +279,8 @@ export interface WorkspaceScene {
   setKeyboardCurvature(degrees: number): void;
   setKeyborbMode(mode: KeyborbMode): void;
   setUISounds(enabled: boolean): void;
+  /** Tints both hands and their arms; null restores the default color. */
+  setHandColor(color: string | null): void;
   setDictationState(state: DictationState): void;
   setAvailablePanes(panes: PaneDescriptor[]): void;
   setPaneCreation(state: PaneCreationState): void;
@@ -984,6 +986,7 @@ export function createWorkspaceScene(
   const controllerRoots: THREE.Group[] = [];
   const handRoots = new Map<THREE.Group, THREE.Group>();
   const handVisuals = new Map<THREE.Group, CartoonHand>();
+  let handColor: string | null = null;
   const handContacts = new Map<THREE.Group, HandContact>();
   const keyboardProximity = new Map<THREE.Group, HandContact>();
   const keyborbInput = createKeyborbInput();
@@ -6265,6 +6268,7 @@ export function createWorkspaceScene(
       handContacts.set(root, createHandContact());
       keyboardProximity.set(root, createHandContact());
       const visual = createStandardHand();
+      visual.setColor(handColor);
       handVisuals.set(root, visual);
       scene.add(visual.root);
       if (typeof renderer.xr.getControllerGrip === 'function') {
@@ -7078,6 +7082,10 @@ export function createWorkspaceScene(
     mutableState.uiSounds = enabled;
     if (inputRoot && inputMode === 'settings') refreshInputRoot(inputMode);
     notify();
+  };
+  const setHandColor = (color: string | null): void => {
+    handColor = color;
+    for (const visual of handVisuals.values()) visual.setColor(color);
   };
   const setDictationState = (state: DictationState): void => {
     const previous = mutableState.dictation;
@@ -7905,6 +7913,7 @@ export function createWorkspaceScene(
     setKeyboardCurvature,
     setKeyborbMode,
     setUISounds,
+    setHandColor,
     setDictationState,
     setAvailablePanes,
     setPaneCreation,

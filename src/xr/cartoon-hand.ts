@@ -18,6 +18,8 @@ export interface CartoonHand {
     deltaSeconds: number,
   ): void;
   hide(): void;
+  /** Tints the hand and arm; null restores the default color. */
+  setColor(color: THREE.ColorRepresentation | null): void;
   dispose(): void;
 }
 
@@ -71,13 +73,16 @@ const REST = [
   ],
 ] as const;
 
+const DEFAULT_COLOR = 0xff672f;
+const DEFAULT_EMISSIVE = 0xff4f1f;
+
 export function createCartoonHand(): CartoonHand {
   const root = new THREE.Group();
   root.name = 'xr-cartoon-hand';
   root.visible = false;
   const material = new THREE.MeshStandardMaterial({
-    color: 0xff672f,
-    emissive: 0xff4f1f,
+    color: DEFAULT_COLOR,
+    emissive: DEFAULT_EMISSIVE,
     emissiveIntensity: 0.6,
     roughness: 0.85,
     metalness: 0,
@@ -428,6 +433,10 @@ export function createCartoonHand(): CartoonHand {
           synthetic.joints[JOINT_NAMES[3][part]].position,
         );
       this.update(synthetic, camera, side, deltaSeconds);
+    },
+    setColor(color) {
+      material.color.set(color ?? DEFAULT_COLOR);
+      material.emissive.set(color ?? DEFAULT_EMISSIVE);
     },
     dispose() {
       if (disposed) return;

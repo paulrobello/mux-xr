@@ -418,6 +418,48 @@ describe('standard XR hand', () => {
     hand.dispose();
   });
 
+  it('tints both hands, wrist caps and the arm, and restores the model color', async () => {
+    const hand = createStandardHand({ loader: parsedLoader() });
+    hand.setColor('#3366ff');
+    await hand.assetReady;
+    const tinted = (): THREE.MeshStandardMaterial[] => {
+      const materials: THREE.MeshStandardMaterial[] = [];
+      for (const name of [
+        'standard-hand-skin-left',
+        'standard-hand-skin-right',
+        'standard-hand-wrist-cap-left',
+        'standard-hand-wrist-cap-right',
+        'elastic-hand-arm',
+      ]) {
+        const mesh = hand.root.getObjectByName(name) as THREE.Mesh;
+        materials.push(mesh.material as THREE.MeshStandardMaterial);
+      }
+      return materials;
+    };
+    const blue = new THREE.Color('#3366ff').getHex();
+    for (const material of tinted()) {
+      expect(material.color.getHex()).toBe(blue);
+      expect(material.emissive.getHex()).toBe(blue);
+    }
+    hand.setColor(null);
+    const [skin, ...rest] = tinted();
+    expect(skin.color.getHex()).not.toBe(blue);
+    for (const material of rest) expect(material.color.getHex()).toBe(skin.color.getHex());
+    hand.dispose();
+  });
+
+  it('tints the cartoon fallback and its arm when the meshes cannot load', async () => {
+    const hand = createStandardHand({ loader: failingLoader() });
+    await hand.assetReady;
+    hand.setColor('#22aa44');
+    const arm = hand.root.getObjectByName('elastic-hand-arm') as THREE.Mesh;
+    const material = arm.material as THREE.MeshStandardMaterial;
+    expect(material.color.getHex()).toBe(0x22aa44);
+    hand.setColor(null);
+    expect(material.color.getHex()).toBe(0xff672f);
+    hand.dispose();
+  });
+
   it('falls back to the cartoon hand when the meshes cannot load', async () => {
     const hand = createStandardHand({ loader: failingLoader() });
     expect(await hand.assetReady).toBe(false);
