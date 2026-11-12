@@ -54,6 +54,7 @@ describe('widget registry', () => {
       ['agent-board', 'Agent board', [0, -0.27, -1.25]],
       ['timer', 'Timer', [0.01, 0.3, -1.25]],
       ['bell-feed', 'Bell feed', [1.05, 0.15, -1.1]],
+      ['perf-gauge', 'Performance', [-1, 0.15, -1.1]],
     ]);
     expect(widgetKinds()).toEqual([
       'digital-clock',
@@ -61,6 +62,7 @@ describe('widget registry', () => {
       'agent-board',
       'timer',
       'bell-feed',
+      'perf-gauge',
     ]);
   });
 
@@ -122,7 +124,7 @@ describe('widget registry', () => {
   it('turns only faceViewer entries toward the eye', () => {
     for (const entry of WIDGET_REGISTRY) {
       const yaw = widgetSpawnYaw(entry);
-      if (entry.kind !== 'bell-feed') {
+      if (entry.kind !== 'bell-feed' && entry.kind !== 'perf-gauge') {
         expect(yaw, entry.kind).toBe(0);
         continue;
       }

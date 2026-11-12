@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { AgentRosterRow } from '../workspace/agent-roster';
 import type { BellFeedEntry } from './bell-feed';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
+import type { PerfSample } from './perf-gauge';
 import { applyUIEnvironment } from './ui-environment';
 
 export type ClockKind = 'digital-clock' | 'analog-clock';
@@ -18,6 +19,10 @@ export interface Widget {
   setBellFeed?: (entries: readonly BellFeedEntry[]) => void;
   /** Whether a ray rests on one of the widget's controls this frame. */
   setPointed?: (pointed: boolean) => void;
+  /** Receives frame stats each time the scene's frame counter reports (about 2 Hz). */
+  setPerfSample?: (sample: PerfSample) => void;
+  /** Drops frame-time history; called when an XR session starts. */
+  resetPerf?: () => void;
 }
 
 let nextWidgetId = 1;

@@ -1,6 +1,7 @@
 import type * as THREE from 'three';
 import { createAgentBoardWidget } from './agent-board';
 import { createBellFeedWidget } from './bell-feed';
+import { createPerfGaugeWidget } from './perf-gauge';
 import { createTimerWidget } from './timer-widget';
 import { createClockWidget, type Widget } from './widgets';
 
@@ -55,6 +56,15 @@ export const WIDGET_REGISTRY = [
     spawnScale: 0.8,
     faceViewer: true,
     create: (envMap) => createBellFeedWidget(envMap),
+  },
+  {
+    kind: 'perf-gauge',
+    displayName: 'Performance',
+    // Left of the digital clock and nearer, clear of the clocks, the board and both HUD poses.
+    spawnOffset: [-1, 0.15, -1.1],
+    spawnScale: 0.9,
+    faceViewer: true,
+    create: (envMap) => createPerfGaugeWidget(envMap),
   },
 ] as const satisfies readonly WidgetEntry[];
 

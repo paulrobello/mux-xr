@@ -107,6 +107,7 @@ import { createKeyborbInput } from './keyborb-input';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
+import { countsAsFrame } from './perf-gauge';
 import { createRadialMenu, type RadialMenuAction } from './radial-menu';
 import { createStandardHand } from './standard-hand';
 import { terminalQualityAtDistance } from './terminal-lod';
@@ -384,6 +385,8 @@ type ScrollStripMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>
 
 interface XrSessionLike {
   addEventListener(type: string, listener: () => void): void;
+  readonly frameRate?: number;
+  readonly visibilityState?: string;
   end(): Promise<void>;
 }
 
@@ -684,6 +687,11 @@ function createGradientTexture(): THREE.CanvasTexture {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
+}
+
+/** Shown panes: visible and not hidden by focus mode. LOD, hit-testing and the perf gauge agree. */
+function isPanelShown(panel: TerminalPanel): boolean {
+  return panel.root.visible && !panel.root.userData.focusHidden;
 }
 
 function isControlVisible(object: THREE.Object3D): boolean {
@@ -1165,6 +1173,14 @@ export function createWorkspaceScene(
   let previousRenderTime: number | null = null;
   let lodWasPresenting = false;
   const frameCounter = createFrameCounter();
+  let perfWorstFrameMs = 0;
+  let perfWasHidden = false;
+  /** XR session start and end: drop the running worst frame and every gauge's history. */
+  const resetPerfStats = (): void => {
+    perfWorstFrameMs = 0;
+    perfWasHidden = true;
+    for (const widget of widgets.values()) widget.resetPerf?.();
+  };
   let fpsLabel: THREE.Mesh | null = null;
   let activePaneLabel: THREE.Mesh | null = null;
   let radialTargetId: string | null = null;
@@ -2298,7 +2314,7 @@ export function createWorkspaceScene(
     if (radialMenu.root.visible) roots = radialMenu.interactive ? [radialMenu.root] : [];
     else
       roots = [...panels.values()]
-        .filter((panel) => panel.root.visible && !panel.root.userData.focusHidden)
+        .filter(isPanelShown)
         .map((panel) => panel.root)
         .concat(
           inputRoot ? [inputRoot] : [],
@@ -2518,9 +2534,25 @@ export function createWorkspaceScene(
       }
     }
     const fps = frameCounter.sample(time);
+    const perfHidden =
+      document.visibilityState === 'hidden' ||
+      (activeSession?.visibilityState !== undefined && activeSession.visibilityState !== 'visible');
+    if (countsAsFrame(radialDelta * 1000, perfHidden, perfWasHidden))
+      perfWorstFrameMs = Math.max(perfWorstFrameMs, radialDelta * 1000);
+    perfWasHidden = perfHidden;
     if (fps !== null) {
       mutableState.fps = fps;
       if (fpsLabel) updateLabel(fpsLabel, `FPS ${fps}`);
+      let shownPanes = 0;
+      for (const panel of panels.values()) if (isPanelShown(panel)) shownPanes += 1;
+      const sample = {
+        fps,
+        worstFrameMs: perfWorstFrameMs,
+        shownPanes,
+        targetHz: renderer?.xr.isPresenting ? (activeSession?.frameRate ?? 72) : 60,
+      };
+      for (const widget of widgets.values()) widget.setPerfSample?.(sample);
+      perfWorstFrameMs = 0;
     }
     if (inputMode === 'terminal' && inputRoot) {
       const surface = mutableState.inputTargetId
@@ -2836,7 +2868,7 @@ export function createWorkspaceScene(
         }
         let quality: TerminalRenderQuality = 'full';
         if (renderer?.xr.isPresenting) {
-          if (!panel.root.visible || panel.root.userData.focusHidden) quality = 'hidden';
+          if (!isPanelShown(panel)) quality = 'hidden';
           else if (panel.id !== renderGazeId) {
             panel.root.getWorldPosition(fidelityPosition);
             panel.root.getWorldScale(fidelityScale);
@@ -3049,6 +3081,11 @@ export function createWorkspaceScene(
   resize();
   if (renderer) renderer.setAnimationLoop((time: number, frame?: XRFrame) => render(time, frame));
   window.addEventListener('resize', resize);
+  // A visibility change between two frames makes the interval spanning it a pause.
+  const markPerfPause = (): void => {
+    perfWasHidden = true;
+  };
+  document.addEventListener('visibilitychange', markPerfPause);
   const onWheel = (event: WheelEvent): void => {
     if (warpEdit || renderer?.xr.isPresenting || !setPointerRay(event as unknown as PointerEvent))
       return;
@@ -4973,9 +5010,7 @@ export function createWorkspaceScene(
       reach = Math.max(reach, raycaster.ray.origin.distanceTo(reachPosition) + 3 * root.scale.x);
     }
     raycaster.far = Math.min(camera.far, reach);
-    const targets = [...panels.values()]
-      .filter((panel) => panel.root.visible && !panel.root.userData.focusHidden)
-      .map((panel) => panel.root);
+    const targets = [...panels.values()].filter(isPanelShown).map((panel) => panel.root);
     if (inputRoot) targets.push(inputRoot);
     if (hudRoot) targets.push(hudRoot);
 
@@ -6385,6 +6420,8 @@ export function createWorkspaceScene(
         : { optionalFeatures: ['local-floor', 'hand-tracking'] },
     );
     activeSession = session;
+    resetPerfStats();
+    session.addEventListener('visibilitychange', markPerfPause);
     poseRestorePending = true;
     xrViewerPending = true;
     xrHeadFromFrame = false;
@@ -6440,6 +6477,7 @@ export function createWorkspaceScene(
       xrViewerPending = false;
       xrHeadFromFrame = false;
       activeSession = null;
+      resetPerfStats();
       hideInput();
       inputTransform = null;
       dragStates.clear();
@@ -6887,6 +6925,7 @@ export function createWorkspaceScene(
     paneFocus.dispose();
     window.cancelAnimationFrame(frameHandle);
     window.removeEventListener('resize', resize);
+    document.removeEventListener('visibilitychange', markPerfPause);
     canvas.removeEventListener('wheel', onWheel);
     canvas.removeEventListener('pointerdown', onPointerDown);
     canvas.removeEventListener('pointermove', onPointerMove);

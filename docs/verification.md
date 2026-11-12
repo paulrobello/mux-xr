@@ -436,6 +436,28 @@ Controller tests drive the scene: bells on two attached panes and an opted-in no
 
 Headless Chromium on Apple M4 Max (ANGLE Metal) rendered the registry layout from a seated eye at (0, 1.35, 0) through a scratch harness, forward-wide and turned toward the feed. The feed faces the eye, clears the analog clock and reads at one row size. The full checkall-ci gate passes 968 tests across 79 files. The feed was not exercised against live par-mux bells, and Quest readability remains an owner check.
 
+## Performance gauge widget (November 11, 2026)
+
+The Widgets panel registers `perf-gauge` (Performance) after the bell feed, spawned at (-1, 0.15, -1.1) and 0.9 scale and turned toward the eye (`faceViewer`). It shows `current / target fps` with a status shape (a green circle on pace, a triangle that is amber within 25% of target and coral beyond), and the shown pane count beside it. Below them is `worst (20 s)` on its own row, all at a fixed 22 mm stat font. Underneath is its 40-sample window as bars tinted by each bar's own frame time against a mid-height budget line. Shown means visible and not focus-hidden, the single `isPanelShown` predicate that terminal LOD, hand hit-testing and the ray roots also use. The scene pushes one sample each time `createFrameCounter` reports, about every 500 ms. An interval counts toward the worst frame only if it is 5 s or shorter, ends while the page and XR session are visible, and spans no `visibilitychange` event on the document or the session. A hidden tab or the Quest system menu therefore no longer reads as `worst 4800 ms`, while a real 1.5 s freeze still shows. Starting or ending an XR session clears the scene's running worst frame and the gauge history. `tests/perf-gauge.test.ts` covers the FPS and per-frame tone thresholds, the pause rule and its 5 s cap, the formatters, the ring buffer including clear, sparkline scaling, label, tone and status-shape updates, reset, the in-place bar buffer, per-bar tints that ignore the current FPS, and a disposed gauge ignoring samples. Controller tests drive real frames:
+
+- One 40 ms hitch reads `worst (20 s) 40.0 ms` with `2 panes shown`.
+- A 6,000 ms gap is skipped and a 1,500 ms freeze shows.
+- Frames while `document.visibilityState` is hidden are skipped, along with the first interval after it shows and a 700 ms interval spanning a hide-and-show event pair with no frame between.
+- With a session that emits `visibilitychange`, its `visible-blurred` 500 ms gap, the 600 ms interval after it and a 900 ms interval spanning a brief blur are all skipped. The next real 25 ms hitch reads against the session's 90 Hz target, after session start has cleared an earlier 80 ms worst, and session end clears it again.
+
+The registry spawn test (with spawn yaw) and a HUD test (both poses, eye heights 1.1 to 1.8 m) cover placement. A seated render from (0, 1.35, 0) with every registered widget at its spawn pose (`perf-gauge-seated.png`, `perf-gauge-seated-close.png`) was inspected for legibility and overlap.
+
+Frame cost was measured with `MUX_XR_PERF_GAUGE=1 make terminal-capacity-check` (6 panes, mixed workload, 8 s, 1440×1000 at device scale 2, headless `channel: 'chromium'` on ANGLE Metal / Apple M4 Max). Arms alternated baseline and gauge, three runs each. Mean render-callback CPU per frame, on the first review build (before the stat relayout and event-driven pause marking, which add no per-frame work beyond one event listener):
+
+| Arm | Run 1 | Run 2 | Run 3 | Mean |
+| --- | --- | --- | --- | --- |
+| Baseline (ms) | 2.396 | 2.522 | 2.187 | 2.368 |
+| Gauge (ms) | 2.840 | 2.297 | 2.527 | 2.555 |
+
+The gauge mean is 0.187 ms higher, inside the 0.335 ms spread between baseline runs. Run-level noise is larger than the effect: the gauge's own best run (2.297 ms) is lower than two of the three baselines. Every run had a p50 of 1.0 to 1.2 ms and a frame-pacing p95 of 16.8 ms. Its p95 ranged from 3.7 to 8.1 ms with no pattern by arm. The 1-minute load was 9.02 to 12.17 before and after every run. In the gauge runs it read `58 / 72 fps`, `worst (20 s) 33.4 ms` and `6 panes shown`. The pre-review build measured 2.177 ms baseline against 2.244 ms with the gauge, at load 9.87 to 13.88. Its worst-frame readout then showed 250 to 350 ms of setup stalls, which the XR-session reset now clears.
+
+`MUX_XR_PRIVATE_TEST=1 make perf-gauge-check` (with `MUX_XR_BASE_URL` and `MUX_XR_TEST_ROOT`) times the 2 Hz update path with real Troika typesetting on the same GPU, and it fails when the 1-minute load before or after exceeds 15. Batches of 20 are used because `performance.now()` is coarsened to 100 µs. Over 1,000 updates on the final layout at load 10.66 before and 13.09 after, a sample that changes every readout and all 40 bar tints took a mean of 41.5 µs (p95 65 µs) until typesetting resolved. A sample with unchanged text took 1.3 µs, and the gauge-only scene render took 35.9 µs. At 2 Hz the worst case is about 83 µs of main-thread work per second, under 0.005 ms per 60 Hz frame. The script also writes `perf-gauge-good.png`, `perf-gauge-warn.png` and `perf-gauge-bad.png`, which were inspected. These are desktop native-GPU diagnostics. They are not Quest frame-time measurements.
+
 ## Agent roster
 
 The roster comes from core `AgentRoster` (sent on every connect, including `/ws?metadata=1`) and `AgentStateChanged` deltas, which the streamer has pushed in mux mode since core 0.58. A read-only probe of the LAN streamer (0.78.1, against the real default daemon) received `AgentRoster` entries such as pane `228` in workspace `+4`, and the tree listed `%228` in workspace `+4`, which confirms the `%N` join. No input, resize or state change was sent to that daemon.

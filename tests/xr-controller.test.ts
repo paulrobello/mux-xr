@@ -3146,6 +3146,29 @@ describe('native XR controller event routing', () => {
       }
     });
 
+    it('keeps the performance gauge clear of the HUD at both poses and every eye height', () => {
+      const { workspace, container } = fixture();
+      const roots = spawnAll(workspace);
+      const gauge = roots[WIDGET_REGISTRY.findIndex(({ kind }) => kind === 'perf-gauge')];
+      if (!gauge) throw new Error('Performance gauge missing');
+      const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+      if (!hud) throw new Error('HUD missing');
+      for (const eyeHeight of [1.1, 1.35, 1.52, 1.8])
+        for (const offsetY of [0.78 - eyeHeight, -0.65]) {
+          hud.position.set(EYE.x, EYE.y + offsetY, EYE.z - 1.35);
+          hud.quaternion.identity();
+          workspace.scene.updateMatrixWorld(true);
+          for (const child of hud.children)
+            if (child.visible)
+              expect(
+                overlaps(gauge, child),
+                `${String(child.name)} at eye ${eyeHeight}, HUD ${offsetY.toFixed(2)}`,
+              ).toBe(false);
+        }
+      workspace.dispose();
+      container.remove();
+    });
+
     it('sends a ray through the board to the Reload button behind it', () => {
       const { workspace, actions, container } = fixture();
       spawnAll(workspace);
@@ -5783,6 +5806,104 @@ describe('native XR controller event routing', () => {
     expect(workspace.scene.getObjectByName('xr-fps-counter')?.userData.labelText).toBe('FPS 60');
     workspace.dispose();
     container.remove();
+  });
+
+  describe('performance gauge feed', () => {
+    const open = () => {
+      const { workspace, container } = fixture();
+      workspace.showInput('widgets');
+      hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'perf-gauge' });
+      const label = (name: string) => workspace.scene.getObjectByName(name)?.userData.labelText;
+      return { workspace, container, label };
+    };
+    // Frames at 60 Hz with one injected interval at the given frame.
+    const run = (start: number, gapAt: number, gapMs: number, frames = 60): number => {
+      let time = start;
+      for (let frame = 0; frame <= frames; frame += 1) {
+        time += frame === gapAt ? gapMs : 1000 / 60;
+        fakeXR.frame?.(time);
+      }
+      return time;
+    };
+
+    // The test XR fake presents without a session frame rate, so the target is the 72 Hz fallback.
+    it('feeds the scene FPS against its target, the worst frame and the shown pane count', () => {
+      const { workspace, container, label } = open();
+      run(0, 20, 40);
+      expect(label('perf-gauge-fps')).toBe(`${workspace.state.fps} / 72 fps`);
+      expect(label('perf-gauge-worst')).toBe('worst (20 s) 40.0 ms');
+      expect(label('perf-gauge-panes')).toBe('2 panes shown');
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('shows a real freeze over a second but skips unreported pauses past 5 s', () => {
+      const { workspace, container, label } = open();
+      const time = run(0, 20, 6000);
+      expect(label('perf-gauge-worst')).toBe('worst (20 s) 16.7 ms');
+      run(time, 20, 1500);
+      expect(label('perf-gauge-worst')).toBe('worst (20 s) 1500 ms');
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('skips intervals while the page is hidden and across a visibilitychange', () => {
+      const { workspace, container, label } = open();
+      const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+      document.dispatchEvent(new Event('visibilitychange'));
+      let time = run(0, 5, 300, 10);
+      visibility.mockReturnValue('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+      // The first interval after the page shows again spans the hidden time; skip it too.
+      time = run(time, 0, 400);
+      expect(label('perf-gauge-worst')).toBe('worst (20 s) 16.7 ms');
+      // A hide and show with no frame between them still marks the spanning interval a pause.
+      document.dispatchEvent(new Event('visibilitychange'));
+      document.dispatchEvent(new Event('visibilitychange'));
+      run(time, 0, 700);
+      expect(label('perf-gauge-worst')).toBe('worst (20 s) 16.7 ms');
+      visibility.mockRestore();
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('skips XR session blur and resets the gauge on session start and end', async () => {
+      const { workspace, container, label } = open();
+      run(0, 20, 80);
+      expect(label('perf-gauge-worst')).toBe('worst (20 s) 80.0 ms');
+      const listeners = new Map<string, Array<() => void>>();
+      const emit = (type: string) => {
+        for (const listener of listeners.get(type) ?? []) listener();
+      };
+      const session = {
+        visibilityState: 'visible',
+        frameRate: 90,
+        addEventListener: (type: string, listener: () => void) =>
+          listeners.set(type, [...(listeners.get(type) ?? []), listener]),
+        end: async () => emit('end'),
+      };
+      vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+      await workspace.enterXR('vr');
+      expect(label('perf-gauge-worst')).toBe('worst (20 s) -- ms');
+      session.visibilityState = 'visible-blurred';
+      emit('visibilitychange');
+      let time = run(10_000, 10, 500, 20);
+      session.visibilityState = 'visible';
+      emit('visibilitychange');
+      time = run(time, 0, 600);
+      // A blur too brief to span a frame is reported only by its events.
+      emit('visibilitychange');
+      emit('visibilitychange');
+      time = run(time, 0, 900);
+      run(time, 30, 25);
+      expect(label('perf-gauge-worst')).toBe('worst (20 s) 25.0 ms');
+      expect(label('perf-gauge-fps')).toMatch(/ \/ 90 fps$/);
+      await session.end();
+      expect(label('perf-gauge-worst')).toBe('worst (20 s) -- ms');
+      vi.unstubAllGlobals();
+      workspace.dispose();
+      container.remove();
+    });
   });
 
   it('accumulates controller-local depth while grip trigger is held and preserves release pose', () => {

@@ -30,6 +30,8 @@ const GAZE_SWEEP = process.env.MUX_XR_GAZE_SWEEP === '1';
 // Damage arm: attach the rows each chunk changes, as a core 0.77+ mux streamer does.
 const DAMAGE = process.env.MUX_XR_DAMAGE === '1';
 const WORKLOAD = process.env.MUX_XR_WORKLOAD ?? 'mixed';
+// Gauge arm: restore the performance gauge widget before load, to measure its frame cost.
+const PERF_GAUGE = process.env.MUX_XR_PERF_GAUGE === '1';
 const damageGenerations = new Map<string, bigint>();
 const PANE_IDS = Array.from({ length: 18 }, (_, index) => `%${index + 1}`);
 const COLS = 149;
@@ -254,6 +256,14 @@ async function installSocketFixture(page: Page, state: WireState, count: number)
 }
 
 async function installInstrumentation(page: Page): Promise<void> {
+  if (PERF_GAUGE)
+    await page.addInitScript(() => {
+      const pose = { position: [-1, 1.75, -1], quaternion: [0, 0, 0, 1], scale: 0.9 };
+      localStorage.setItem(
+        'mux-xr:widget-poses:v2',
+        JSON.stringify({ version: 2, poses: { 'perf-gauge': pose } }),
+      );
+    });
   await page.addInitScript(() => {
     const w = window as unknown as {
       __capacityMetrics: BrowserMetrics;
@@ -706,8 +716,19 @@ async function measure(
     `far pane was not promoted to full quality: ${JSON.stringify(farPane)}`,
   );
   assert(farPane.nonBlackPixels, 'far pane center sample remained black');
+  const perfGauge = await page.evaluate(() => {
+    const scene = (window as unknown as FixtureWindow).__questScene;
+    return {
+      present: Boolean(scene.getObjectByName('perf-gauge-fps')),
+      fps: scene.getObjectByName('perf-gauge-fps')?.userData.labelText ?? null,
+      worst: scene.getObjectByName('perf-gauge-worst')?.userData.labelText ?? null,
+      panes: scene.getObjectByName('perf-gauge-panes')?.userData.labelText ?? null,
+    };
+  });
+  assert(perfGauge.present === PERF_GAUGE, `perf gauge arm mismatch: ${JSON.stringify(perfGauge)}`);
   return {
     count,
+    perfGauge,
     painterWindow,
     durationMs: Date.now() - started,
     hostLoad: { before, after, valid: before[0] <= 15 && after[0] <= 15 },
@@ -728,6 +749,7 @@ async function measure(
     ),
     metrics: {
       ...metrics,
+      frameCpuMeanMs: cpu.reduce((sum, value) => sum + value, 0) / Math.max(1, cpu.length),
       frameCpuP50Ms: percentile(cpu, 0.5),
       frameCpuP95Ms: percentile(cpu, 0.95),
       pacingP95Ms: percentile(times, 0.95),
@@ -804,6 +826,7 @@ async function main(): Promise<void> {
       testRoot: TEST_ROOT,
       background: BACKGROUND,
       damage: DAMAGE,
+      perfGauge: PERF_GAUGE,
       workloadKind: WORKLOAD,
       counts: COUNTS,
       viewport: { width: 1440, height: 1000, deviceScaleFactor: 2 },
@@ -820,7 +843,7 @@ async function main(): Promise<void> {
       },
       results,
     };
-    const arm = `${BASELINE ? 'baseline' : 'candidate'}-${WORKLOAD}${DAMAGE ? '-damage' : ''}`;
+    const arm = `${BASELINE ? 'baseline' : 'candidate'}-${WORKLOAD}${DAMAGE ? '-damage' : ''}${PERF_GAUGE ? '-perf-gauge' : ''}`;
     const path = join(evidence, `terminal-capacity-${arm}.json`);
     await writeFile(path, JSON.stringify(report, null, 2));
     const invalid = results.find(
