@@ -103,10 +103,14 @@ export function prepareQuestFixture(testRoot: string): void {
   const entryPath = join(root, 'xr-entry.ts');
   const mainCopyPath = join(root, 'quest-main.ts');
   writeFileSync(shimPath, threeShimSource());
-  const sceneSource = readFileSync(sceneSourcePath, 'utf8').replace(
-    /from\s+(["'])three\1/,
-    `from ${JSON.stringify(shimPath)}`,
-  );
+  const sceneSource = readFileSync(sceneSourcePath, 'utf8')
+    .replace(/from\s+(["'])three\1/, `from ${JSON.stringify(shimPath)}`)
+    // The copy lives outside the repo, so bare three subpath imports cannot resolve from it.
+    .replace(
+      /from\s+(["'])(three\/[^"']+)\1/g,
+      (_match, _quote: string, specifier: string) =>
+        `from ${JSON.stringify(join(repoRoot, 'node_modules', specifier))}`,
+    );
   writeFileSync(sceneCopyPath, absoluteImport(sceneSource, sceneSourcePath, new Map()));
   writeFileSync(
     entryPath,
