@@ -76,6 +76,8 @@ const attached = attachDictationServer(server, {
           : `Clipboard refused: ${event.code}`,
       ),
   },
+  // Refusal codes only; successful stats requests are never logged.
+  hostStats: { onEvent: (event) => console.log(`Host stats refused: ${event.code}`) },
   ffmpegPath: parsed.get('--ffmpeg') ?? '/opt/homebrew/bin/ffmpeg',
   whisperPath: parsed.get('--whisper') ?? '/opt/homebrew/bin/whisper-cli',
 });

@@ -1,6 +1,7 @@
 import type * as THREE from 'three';
 import { createAgentBoardWidget } from './agent-board';
 import { createBellFeedWidget } from './bell-feed';
+import { createHostLoadWidget } from './host-load';
 import { createPerfGaugeWidget } from './perf-gauge';
 import { createPictureFrameWidget } from './picture-frame';
 import { createTimerWidget } from './timer-widget';
@@ -68,6 +69,15 @@ export const WIDGET_REGISTRY = [
     spawnScale: 0.9,
     faceViewer: true,
     create: (envMap) => createPerfGaugeWidget(envMap),
+  },
+  {
+    kind: 'host-load',
+    displayName: 'Host load',
+    // Above and behind the perf gauge, below the upper picture row; the only clear spot this size.
+    spawnOffset: [-1.15, 0.53, -1.3],
+    spawnScale: 0.7,
+    faceViewer: true,
+    create: (envMap) => createHostLoadWidget(envMap),
   },
   {
     kind: 'picture',

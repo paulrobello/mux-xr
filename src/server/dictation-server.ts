@@ -10,8 +10,14 @@ import {
   CLIPBOARD_PATH,
   type ClipboardServerOptions,
   createClipboardRoute,
+  createFailureLimiter,
 } from './clipboard-server';
 import type { DictationTelemetry, TranscriptionOutcome } from './dictation-telemetry';
+import {
+  createHostStatsRoute,
+  HOST_STATS_PATH,
+  type HostStatsRouteOptions,
+} from './host-stats-server';
 
 const execFile = promisify(execFileCallback);
 const MAX_PAYLOAD = 8 * 1024 * 1024;
@@ -29,6 +35,16 @@ export type DictationServerOptions = {
   timeoutMs?: number;
   /** Clipboard sync on `/clipboard`; without it the route answers that sync is disabled. */
   clipboard?: Omit<ClipboardServerOptions, 'allowedOrigins'>;
+  /** Read-only `/host-stats`, gated by the clipboard pairing secret. */
+  hostStats?: Pick<
+    HostStatsRouteOptions,
+    | 'sampler'
+    | 'requestLimiter'
+    | 'authTimeoutMs'
+    | 'sessionTimeoutMs'
+    | 'maxConnectionsPerClient'
+    | 'onEvent'
+  >;
   telemetry?: Pick<
     DictationTelemetry,
     'connected' | 'disconnected' | 'rejected' | 'beginTranscription'
@@ -121,9 +137,21 @@ export const attachDictationServer = (
   let activeTask: Promise<void> | null = null;
   const sockets = new Set<WebSocket>();
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
+  const authLimiter = options.clipboard?.limiter ?? createFailureLimiter(options.clipboard?.now);
+  const loadSecret =
+    options.clipboard?.loadSecret ??
+    (() => ({ enabled: false, reason: 'no --clipboard-secret-file configured' }) as const);
   const clipboardRoute = createClipboardRoute({
-    loadSecret: () => ({ enabled: false, reason: 'no --clipboard-secret-file configured' }),
     ...options.clipboard,
+    loadSecret,
+    limiter: authLimiter,
+    allowedOrigins: options.allowedOrigins,
+  });
+  const hostStatsRoute = createHostStatsRoute({
+    ...options.hostStats,
+    loadSecret,
+    limiter: authLimiter,
+    now: options.clipboard?.now,
     allowedOrigins: options.allowedOrigins,
   });
 
@@ -143,6 +171,10 @@ export const attachDictationServer = (
     }
     if (requestUrl.pathname === CLIPBOARD_PATH && !requestUrl.search) {
       clipboardRoute.handleUpgrade(request, socket, head);
+      return;
+    }
+    if (requestUrl.pathname === HOST_STATS_PATH && !requestUrl.search) {
+      hostStatsRoute.handleUpgrade(request, socket, head);
       return;
     }
     const origin = request.headers.origin;
@@ -270,6 +302,7 @@ export const attachDictationServer = (
       }
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await clipboardRoute.close();
+      await hostStatsRoute.close();
     },
   };
 };
