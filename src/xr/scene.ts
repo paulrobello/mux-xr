@@ -106,7 +106,13 @@ import {
   setKeyborbPressed,
 } from './keyborb';
 import { createKeyborbInput } from './keyborb-input';
-import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
+import { createLabelBatcher, labelBatchTransparentSort } from './label-batches';
+import {
+  createScalableLabel,
+  disposeScalableLabel,
+  liveScalableLabels,
+  updateScalableLabel,
+} from './labels';
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
 import { countsAsFrame } from './perf-gauge';
@@ -855,10 +861,12 @@ export function createWorkspaceScene(
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.xr.enabled = true;
+    renderer.setTransparentSort(labelBatchTransparentSort);
   } catch (error) {
     rendererError = error instanceof Error ? error.message : 'WebGL renderer initialization failed';
   }
   const uiEnvironment = createUIEnvironment(renderer);
+  const labelBatcher = createLabelBatcher(scene, liveScalableLabels);
   const ambient = new THREE.AmbientLight(0x9db5c8, 0.7);
   const key = new THREE.DirectionalLight(0xb8dfff, 1.2);
   key.position.set(-2, 4, 4);
@@ -7783,6 +7791,7 @@ export function createWorkspaceScene(
     canvas.removeEventListener('pointercancel', onPointerUp);
     canvas.removeEventListener('lostpointercapture', onPointerUp);
     renderer?.setAnimationLoop(null);
+    labelBatcher.dispose();
     for (const id of [...panels.keys()]) removeTerminal(id);
     radialMenu.dispose();
     for (const kind of [...widgets.keys()]) removeWidget(kind, false);

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { BatchedText, Text, type TroikaTextMaterial } from 'troika-three-text';
+import type { Text } from 'troika-three-text';
 import { createScalableLabel } from './labels';
+import { CachedTextBatch } from './text-batch';
 
 const SHELL_VERTEX = `
   #ifdef KEYBORB_INSTANCED
@@ -170,45 +171,8 @@ export function createKeyborbShells(orbs: readonly THREE.Mesh[]): KeyborbShells 
   return { mesh, update };
 }
 
-/**
- * A troika batch that rebuilds its per-glyph data only after a glyph moved or the batch repacked.
- * Stock BatchedText rebuilds it on every render, twice a frame in XR, and because it compares
- * float64 values with its float32 store it re-uploads the data texture each time.
- * Member colour, opacity, stroke, outline, clip and curve go only into that data, never through a
- * sync, so code that changes them on a member must bump `revision`.
- */
-export class KeyborbGlyphBatch extends BatchedText {
-  /** Bumped whenever member data must be rebuilt. */
-  revision = 0;
-  private readonly prepared = new WeakMap<TroikaTextMaterial, number>();
-  private boundsRevision = -1;
-
-  constructor() {
-    super();
-    this.addEventListener('synccomplete', () => {
-      this.revision++;
-    });
-  }
-
-  override updateBounds(): void {
-    if (this.boundsRevision === this.revision) return;
-    this.boundsRevision = this.revision;
-    super.updateBounds();
-  }
-
-  override _prepareForRender(material: TroikaTextMaterial): void {
-    const texture = this._dataTextures[material.isTextOutlineMaterial ? 'outline' : 'main'];
-    if (texture && this.prepared.get(material) === this.revision) {
-      // The outline material shares the main material's uniforms, so the flag is set per pass.
-      material.uniforms.uTroikaIsOutline.value = Boolean(material.isTextOutlineMaterial);
-      material.setMatrixTexture(texture);
-      Text.prototype._prepareForRender.call(this, material);
-      return;
-    }
-    super._prepareForRender(material);
-    this.prepared.set(material, this.revision);
-  }
-}
+/** The Keyborb's glyph batch: a CachedTextBatch whose member matrices the Keyborb writes. */
+export class KeyborbGlyphBatch extends CachedTextBatch {}
 
 export interface KeyborbGlyphs {
   batch: KeyborbGlyphBatch;

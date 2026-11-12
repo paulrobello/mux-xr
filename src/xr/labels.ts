@@ -15,6 +15,13 @@ const LABEL_GLYPH_WIDTH_FACTOR = 0.55;
 // The LAN streamer's policy forbids blob workers. Typesetting must stay on the main thread.
 configureTextBuilder({ defaultFontURL: LABEL_FONT_URL, useWorker: false });
 
+const liveLabels = new Set<THREE.Mesh>();
+
+/** Every created label not yet disposed, for the per-scene text batcher. */
+export function liveScalableLabels(): ReadonlySet<THREE.Mesh> {
+  return liveLabels;
+}
+
 export interface ScalableLabelOptions {
   wrap?: boolean;
   background?: string;
@@ -40,6 +47,8 @@ interface LabelUserData {
   labelResourcesFinalized: boolean;
   labelSyncPromise: Promise<void>;
   disposeLabel: () => void;
+  /** Set by the text batcher while it draws this label's text. */
+  labelBatchRelease?: () => void;
 }
 
 type LabelRoot = THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> & {
@@ -238,6 +247,8 @@ export function createScalableLabel(
   userData.disposeLabel = () => {
     if (userData.labelDisposed) return;
     userData.labelDisposed = true;
+    liveLabels.delete(root);
+    userData.labelBatchRelease?.();
     textMesh.visible = false;
     root.remove(textMesh);
     texture.dispose();
@@ -252,6 +263,7 @@ export function createScalableLabel(
     };
     userData.labelSyncPromise.then(finalize, finalize);
   };
+  liveLabels.add(root);
   return root;
 }
 

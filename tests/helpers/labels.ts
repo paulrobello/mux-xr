@@ -23,3 +23,7 @@ export function updateScalableLabel(root: THREE.Mesh, label: string): void {
 export function disposeScalableLabel(root: THREE.Object3D): void {
   root.userData.disposeLabel?.();
 }
+
+export function liveScalableLabels(): ReadonlySet<THREE.Mesh> {
+  return new Set();
+}
