@@ -4,6 +4,8 @@ import { type CartoonHand, createCartoonHand } from './cartoon-hand';
 import type { HandContactProbe } from './hand-contact';
 import controllerPoses from './standard-hand-controller-poses.json';
 
+const baseUpdateMatrixWorld = THREE.Object3D.prototype.updateMatrixWorld;
+
 type HandSide = 'left' | 'right';
 type TrackedHand = THREE.Group & { joints?: Record<string, THREE.Object3D | undefined> };
 
@@ -68,6 +70,9 @@ interface SideModel {
   root: THREE.Object3D;
   mesh: THREE.SkinnedMesh;
   bones: Map<string, THREE.Bone>;
+  /** Every node under the root, parents before children. */
+  order: THREE.Object3D[];
+  boneNames: Map<THREE.Object3D, string>;
   probeVertices: number[];
   probes: HandContactProbe[];
   probesStale: boolean;
@@ -324,7 +329,23 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
       probes.push({ point: new THREE.Vector3(), radius: 0.012 });
     }
     scene.visible = false;
-    return { root: scene, mesh, bones, probeVertices, probes, probesStale: true };
+    const order: THREE.Object3D[] = [];
+    scene.traverse((node) => {
+      if (node !== scene) order.push(node);
+    });
+    const boneNames = new Map<THREE.Object3D, string>(
+      [...bones].map(([name, bone]) => [bone, name]),
+    );
+    return {
+      root: scene,
+      mesh,
+      bones,
+      order,
+      boneNames,
+      probeVertices,
+      probes,
+      probesStale: true,
+    };
   };
 
   const assetReady = Promise.allSettled(
@@ -413,18 +434,30 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
       return;
     }
     model.root.updateWorldMatrix(true, false);
-    for (const [name, bone] of model.bones) {
-      const matrix = jointMatrix(tracked, name);
-      if (!matrix || !bone.parent) continue;
-      bone.parent.updateWorldMatrix(true, false);
-      parentInverse.copy(bone.parent.matrixWorld).invert();
-      jointWorld.multiplyMatrices(parentInverse, matrix);
-      jointWorld.decompose(bone.position, bone.quaternion, bone.scale);
+    // Parents come first, so each bone is posed against its parent's final world matrix and one
+    // pass leaves every world matrix current, as a per-bone ancestor update did.
+    for (const node of model.order) {
+      const parent = node.parent as THREE.Object3D;
+      const name = model.boneNames.get(node);
+      const matrix = name === undefined ? undefined : jointMatrix(tracked, name);
+      if (matrix) {
+        parentInverse.copy(parent.matrixWorld).invert();
+        jointWorld.multiplyMatrices(parentInverse, matrix);
+        jointWorld.decompose(node.position, node.quaternion, node.scale);
+      }
+      if (node.updateMatrixWorld !== baseUpdateMatrixWorld) {
+        // SkinnedMesh refreshes its bind inverse in its override.
+        node.updateMatrixWorld(true);
+        continue;
+      }
+      if (node.matrixAutoUpdate) node.updateMatrix();
+      if (node.matrixWorldAutoUpdate)
+        node.matrixWorld.multiplyMatrices(parent.matrixWorld, node.matrix);
+      node.matrixWorldNeedsUpdate = false;
     }
-    model.root.updateMatrixWorld(true);
     model.mesh.skeleton.update();
     const bonePosition = (name: string, target: THREE.Vector3): THREE.Vector3 =>
-      (model.bones.get(name) as THREE.Bone).getWorldPosition(target);
+      target.setFromMatrixPosition((model.bones.get(name) as THREE.Bone).matrixWorld);
     const userData = fallback.root.userData;
     // An untracked joint's bone keeps its last placement, so its tip keeps the cartoon's value.
     for (const [key, name] of TIP_JOINTS)
