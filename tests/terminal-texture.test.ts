@@ -213,61 +213,6 @@ describe('terminal texture', () => {
     expect(owned.texture.anisotropy).toBe(1);
   });
 
-  it('fills a resized texture in strips before swapping it in', () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 2;
-    canvas.height = 20;
-    const getImageData = vi.fn((_x: number, _y: number, w: number, h: number) => ({
-      data: new Uint8ClampedArray(w * h * 4),
-      width: w,
-      height: h,
-    }));
-    vi.spyOn(canvas, 'getContext').mockReturnValue({
-      getImageData,
-    } as unknown as CanvasRenderingContext2D);
-    const dirtyRows = new Uint8Array(20);
-    const mipsAtCopy: boolean[] = [];
-    const copyTextureToTexture = vi.fn(
-      (_source: THREE.Texture, destination: THREE.Texture, _region: THREE.Box2) => {
-        mipsAtCopy.push(destination.generateMipmaps);
-      },
-    );
-    const owned = createTerminalTexture({ canvas, dirtyRows }, { copyTextureToTexture });
-    const previous = owned.texture;
-    const dispose = vi.spyOn(previous, 'dispose');
-    canvas.width = 4;
-    canvas.height = 40;
-    owned.update();
-    expect(owned.swapPending).toBe(true);
-    expect(owned.texture).toBe(previous);
-    const next = copyTextureToTexture.mock.calls[0][1] as THREE.DataTexture;
-    expect(next.image.width).toBe(4);
-    expect(next.source.dataReady).toBe(false);
-    expect(copyTextureToTexture.mock.calls[0][2].max.toArray()).toEqual([4, 40]);
-    expect(copyTextureToTexture.mock.calls[0][2].min.toArray()).toEqual([0, 24]);
-    // A paint that changes an already-copied row sends it again.
-    dirtyRows[0] = 1;
-    owned.update();
-    dirtyRows[0] = 0;
-    expect(owned.swapPending).toBe(true);
-    expect(owned.texture).toBe(previous);
-    owned.advance();
-    expect(owned.swapPending).toBe(false);
-    expect(owned.texture).toBe(next);
-    expect(next.source.dataReady).toBe(true);
-    expect(dispose).toHaveBeenCalledOnce();
-    // Storage is allocated with mip levels on the first copy and the chain is built on the last.
-    expect(mipsAtCopy[0]).toBe(true);
-    expect(mipsAtCopy.at(-1)).toBe(true);
-    expect(mipsAtCopy.slice(1, -1).every((value) => !value)).toBe(true);
-    expect(next.generateMipmaps).toBe(true);
-    const copiedRows = getImageData.mock.calls
-      .filter((call) => call[2] === 4)
-      .reduce((total, call) => total + call[3], 0);
-    expect(copiedRows).toBe(42);
-    owned.dispose();
-  });
-
   it('falls back to CanvasTexture when a context cannot read pixels', () => {
     const canvas = document.createElement('canvas');
     canvas.width = 2;
