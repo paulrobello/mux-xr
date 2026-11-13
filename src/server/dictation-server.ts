@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import type { Server } from 'node:http';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -33,6 +33,7 @@ import {
   REPO_STATUS_PATH,
   type RepoStatusRouteOptions,
 } from './repo-status-server';
+import { createToastHub, TOASTS_PATH, type ToastHubOptions } from './toast-server';
 import { createWeatherRoute, WEATHER_PATH, type WeatherRouteOptions } from './weather-server';
 
 const execFile = promisify(execFileCallback);
@@ -87,6 +88,11 @@ export type DictationServerOptions = {
    * Service. It only reaches those fixed hosts, so the clipboard pairing secret alone gates it.
    */
   weather?: Omit<WeatherRouteOptions, 'allowedOrigins' | 'loadSecret'>;
+  /**
+   * Toasts: senders POST `/toast` with the pairing secret as a bearer token, and paired headsets
+   * receive them on `/toasts`. Only this Mac may send unless `allowRemoteSenders`.
+   */
+  toasts?: Pick<ToastHubOptions, 'allowRemoteSenders' | 'onEvent' | 'pingIntervalMs' | 'makeId'>;
   telemetry?: Pick<
     DictationTelemetry,
     'connected' | 'disconnected' | 'rejected' | 'beginTranscription'
@@ -154,7 +160,11 @@ const sendJson = (socket: WebSocket, message: Record<string, string>): void => {
   if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
 };
 
-export type AttachedDictationServer = { close: () => Promise<void> };
+export type AttachedDictationServer = {
+  /** Answers plain HTTP routes it owns (`/toast`); false leaves the request to the caller. */
+  handleRequest: (request: IncomingMessage, response: ServerResponse) => boolean;
+  close: () => Promise<void>;
+};
 
 export const attachDictationServer = (
   server: Server,
@@ -219,6 +229,13 @@ export const attachDictationServer = (
     now: options.weather?.now ?? options.clipboard?.now,
     allowedOrigins: options.allowedOrigins,
   });
+  const toastHub = createToastHub({
+    ...options.toasts,
+    loadSecret,
+    limiter: authLimiter,
+    now: options.clipboard?.now,
+    allowedOrigins: options.allowedOrigins,
+  });
   const pictureDepthRoute = createPictureDepthRoute({
     ...options.pictureDepth,
     loadSecret: options.pictureDepth?.enabled
@@ -264,6 +281,10 @@ export const attachDictationServer = (
     }
     if (requestUrl.pathname === PICTURE_DEPTH_PATH && !requestUrl.search) {
       pictureDepthRoute.handleUpgrade(request, socket, head);
+      return;
+    }
+    if (requestUrl.pathname === TOASTS_PATH && !requestUrl.search) {
+      toastHub.handleUpgrade(request, socket, head);
       return;
     }
     const origin = request.headers.origin;
@@ -382,6 +403,7 @@ export const attachDictationServer = (
   });
 
   return {
+    handleRequest: toastHub.handleRequest,
     close: async () => {
       server.off('upgrade', handleUpgrade);
       activeJob?.controller.abort(new Error('Server stopping.'));
@@ -396,6 +418,7 @@ export const attachDictationServer = (
       await pictureFetchRoute.close();
       await pictureDepthRoute.close();
       await weatherRoute.close();
+      await toastHub.close();
     },
   };
 };

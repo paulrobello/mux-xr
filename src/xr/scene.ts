@@ -40,6 +40,7 @@ import {
 } from '../terminal/filtering';
 import { paneHeading, processBadge } from '../terminal/lifecycle';
 import { terminalKeyLabel } from '../terminal/protocol';
+import type { ToastEnvelope } from '../toast-contract';
 import {
   type AgentRosterLayout,
   type AgentRosterRow,
@@ -137,6 +138,7 @@ import {
   liveScalableLabels,
   updateScalableLabel,
 } from './labels';
+import { createMessageToastLayer } from './message-toasts';
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
 import { countsAsFrame } from './perf-gauge';
@@ -350,6 +352,8 @@ export interface WorkspaceScene {
   exitXR(): Promise<void>;
   setUpdateAvailable(available: boolean): void;
   setNotice(message: string | null, options?: NoticeOptions): void;
+  /** A toast an outside program posted through the host service, or its dismissal. */
+  receiveToast(envelope: ToastEnvelope): void;
   /** Last physical-keyboard key shown in the HUD; null hides it. */
   setKeyIndicator(text: string | null): void;
   /** True while an in-scene text field is taking input. */
@@ -852,6 +856,8 @@ export function createWorkspaceScene(
   actions: WorkspaceActions,
   options: {
     feedback?: UIFeedback;
+    /** The user dismissed an outside-program toast; the host should clear it on every headset. */
+    onToastDismissed?: (id: string) => void;
     /** A picture frame was closed by the user; its stored image should go. */
     onPictureClosed?: (id: string) => void;
     /** In-XR picture picking; without it the frame's Enter URL and Recent actions do nothing. */
@@ -1024,7 +1030,13 @@ export function createWorkspaceScene(
   const hierarchyTouch = createHierarchyTouch();
   const keyborbFlashes = new Map<number, number>();
   let keyborbHighlighted = false;
-  const priorityHandActions = new Set(['wristMenu', 'exit', 'reloadUpdate', 'dismissNotice']);
+  const priorityHandActions = new Set([
+    'wristMenu',
+    'exit',
+    'reloadUpdate',
+    'dismissNotice',
+    'dismissToast',
+  ]);
   const contactSamples = new Map<THREE.Group, HandContactSample>();
   const contactGripArmed = new Set<THREE.Group>();
   const pokeSources = new Set<THREE.Group>();
@@ -1426,6 +1438,8 @@ export function createWorkspaceScene(
   let latestAgentRoster: readonly AgentRosterRow[] = [];
   // Scene-owned so bells and notices raised while the feed widget is closed show when it opens.
   const bellFeed = createBellFeedStore();
+  const messageToasts = createMessageToastLayer();
+  scene.add(messageToasts.root);
   // Reused every frame: widgets whose meshes a controller ray hit.
   const pointedWidgets = new Set<Widget>();
   bellFeed.subscribe(() => {
@@ -2737,6 +2751,14 @@ export function createWorkspaceScene(
     }
     for (const [key, until] of pressUntil) if (time >= until) pressUntil.delete(key);
     if (mutableState.toast && time >= toastDeadline) showToast(null);
+    messageToasts.update(performance.now(), deltaSeconds, {
+      camera: trackedHead(),
+      hud: hudRoot,
+      pane: (paneId) => {
+        const panel = panels.get(paneId ?? mutableState.selectedTerminalId ?? '');
+        return panel && isPanelShown(panel) ? { object: panel.root, top: panel.height / 2 } : null;
+      },
+    });
     paneFocus.update(deltaSeconds);
     radialMenu.update(radialDelta);
     if (poseRestorePending && renderer?.xr.isPresenting) {
@@ -5424,6 +5446,16 @@ export function createWorkspaceScene(
     if (updateNotice) updateNotice.visible = available && Boolean(renderer?.xr.isPresenting);
     notify();
   };
+  const receiveToast = (envelope: ToastEnvelope): void => {
+    if (disposed || !messageToasts.apply(envelope, performance.now())) return;
+    // A replay after a reconnect was already announced when it first arrived.
+    if (envelope.type !== 'toast' || envelope.replay) return;
+    const { toast } = envelope;
+    feedback.play(toast.level === 'error' ? 'error' : toast.level === 'warn' ? 'armed' : 'select');
+    // Recorded in the feed too, so a warning or error is not lost if the card times out unseen.
+    if (toast.level === 'warn' || toast.level === 'error')
+      bellFeed.pushNotice(toast.title ? `${toast.title}: ${toast.message}` : toast.message);
+  };
   const setNotice = (message: string | null, options: NoticeOptions = {}): void => {
     if (message && options.feed) bellFeed.pushNotice(message);
     if (mutableState.notice === message) return;
@@ -5814,6 +5846,11 @@ export function createWorkspaceScene(
     }
     if (action === 'dismissNotice') {
       setNotice(null);
+      return true;
+    }
+    if (action === 'dismissToast') {
+      const id = hit.userData.toastId;
+      if (typeof id === 'string' && messageToasts.dismiss(id)) options.onToastDismissed?.(id);
       return true;
     }
     if (action === 'openInput') {
@@ -6222,6 +6259,7 @@ export function createWorkspaceScene(
     const targets = [...panels.values()].filter(isPanelShown).map((panel) => panel.root);
     if (inputRoot) targets.push(inputRoot);
     if (hudRoot) targets.push(hudRoot);
+    targets.push(messageToasts.root);
 
     for (const widget of widgets.values()) targets.push(widget.root);
     if (radialMenu.root.visible) {
@@ -6243,7 +6281,9 @@ export function createWorkspaceScene(
               !PASSIVE_ACTIONS.has(String(entry.object.userData.inputAction)),
           )
         : undefined;
-    const intersection = hudButton ?? hits[0];
+    // Toast cards draw over everything, so the card under the ray wins it.
+    const toastHit = hits.find((entry) => entry.object.userData.inputAction === 'dismissToast');
+    const intersection = toastHit ?? hudButton ?? hits[0];
     const hit = intersection?.object;
     lastRayDistance = intersection?.distance ?? CONTROLLER_RAY_LENGTH;
     if (!hit) return null;
@@ -8220,6 +8260,7 @@ export function createWorkspaceScene(
   const dispose = (): void => {
     if (disposed) return;
     disarmCommand();
+    messageToasts.dispose();
     clearTimeout(paneCreationRetry);
     clearTimeout(agentRosterRetry);
     for (const thumbnail of backgroundThumbnails.values())
@@ -8379,6 +8420,7 @@ export function createWorkspaceScene(
     typeTextEntryKey,
     notifyPicture,
     setNotice,
+    receiveToast,
     addPicture: (id, image, target) => showPicture(id, image, false, target),
     restorePictures: (pictures) => {
       const ids = new Set(pictures.map(({ id }) => widgetKey(PICTURE_KIND, id)));

@@ -13,6 +13,8 @@ import { createDesktopPanels, type DesktopPanels } from './desktop/panels';
 import { createEnvironmentManager, loadObservatory } from './environment';
 import { createHostClipboardClient, createHostClipboardSecretStore } from './host-clipboard';
 import { createDefaultPictureDepth } from './host-picture-depth';
+import { dictationServiceUrl } from './host-stats';
+import { createToastSubscription } from './host-toasts';
 import { createKeyFlash, formatKeyIndicator, mountPageKeyIndicator } from './key-indicator';
 import { installKeyboardRouter } from './keyboard-router';
 import { createLocalSpeechRecognition, isLocalSpeechSupported } from './local-speech';
@@ -530,11 +532,13 @@ ui = mountWorkspaceUI(app, {
   },
   isHostClipboardPaired: () => hostClipboardSecret.get() !== null,
   onHostClipboardSecret: (secret) => {
-    if (secret === null) {
-      hostClipboardSecret.forget();
-      return true;
-    }
-    return hostClipboardSecret.set(secret);
+    let saved = true;
+    if (secret === null) hostClipboardSecret.forget();
+    else saved = hostClipboardSecret.set(secret);
+    // Resubscribe at once with the new secret instead of waiting out a refusal's backoff.
+    toastSubscription.stop();
+    toastSubscription.start();
+    return saved;
   },
   onSendKey: sendKey,
   onRunCommand: runCommand,
@@ -579,10 +583,18 @@ const pictures = createPictureController({
   depth: createDefaultPictureDepth(),
 });
 scene = createWorkspaceScene(ui.sceneHost, actions, {
+  onToastDismissed: (id) => toastSubscription.dismiss(id),
   onPictureClosed: (id) => pictures.closed(id),
   onPictureDepthView: (id, view) => pictures.setDepthView(id, view),
   pictures,
 });
+// Toasts outside programs post to the host service; it needs the host clipboard pairing secret.
+const toastSubscription = createToastSubscription({
+  url: () => dictationServiceUrl('/toasts', window.location),
+  secret: () => hostClipboardSecret.get(),
+  onEnvelope: (envelope) => scene.receiveToast(envelope),
+});
+toastSubscription.start();
 const setPageKey = mountPageKeyIndicator(document.body);
 const keyFlash = createKeyFlash((text) => {
   setPageKey(text);

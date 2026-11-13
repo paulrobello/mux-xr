@@ -15,6 +15,8 @@ export type DictationLaunchdOptions = {
   pictureProxy?: boolean;
   /** Opts the agent into `/picture-depth`, which decodes images a paired client uploads; off unless asked for. */
   pictureDepth?: boolean;
+  /** Accepts `/toast` senders from other LAN hosts too; this Mac only unless asked for. */
+  toastLan?: boolean;
 };
 
 const xml = (value: string): string =>
@@ -128,6 +130,7 @@ export const buildLaunchAgentPlist = (options: DictationLaunchdOptions = {}): st
     ...(options.pictureDepth
       ? ['--picture-depth', 'on', '--depth-model', depthModelPath(repository)]
       : []),
+    ...(options.toastLan ? ['--toast-lan', 'on'] : []),
   ]);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

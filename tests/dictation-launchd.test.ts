@@ -132,6 +132,16 @@ describe('Whisper LaunchDaemon definition', () => {
     expect(() => parseInstallerArgs(['--print', '--picture-depth'])).toThrow(/only supported/);
   });
 
+  it('accepts LAN toast senders only when the agent install opts in', () => {
+    expect(buildLaunchAgentPlist()).not.toContain('--toast-lan');
+    expect(buildLaunchAgentPlist({ toastLan: true })).toContain(
+      '<string>--toast-lan</string>\n    <string>on</string>',
+    );
+    expect(parseInstallerArgs(['--print', '--agent']).toastLan).toBe(false);
+    expect(parseInstallerArgs(['--print', '--agent', '--toast-lan']).toastLan).toBe(true);
+    expect(() => parseInstallerArgs(['--print', '--toast-lan'])).toThrow(/only supported/);
+  });
+
   it('parses agent print and install modes and never migrates listeners for agents', () => {
     expect(parseInstallerArgs(['--print', '--agent'])).toMatchObject({ print: true, agent: true });
     expect(parseInstallerArgs(['--install', '--agent'])).toMatchObject({

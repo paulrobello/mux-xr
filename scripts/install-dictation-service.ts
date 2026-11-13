@@ -29,6 +29,7 @@ type InstallerOptions = {
   repoStatus: boolean;
   pictureProxy: boolean;
   pictureDepth: boolean;
+  toastLan: boolean;
 };
 export type ListenerMetadata = {
   uid: number;
@@ -49,6 +50,7 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
   let repoStatus = false;
   let pictureProxy = false;
   let pictureDepth = false;
+  let toastLan = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--install') install = true;
@@ -59,6 +61,7 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
     else if (argument === '--repo-status') repoStatus = true;
     else if (argument === '--picture-proxy') pictureProxy = true;
     else if (argument === '--picture-depth') pictureDepth = true;
+    else if (argument === '--toast-lan') toastLan = true;
     else if (argument === '--repo') repository = argv[++index] ?? '';
     else if (argument === '--user') user = argv[++index] ?? '';
     else throw new Error(`Unknown argument: ${argument}`);
@@ -70,6 +73,7 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
   if (repoStatus && !agent) throw new Error('--repo-status is only supported with --agent.');
   if (pictureProxy && !agent) throw new Error('--picture-proxy is only supported with --agent.');
   if (pictureDepth && !agent) throw new Error('--picture-depth is only supported with --agent.');
+  if (toastLan && !agent) throw new Error('--toast-lan is only supported with --agent.');
   if (agent && migrateRunningListener)
     throw new Error('--agent installs never migrate a running listener.');
   return {
@@ -83,6 +87,7 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
     repoStatus,
     pictureProxy,
     pictureDepth,
+    toastLan,
   };
 };
 

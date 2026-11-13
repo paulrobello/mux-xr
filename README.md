@@ -164,6 +164,47 @@ Security: the Origin allow-list blocks other web pages but is not authentication
 
 The same secret gates `/repo-status`, the route behind the Git & CI widget, but only when the dictation server also runs with `--repo-status on` (the LaunchAgent installer adds it for `--agent --repo-status`). The route is off by default, so pairing the host clipboard alone never lets a client run commands on the Mac. The client proves the secret with an HMAC-SHA256 over a separate protocol label, the nonce, the pane's OSC 7 host name and the requested directory, so a proof is bound to one host and directory and cannot be replayed against `/clipboard`. An absent host, `localhost` and this Mac's full or short host name in any case count as local. Any other host answers `remote` without running anything. The server resolves the directory with `realpath` and answers only when the directory, the repo root, its git directory and its common git directory all resolve inside the home directory of the user it runs as. Missing paths, paths outside home and non-repos all answer `not-a-repo`, so the answer does not say whether a path exists (response timing still can, to a client holding the secret). It never runs `git status`. Every git command starts with `git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c safe.bareRepository=explicit -c protocol.allow=never --no-optional-locks -C <dir>`, with the same four settings repeated through `GIT_CONFIG_COUNT` and `GIT_CEILING_DIRECTORIES` set to the parent of home. The git commands are `rev-parse --show-toplevel --absolute-git-dir --git-common-dir`, `symbolic-ref -q --short HEAD`, `for-each-ref --format=%(upstream:short)%00%(upstream:track) refs/heads/<branch>`, `diff-index --cached --quiet HEAD --`, `ls-files --others --exclude-standard --directory` (output capped at one byte) and `config --get remote.origin.url`. None of them reads tracked file content, so the repo's own filter drivers never run. When origin is a GitHub URL with a valid `owner/repo`, the server also runs `gh run list -R <owner/repo> --limit 1 --json conclusion,status,headBranch,workflowName,createdAt --branch=<branch>` from `/`. Otherwise CI reads unknown and `gh` does not run. Each command runs without a shell, with a fixed environment, an output cap and a timeout (3 seconds for git, 4 for `gh`), in its own process group, which is killed on timeout. The requested directory is only ever the `-C` argument. Answers carry the repo folder name, the branch, the ahead/behind counts, the dirty flag and the CI conclusion, status, workflow name and start time, never file names, remote URLs or the full path. Each client may make 30 authenticated requests a minute and hold 2 unauthenticated connections. Failed proofs on either route count toward one shared five-per-minute block, and at most 8 connections are open at once. Git probes run one at a time and a queued probe whose connection has closed is skipped, while `gh` runs outside that queue.
 
+### Toasts from other programs
+
+Other programs can put a message in front of you in XR. They POST it to the dictation server's `/toast` route on port 4242, and every paired headset receives it on its `/toasts` subscription. The route is on the host service, not the par-term-streamer, so it works with the official streamer binary. A toast is a dark card with a colored stripe for its level: **INFO** cyan, **OK** green (`success`), **WARN** amber, **ERROR** coral, or any `#rrggbb` color you give. Cards show the level, title and source above the message, and play a short cue (an error buzz for errors).
+
+```sh
+bun run scripts/send-toast.ts "mux-xr main passed in 4m 12s" --level success --title CI --source gh
+bun run scripts/send-toast.ts "Deploying build-host-2…" --id deploy --timeout 0 --placement center
+bun run scripts/send-toast.ts --dismiss deploy
+bun run scripts/send-toast.ts "Waiting for an answer" --level warn --pane current
+```
+
+`send-toast.ts` reads the pairing secret from `.local/clipboard-secret`, or from `--secret-file` or `MUX_XR_SECRET_FILE`. Any HTTP client works the same way:
+
+```sh
+curl -sk https://localhost:4242/toast \
+  -H "Authorization: Bearer $(cat .local/clipboard-secret)" \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Disk is 91% full","level":"warn","title":"Disk","timeout":20}'
+```
+
+The JSON body takes these fields:
+
+| Field | Values | Default |
+| --- | --- | --- |
+| `message` | 1-280 characters, newlines kept | required |
+| `level` | `info`, `success`, `warn`, `error` | `info` |
+| `title` | up to 60 characters | none |
+| `source` | up to 40 characters, shown after the title | none |
+| `color` | `#rrggbb` accent, overrides the level color | level color |
+| `timeout` | seconds, 0-3600; `0` keeps it until dismissed | 6 info and success, 10 warn, 15 error |
+| `placement` | `top`, `center`, `bottom`, `hud`, `pane` | `top` |
+| `paneId` | par-mux pane id such as `%12`, for `pane` | the selected pane |
+| `id` | letters, digits, `.` `_` `:` `-`; posting the same id again replaces that toast in place | generated |
+| `dismiss` | `true` with `id` clears that toast | |
+
+`top`, `center` and `bottom` float 1.25 m in front of you and follow your head with a short lag. Top and bottom each stack up to three cards, newest nearest the edge, and center holds one. `hud` stacks above the HUD's notice row and moves with the HUD. `pane` sits above the named pane, or the selected one, and falls back to the top of view while that pane is not shown. Point and trigger or pinch on a card, or its ×, to dismiss it. Up to 24 toasts are held, extra ones wait for a free card, and a timeout counts from arrival. Warnings and errors are also added to the Bell feed as notices, so they are not lost if the card times out unseen. Toasts posted while no headset is connected are replayed when one subscribes, until they time out (at most 16 are kept).
+
+The reply is `202 {"id": "...", "delivered": N}`, where `N` is the number of subscribed headsets. Refusals carry `{"error": "..."}`: 400 for an invalid field (the message names it), 401 for a missing or wrong bearer token, 403 for a browser request (any `Origin` header) or a LAN sender without `--toast-lan on`, 405 for anything but POST, 413 over 4 KiB, 415 without `Content-Type: application/json`, 429 after five failed tokens a minute (shared with the other routes) or 120 toasts a minute from one client, and 503 while no pairing secret is set.
+
+Security: senders must present the host clipboard pairing secret as `Authorization: Bearer <secret>`. The comparison is constant-time. By default only this Mac may send (loopback addresses). Installing the LaunchAgent with `--toast-lan` (`bun run scripts/install-dictation-service.ts --install --agent --toast-lan`) also accepts LAN senders that present the secret over HTTPS. Browser pages are refused outright, so a web page cannot post toasts. Headsets subscribe with the same HMAC challenge-response as the other routes under their own protocol string (`mux-xr-toasts-v1`), so a proof for one route never passes another. At most 8 subscriptions are open, 4 per client, with a ping every 25 seconds. Control and bidi-override characters are stripped from all text. The server log records levels, delivery counts and refusal codes, never message text or the secret. `bun run scripts/toast-shots.ts` renders every level and placement to `/tmp/xr-toast-shots`.
+
 ### Picture proxy
 
 Most image hosts send no CORS headers, so the browser refuses to read them. When the direct fetch fails as CORS, the picture loader falls back to the dictation server's `/picture-fetch` route, which downloads the image on the Mac and returns the bytes. The route is off by default, like `/repo-status`: it needs `--picture-proxy on` (the LaunchAgent installer adds it for `bun run scripts/install-dictation-service.ts --install --agent --picture-proxy`) and the clipboard pairing secret from Settings → Host clipboard. Without the flag the notice reads that the proxy is off, and an unpaired client keeps the plain CORS notice.

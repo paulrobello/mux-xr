@@ -79,6 +79,8 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
       return undefined;
     case 'dismissNotice':
       return 'Clear this message';
+    case 'dismissToast':
+      return 'Dismiss this toast';
     case 'filterDistance':
       return 'Set the maximum distance for sharper gaze';
     case 'curvature':

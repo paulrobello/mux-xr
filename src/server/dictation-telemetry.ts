@@ -8,7 +8,7 @@ export interface DictationTelemetry {
   connected(): void;
   disconnected(): void;
   rejected(reason: 'origin' | 'path' | 'invalid_payload' | 'busy'): void;
-  httpRequest(route: '/health' | 'other', status: number): void;
+  httpRequest(route: '/health' | '/toast' | 'other', status: number): void;
   beginTranscription(bytes: number): (outcome: TranscriptionOutcome) => void;
   started(): void;
   forceFlush(): Promise<void>;

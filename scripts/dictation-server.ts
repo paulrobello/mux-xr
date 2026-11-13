@@ -39,6 +39,16 @@ const telemetry = createDictationTelemetry({
 const server = createServer(
   { cert: readFileSync(cert), key: readFileSync(key) },
   (request, response) => {
+    if (attached.handleRequest(request, response)) {
+      response.once('finish', () => {
+        try {
+          telemetry.httpRequest('/toast', response.statusCode);
+        } catch {
+          /* The toast route must remain independent of telemetry. */
+        }
+      });
+      return;
+    }
     try {
       telemetry.httpRequest(
         request.url === '/health' ? '/health' : 'other',
@@ -74,6 +84,10 @@ const depthModel = resolve(
 // Fail at start, not on the first request, when depth is on but the model was never fetched.
 if (pictureDepthFlag === 'on') accessSync(depthModel, constants.R_OK);
 console.log(`Picture depth ${pictureDepthFlag === 'on' ? 'enabled' : 'disabled'}.`);
+const toastLanFlag = parsed.get('--toast-lan') ?? 'off';
+if (toastLanFlag !== 'on' && toastLanFlag !== 'off')
+  throw new Error('--toast-lan takes on or off.');
+console.log(`Toast senders: ${toastLanFlag === 'on' ? 'this Mac and the LAN' : 'this Mac only'}.`);
 const clipboardAtStart = loadClipboardSecret(clipboardSecretFile);
 console.log(
   clipboardAtStart.enabled
@@ -117,6 +131,18 @@ const attached = attachDictationServer(server, {
         event.kind === 'transfer'
           ? `Clipboard ${event.direction}: ${event.bytes} bytes`
           : `Clipboard refused: ${event.code}`,
+      ),
+  },
+  // Levels, counts and refusal codes only: toast text never reaches the log.
+  toasts: {
+    allowRemoteSenders: toastLanFlag === 'on',
+    onEvent: (event) =>
+      console.log(
+        event.kind === 'toast'
+          ? `Toast ${event.level}: delivered to ${event.delivered}`
+          : event.kind === 'dismiss'
+            ? `Toast dismissed: delivered to ${event.delivered}`
+            : `Toast refused: ${event.code}`,
       ),
   },
   // Refusal codes only; successful stats requests are never logged.
