@@ -142,6 +142,8 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
       return data.handColor
         ? 'Tint both hands and arms with this color'
         : 'Restore the default hand color';
+    case 'armColor':
+      return data.armColor ? 'Tint both arms with this color' : 'Color the arms like the hands';
     case 'uiSounds':
       return 'Turn interface clicks and controller pulses on or off';
     case 'terminalColors':

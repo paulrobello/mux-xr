@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { createCartoonHand } from '../src/xr/cartoon-hand';
+import { dimHandColor } from '../src/xr/hand-colors';
+
+const dim = (color: THREE.ColorRepresentation): number =>
+  dimHandColor(new THREE.Color(), color).getHex();
 
 type Hand = THREE.Group & { joints: Record<string, THREE.Group> };
 
@@ -168,13 +172,18 @@ describe('cartoon tracked hands', () => {
     left.dispose();
     right.dispose();
   });
+  it('dims hand colors to 80% of their displayed sRGB values', () => {
+    expect(dimHandColor(new THREE.Color(), '#ffffff').getHexString()).toBe('cccccc');
+    expect(dimHandColor(new THREE.Color(), '#3b82f6').getHexString()).toBe('2f68c5');
+  });
+
   it('uses rounded opaque orange skin and a continuous arm without any picking surfaces', () => {
     const visual = createCartoonHand();
     visual.update(trackedHand('right'), new THREE.PerspectiveCamera(), 'right', 1 / 90);
     expect(visual.root.visible).toBe(true);
     const meshes = visual.root.children as THREE.Mesh[];
     expect(meshes).toHaveLength(2);
-    expect((meshes[0].material as THREE.MeshStandardMaterial).color.getHex()).toBe(0xff672f);
+    expect((meshes[0].material as THREE.MeshStandardMaterial).color.getHex()).toBe(dim(0xff672f));
     expect((meshes[0].material as THREE.MeshStandardMaterial).transparent).toBe(false);
     for (const mesh of meshes) {
       expect(mesh.raycast).not.toBe(THREE.Mesh.prototype.raycast);

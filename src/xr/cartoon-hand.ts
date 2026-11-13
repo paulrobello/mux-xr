@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createElasticArm } from './elastic-arm';
+import { dimHandColor } from './hand-colors';
 import type { HandContactProbe } from './hand-contact';
 
 type HandSide = 'left' | 'right';
@@ -18,8 +19,11 @@ export interface CartoonHand {
     deltaSeconds: number,
   ): void;
   hide(): void;
-  /** Tints the hand and arm; null restores the default color. */
-  setColor(color: THREE.ColorRepresentation | null): void;
+  /** Tints the hand and arm; a null hand color restores the default, a null arm color follows the hand. */
+  setColor(
+    color: THREE.ColorRepresentation | null,
+    armColor?: THREE.ColorRepresentation | null,
+  ): void;
   dispose(): void;
 }
 
@@ -120,7 +124,8 @@ export function createCartoonHand(): CartoonHand {
   mesh.name = 'cartoon-hand-skin';
   mesh.frustumCulled = false;
   mesh.raycast = () => undefined;
-  const arm = createElasticArm(material);
+  const armMaterial = material.clone();
+  const arm = createElasticArm(armMaterial);
   arm.mesh.name = 'elastic-hand-arm';
   root.add(mesh, arm.mesh);
 
@@ -235,7 +240,7 @@ export function createCartoonHand(): CartoonHand {
     }
   };
 
-  return {
+  const hand: CartoonHand = {
     root,
     contactProbes,
     hide,
@@ -434,9 +439,11 @@ export function createCartoonHand(): CartoonHand {
         );
       this.update(synthetic, camera, side, deltaSeconds);
     },
-    setColor(color) {
-      material.color.set(color ?? DEFAULT_COLOR);
-      material.emissive.set(color ?? DEFAULT_EMISSIVE);
+    setColor(color, armColor = null) {
+      dimHandColor(material.color, color ?? DEFAULT_COLOR);
+      dimHandColor(material.emissive, color ?? DEFAULT_EMISSIVE);
+      dimHandColor(armMaterial.color, armColor ?? color ?? DEFAULT_COLOR);
+      dimHandColor(armMaterial.emissive, armColor ?? color ?? DEFAULT_EMISSIVE);
     },
     dispose() {
       if (disposed) return;
@@ -446,8 +453,11 @@ export function createCartoonHand(): CartoonHand {
       geometry.dispose();
       palm.dispose();
       material.dispose();
+      armMaterial.dispose();
       root.removeFromParent();
       root.clear();
     },
   };
+  hand.setColor(null);
+  return hand;
 }

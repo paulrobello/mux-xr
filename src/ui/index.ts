@@ -138,6 +138,8 @@ export interface WorkspaceSettings {
   uiSounds: boolean;
   /** `#rrggbb` tint for the XR hands and arms, or empty for the default color. */
   handColor: string;
+  /** `#rrggbb` arm tint, or empty to match the hands. */
+  armColor: string;
   /** par-mux `agent-rows` preset, or `custom` for {@link agentRowsCustom}. */
   agentRows: AgentRowsChoice;
   agentRowsCustom: string;
@@ -197,6 +199,8 @@ export interface WorkspaceUI {
   setUISounds(enabled: boolean, persist?: boolean): void;
   /** Applies a hand color chosen in XR; empty restores the default color. */
   setHandColor(color: string, persist?: boolean): void;
+  /** Applies an arm color chosen in XR; empty makes the arms match the hands. */
+  setArmColor(color: string, persist?: boolean): void;
   setBackground(mode: BackgroundMode, persist?: boolean): void;
   setFilteringCapabilities(maxAnisotropy: number): void;
   setDictationState(state: DictationState): void;
@@ -275,6 +279,7 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   keyborbMode: 'auto',
   uiSounds: true,
   handColor: '',
+  armColor: '',
   agentRows: 'full',
   agentRowsCustom: '',
   agentsSort: DEFAULT_AGENT_ROSTER_LAYOUT.sort,
@@ -381,6 +386,7 @@ export function validateSettings(value: unknown): WorkspaceSettings {
     keyborbMode: validateKeyborbMode(candidate.keyborbMode),
     uiSounds: candidate.uiSounds !== false,
     handColor: validateHandColor(candidate.handColor),
+    armColor: validateHandColor(candidate.armColor),
     agentRows: AGENT_ROWS_CHOICES.includes(candidate.agentRows as AgentRowsChoice)
       ? (candidate.agentRows as AgentRowsChoice)
       : DEFAULT_SETTINGS.agentRows,
@@ -729,34 +735,56 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       uiSounds,
       settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
     );
-    const handColor = document.createElement('div');
-    handColor.innerHTML =
-      '<label for="mux-hand-color">Hand and arm color</label><div class="hand-color-row"><input id="mux-hand-color" type="color" data-hand-color><button type="button" data-action="hand-color-default" class="text-btn" title="Use the default hand color">Default</button></div>';
-    settingsPanel.insertBefore(
-      handColor,
-      settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
-    );
-    const handColorInput = handColor.querySelector<HTMLInputElement>('[data-hand-color]');
-    const handColorDefault = handColor.querySelector<HTMLButtonElement>(
-      '[data-action="hand-color-default"]',
-    );
-    if (!handColorInput || !handColorDefault) throw new Error('Hand color control missing');
-    const updateHandColor = (): void => {
-      handColorInput.value = settings.handColor || DEFAULT_HAND_SWATCH;
-      handColorDefault.disabled = !settings.handColor;
+    // A color picker plus a button that clears the color back to empty.
+    const colorPicker = (
+      key: 'handColor' | 'armColor',
+      label: string,
+      reset: string,
+      resetTitle: string,
+      swatch: () => string,
+    ): (() => void) => {
+      const row = document.createElement('div');
+      const id = key === 'handColor' ? 'hand' : 'arm';
+      row.innerHTML = `<label for="mux-${id}-color">${label}</label><div class="hand-color-row"><input id="mux-${id}-color" type="color" data-${id}-color><button type="button" data-action="${id}-color-default" class="text-btn" title="${resetTitle}">${reset}</button></div>`;
+      settingsPanel.insertBefore(row, settingsPanel.querySelector('[data-action="passthrough"]'));
+      const input = row.querySelector<HTMLInputElement>(`[data-${id}-color]`);
+      const clear = row.querySelector<HTMLButtonElement>(`[data-action="${id}-color-default"]`);
+      if (!input || !clear) throw new Error(`${label} control missing`);
+      const update = (): void => {
+        input.value = settings[key] || swatch();
+        clear.disabled = !settings[key];
+      };
+      input.addEventListener('input', () => {
+        settings = { ...settings, [key]: validateHandColor(input.value) };
+        updateHandColorControls();
+        saveSettings();
+      });
+      clear.addEventListener('click', () => {
+        settings = { ...settings, [key]: '' };
+        updateHandColorControls();
+        saveSettings();
+      });
+      return update;
     };
-    handColorInput.addEventListener('input', () => {
-      settings = { ...settings, handColor: validateHandColor(handColorInput.value) };
-      updateHandColor();
-      saveSettings();
-    });
-    handColorDefault.addEventListener('click', () => {
-      settings = { ...settings, handColor: '' };
-      updateHandColor();
-      saveSettings();
-    });
-    updateHandColor();
-    updateHandColorControls = updateHandColor;
+    const updateHandPicker = colorPicker(
+      'handColor',
+      'Hand color',
+      'Default',
+      'Use the default hand color',
+      () => DEFAULT_HAND_SWATCH,
+    );
+    const updateArmPicker = colorPicker(
+      'armColor',
+      'Arm color',
+      'Match hands',
+      'Color the arms like the hands',
+      () => settings.handColor || DEFAULT_HAND_SWATCH,
+    );
+    updateHandColorControls = () => {
+      updateHandPicker();
+      updateArmPicker();
+    };
+    updateHandColorControls();
     const filteringControls = document.createElement('div');
     filteringControls.innerHTML =
       '<label>Terminal filtering<select data-filter-mode aria-label="Terminal filtering"><option value="nearest">Nearest pixels</option><option value="linear">Linear (sharp)</option><option value="mipmap-nearest">Mipmap bilinear</option><option value="mipmap-linear">Mipmap trilinear (smooth)</option></select></label><label data-filter-anisotropy-row>Anisotropy (mipmap modes)<select data-filter-anisotropy aria-label="Terminal anisotropy"><option value="1">Off</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option><option value="16">16x</option></select><span>Anisotropy matters for oblique minification. 8x and 16x may look the same front-facing.</span></label><label class="check"><input type="checkbox" data-filter-gaze> Sharper gazed terminal <span>Use sharp linear sampling while looking at a terminal.</span></label><label data-filter-distance-row>Gaze max distance<input data-filter-distance type="number" min="0.25" max="20" step="0.25" aria-label="Gaze maximum distance in meters"><span>Sharper gaze ignores mipmaps within this distance.</span></label>';
@@ -2111,6 +2139,13 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       if (settings.background === mode) return;
       settings = { ...settings, background: mode };
       qs<HTMLSelectElement>('[data-background]').value = mode;
+      if (persist) saveSettings();
+    },
+    setArmColor(color, persist = false) {
+      const next = validateHandColor(color);
+      if (settings.armColor === next) return;
+      settings = { ...settings, armColor: next };
+      updateHandColorControls();
       if (persist) saveSettings();
     },
     setHandColor(color, persist = false) {

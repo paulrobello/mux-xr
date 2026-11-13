@@ -32,6 +32,8 @@ vi.mock('three', async (importOriginal) => {
     capabilities = { getMaxAnisotropy: () => 1 };
     setPixelRatio(_ratio: number): void {}
     setSize(_width: number, _height: number, _updateStyle?: boolean): void {}
+    autoClear = true;
+    clearDepth(): void {}
     setAnimationLoop(callback: ((time: number) => void) | null): void {
       fakeXR.frame = callback;
     }

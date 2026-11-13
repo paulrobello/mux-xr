@@ -109,7 +109,11 @@ import {
   setKeyborbPressed,
 } from './keyborb';
 import { createKeyborbInput } from './keyborb-input';
-import { createLabelBatcher, labelBatchTransparentSort } from './label-batches';
+import {
+  createLabelBatcher,
+  LABEL_BATCH_HIDDEN_LAYER,
+  labelBatchTransparentSort,
+} from './label-batches';
 import {
   createScalableLabel,
   disposeScalableLabel,
@@ -131,6 +135,7 @@ import {
 } from './picture-sizing';
 import { PICTURE_LIMITS } from './picture-store';
 import { createRadialMenu, type RadialMenuAction } from './radial-menu';
+import { ON_TOP_LAYER } from './render-layers';
 import { createStandardHand } from './standard-hand';
 import { terminalQualityAtDistance } from './terminal-lod';
 import {
@@ -229,6 +234,8 @@ export interface WorkspaceSceneState {
   uiSounds: boolean;
   /** `#rrggbb` hand and arm tint, or empty for the default color. */
   handColor: string;
+  /** `#rrggbb` arm tint, or empty to match the hands. */
+  armColor: string;
   dictation: DictationState;
   fps: number | null;
   xrMode: 'desktop' | 'vr' | 'ar';
@@ -284,6 +291,8 @@ export interface WorkspaceScene {
   setUISounds(enabled: boolean): void;
   /** Tints both hands and their arms; null restores the default color. */
   setHandColor(color: string | null): void;
+  /** Tints both arms; null makes them match the hands. */
+  setArmColor(color: string | null): void;
   setDictationState(state: DictationState): void;
   setAvailablePanes(panes: PaneDescriptor[]): void;
   setPaneCreation(state: PaneCreationState): void;
@@ -880,6 +889,9 @@ export function createWorkspaceScene(
   const ambient = new THREE.AmbientLight(0x9db5c8, 0.7);
   const key = new THREE.DirectionalLight(0xb8dfff, 1.2);
   key.position.set(-2, 4, 4);
+  // Both render passes share the scene's lights, so lit shaders keep one program between them.
+  ambient.layers.enable(ON_TOP_LAYER);
+  key.layers.enable(ON_TOP_LAYER);
   scene.add(ambient, key);
   const observatory = createObservatory(scene);
   const panels = new Map<string, TerminalPanel>();
@@ -963,6 +975,7 @@ export function createWorkspaceScene(
     keyborbEnabled: false,
     uiSounds: true,
     handColor: '',
+    armColor: '',
     dictation: { supported: false, status: 'idle', transcript: '', error: null },
     fps: null,
     xrMode: 'desktop',
@@ -980,7 +993,9 @@ export function createWorkspaceScene(
   let disposed = false;
   let frameHandle = 0;
   const raycaster = new THREE.Raycaster();
+  raycaster.layers.enable(ON_TOP_LAYER);
   const fidelityRay = new THREE.Raycaster();
+  fidelityRay.layers.enable(ON_TOP_LAYER);
   const fidelityHits: THREE.Intersection[] = [];
   const terminalScreens: THREE.Mesh[] = [];
   const fidelityEye = new THREE.Vector3();
@@ -1005,6 +1020,8 @@ export function createWorkspaceScene(
     { object: THREE.Mesh; target: string | null; mode: InputMode }
   >();
   const controllerGrips = new Map<THREE.Group, THREE.Group>();
+  /** Pointer rays and their contact dots, drawn over menus with the hands. */
+  const pointerParts: THREE.Object3D[] = [];
   const wristMenuButton = createLabelButton('Menu', 0.052, 0.035, { inputAction: 'wristMenu' });
   const wristWatch = createWristMenuWatch(wristMenuButton, uiEnvironment.texture);
   let wristMenuLastPressed = Number.NEGATIVE_INFINITY;
@@ -2596,6 +2613,62 @@ export function createWorkspaceScene(
       roots,
     );
   };
+  const onTopMask = 1 << ON_TOP_LAYER;
+  const batchHiddenMask = 1 << LABEL_BATCH_HIDDEN_LAYER;
+  const putOnTop = (root: THREE.Object3D): void => {
+    root.traverse((object) => {
+      if (object.layers.mask !== batchHiddenMask) object.layers.mask = onTopMask;
+    });
+  };
+  const noRenderHook = (): void => undefined;
+  // Without multisampled render-to-texture, three resolves an antialiased XR target at the end of
+  // each render, so a second pass would draw onto a discarded buffer.
+  const xrTargetResolvesPerRender = (): boolean => {
+    if (!renderer?.xr.isPresenting) return false;
+    const target = renderer.getRenderTarget?.();
+    return (
+      Boolean(target && target.samples > 0) &&
+      !renderer.extensions?.has('WEBGL_multisampled_render_to_texture')
+    );
+  };
+  // While a menu is open the room draws first without menus, hands, rays and their help and HUD
+  // text; those then draw over a cleared depth buffer so nothing in the room can cover a menu.
+  const renderScene = (): void => {
+    if (!renderer) return;
+    const menuOpen = radialMenu.root.visible || Boolean(inputRoot?.visible && inputRoot.parent);
+    camera.layers.enable(ON_TOP_LAYER);
+    if (!menuOpen || xrTargetResolvesPerRender()) {
+      renderer.render(scene, camera);
+      return;
+    }
+    putOnTop(radialMenu.root);
+    if (inputRoot) putOnTop(inputRoot);
+    for (const visual of handVisuals.values()) putOnTop(visual.root);
+    for (const part of pointerParts) putOnTop(part);
+    putOnTop(hoverHelp);
+    putOnTop(wristWatch.root);
+    if (hudRoot) putOnTop(hudRoot);
+    const mask = camera.layers.mask;
+    camera.layers.mask = mask & ~onTopMask;
+    renderer.render(scene, camera);
+    const background = scene.background;
+    const beforeRender = scene.onBeforeRender;
+    const autoClear = renderer.autoClear;
+    scene.background = null;
+    // Label batches were placed by the first pass.
+    scene.onBeforeRender = noRenderHook;
+    renderer.autoClear = false;
+    camera.layers.mask = onTopMask;
+    try {
+      renderer.clearDepth();
+      renderer.render(scene, camera);
+    } finally {
+      camera.layers.mask = mask;
+      renderer.autoClear = autoClear;
+      scene.onBeforeRender = beforeRender;
+      scene.background = background;
+    }
+  };
   const render = (time = 0, frame?: XRFrame): void => {
     if (disposed) return;
     if (renderer?.xr.isPresenting) {
@@ -3386,7 +3459,7 @@ export function createWorkspaceScene(
     }
     observatory.rotation.y = time * 0.00001;
     for (const panel of panels.values()) panel.surface.flush?.();
-    renderer?.render(scene, camera);
+    renderScene();
     if (!renderer && typeof window.requestAnimationFrame === 'function')
       frameHandle = window.requestAnimationFrame(render);
   };
@@ -4264,19 +4337,27 @@ export function createWorkspaceScene(
         setModifierVisual(button, mutableState.xrMode === xrMode);
         inputRoot.add(button);
       }
-      const handCaption = createLabelButton('Hand color', 0.6, 0.08, { inputAction: 'noop' });
-      handCaption.position.y = -0.27;
-      inputRoot.add(handCaption);
-      // Each swatch shows its own color; a white border marks the current one.
-      for (const [index, { name, color }] of HAND_COLOR_PRESETS.entries()) {
-        const swatch = createLabelButton(name, 0.2, 0.1, {
-          inputAction: 'handColor',
-          handColor: color,
-          labelBackground: color || '#1c2a35',
-          ...(mutableState.handColor === color ? { labelBorder: '#ffffff' } : {}),
-        });
-        swatch.position.set((index - (HAND_COLOR_PRESETS.length - 1) / 2) * 0.23, -0.4, 0);
-        inputRoot.add(swatch);
+      for (const [row, [caption, action, current, empty]] of (
+        [
+          ['Hand color', 'handColor', mutableState.handColor, 'Default'],
+          ['Arm color', 'armColor', mutableState.armColor, 'Match'],
+        ] as const
+      ).entries()) {
+        const y = -0.25 - row * 0.24;
+        const label = createLabelButton(caption, 0.6, 0.08, { inputAction: 'noop' });
+        label.position.y = y;
+        inputRoot.add(label);
+        // Each swatch shows its own color; a white border marks the current one.
+        for (const [index, { name, color }] of HAND_COLOR_PRESETS.entries()) {
+          const swatch = createLabelButton(color ? name : empty, 0.2, 0.1, {
+            inputAction: action,
+            [action]: color,
+            labelBackground: color || '#1c2a35',
+            ...(current === color ? { labelBorder: '#ffffff' } : {}),
+          });
+          swatch.position.set((index - (HAND_COLOR_PRESETS.length - 1) / 2) * 0.23, y - 0.11, 0);
+          inputRoot.add(swatch);
+        }
       }
     } else if (mode === 'display') {
       (
@@ -4872,7 +4953,7 @@ export function createWorkspaceScene(
           ? -1.13
           : mode === 'settings'
             ? -0.89
-            : mode === 'terminal' && terminalHasReset
+            : mode === 'world' || (mode === 'terminal' && terminalHasReset)
               ? -0.78
               : -0.66,
       0,
@@ -4892,7 +4973,11 @@ export function createWorkspaceScene(
       });
       back.position.set(
         -0.22,
-        mode === 'display' ? -1.13 : mode === 'terminal' && terminalHasReset ? -0.78 : -0.66,
+        mode === 'display'
+          ? -1.13
+          : mode === 'world' || (mode === 'terminal' && terminalHasReset)
+            ? -0.78
+            : -0.66,
         0,
       );
       inputRoot.add(back);
@@ -5181,6 +5266,10 @@ export function createWorkspaceScene(
     }
     if (action === 'handColor') {
       setHandColor(String(hit.userData.handColor ?? '') || null);
+      return true;
+    }
+    if (action === 'armColor') {
+      setArmColor(String(hit.userData.armColor ?? '') || null);
       return true;
     }
     if (action === 'uiSounds') {
@@ -6011,6 +6100,7 @@ export function createWorkspaceScene(
       contact.raycast = () => undefined;
       contact.visible = false;
       root.add(rayLine, contact);
+      pointerParts.push(rayLine, contact);
       const onSelect = (): void => {
         if (!root.visible || disconnectedControllers.has(root) || gripActive()) return;
         if (activeHand(root) && mutableState.keyborbEnabled) {
@@ -6289,7 +6379,7 @@ export function createWorkspaceScene(
       handContacts.set(root, createHandContact());
       keyboardProximity.set(root, createHandContact());
       const visual = createStandardHand();
-      visual.setColor(mutableState.handColor || null);
+      visual.setColor(mutableState.handColor || null, mutableState.armColor || null);
       handVisuals.set(root, visual);
       scene.add(visual.root);
       if (typeof renderer.xr.getControllerGrip === 'function') {
@@ -7108,7 +7198,17 @@ export function createWorkspaceScene(
     const next = validateHandColor(color);
     if (next === mutableState.handColor) return;
     mutableState.handColor = next;
-    for (const visual of handVisuals.values()) visual.setColor(next || null);
+    applyHandColors();
+  };
+  const setArmColor = (color: string | null): void => {
+    const next = validateHandColor(color);
+    if (next === mutableState.armColor) return;
+    mutableState.armColor = next;
+    applyHandColors();
+  };
+  const applyHandColors = (): void => {
+    const { handColor, armColor } = mutableState;
+    for (const visual of handVisuals.values()) visual.setColor(handColor || null, armColor || null);
     if (inputRoot && inputMode === 'world') refreshInputRoot(inputMode);
     notify();
   };
@@ -7939,6 +8039,7 @@ export function createWorkspaceScene(
     setKeyborbMode,
     setUISounds,
     setHandColor,
+    setArmColor,
     setDictationState,
     setAvailablePanes,
     setPaneCreation,

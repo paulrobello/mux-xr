@@ -120,6 +120,8 @@ export function createLabelBatcher(
     if (batch) return batch;
     const created = new LabelTextBatch();
     created.renderOrder = order;
+    // A batch draws in the same render pass as the root it belongs to.
+    created.layers.mask = root.layers.mask;
     // A member's own Text stays drawn until the batch has glyphs for it, so nothing blinks.
     created.addEventListener('synccomplete', () => {
       for (const [text, member] of members)

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ON_TOP_LAYER } from './render-layers';
 
 export interface HandContactProbe {
   point: THREE.Vector3;
@@ -60,6 +61,7 @@ export function createHandContact(): HandContact {
   const delta = new THREE.Vector3();
   const previous = new THREE.Vector3();
   const sweep = new THREE.Raycaster();
+  sweep.layers.enable(ON_TOP_LAYER);
   const sweepHits: THREE.Intersection[] = [];
   const keyHit = surface();
   const bodyHit = surface();

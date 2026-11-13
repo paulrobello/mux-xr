@@ -3,11 +3,16 @@ import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { describe, expect, it, vi } from 'vitest';
+import { dimHandColor } from '../src/xr/hand-colors';
 import {
   createStandardHand,
   STANDARD_HAND_ASSET_URLS,
   STANDARD_HAND_JOINTS,
 } from '../src/xr/standard-hand';
+
+const dim = (color: THREE.ColorRepresentation): number =>
+  dimHandColor(new THREE.Color(), color).getHex();
+
 import {
   WRIST_WATCH_EXTENT,
   WRIST_WATCH_NEAR_EXIT_GAP,
@@ -436,7 +441,7 @@ describe('standard XR hand', () => {
       }
       return materials;
     };
-    const blue = new THREE.Color('#3366ff').getHex();
+    const blue = dim('#3366ff');
     for (const material of tinted()) {
       expect(material.color.getHex()).toBe(blue);
       expect(material.emissive.getHex()).toBe(blue);
@@ -454,9 +459,28 @@ describe('standard XR hand', () => {
     hand.setColor('#22aa44');
     const arm = hand.root.getObjectByName('elastic-hand-arm') as THREE.Mesh;
     const material = arm.material as THREE.MeshStandardMaterial;
-    expect(material.color.getHex()).toBe(0x22aa44);
+    expect(material.color.getHex()).toBe(dim(0x22aa44));
     hand.setColor(null);
-    expect(material.color.getHex()).toBe(0xff672f);
+    expect(material.color.getHex()).toBe(dim(0xff672f));
+    hand.dispose();
+  });
+
+  it('gives the arm its own color and falls back to the hand color', async () => {
+    const hand = createStandardHand({ loader: parsedLoader() });
+    await hand.assetReady;
+    const color = (name: string): number =>
+      (
+        (hand.root.getObjectByName(name) as THREE.Mesh).material as THREE.MeshStandardMaterial
+      ).color.getHex();
+    hand.setColor('#3366ff', '#22aa44');
+    expect(color('standard-hand-skin-left')).toBe(dim('#3366ff'));
+    expect(color('standard-hand-wrist-cap-right')).toBe(dim('#3366ff'));
+    expect(color('elastic-hand-arm')).toBe(dim('#22aa44'));
+    hand.setColor('#3366ff', null);
+    expect(color('elastic-hand-arm')).toBe(dim('#3366ff'));
+    hand.setColor(null, '#22aa44');
+    expect(color('elastic-hand-arm')).toBe(dim('#22aa44'));
+    expect(color('standard-hand-skin-left')).not.toBe(dim('#22aa44'));
     hand.dispose();
   });
 

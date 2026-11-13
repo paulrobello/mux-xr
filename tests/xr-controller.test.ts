@@ -51,6 +51,8 @@ vi.mock('three', async (importOriginal) => {
     capabilities = { getMaxAnisotropy: () => 1 };
     setPixelRatio(_ratio: number): void {}
     setSize(_width: number, _height: number, _updateStyle?: boolean): void {}
+    autoClear = true;
+    clearDepth(): void {}
     setAnimationLoop(callback: ((time: number) => void) | null): void {
       fakeXR.frame = callback;
     }
@@ -66,7 +68,7 @@ import * as THREE from 'three';
 import type { PaneDescriptor, TerminalSurface, WorkspaceActions } from '../src/contracts';
 import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
 import { createPictureController, type PictureLoaders } from '../src/workspace/pictures';
-import { HAND_COLOR_PRESETS } from '../src/xr/hand-colors';
+import { dimHandColor, HAND_COLOR_PRESETS } from '../src/xr/hand-colors';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
 import { PictureLoadError, pictureErrorNotice } from '../src/xr/picture-sizing';
 import {
@@ -75,6 +77,7 @@ import {
   createPictureLibrary,
   createRecentPictureLibrary,
 } from '../src/xr/picture-store';
+import { ON_TOP_LAYER } from '../src/xr/render-layers';
 import { createWorkspaceScene } from '../src/xr/scene';
 import { terminalWarpPoint } from '../src/xr/terminal-warp';
 import { NOMINAL_VIEWER_HEIGHT } from '../src/xr/ui-poses';
@@ -4823,6 +4826,61 @@ describe('native XR controller event routing', () => {
     vi.unstubAllGlobals();
   });
 
+  it('draws open menus, hands and rays in a second pass over cleared depth', () => {
+    const { workspace, container } = fixture();
+    const masks: number[] = [];
+    const render = vi.spyOn(THREE.WebGLRenderer.prototype, 'render').mockImplementation(function (
+      this: unknown,
+      scene: THREE.Object3D,
+      camera: THREE.Camera,
+    ) {
+      masks.push(camera.layers.mask);
+      scene.updateMatrixWorld(true);
+    });
+    const clearDepth = vi.spyOn(THREE.WebGLRenderer.prototype, 'clearDepth');
+    const onTop = 1 << ON_TOP_LAYER;
+    fakeXR.frame?.(16);
+    expect(masks).toHaveLength(1);
+    expect(masks[0] & onTop).toBe(onTop);
+    workspace.showInput('settings');
+    masks.length = 0;
+    fakeXR.frame?.(32);
+    expect(masks).toHaveLength(2);
+    expect(masks[0] & onTop).toBe(0);
+    expect(masks[1]).toBe(onTop);
+    expect(clearDepth).toHaveBeenCalledTimes(1);
+    const menu = workspace.scene.getObjectByName('xr-settings-controls');
+    if (!menu) throw new Error('Settings missing');
+    menu.traverse((object) => {
+      if ((object as THREE.Mesh).isMesh && object.layers.mask !== 1 << 31)
+        expect(object.layers.mask).toBe(onTop);
+    });
+    workspace.scene.traverse((object) => {
+      if (object.name === 'elastic-hand-arm') expect(object.layers.mask).toBe(onTop);
+    });
+    const hud = workspace.scene.getObjectByName('xr-workspace-hud');
+    if (!hud) throw new Error('HUD missing');
+    hud.traverse((object) => {
+      if (object.layers.mask !== 1 << 31) expect(object.layers.mask).toBe(onTop);
+    });
+    // An antialiased XR target that resolves after every render keeps the single pass.
+    const proto = THREE.WebGLRenderer.prototype as unknown as Record<string, unknown>;
+    proto.getRenderTarget = () => ({ samples: 4 });
+    proto.extensions = { has: () => false };
+    fakeXR.presenting = true;
+    masks.length = 0;
+    fakeXR.frame?.(48);
+    expect(masks).toHaveLength(1);
+    fakeXR.presenting = false;
+    delete proto.getRenderTarget;
+    delete proto.extensions;
+    workspace.hideInput();
+    render.mockRestore();
+    clearDepth.mockRestore();
+    workspace.dispose();
+    container.remove();
+  });
+
   it('picks a hand color from World swatches and restores the default', () => {
     const { workspace, container } = fixture();
     workspace.showInput('settings');
@@ -4847,10 +4905,17 @@ describe('native XR controller event routing', () => {
         arms.push((object as THREE.Mesh).material as THREE.MeshStandardMaterial);
     });
     expect(arms.length).toBeGreaterThan(0);
-    for (const material of arms) expect(material.color.getHex()).toBe(0x3b82f6);
+    const dim = (hex: number): number => dimHandColor(new THREE.Color(), hex).getHex();
+    for (const material of arms) expect(material.color.getHex()).toBe(dim(0x3b82f6));
+    hit(workspace, { inputAction: 'armColor', armColor: '#22a55a' });
+    expect(workspace.state.armColor).toBe('#22a55a');
+    for (const material of arms) expect(material.color.getHex()).toBe(dim(0x22a55a));
     hit(workspace, { inputAction: 'handColor', handColor: '' });
     expect(workspace.state.handColor).toBe('');
-    for (const material of arms) expect(material.color.getHex()).not.toBe(0x3b82f6);
+    for (const material of arms) expect(material.color.getHex()).toBe(dim(0x22a55a));
+    hit(workspace, { inputAction: 'armColor', armColor: '' });
+    expect(workspace.state.armColor).toBe('');
+    for (const material of arms) expect(material.color.getHex()).not.toBe(dim(0x22a55a));
     workspace.dispose();
     container.remove();
   });
