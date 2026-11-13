@@ -3242,6 +3242,14 @@ export function createWorkspaceScene(
     }
     updatePanePulls();
     correctTerminalFloor();
+    for (const panel of panels.values()) {
+      if (!panel.textureSource.swapPending) continue;
+      panel.textureSource.advance();
+      if (panel.texture !== panel.textureSource.texture) {
+        panel.texture = panel.textureSource.texture;
+        panel.screen.material.map = panel.texture;
+      }
+    }
     if (renderer?.xr.isPresenting) {
       // Rays and gaze below only use visible objects; the renderer's pass catches hidden ones up.
       updateVisibleMatrixWorld(scene);

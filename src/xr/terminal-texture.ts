@@ -13,9 +13,29 @@ export interface TerminalTextureSurface {
 
 export interface TerminalTexture {
   readonly texture: THREE.Texture;
+  /** A resized texture is still filling in strips; call advance() each frame. */
+  readonly swapPending: boolean;
   setFiltering(settings: TerminalFiltering): void;
+  /** Upload what the surface's latest paint changed. */
   update(): void;
+  /** Continue filling a resized texture without a new paint. */
+  advance(): void;
   dispose(): void;
+}
+
+// A resized canvas fills its replacement texture this many logical rows per update. Uploading a
+// full 3289x1029 terminal in one call stalled a Quest 3 frame by ~100 ms.
+const SWAP_ROWS_PER_UPDATE = 8;
+
+interface PendingSwap {
+  texture: THREE.DataTexture;
+  source: THREE.DataTexture;
+  data: Uint8Array;
+  width: number;
+  height: number;
+  rows: Uint8Array;
+  remaining: number;
+  allocated: boolean;
 }
 
 export interface TerminalTextureRenderer {
@@ -179,9 +199,112 @@ export function createTerminalTexture(
     previous.dispose();
   };
 
+  let pending: PendingSwap | null = null;
+  const copyRows = (
+    target: { texture: THREE.Texture; source: THREE.DataTexture; data: Uint8Array },
+    width: number,
+    height: number,
+    rowCount: number,
+    first: number,
+    last: number,
+  ): void => {
+    if (!context) return;
+    const pixelRowStart = Math.floor((first * height) / rowCount);
+    const pixelRowEnd = Math.min(height, Math.ceil(((last + 1) * height) / rowCount));
+    if (pixelRowEnd <= pixelRowStart) return;
+    const image = context.getImageData(0, pixelRowStart, width, pixelRowEnd - pixelRowStart);
+    const rowBytes = width * 4;
+    for (let sourceRow = 0; sourceRow < pixelRowEnd - pixelRowStart; sourceRow += 1) {
+      const destination = (height - 1 - (pixelRowStart + sourceRow)) * rowBytes;
+      const source = sourceRow * rowBytes;
+      target.data.set(image.data.subarray(source, source + rowBytes), destination);
+    }
+    copyRegion.min.set(0, height - pixelRowEnd);
+    copyRegion.max.set(width, height - pixelRowStart);
+    copyPosition.copy(copyRegion.min);
+    renderer?.copyTextureToTexture(target.source, target.texture, copyRegion, copyPosition);
+  };
+  const cancelSwap = (): void => {
+    if (!pending) return;
+    pending.source.dispose();
+    pending.texture.dispose();
+    pending = null;
+  };
+  const startSwap = (width: number, height: number): void => {
+    cancelSwap();
+    const rowCount = Math.max(1, surface.dirtyRows?.length || height);
+    const data = new Uint8Array(width * height * 4);
+    const next = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+    next.flipY = false;
+    copyTextureSettings(texture, next);
+    // Allocate GPU storage without uploading data; strips fill it.
+    next.source.dataReady = false;
+    next.needsUpdate = true;
+    pending = {
+      texture: next,
+      source: new THREE.DataTexture(data, width, height, THREE.RGBAFormat),
+      data,
+      width,
+      height,
+      rows: new Uint8Array(rowCount).fill(1),
+      remaining: rowCount,
+      allocated: false,
+    };
+  };
+  const advanceSwap = (newPaint: boolean): void => {
+    const swap = pending;
+    if (!swap) return;
+    const rowCount = swap.rows.length;
+    const dirty = surface.dirtyRows;
+    if (newPaint && dirty && dirty.length === rowCount)
+      for (let row = 0; row < rowCount; row += 1)
+        if (dirty[row] && !swap.rows[row]) {
+          swap.rows[row] = 1;
+          swap.remaining += 1;
+        }
+    let budget = SWAP_ROWS_PER_UPDATE;
+    let first = -1;
+    const flush = (last: number): void => {
+      if (first < 0) return;
+      // The first copy allocates storage, whose mip level count follows generateMipmaps, and
+      // the last builds the mip chain; strips in between skip regenerating it.
+      swap.texture.generateMipmaps =
+        (!swap.allocated || swap.remaining === 0) && effectiveFiltering.generateMipmaps;
+      copyRows(swap, swap.width, swap.height, rowCount, first, last);
+      swap.allocated = true;
+      first = -1;
+    };
+    for (let row = 0; row < rowCount && budget > 0; row += 1) {
+      if (!swap.rows[row]) {
+        flush(row - 1);
+        continue;
+      }
+      swap.rows[row] = 0;
+      swap.remaining -= 1;
+      budget -= 1;
+      if (first < 0) first = row;
+      if (budget === 0 || row === rowCount - 1) flush(row);
+    }
+    flush(rowCount - 1);
+    if (swap.remaining > 0) return;
+    const previous = texture;
+    uploadSource?.dispose();
+    uploadSource = swap.source;
+    texture = swap.texture;
+    texture.source.dataReady = true;
+    data = swap.data;
+    canvasWidth = swap.width;
+    canvasHeight = swap.height;
+    pending = null;
+    previous.dispose();
+  };
+
   return {
     get texture(): THREE.Texture {
       return texture;
+    },
+    get swapPending(): boolean {
+      return pending !== null;
     },
     setFiltering(settings: TerminalFiltering): void {
       const nextFiltering = validateTerminalFiltering(settings);
@@ -197,11 +320,26 @@ export function createTerminalTexture(
       effectiveFiltering = nextEffectiveFiltering;
       configureTexture(texture, currentFiltering, renderer);
       texture.needsUpdate = true;
+      if (pending) configureTexture(pending.texture, currentFiltering, renderer);
     },
     update(): void {
       if (disposed) return;
-      if (surface.canvas.width !== canvasWidth || surface.canvas.height !== canvasHeight) {
-        makeTexture();
+      const width = surface.canvas.width;
+      const height = surface.canvas.height;
+      if (width !== canvasWidth || height !== canvasHeight) {
+        if (!canCopyRegion || !data) {
+          makeTexture();
+          return;
+        }
+        if (pending?.width !== width || pending?.height !== height) startSwap(width, height);
+        advanceSwap(true);
+        return;
+      }
+      if (pending) {
+        // The canvas returned to the displayed size before the swap finished.
+        cancelSwap();
+        markRows(0, rowsForCanvas() - 1);
+        if (texture.updateRanges.length > 0) texture.needsUpdate = true;
         return;
       }
       const dirtyRows = surface.dirtyRows;
@@ -223,9 +361,16 @@ export function createTerminalTexture(
       }
       if (data && texture.updateRanges.length > 0) texture.needsUpdate = true;
     },
+    advance(): void {
+      if (disposed || !pending) return;
+      if (surface.canvas.width !== pending.width || surface.canvas.height !== pending.height)
+        return;
+      advanceSwap(false);
+    },
     dispose(): void {
       if (disposed) return;
       disposed = true;
+      cancelSwap();
       uploadSource?.dispose();
       texture.dispose();
     },
