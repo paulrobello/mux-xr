@@ -9,6 +9,9 @@ const DEFAULT_FOREGROUND = '#d8e1ef';
 const CANVAS_BACKGROUND = '#05070b';
 const MONOCHROME_BACKGROUND = '#070707';
 const MAX_PENDING_RANGES = 256;
+// A density change keeps the rescaled old pixels and redraws rows within this per-paint budget:
+// repainting a 299x49 grid at once took 300-400 ms on Quest 3 and froze head tracking.
+const REDRAW_BUDGET_MS = 4;
 
 type SelectionPosition = { start: { x: number; y: number }; end: { x: number; y: number } } | null;
 type TerminalLike = Pick<Terminal, 'buffer'> & {
@@ -25,11 +28,15 @@ export interface TerminalDamageHint {
 export interface TerminalPainterOptions {
   /** Shadow-scan every row after a hinted paint and count rows the hint missed. */
   audit?: boolean;
+  /** Time per paint for redrawing rows after a density change; at least one row is drawn. */
+  redrawBudgetMs?: number;
 }
 
 export interface TerminalPainter {
   readonly dirtyRows: Uint8Array;
   readonly damageStats: TerminalDamageStats;
+  /** Rows still show rescaled pixels from a density change and need further paints. */
+  readonly redrawPending: boolean;
   paint(
     cols: number,
     rows: number,
@@ -62,6 +69,10 @@ export function createTerminalPainter(
   let cachedBgValue = new Int32Array(0);
   let cachedFlags = new Uint8Array(0);
   let dirtyRows = new Uint8Array(0);
+  let redrawRows = new Uint8Array(0);
+  let redrawCount = 0;
+  let scratch: HTMLCanvasElement | null = null;
+  const redrawBudgetMs = options.redrawBudgetMs ?? REDRAW_BUDGET_MS;
   let previousCursorRow = -1;
   let previousCursorX = -1;
   let previousSelectionKey = '';
@@ -136,6 +147,8 @@ export function createTerminalPainter(
     cachedBgValue = new Int32Array(length);
     cachedFlags = new Uint8Array(length);
     dirtyRows = new Uint8Array(rows);
+    redrawRows = new Uint8Array(rows);
+    redrawCount = 0;
     scanRows = new Uint8Array(rows);
   };
 
@@ -249,6 +262,9 @@ export function createTerminalPainter(
     get dirtyRows(): Uint8Array {
       return dirtyRows;
     },
+    get redrawPending(): boolean {
+      return redrawCount > 0;
+    },
     paint(cols, rows, colorMode, resolutionScale = 1): boolean {
       const scale = resolutionScale > 0 ? resolutionScale : 1;
       const density =
@@ -265,6 +281,23 @@ export function createTerminalPainter(
       const width = Math.max(1, Math.round(logicalWidth * density));
       const height = Math.max(1, Math.round(logicalHeight * density));
       const canvasChanged = canvas.width !== width || canvas.height !== height;
+      const rescale =
+        initialized &&
+        !invalidated &&
+        !dimensionsChanged &&
+        colorMode === cachedMode &&
+        (canvasChanged || density !== cachedDensity);
+      let snapshot: HTMLCanvasElement | null = null;
+      if (rescale && canvasChanged && typeof document !== 'undefined') {
+        scratch ??= document.createElement('canvas');
+        scratch.width = canvas.width;
+        scratch.height = canvas.height;
+        const scratchContext = scratch.getContext('2d');
+        if (scratchContext && typeof scratchContext.drawImage === 'function') {
+          scratchContext.drawImage(canvas, 0, 0);
+          snapshot = scratch;
+        }
+      }
       if (canvas.width !== width) canvas.width = width;
       if (canvas.height !== height) canvas.height = height;
       const styleWidth = `${logicalWidth}px`;
@@ -273,19 +306,34 @@ export function createTerminalPainter(
       if (canvas.style.height !== styleHeight) canvas.style.height = styleHeight;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) return false;
+      if (snapshot && typeof ctx.drawImage === 'function') {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.drawImage(snapshot, 0, 0, width, height);
+        snapshot.width = 1;
+        snapshot.height = 1;
+      }
+      const progressive = rescale && (snapshot !== null || !canvasChanged);
       const background = colorMode === 'monochrome' ? MONOCHROME_BACKGROUND : CANVAS_BACKGROUND;
       const full =
-        !initialized ||
-        invalidated ||
-        canvasChanged ||
-        density !== cachedDensity ||
-        colorMode !== cachedMode;
+        !progressive &&
+        (!initialized ||
+          invalidated ||
+          canvasChanged ||
+          density !== cachedDensity ||
+          colorMode !== cachedMode);
       const active = terminal.buffer.active;
       const selection = terminal.getSelectionPosition?.();
       const currentSelectionKey = selectionKey(selection);
       const cursorRow = active.baseY + active.cursorY - active.viewportY;
       dirtyRows.fill(0);
-      if (full) dirtyRows.fill(1);
+      if (full) {
+        dirtyRows.fill(1);
+        redrawRows.fill(0);
+        redrawCount = 0;
+      } else if (progressive) {
+        redrawRows.fill(1);
+        redrawCount = rows;
+      }
       if (currentSelectionKey !== previousSelectionKey || active.viewportY !== previousViewportY) {
         const markSelectionRows = (key: string, viewportY: number): void => {
           if (!key) return;
@@ -357,9 +405,16 @@ export function createTerminalPainter(
       if (cursorChanged && previousCursorRow >= 0 && previousCursorRow < rows)
         dirtyRows[previousCursorRow] = 1;
       if (cursorRow >= 0 && cursorRow < rows) {
-        if (cursorChanged) dirtyRows[cursorRow] = 1;
+        if (cursorChanged || progressive) dirtyRows[cursorRow] = 1;
       }
-      let changed = full;
+      if (redrawCount > 0) {
+        for (let row = 0; row < rows; row += 1) {
+          if (!dirtyRows[row] || !redrawRows[row]) continue;
+          redrawRows[row] = 0;
+          redrawCount -= 1;
+        }
+      }
+      let changed = full || progressive;
       ctx.setTransform(density, 0, 0, density, 0, 0);
       if (ctx.textBaseline !== 'top') ctx.textBaseline = 'top';
       if (ctx.strokeStyle !== '#ffffff') ctx.strokeStyle = '#ffffff';
@@ -367,6 +422,20 @@ export function createTerminalPainter(
         if (!dirtyRows[row]) continue;
         drawRow(ctx, row, cols, colorMode, background, cell, selection);
         changed = true;
+      }
+      if (redrawCount > 0) {
+        const started = performance.now();
+        let drew = false;
+        for (let row = 0; row < rows && redrawCount > 0; row += 1) {
+          if (!redrawRows[row]) continue;
+          if (drew && performance.now() - started >= redrawBudgetMs) break;
+          redrawRows[row] = 0;
+          redrawCount -= 1;
+          dirtyRows[row] = 1;
+          drawRow(ctx, row, cols, colorMode, background, cell, selection);
+          drew = true;
+          changed = true;
+        }
       }
       if (cursorRow >= 0 && cursorRow < rows && (dirtyRows[cursorRow] !== 0 || full)) {
         ctx.strokeRect(

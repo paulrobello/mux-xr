@@ -230,8 +230,10 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     if (renderQuality === 'hidden') return;
     pendingPaint = false;
     const scale = renderQuality === 'full' ? 1 : renderQuality === 'medium' ? 0.5 : 0.25;
-    if (!painter.paint(cols, rows, colorMode, scale)) return;
-    lastPaintAt = Date.now();
+    const painted = painter.paint(cols, rows, colorMode, scale);
+    if (painted) lastPaintAt = Date.now();
+    if (painter.redrawPending) queuePaint();
+    if (!painted) return;
     if (emit) {
       revision += 1;
       notify();
@@ -566,7 +568,6 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     setRenderQuality: (quality) => {
       if (renderQuality === quality || disposed) return;
       renderQuality = quality;
-      painter.invalidate();
       cancelPaint();
       pendingPaint = true;
       if (!paused && quality === 'full') paint();

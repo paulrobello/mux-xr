@@ -132,6 +132,32 @@ describe('terminal painter', () => {
     expect(painter.paint(5, 3, 'monochrome')).toBe(true);
   });
 
+  it('rescales old pixels on a density change and redraws rows across paints', () => {
+    const f = fixture(4, 3);
+    const drawImage = vi.fn();
+    (f.context as Record<string, unknown>).drawImage = drawImage;
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(f.context as unknown as CanvasRenderingContext2D);
+    f.lines[0][0] = cell({ chars: 'a' });
+    const painter = createTerminalPainter(f.canvas, f.terminal as never, { redrawBudgetMs: 0 });
+    painter.paint(4, 3, 'comfort', 1);
+    expect(painter.redrawPending).toBe(false);
+    const calls = f.context.calls as string[];
+    calls.length = 0;
+    expect(painter.paint(4, 3, 'comfort', 0.5)).toBe(true);
+    expect(drawImage).toHaveBeenCalledTimes(2);
+    expect(f.canvas.width).toBe(22);
+    // The cursor row and one budgeted row are redrawn; the last row keeps rescaled pixels.
+    expect(painter.dirtyRows).toEqual(new Uint8Array([1, 1, 0]));
+    expect(painter.redrawPending).toBe(true);
+    expect(painter.paint(4, 3, 'comfort', 0.5)).toBe(true);
+    expect(painter.dirtyRows).toEqual(new Uint8Array([0, 0, 1]));
+    expect(painter.redrawPending).toBe(false);
+    expect(painter.paint(4, 3, 'comfort', 0.5)).toBe(false);
+    getContext.mockRestore();
+  });
+
   it('uses the optional resolution scale without changing logical canvas size', () => {
     const f = fixture(4, 2);
     const painter = createTerminalPainter(f.canvas, f.terminal as never);
