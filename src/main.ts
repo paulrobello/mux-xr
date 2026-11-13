@@ -335,6 +335,7 @@ function applySettings(settings: WorkspaceSettings): void {
     scene.setUISounds(settings.uiSounds);
     scene.setHandColor(settings.handColor || null);
     scene.setArmColor(settings.armColor || null);
+    scene.setWeatherZip(settings.weatherZip);
     scene.setBackground(settings.background);
     for (const surface of surfaces.values()) surface.setColorMode(settings.colorMode);
     rosterLayout = agentRosterLayout(settings);
@@ -665,6 +666,7 @@ const stopPresentation = scene.subscribe((state) => {
     ui.setUISounds(state.uiSounds, true);
     ui.setHandColor(state.handColor, true);
     ui.setArmColor(state.armColor, true);
+    ui.setWeatherZip(state.weatherZip, true);
     ui.setFilteringCapabilities(Number(scene.scene.userData.maxAnisotropy ?? 1));
     for (const id of surfaces.keys()) {
       ui.setTerminalCurvature(id, scene.getTerminalCurvature(id));

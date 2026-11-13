@@ -33,6 +33,7 @@ import {
   REPO_STATUS_PATH,
   type RepoStatusRouteOptions,
 } from './repo-status-server';
+import { createWeatherRoute, WEATHER_PATH, type WeatherRouteOptions } from './weather-server';
 
 const execFile = promisify(execFileCallback);
 const MAX_PAYLOAD = 8 * 1024 * 1024;
@@ -81,6 +82,11 @@ export type DictationServerOptions = {
     PictureDepthRouteOptions,
     'allowedOrigins' | 'loadSecret'
   >;
+  /**
+   * Weather on `/weather`: the Mac looks up a US ZIP with zippopotam.us and the National Weather
+   * Service. It only reaches those fixed hosts, so the clipboard pairing secret alone gates it.
+   */
+  weather?: Omit<WeatherRouteOptions, 'allowedOrigins' | 'loadSecret'>;
   telemetry?: Pick<
     DictationTelemetry,
     'connected' | 'disconnected' | 'rejected' | 'beginTranscription'
@@ -206,6 +212,13 @@ export const attachDictationServer = (
     limiter: authLimiter,
     allowedOrigins: options.allowedOrigins,
   });
+  const weatherRoute = createWeatherRoute({
+    ...options.weather,
+    loadSecret,
+    limiter: authLimiter,
+    now: options.weather?.now ?? options.clipboard?.now,
+    allowedOrigins: options.allowedOrigins,
+  });
   const pictureDepthRoute = createPictureDepthRoute({
     ...options.pictureDepth,
     loadSecret: options.pictureDepth?.enabled
@@ -243,6 +256,10 @@ export const attachDictationServer = (
     }
     if (requestUrl.pathname === PICTURE_FETCH_PATH && !requestUrl.search) {
       pictureFetchRoute.handleUpgrade(request, socket, head);
+      return;
+    }
+    if (requestUrl.pathname === WEATHER_PATH && !requestUrl.search) {
+      weatherRoute.handleUpgrade(request, socket, head);
       return;
     }
     if (requestUrl.pathname === PICTURE_DEPTH_PATH && !requestUrl.search) {
@@ -378,6 +395,7 @@ export const attachDictationServer = (
       await repoStatusRoute.close();
       await pictureFetchRoute.close();
       await pictureDepthRoute.close();
+      await weatherRoute.close();
     },
   };
 };

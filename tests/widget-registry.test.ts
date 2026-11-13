@@ -65,6 +65,7 @@ describe('widget registry', () => {
       ['perf-gauge', 'Performance', [-1, 0.15, -1.1]],
       ['host-load', 'Host load', [-1.15, 0.53, -1.3]],
       ['repo-status', 'Git & CI', [0.6, -0.1, -1.4]],
+      ['weather', 'Weather', [-0.6, 0.58, -1.32]],
       ['picture', 'Picture', [-0.95, -0.55, -1.15]],
     ]);
     expect(widgetKinds()).toEqual([
@@ -76,6 +77,7 @@ describe('widget registry', () => {
       'perf-gauge',
       'host-load',
       'repo-status',
+      'weather',
       'picture',
     ]);
   });

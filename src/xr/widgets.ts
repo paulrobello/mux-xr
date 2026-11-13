@@ -29,6 +29,8 @@ export interface Widget {
   setFocusedPane?: (paneId: string | null, cwd: string | null, host?: string | null) => void;
   /** Applies a new texture anisotropy, already capped to the renderer maximum. */
   setTextureAnisotropy?: (anisotropy: number) => void;
+  /** Receives the weather ZIP setting on mount and on each change; empty when none is set. */
+  setWeatherZip?: (zip: string) => void;
   /** Gives a picture frame its depth map; frames take ownership of the image's canvas. */
   setPictureDepth?: (depth: PictureImage) => void;
 }

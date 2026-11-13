@@ -16,6 +16,7 @@ import type {
   WorkspaceActions,
 } from '../contracts';
 import { getControlHelp } from '../control-help';
+import { validateWeatherZip } from '../host-weather';
 import {
   createModifierState,
   type KeyboardModifier,
@@ -196,7 +197,8 @@ type InputMode =
   | 'world'
   | 'buttons'
   | 'picture-url'
-  | 'picture-gallery';
+  | 'picture-gallery'
+  | 'weather-zip';
 
 /** Modes that show the virtual keyboard and edit text with it. */
 const isTypingMode = (mode: InputMode): boolean =>
@@ -236,6 +238,8 @@ export interface WorkspaceSceneState {
   handColor: string;
   /** `#rrggbb` arm tint, or empty to match the hands. */
   armColor: string;
+  /** Five-digit US ZIP for the weather widget, or empty when none is set. */
+  weatherZip: string;
   dictation: DictationState;
   fps: number | null;
   xrMode: 'desktop' | 'vr' | 'ar';
@@ -293,6 +297,8 @@ export interface WorkspaceScene {
   setHandColor(color: string | null): void;
   /** Tints both arms; null makes them match the hands. */
   setArmColor(color: string | null): void;
+  /** Sets the weather widget's ZIP; anything but five digits clears it. */
+  setWeatherZip(zip: string): void;
   setDictationState(state: DictationState): void;
   setAvailablePanes(panes: PaneDescriptor[]): void;
   setPaneCreation(state: PaneCreationState): void;
@@ -976,6 +982,7 @@ export function createWorkspaceScene(
     uiSounds: true,
     handColor: '',
     armColor: '',
+    weatherZip: '',
     dictation: { supported: false, status: 'idle', transcript: '', error: null },
     fps: null,
     xrMode: 'desktop',
@@ -1351,6 +1358,8 @@ export function createWorkspaceScene(
   let commandEditorMessage = '';
   // In-XR picture picking: the URL being typed, the frame it fills, and the Recent gallery.
   let pictureUrl = { text: '', cursor: 0 };
+  let weatherZipDraft = '';
+  let weatherZipMessage = '';
   let pictureTarget: string | undefined;
   let picturePanelMessage = '';
   let pictureBusy = false;
@@ -3609,6 +3618,7 @@ export function createWorkspaceScene(
     });
     widget.setAgentRoster?.(latestAgentRoster);
     widget.setBellFeed?.(bellFeed.entries());
+    widget.setWeatherZip?.(mutableState.weatherZip);
     widgets.set(key, widget);
     scene.add(widget.root);
     if (place) placeWidget(key, widget);
@@ -4175,15 +4185,17 @@ export function createWorkspaceScene(
                     ? 'Display settings'
                     : mode === 'world'
                       ? 'World settings'
-                      : mode === 'filtering'
-                        ? 'Terminal filtering'
-                        : mode === 'warp'
-                          ? 'Terminal curvature'
-                          : mode === 'arrange'
-                            ? 'Arrange terminals'
-                            : mode === 'panes'
-                              ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
-                              : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? (mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard') : 'Terminal settings'} · ${targetTitle}`,
+                      : mode === 'weather-zip'
+                        ? 'Weather ZIP code'
+                        : mode === 'filtering'
+                          ? 'Terminal filtering'
+                          : mode === 'warp'
+                            ? 'Terminal curvature'
+                            : mode === 'arrange'
+                              ? 'Arrange terminals'
+                              : mode === 'panes'
+                                ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
+                                : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? (mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard') : 'Terminal settings'} · ${targetTitle}`,
       mode === 'panes' ? 1.8 : 0.9,
       0.12,
       { inputAction: 'grabInput' },
@@ -4358,6 +4370,56 @@ export function createWorkspaceScene(
           swatch.position.set((index - (HAND_COLOR_PRESETS.length - 1) / 2) * 0.23, y - 0.11, 0);
           inputRoot.add(swatch);
         }
+      }
+      const zip = createLabelButton(
+        `Weather ZIP: ${mutableState.weatherZip || 'not set'}`,
+        0.8,
+        0.1,
+        { inputAction: 'openInput', mode: 'weather-zip' },
+      );
+      zip.name = 'xr-weather-zip-button';
+      zip.position.y = -0.37;
+      inputRoot.add(zip);
+    } else if (mode === 'weather-zip') {
+      const field = createLabelButton(
+        `ZIP: ${weatherZipDraft}${weatherZipDraft.length < 5 ? '|' : ''}`,
+        0.76,
+        0.12,
+        { inputAction: 'noop' },
+      );
+      field.name = 'xr-weather-zip-field';
+      field.position.y = 0.4;
+      setModifierVisual(field, true);
+      inputRoot.add(field);
+      const keys = [
+        ['1', '2', '3'],
+        ['4', '5', '6'],
+        ['7', '8', '9'],
+        ['Clear', '0', '⌫'],
+      ] as const;
+      for (const [row, labels] of keys.entries())
+        for (const [column, key] of labels.entries()) {
+          const digit = /^\d$/.test(key);
+          const button = createLabelButton(key, 0.22, 0.12, {
+            inputAction: digit ? 'zipDigit' : key === 'Clear' ? 'zipClear' : 'zipDelete',
+            ...(digit ? { zipDigit: key } : {}),
+          });
+          button.name = `xr-weather-zip-key-${digit ? key : key === 'Clear' ? 'clear' : 'delete'}`;
+          button.position.set((column - 1) * 0.25, 0.24 - row * 0.14, 0);
+          inputRoot.add(button);
+        }
+      const save = createLabelButton('Save', 0.36, 0.1, { inputAction: 'zipSave' });
+      save.name = 'xr-weather-zip-save';
+      save.position.set(-0.2, -0.36, 0);
+      const unset = createLabelButton('Remove ZIP', 0.36, 0.1, { inputAction: 'zipUnset' });
+      unset.name = 'xr-weather-zip-unset';
+      unset.position.set(0.2, -0.36, 0);
+      inputRoot.add(save, unset);
+      if (weatherZipMessage) {
+        const message = createLabelButton(weatherZipMessage, 0.76, 0.08, { inputAction: 'noop' });
+        message.name = 'xr-weather-zip-message';
+        message.position.y = -0.48;
+        inputRoot.add(message);
       }
     } else if (mode === 'display') {
       (
@@ -4954,10 +5016,12 @@ export function createWorkspaceScene(
           : mode === 'settings'
             ? -0.89
             : mode === 'world'
-              ? -0.35
-              : mode === 'terminal' && terminalHasReset
-                ? -0.78
-                : -0.66,
+              ? -0.51
+              : mode === 'weather-zip'
+                ? -0.6
+                : mode === 'terminal' && terminalHasReset
+                  ? -0.78
+                  : -0.66,
       0,
     );
     if (mode === 'picture-gallery') close.position.set(0.3, -0.46, 0);
@@ -4967,21 +5031,23 @@ export function createWorkspaceScene(
       close.position.set(x, y, 0);
     }
     inputRoot.add(close);
-    if (['terminal', 'display', 'world', 'filtering', 'buttons'].includes(mode)) {
+    if (['terminal', 'display', 'world', 'filtering', 'buttons', 'weather-zip'].includes(mode)) {
       close.position.x = 0.22;
       const back = createLabelButton('Back', 0.3, 0.09, {
         inputAction: 'openInput',
-        mode: mode === 'filtering' ? 'display' : 'settings',
+        mode: mode === 'filtering' ? 'display' : mode === 'weather-zip' ? 'world' : 'settings',
       });
       back.position.set(
         -0.22,
         mode === 'display'
           ? -0.84
           : mode === 'world'
-            ? -0.35
-            : mode === 'terminal' && terminalHasReset
-              ? -0.78
-              : -0.66,
+            ? -0.51
+            : mode === 'weather-zip'
+              ? -0.6
+              : mode === 'terminal' && terminalHasReset
+                ? -0.78
+                : -0.66,
         0,
       );
       inputRoot.add(back);
@@ -5278,6 +5344,35 @@ export function createWorkspaceScene(
     }
     if (action === 'uiSounds') {
       setUISounds(!mutableState.uiSounds);
+      return true;
+    }
+    if (
+      action === 'zipDigit' ||
+      action === 'zipDelete' ||
+      action === 'zipClear' ||
+      action === 'zipSave' ||
+      action === 'zipUnset'
+    ) {
+      weatherZipMessage = '';
+      if (action === 'zipDigit' && weatherZipDraft.length < 5)
+        weatherZipDraft += String(hit.userData.zipDigit ?? '')
+          .replace(/\D/g, '')
+          .slice(0, 1);
+      else if (action === 'zipDelete') weatherZipDraft = weatherZipDraft.slice(0, -1);
+      else if (action === 'zipClear') weatherZipDraft = '';
+      else if (action === 'zipUnset') {
+        setWeatherZip('');
+        showInput('world');
+        return true;
+      } else if (action === 'zipSave') {
+        if (!validateWeatherZip(weatherZipDraft)) weatherZipMessage = 'Enter all five digits';
+        else {
+          setWeatherZip(weatherZipDraft);
+          showInput('world');
+          return true;
+        }
+      }
+      if (inputRoot && inputMode === 'weather-zip') refreshInputRoot('weather-zip');
       return true;
     }
     if (action === 'backgroundSelect') {
@@ -6973,6 +7068,7 @@ export function createWorkspaceScene(
     'settings',
     'display',
     'world',
+    'weather-zip',
     'terminal',
     'filtering',
     'buttons',
@@ -7204,6 +7300,14 @@ export function createWorkspaceScene(
     mutableState.handColor = next;
     applyHandColors();
   };
+  const setWeatherZip = (zip: string): void => {
+    const next = validateWeatherZip(zip);
+    if (next === mutableState.weatherZip) return;
+    mutableState.weatherZip = next;
+    for (const widget of widgets.values()) widget.setWeatherZip?.(next);
+    if (inputRoot && inputMode === 'world') refreshInputRoot(inputMode);
+    notify();
+  };
   const setArmColor = (color: string | null): void => {
     const next = validateHandColor(color);
     if (next === mutableState.armColor) return;
@@ -7321,6 +7425,10 @@ export function createWorkspaceScene(
     keyboardResume = null;
     templateHint = null;
     if (mode === 'widgets') widgetsPage = 0;
+    if (mode === 'weather-zip') {
+      weatherZipDraft = mutableState.weatherZip;
+      weatherZipMessage = '';
+    }
     if (
       !renderer?.xr.isPresenting &&
       (mode === 'commands' || mode === 'keyboard' || mode === 'command-editor')
@@ -8044,6 +8152,7 @@ export function createWorkspaceScene(
     setUISounds,
     setHandColor,
     setArmColor,
+    setWeatherZip,
     setDictationState,
     setAvailablePanes,
     setPaneCreation,

@@ -13,6 +13,7 @@ import type {
 import { isBackgroundMode } from '../contracts';
 import { getKeyHelp } from '../control-help';
 import { HOST_CLIPBOARD_SETUP } from '../host-clipboard';
+import { validateWeatherZip } from '../host-weather';
 import { createModifierState, keyboardDimensions, keyboardKeys } from '../keyboard';
 import {
   commandServerKey,
@@ -140,6 +141,8 @@ export interface WorkspaceSettings {
   handColor: string;
   /** `#rrggbb` arm tint, or empty to match the hands. */
   armColor: string;
+  /** Five-digit US ZIP for the weather widget, or empty when none is set. */
+  weatherZip: string;
   /** par-mux `agent-rows` preset, or `custom` for {@link agentRowsCustom}. */
   agentRows: AgentRowsChoice;
   agentRowsCustom: string;
@@ -201,6 +204,8 @@ export interface WorkspaceUI {
   setHandColor(color: string, persist?: boolean): void;
   /** Applies an arm color chosen in XR; empty makes the arms match the hands. */
   setArmColor(color: string, persist?: boolean): void;
+  /** Applies a weather ZIP chosen in XR; anything but five digits clears it. */
+  setWeatherZip(zip: string, persist?: boolean): void;
   setBackground(mode: BackgroundMode, persist?: boolean): void;
   setFilteringCapabilities(maxAnisotropy: number): void;
   setDictationState(state: DictationState): void;
@@ -279,6 +284,7 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   keyborbMode: 'auto',
   uiSounds: true,
   handColor: '',
+  weatherZip: '',
   armColor: '',
   agentRows: 'full',
   agentRowsCustom: '',
@@ -387,6 +393,7 @@ export function validateSettings(value: unknown): WorkspaceSettings {
     uiSounds: candidate.uiSounds !== false,
     handColor: validateHandColor(candidate.handColor),
     armColor: validateHandColor(candidate.armColor),
+    weatherZip: validateWeatherZip(candidate.weatherZip),
     agentRows: AGENT_ROWS_CHOICES.includes(candidate.agentRows as AgentRowsChoice)
       ? (candidate.agentRows as AgentRowsChoice)
       : DEFAULT_SETTINGS.agentRows,
@@ -733,6 +740,13 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       '<input type="checkbox" data-ui-sounds> UI sounds <span>Play short clicks in XR and pulse the controllers on presses, grabs and scrolling.</span>';
     settingsPanel.insertBefore(
       uiSounds,
+      settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
+    );
+    const weatherZip = document.createElement('label');
+    weatherZip.innerHTML =
+      '<span>Weather ZIP</span><input data-weather-zip type="text" inputmode="numeric" maxlength="5" pattern="[0-9]{5}" placeholder="e.g. 95814" aria-label="Weather ZIP code"><small>US ZIP for the XR weather widget; leave empty for none.</small>';
+    settingsPanel.insertBefore(
+      weatherZip,
       settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
     );
     // A color picker plus a button that clears the color back to empty.
@@ -1803,6 +1817,15 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     };
     saveSettings();
   });
+  const weatherZipInput = qs<HTMLInputElement>('[data-weather-zip]');
+  weatherZipInput.value = settings.weatherZip;
+  weatherZipInput.addEventListener('change', () => {
+    const next = validateWeatherZip(weatherZipInput.value.trim());
+    weatherZipInput.value = next;
+    if (settings.weatherZip === next) return;
+    settings = { ...settings, weatherZip: next };
+    saveSettings();
+  });
   qs<HTMLInputElement>('[data-ui-sounds]').addEventListener('change', (event) => {
     settings = { ...settings, uiSounds: (event.target as HTMLInputElement).checked };
     saveSettings();
@@ -2146,6 +2169,13 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       if (settings.armColor === next) return;
       settings = { ...settings, armColor: next };
       updateHandColorControls();
+      if (persist) saveSettings();
+    },
+    setWeatherZip(zip, persist = false) {
+      const next = validateWeatherZip(zip);
+      if (settings.weatherZip === next) return;
+      settings = { ...settings, weatherZip: next };
+      qs<HTMLInputElement>('[data-weather-zip]').value = next;
       if (persist) saveSettings();
     },
     setHandColor(color, persist = false) {

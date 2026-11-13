@@ -4920,6 +4920,38 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('sets the weather ZIP from a World keypad and clears it again', () => {
+    const { workspace, container } = fixture();
+    workspace.showInput('settings');
+    hit(workspace, { inputAction: 'openInput', mode: 'world' });
+    const named = (name: string) => workspace.scene.getObjectByName(name);
+    expect(named('xr-weather-zip-button')?.userData.labelText).toBe('Weather ZIP: not set');
+    hit(workspace, { inputAction: 'openInput', mode: 'weather-zip' });
+    for (const zipDigit of ['9', '5', '8']) hit(workspace, { inputAction: 'zipDigit', zipDigit });
+    expect(named('xr-weather-zip-field')?.userData.labelText).toBe('ZIP: 958|');
+    hit(workspace, { inputAction: 'zipSave' });
+    expect(workspace.state.weatherZip).toBe('');
+    expect(named('xr-weather-zip-message')?.userData.labelText).toBe('Enter all five digits');
+    for (const zipDigit of ['1', '4', '7']) hit(workspace, { inputAction: 'zipDigit', zipDigit });
+    expect(named('xr-weather-zip-field')?.userData.labelText).toBe('ZIP: 95814');
+    hit(workspace, { inputAction: 'zipDelete' });
+    hit(workspace, { inputAction: 'zipDigit', zipDigit: '4' });
+    hit(workspace, { inputAction: 'zipSave' });
+    expect(workspace.state.weatherZip).toBe('95814');
+    expect(named('xr-world-controls')).toBeTruthy();
+    expect(named('xr-weather-zip-button')?.userData.labelText).toBe('Weather ZIP: 95814');
+    hit(workspace, { inputAction: 'openInput', mode: 'weather-zip' });
+    expect(named('xr-weather-zip-field')?.userData.labelText).toBe('ZIP: 95814');
+    hit(workspace, { inputAction: 'zipUnset' });
+    expect(workspace.state.weatherZip).toBe('');
+    workspace.setWeatherZip('abc');
+    expect(workspace.state.weatherZip).toBe('');
+    workspace.setWeatherZip('10001');
+    expect(workspace.state.weatherZip).toBe('10001');
+    workspace.dispose();
+    container.remove();
+  });
+
   it('owns the background selector only in World and closes it after selection', () => {
     const { workspace, container } = fixture();
     workspace.showInput('settings');
@@ -5011,7 +5043,8 @@ describe('native XR controller event routing', () => {
     const { workspace, container } = fixture();
     for (const [mode, maxHeight] of [
       ['display', 1.55],
-      ['world', 1.05],
+      ['world', 1.2],
+      ['weather-zip', 1.3],
     ] as const) {
       workspace.showInput(mode);
       const root = workspace.scene.getObjectByName(`xr-${mode}-controls`);

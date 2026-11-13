@@ -6,6 +6,7 @@ import { createPerfGaugeWidget } from './perf-gauge';
 import { createPictureFrameWidget } from './picture-frame';
 import { createRepoStatusWidget } from './repo-status-widget';
 import { createTimerWidget } from './timer-widget';
+import { createWeatherWidget } from './weather-widget';
 import { createClockWidget, type Widget } from './widgets';
 
 export interface WidgetEntry {
@@ -89,6 +90,16 @@ export const WIDGET_REGISTRY = [
     spawnScale: 0.7,
     faceViewer: true,
     create: (envMap) => createRepoStatusWidget(envMap),
+  },
+  {
+    kind: 'weather',
+    displayName: 'Weather',
+    // Above the left clock, right of host load and under the upper picture row; that gap is
+    // short, so the widget is a wide banner at this scale.
+    spawnOffset: [-0.6, 0.58, -1.32],
+    spawnScale: 0.62,
+    faceViewer: true,
+    create: (envMap) => createWeatherWidget(envMap),
   },
   {
     kind: 'picture',

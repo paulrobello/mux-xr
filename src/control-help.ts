@@ -144,6 +144,16 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
         : 'Restore the default hand color';
     case 'armColor':
       return data.armColor ? 'Tint both arms with this color' : 'Color the arms like the hands';
+    case 'zipDigit':
+      return `Type ${String(data.zipDigit ?? 'a number')} into the weather ZIP`;
+    case 'zipDelete':
+      return 'Delete the last ZIP number';
+    case 'zipClear':
+      return 'Clear the ZIP field';
+    case 'zipSave':
+      return 'Save the ZIP and show its weather';
+    case 'zipUnset':
+      return 'Remove the weather ZIP';
     case 'uiSounds':
       return 'Turn interface clicks and controller pulses on or off';
     case 'terminalColors':
@@ -173,14 +183,16 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
               : data.mode === 'display'
                 ? 'Choose colors, filtering, new-window opacity and focus preferences'
                 : data.mode === 'world'
-                  ? 'Choose VR background or passthrough'
-                  : data.mode === 'widgets'
-                    ? 'Open movable digital and analog clocks'
-                    : data.mode === 'filtering'
-                      ? 'Choose filtering and viewed-terminal clarity'
-                      : data.mode === 'arrange'
-                        ? 'Arrange attached terminals in a spatial pattern'
-                        : 'Open saved quick commands';
+                  ? 'Choose VR background, passthrough, hand colors and the weather ZIP'
+                  : data.mode === 'weather-zip'
+                    ? 'Enter the US ZIP code the weather widget shows'
+                    : data.mode === 'widgets'
+                      ? 'Open movable digital and analog clocks'
+                      : data.mode === 'filtering'
+                        ? 'Choose filtering and viewed-terminal clarity'
+                        : data.mode === 'arrange'
+                          ? 'Arrange attached terminals in a spatial pattern'
+                          : 'Open saved quick commands';
     case 'exit':
       return 'Exit immersive mode or the 3D preview; press twice to confirm';
     case 'close':
