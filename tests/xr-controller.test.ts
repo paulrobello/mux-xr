@@ -8344,6 +8344,11 @@ describe('native XR controller event routing', () => {
       if (!frame || !rimLeft || !rimRight) throw new Error('Desk window frame is missing');
       const rimMaterial = (rimLeft as THREE.Mesh<THREE.PlaneGeometry, THREE.Material>).material;
       const close = frame.getObjectByName('desk-window-close');
+      const aperture = frame.getObjectByName('desk-window-aperture') as THREE.Mesh<
+        THREE.PlaneGeometry,
+        THREE.ShaderMaterial
+      >;
+      expect(aperture.material.uniforms.editing.value).toBe(false);
       expect(rimMaterial.visible).toBe(false);
       expect(close?.visible).toBe(false);
       // Keep the terminal furniture away from the controller rays aimed at the rim.
@@ -8362,6 +8367,7 @@ describe('native XR controller event routing', () => {
       fakeXR.frame?.(32);
       expect(frame.position.x).toBeCloseTo(initial.x + 0.16);
       expect(frame.quaternion.angleTo(initialRotation)).toBeGreaterThan(0.01);
+      expect(aperture.material.uniforms.editing.value).toBe(true);
       expect(rimMaterial.visible).toBe(true);
       expect(close?.visible).toBe(true);
       (pad.axes as number[])[3] = 0;
@@ -8378,6 +8384,7 @@ describe('native XR controller event routing', () => {
       left.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
       right.quaternion.copy(left.quaternion);
       fakeXR.frame?.(80);
+      expect(aperture.material.uniforms.editing.value).toBe(false);
       expect(rimMaterial.visible).toBe(false);
       expect(close?.visible).toBe(false);
       aimController(left, rimLeft);

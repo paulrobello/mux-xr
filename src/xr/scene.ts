@@ -101,7 +101,12 @@ import {
   draftFromCommand,
   editCommandDraft,
 } from './command-editor';
-import { createDeskBackdrop, DESK_WINDOW_KIND, setEnvironmentWindowMask } from './desk-window';
+import {
+  createDeskBackdrop,
+  createDeskWindow,
+  DESK_WINDOW_KIND,
+  setEnvironmentWindowMask,
+} from './desk-window';
 import { XR_ENTRY_LABELS, type XrEntryMode } from './entry';
 import {
   keepLayoutAboveFloor,
@@ -935,6 +940,7 @@ export function createWorkspaceScene(
   const observatory = createObservatory(scene);
   const deskBackdrop = createDeskBackdrop();
   scene.add(deskBackdrop);
+  const deskWindowViewer = new THREE.Vector3();
   let deskWindowOnEntry = false;
   const panels = new Map<string, TerminalPanel>();
   const widgets = new Map<WidgetKey, Widget>();
@@ -3639,6 +3645,7 @@ export function createWorkspaceScene(
     }
     observatory.rotation.y = time * 0.00001;
     for (const panel of panels.values()) panel.surface.flush?.();
+    if (widgets.has(DESK_WINDOW_KIND)) trackedHead().getWorldPosition(deskWindowViewer);
     renderScene();
     if (!renderer && typeof window.requestAnimationFrame === 'function')
       frameHandle = window.requestAnimationFrame(render);
@@ -4047,7 +4054,8 @@ export function createWorkspaceScene(
     }
     mutableState.fullPassthrough = false;
     const saved = widgetPoseStore.read()[DESK_WINDOW_KIND];
-    const widget = addWidget(DESK_WINDOW_KIND);
+    const widget = createDeskWindow(deskWindowViewer);
+    mountWidget(DESK_WINDOW_KIND, widget);
     if (saved && validPose(saved)) applyUIPose(widget.root, saved, [0.25, 2]);
     mutableState.widgets = [...widgets.keys()];
     hideInput();

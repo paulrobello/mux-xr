@@ -187,7 +187,7 @@ const DESK_WINDOW_ENTRY: WidgetEntry = {
   kind: DESK_WINDOW_KIND,
   displayName: 'Desk window',
   spawnOffset: [0, -0.72, -1.05],
-  create: createDeskWindow,
+  create: () => createDeskWindow(),
 };
 
 export type WidgetKind = (typeof WIDGET_REGISTRY)[number]['kind'] | typeof DESK_WINDOW_KIND;

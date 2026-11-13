@@ -9,7 +9,7 @@ const MASK_ORDER = -1_000_001;
 const WIDTH = 0.85;
 const HEIGHT = 0.46;
 const RIM = 0.014;
-const FEATHER_METRES = 0.08;
+const FEATHER_METRES = 0.055;
 const RIM_COLOR = 0x536e7d;
 const maskedRoots = new WeakSet<THREE.Object3D>();
 
@@ -75,16 +75,36 @@ export function createDeskBackdrop(): THREE.Mesh<THREE.PlaneGeometry, THREE.Shad
   return backdrop;
 }
 
-export function createDeskWindow(): Widget {
+// Both eyes use the direction from the same viewer origin to the opening. Their view
+// rotations and projection matrices still map those directions to the correct eye pixels.
+const APERTURE_VERTEX = `
+  uniform vec3 viewerCenter;
+  uniform bool editing;
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    vec3 world = (modelMatrix * vec4(position, 1.0)).xyz;
+    vec3 direction = editing
+      ? (modelViewMatrix * vec4(position, 1.0)).xyz
+      : (viewMatrix * vec4(world - viewerCenter, 0.0)).xyz;
+    gl_Position = projectionMatrix * vec4(direction, 1.0);
+  }
+`;
+
+export function createDeskWindow(viewerCenter = new THREE.Vector3()): Widget {
   const root = new THREE.Group();
   root.name = 'desk-window';
   root.userData.widgetId = DESK_WINDOW_KIND;
   root.userData.widgetKind = DESK_WINDOW_KIND;
   root.userData.scaleLimits = [0.25, 2];
 
+  const editing = { value: false };
   const aperture = new THREE.Mesh(
     new THREE.PlaneGeometry(WIDTH, HEIGHT),
-    new THREE.MeshBasicMaterial({
+    new THREE.ShaderMaterial({
+      uniforms: { viewerCenter: { value: viewerCenter }, editing },
+      vertexShader: APERTURE_VERTEX,
+      fragmentShader: 'void main() { gl_FragColor = vec4(0.0); }',
       side: THREE.DoubleSide,
       colorWrite: false,
       depthWrite: false,
@@ -102,22 +122,16 @@ export function createDeskWindow(): Widget {
   aperture.raycast = () => undefined;
   root.add(aperture);
 
-  // Keep the aperture's projection in world space for each eye. Fade the camera image to
-  // a quiet edge so nearby physical objects clipped by one eye do not meet a hard seam.
   const feather = new THREE.Mesh(
     aperture.geometry,
     new THREE.ShaderMaterial({
       uniforms: {
+        viewerCenter: { value: viewerCenter },
+        editing,
         size: { value: new THREE.Vector2(WIDTH, HEIGHT) },
         featherWidth: { value: FEATHER_METRES },
       },
-      vertexShader: `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
+      vertexShader: APERTURE_VERTEX,
       fragmentShader: `
         uniform vec2 size;
         uniform float featherWidth;
@@ -173,6 +187,7 @@ export function createDeskWindow(): Widget {
     update: () => undefined,
     dispose: () => disposeOwned(root),
     setPointed: (pointed) => {
+      editing.value = pointed;
       rimMaterial.visible = pointed;
       close.visible = pointed;
     },
