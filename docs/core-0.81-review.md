@@ -29,8 +29,16 @@ Every change is an optional field, so this client and older streamers stay compa
 - After a broadcast lag, the stream re-sends the pane's process state, so a held pane that exited no longer shows as running.
 - `worktree-remove -f`, `kill-window` and `kill-session` release agent-roster rows, so the board stops showing ghost agents.
 
-## Before upgrading the LAN streamer
+## Qualification
 
-- Since 0.80.0 the streamer refuses a non-loopback bind that serves shells without authentication unless `--allow-unauthenticated` is passed. The LAN preview binds `0.0.0.0` with TLS and no authentication. The alternatives are that flag, or an API key or HTTP password that the client would have to send.
-- The macOS application firewall rule approved on November 1, 2026 applies to the current binary at `.local/bin/streamer-candidate` (see [verification](verification.md)). Replacing that file may require approving the rule again before the headset can connect.
-- The 0.81.0 binaries need the same real-app check the 0.78.1 pair passed.
+On November 12, 2026, the official 0.81.0 streamer was run on loopback against a private par-mux 0.80.0 daemon (`0.80.0+e9d8f33c`, the same version as the shared default daemon) on its own socket.
+
+- `scripts/pane-lifecycle-check.ts` passed: the client saw `exited(3)` and then `running` on the same stream.
+- `scripts/real-app-check.ts` passed with no errors. Two panes in separate sessions held 80×24 with zero baseline Resize messages. An explicit 100×30 resize restored to 80×24 with exactly two wire resizes. Renderer: `ANGLE Metal Renderer: Apple M4 Max`.
+- The first real-app run failed at the 100×30 resize because the private panes were split inside one window. The unchanged 0.78.1 binary failed at the same step on that layout, and both pass with one pane per session. This is a functional check, run at a 1-minute load of 52 to 79. It makes no timing claim.
+
+## LAN deployment
+
+- Since 0.80.0 the streamer refuses a non-loopback bind that serves shells without authentication unless `--allow-unauthenticated` is passed. Paul chose that flag on November 12, 2026. The LAN preview keeps TLS and its origin allow-list, and has no authentication.
+- The 0.81.0 binary replaced `.local/bin/streamer-candidate` in place, and the 0.78.1 binary is kept as `.local/bin/streamer-candidate-0.78.1`. Both are signed with the same Developer ID identity. The macOS firewall rule for that path still admits it: test-mac fetched `https://192.0.2.10:4240/` with HTTP 200.
+- The `mux-xr-streamer` pane was respawned with its previous flags plus `--allow-unauthenticated`. The default par-mux daemon was not restarted. The browser e2e suite passed on all three viewports against the live streamer.
