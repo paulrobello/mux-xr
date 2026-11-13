@@ -22,6 +22,7 @@ With 12 panes and Observatory selected, baseline/candidate render-callback p95 w
 
 - Full quality for the pane under head-directed gaze, independent of keyboard targeting. Nearby panes remain full, medium panes use half raster density and up to 15 paints/s, far panes quarter density and up to 5 paints/s. Hidden focus-mode panes keep parsing output without painting. PTY grids and UI labels are unchanged.
 - Distance hysteresis and a 250 ms demotion delay avoid oscillation. Promotion is immediate. Returning to desktop restores full quality.
+- Update 2026-11-12: head-gaze promotion now needs 350 ms of dwell, and a gaze-promoted pane stays full for 2 s after gaze leaves. On Quest 3 each tier change resized the canvas and re-uploaded the whole texture (12.8 MiB at 3289×1029), and a fast head sweep across a far pane caused 260–270 ms frame gaps. Distance-based promotion is still immediate. Settling on a far pane still costs one full-size resize.
 - Reuse the scene matrix update across XR fidelity and controller picking. Fidelity queries intersect terminal screens, not every key and label.
 - Exterior stars are inside the camera clip distance. The static galactic field is precomputed into a 512×256 sRGB texture rather than running procedural trigonometry per fragment. A self-hosted copy of the existing authored planet map avoids the embedded-image fetch failure under the unchanged CSP.
 

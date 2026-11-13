@@ -8209,11 +8209,44 @@ describe('native XR controller event routing', () => {
     expect(right.setRenderQuality).toHaveBeenLastCalledWith('low');
     workspace.camera.lookAt(b.position);
     fakeXR.frame?.(420);
+    expect(workspace.state.renderGazeTerminalId).toBe('pane-b');
+    expect(right.setRenderQuality).toHaveBeenLastCalledWith('low');
+    fakeXR.frame?.(800);
     expect(right.setRenderQuality).toHaveBeenLastCalledWith('full');
     expect(workspace.state.renderGazeTerminalId).toBe('pane-b');
+    // A brief glance away keeps the promoted pane full instead of resizing it again.
+    workspace.camera.lookAt(a.position);
+    for (let time = 820; time <= 2000; time += 20) fakeXR.frame?.(time);
+    expect(right.setRenderQuality).toHaveBeenLastCalledWith('full');
+    for (let time = 2020; time <= 3200; time += 20) fakeXR.frame?.(time);
+    expect(right.setRenderQuality).toHaveBeenLastCalledWith('low');
     expect(workspace.state.selectedTerminalId).toBe('pane-a');
     expect(workspace.state.gazeInputEnabled).toBe(false);
     expect(actions.resizeGrid).not.toHaveBeenCalled();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('does not promote a far pane that a fast head sweep crosses', () => {
+    const { workspace, right, container } = fixture();
+    right.setRenderQuality = vi.fn();
+    workspace.camera.position.set(0, 1.6, 0);
+    workspace.camera.rotation.set(0, 0, 0);
+    const a = workspace.scene.getObjectByName('terminal-panel-pane-a');
+    const b = workspace.scene.getObjectByName('terminal-panel-pane-b');
+    if (!a || !b) throw new Error('Terminal roots missing');
+    a.position.set(-6, 1.6, -10);
+    b.position.set(6, 1.6, -10);
+    workspace.setGazeInputEnabled(false);
+    workspace.selectTerminal('pane-a');
+    for (let frame = 0; frame < 20; frame += 1) fakeXR.frame?.(frame * 20);
+    right.setRenderQuality = vi.fn();
+    workspace.camera.lookAt(b.position);
+    for (let time = 400; time <= 700; time += 20) fakeXR.frame?.(time);
+    expect(workspace.state.renderGazeTerminalId).toBe('pane-b');
+    workspace.camera.lookAt(a.position);
+    for (let time = 720; time <= 1500; time += 20) fakeXR.frame?.(time);
+    expect(right.setRenderQuality).not.toHaveBeenCalled();
     workspace.dispose();
     container.remove();
   });

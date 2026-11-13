@@ -460,6 +460,11 @@ const QUALITY_RANK: Record<TerminalRenderQuality, number> = {
   medium: 2,
   full: 3,
 };
+// A raster tier change repaints, reads back and reuploads the whole terminal, which stalls a
+// Quest frame for up to ~270 ms at full size, so a head sweep across a pane must not promote it.
+const GAZE_PROMOTE_DWELL_MS = 350;
+// Glancing away briefly keeps the gazed pane full instead of paying the resize twice more.
+const GAZE_FULL_HOLD_MS = 2000;
 
 type ScrollStripMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
 
@@ -511,6 +516,10 @@ interface TerminalPanel {
   renderQuality: TerminalRenderQuality;
   pendingQuality: TerminalRenderQuality | null;
   qualitySince: number;
+  /** When head gaze started resting on this pane, or null while it is elsewhere. */
+  gazeSince: number | null;
+  /** Last time the pane held gaze long enough to be raised to full raster density. */
+  gazeFullAt: number;
   filterVersion: number;
   filterGaze: boolean;
   filterGazeAt: number;
@@ -3262,10 +3271,15 @@ export function createWorkspaceScene(
           panel.filterGaze = filterGaze;
           panel.filterVersion = filterVersion;
         }
+        if (panel.id !== renderGazeId) panel.gazeSince = null;
+        else if (panel.gazeSince === null) panel.gazeSince = time;
+        if (panel.gazeSince !== null && time - panel.gazeSince >= GAZE_PROMOTE_DWELL_MS)
+          panel.gazeFullAt = time;
+        const gazeFull = time - panel.gazeFullAt < GAZE_FULL_HOLD_MS;
         let quality: TerminalRenderQuality = 'full';
         if (renderer?.xr.isPresenting) {
           if (!isPanelShown(panel)) quality = 'hidden';
-          else if (panel.id !== renderGazeId) {
+          else if (!gazeFull) {
             panel.root.getWorldPosition(fidelityPosition);
             panel.root.getWorldScale(fidelityScale);
             quality = terminalQualityAtDistance(
@@ -3294,6 +3308,8 @@ export function createWorkspaceScene(
       for (const panel of panels.values()) {
         panel.renderQuality = 'full';
         panel.pendingQuality = null;
+        panel.gazeSince = null;
+        panel.gazeFullAt = Number.NEGATIVE_INFINITY;
         panel.surface.setRenderQuality?.('full');
         panel.filterGaze = false;
         setTerminalMaterialFiltering(panel.screen.material, mutableState.filtering, false);
@@ -6735,6 +6751,8 @@ export function createWorkspaceScene(
       renderQuality: 'full',
       pendingQuality: null,
       qualitySince: 0,
+      gazeSince: null,
+      gazeFullAt: Number.NEGATIVE_INFINITY,
       filterVersion,
       filterGaze: false,
       filterGazeAt: 0,
@@ -7622,6 +7640,8 @@ export function createWorkspaceScene(
       for (const panel of panels.values()) {
         panel.renderQuality = 'full';
         panel.pendingQuality = null;
+        panel.gazeSince = null;
+        panel.gazeFullAt = Number.NEGATIVE_INFINITY;
         panel.surface.setRenderQuality?.('full');
         panel.filterGaze = false;
         setTerminalMaterialFiltering(panel.screen.material, mutableState.filtering, false);

@@ -661,6 +661,8 @@ async function measure(
     if (!far) return { selectedId, visible: false, candidates: 0 };
     w.__questCamera.lookAt(far.point);
     w.__questCamera.updateMatrixWorld(true);
+    // Gaze must rest on a pane for the scene's 350 ms dwell before it is promoted.
+    await new Promise<void>((resolve) => setTimeout(resolve, 600));
     await new Promise<void>((resolve) =>
       requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
     );
