@@ -5007,6 +5007,41 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('packs the Display and World panels into compact, non-overlapping rows', () => {
+    const { workspace, container } = fixture();
+    for (const [mode, maxHeight] of [
+      ['display', 1.55],
+      ['world', 1.05],
+    ] as const) {
+      workspace.showInput(mode);
+      const root = workspace.scene.getObjectByName(`xr-${mode}-controls`);
+      if (!root) throw new Error(`${mode} missing`);
+      root.updateMatrixWorld(true);
+      const boxes: { label: string; box: THREE.Box3 }[] = [];
+      root.traverse((object) => {
+        const { labelWidth, labelHeight } = object.userData;
+        if (!labelWidth || !labelHeight || object.parent?.name === 'background-options') return;
+        const center = root.worldToLocal(object.getWorldPosition(new THREE.Vector3()));
+        boxes.push({
+          label: object.userData.labelText,
+          box: new THREE.Box3(
+            new THREE.Vector3(center.x - labelWidth / 2, center.y - labelHeight / 2, -1),
+            new THREE.Vector3(center.x + labelWidth / 2, center.y + labelHeight / 2, 1),
+          ),
+        });
+      });
+      boxes.forEach(({ label, box }, index) => {
+        for (const other of boxes.slice(index + 1))
+          expect(box.intersectsBox(other.box), `${label} overlaps ${other.label}`).toBe(false);
+      });
+      const top = Math.max(...boxes.map(({ box }) => box.max.y));
+      const bottom = Math.min(...boxes.map(({ box }) => box.min.y));
+      expect(top - bottom, mode).toBeLessThan(maxHeight);
+    }
+    workspace.dispose();
+    container.remove();
+  });
+
   it('keeps preferences in their owning panels and removes terminal key strips', () => {
     const { workspace, container } = fixture();
     for (const mode of [

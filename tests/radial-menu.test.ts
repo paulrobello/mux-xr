@@ -104,6 +104,57 @@ describe('animated radial menu', () => {
     menu.dispose();
   });
 
+  it('outlines every sector and the cancel disc without catching rays, fading with the menu', () => {
+    const menu = createRadialMenu();
+    const outlines: THREE.Mesh[] = [];
+    menu.root.traverse((object) => {
+      if (object.name === 'radial-outline') outlines.push(object as THREE.Mesh);
+    });
+    expect(outlines.map((outline) => outline.parent?.name).sort()).toEqual(
+      [
+        'radial-menu-cancel',
+        ...['keyboard', 'commands', 'panes', 'layout', 'warp', 'widgets', 'settings', 'focus'].map(
+          (action) => `radial-menu-${action}`,
+        ),
+      ].sort(),
+    );
+    const material = outlines[0].material as THREE.MeshBasicMaterial;
+    expect(outlines.every((outline) => outline.material === material)).toBe(true);
+    menu.open();
+    menu.update(0.8);
+    menu.root.updateMatrixWorld(true);
+    for (const outline of outlines) {
+      const position = outline.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const onRibbon = new THREE.Vector3()
+        .add(new THREE.Vector3().fromBufferAttribute(position, 0))
+        .add(new THREE.Vector3().fromBufferAttribute(position, 1))
+        .add(new THREE.Vector3().fromBufferAttribute(position, 2))
+        .divideScalar(3);
+      outline.localToWorld(onRibbon);
+      const ray = new THREE.Raycaster(
+        onRibbon.clone().add(new THREE.Vector3(0, 0, 1)),
+        new THREE.Vector3(0, 0, -1),
+      );
+      const hits: THREE.Intersection[] = [];
+      outline.raycast(ray, hits);
+      expect(hits).toHaveLength(0);
+      THREE.Mesh.prototype.raycast.call(outline, ray, hits);
+      expect(hits.length).toBeGreaterThan(0);
+    }
+    const disc = outlines.find((outline) => outline.parent?.name === 'radial-menu-cancel');
+    const box = new THREE.Box3().setFromBufferAttribute(
+      disc?.geometry.getAttribute('position') as THREE.BufferAttribute,
+    );
+    expect(box.max.x).toBeCloseTo(0.1075, 3);
+    expect(box.min.y).toBeCloseTo(-0.1075, 3);
+    const openOpacity = material.opacity;
+    expect(openOpacity).toBeGreaterThan(0.8);
+    menu.close();
+    menu.update(0.075);
+    expect(material.opacity).toBeLessThan(openOpacity);
+    menu.dispose();
+  });
+
   it('reaches interactive state after the shortened opening duration', () => {
     const menu = createRadialMenu();
     menu.open();

@@ -51,17 +51,16 @@ const COLORS = {
   selected: '#315c6d',
   cancel: '#17212d',
   text: '#dce7ed',
+  outline: '#66d5e7',
 };
+const OUTLINE_WIDTH = 0.005;
+const OUTLINE_OPACITY = 0.9;
 const OPEN_SECONDS = 0.64;
 const CLOSE_SECONDS = 0.15;
 const FAN_RADIUS = 0.245;
 const STACK_ANGLE = -Math.PI / 2;
 
-function sectorGeometry(
-  innerRadius: number,
-  outerRadius: number,
-  center: number,
-): THREE.ShapeGeometry {
+function sectorShape(innerRadius: number, outerRadius: number, center: number): THREE.Shape {
   const shape = new THREE.Shape();
   const half = Math.PI / ACTIONS.length - 0.035;
   const steps = 10;
@@ -80,7 +79,41 @@ function sectorGeometry(
     shape.lineTo(Math.cos(angle) * innerRadius - anchorX, Math.sin(angle) * innerRadius - anchorY);
   }
   shape.closePath();
-  return new THREE.ShapeGeometry(shape);
+  return shape;
+}
+
+/** A closed stroke of constant width centered on the polygon, with mitered corners. */
+function outlineGeometry(polygon: THREE.Vector2[], width: number): THREE.BufferGeometry {
+  const points = polygon.filter(
+    (point, index) => point.distanceToSquared(polygon[(index + 1) % polygon.length]) > 1e-12,
+  );
+  const count = points.length;
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const previous = points[(index + count - 1) % count];
+    const current = points[index];
+    const next = points[(index + 1) % count];
+    const inNormal = new THREE.Vector2(current.y - previous.y, previous.x - current.x).normalize();
+    const outNormal = new THREE.Vector2(next.y - current.y, current.x - next.x).normalize();
+    const miter = inNormal.clone().add(outNormal).normalize();
+    const length = width / 2 / Math.max(0.3, miter.dot(outNormal));
+    positions.push(
+      current.x + miter.x * length,
+      current.y + miter.y * length,
+      0,
+      current.x - miter.x * length,
+      current.y - miter.y * length,
+      0,
+    );
+    const a = index * 2;
+    const b = ((index + 1) % count) * 2;
+    indices.push(a, a + 1, b, b, a + 1, b + 1);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  return geometry;
 }
 
 function glassMaterial(color: string, opacity = 0.84): THREE.MeshBasicMaterial {
@@ -116,6 +149,22 @@ export function createRadialMenu(): RadialMenu {
   const geometries = new Set<THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>();
   const targets: Target[] = [];
+  const outlineMaterial = new THREE.MeshBasicMaterial({
+    color: COLORS.outline,
+    transparent: true,
+    opacity: OUTLINE_OPACITY,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  materials.add(outlineMaterial);
+  const addOutline = (parent: THREE.Object3D, polygon: THREE.Vector2[]): void => {
+    const outline = new THREE.Mesh(outlineGeometry(polygon, OUTLINE_WIDTH), outlineMaterial);
+    outline.name = 'radial-outline';
+    outline.position.z = 0.002;
+    outline.raycast = () => undefined;
+    geometries.add(outline.geometry);
+    parent.add(outline);
+  };
   const reloadButton = createScalableLabel('Reload update', 0.34, 0.075, {
     background: COLORS.selected,
     backplate: true,
@@ -143,6 +192,7 @@ export function createRadialMenu(): RadialMenu {
   centerDisc.userData.inputAction = 'radialAction';
   centerDisc.userData.radialAction = 'cancel';
   center.add(centerDisc);
+  addOutline(center, new THREE.Path().absarc(0, 0, 0.105, 0, Math.PI * 2, false).getPoints(32));
   const cancelLabel = createScalableLabel(LABELS.cancel, 0.15, 0.06, {
     background: COLORS.cancel,
     backplate: false,
@@ -167,15 +217,14 @@ export function createRadialMenu(): RadialMenu {
       Math.cos(finalAngle) * FAN_RADIUS,
       Math.sin(finalAngle) * FAN_RADIUS,
     ];
-    const mesh = new THREE.Mesh(
-      sectorGeometry(0.14, 0.36, Math.PI / 2),
-      glassMaterial(COLORS.glass),
-    );
+    const shape = sectorShape(0.14, 0.36, Math.PI / 2);
+    const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), glassMaterial(COLORS.glass));
     geometries.add(mesh.geometry);
     materials.add(mesh.material);
     mesh.userData.inputAction = 'radialAction';
     mesh.userData.radialAction = action;
     group.add(mesh);
+    addOutline(group, shape.getPoints());
     const label = createScalableLabel(LABELS[action], 0.17, 0.07, {
       background: COLORS.glass,
       backplate: false,
@@ -223,6 +272,7 @@ export function createRadialMenu(): RadialMenu {
   };
   const setOpacity = (opacity: number): void => {
     centerDisc.material.opacity = opacity * 0.84;
+    outlineMaterial.opacity = opacity * OUTLINE_OPACITY;
     for (const target of targets) target.material.opacity = opacity * 0.84;
   };
   const resetTransforms = (): void => {

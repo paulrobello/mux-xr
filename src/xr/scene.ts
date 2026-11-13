@@ -4324,7 +4324,7 @@ export function createWorkspaceScene(
       inputRoot.add(sounds);
     } else if (mode === 'world') {
       const backgroundSelect = createBackgroundSelect(mutableState.background, 'input');
-      backgroundSelect.position.y = 0.25;
+      backgroundSelect.position.y = 0.42;
       inputRoot.add(backgroundSelect);
       for (const [index, [label, xrMode]] of (
         [
@@ -4333,7 +4333,7 @@ export function createWorkspaceScene(
         ] as const
       ).entries()) {
         const button = createLabelButton(label, 0.65, 0.12, { inputAction: 'xrMode', xrMode });
-        button.position.set(index ? 0.38 : -0.38, -0.1, 0);
+        button.position.set(index ? 0.38 : -0.38, 0.28, 0);
         setModifierVisual(button, mutableState.xrMode === xrMode);
         inputRoot.add(button);
       }
@@ -4343,7 +4343,7 @@ export function createWorkspaceScene(
           ['Arm color', 'armColor', mutableState.armColor, 'Match'],
         ] as const
       ).entries()) {
-        const y = -0.25 - row * 0.24;
+        const y = 0.15 - row * 0.24;
         const label = createLabelButton(caption, 0.6, 0.08, { inputAction: 'noop' });
         label.position.y = y;
         inputRoot.add(label);
@@ -4371,7 +4371,7 @@ export function createWorkspaceScene(
           inputAction: 'terminalColors',
           colorMode,
         });
-        button.position.set((index - 1) * 0.46, 0.25, 0);
+        button.position.set((index - 1) * 0.46, 0.4, 0);
         setModifierVisual(button, mutableState.terminalColorMode === colorMode);
         inputRoot?.add(button);
       });
@@ -4379,7 +4379,7 @@ export function createWorkspaceScene(
         inputAction: 'openInput',
         mode: 'filtering',
       });
-      filteringButton.position.y = 0;
+      filteringButton.position.y = 0.25;
       inputRoot.add(filteringButton);
       const hierarchyStyle = createLabelButton(
         `Mux tree: ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`,
@@ -4390,7 +4390,7 @@ export function createWorkspaceScene(
           hierarchyStyle: mutableState.hierarchyStyle === 'helix' ? 'spatial-docks' : 'helix',
         },
       );
-      hierarchyStyle.position.y = -0.16;
+      hierarchyStyle.position.y = 0.1;
       inputRoot.add(hierarchyStyle);
       const preferences = mutableState.windowPreferences;
       for (const [index, [preference, label, step]] of (
@@ -4405,7 +4405,7 @@ export function createWorkspaceScene(
           ['focusCurvature', `Focus warp: ${Math.round(preferences.focusCurvature)}°`, 5],
         ] as const
       ).entries()) {
-        const y = -0.32 - index * 0.13;
+        const y = -0.04 - index * 0.13;
         const value = createLabelButton(label, 1.05, 0.1, { inputAction: 'noop' });
         value.position.set(0, y, 0);
         inputRoot.add(value);
@@ -4432,7 +4432,7 @@ export function createWorkspaceScene(
             ],
         },
       );
-      stripSideButton.position.set(0, -0.84, 0);
+      stripSideButton.position.set(0, -0.56, 0);
       inputRoot.add(stripSideButton);
       const frameChinButton = createLabelButton(
         `Frame chin: ${preferences.frameChin ? 'on' : 'off'}`,
@@ -4440,7 +4440,7 @@ export function createWorkspaceScene(
         0.1,
         { inputAction: 'frameChin' },
       );
-      frameChinButton.position.set(0, -0.97, 0);
+      frameChinButton.position.set(0, -0.69, 0);
       inputRoot.add(frameChinButton);
     } else if (mode === 'buttons') {
       const map = mutableState.windowPreferences.buttonMap;
@@ -4950,12 +4950,14 @@ export function createWorkspaceScene(
       mode === 'panes'
         ? -0.9
         : mode === 'display'
-          ? -1.13
+          ? -0.84
           : mode === 'settings'
             ? -0.89
-            : mode === 'world' || (mode === 'terminal' && terminalHasReset)
-              ? -0.78
-              : -0.66,
+            : mode === 'world'
+              ? -0.35
+              : mode === 'terminal' && terminalHasReset
+                ? -0.78
+                : -0.66,
       0,
     );
     if (mode === 'picture-gallery') close.position.set(0.3, -0.46, 0);
@@ -4974,10 +4976,12 @@ export function createWorkspaceScene(
       back.position.set(
         -0.22,
         mode === 'display'
-          ? -1.13
-          : mode === 'world' || (mode === 'terminal' && terminalHasReset)
-            ? -0.78
-            : -0.66,
+          ? -0.84
+          : mode === 'world'
+            ? -0.35
+            : mode === 'terminal' && terminalHasReset
+              ? -0.78
+              : -0.66,
         0,
       );
       inputRoot.add(back);
