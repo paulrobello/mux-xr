@@ -3610,14 +3610,6 @@ export function createWorkspaceScene(
       }
       hoveredByController.clear();
       for (const [controller, object] of nextHovered) hoveredByController.set(controller, object);
-      const desk = widgets.get(DESK_WINDOW_KIND);
-      if (desk) {
-        for (const drag of dragStates.values()) {
-          if (drag.object !== desk.root) continue;
-          pointedWidgets.add(desk);
-          break;
-        }
-      }
       for (const widget of widgets.values()) widget.setPointed?.(pointedWidgets.has(widget));
       pointedWidgets.clear();
       showHover(hover ?? (controlTargeted ? null : bodyHover), time);

@@ -8348,9 +8348,10 @@ describe('native XR controller event routing', () => {
         THREE.PlaneGeometry,
         THREE.ShaderMaterial
       >;
-      expect(aperture.material.uniforms.editing.value).toBe(false);
-      expect(rimMaterial.visible).toBe(false);
+      expect(aperture.material.uniforms.viewerCenter.value).toBeInstanceOf(THREE.Vector3);
+      expect(rimMaterial.visible).toBe(true);
       expect(close?.visible).toBe(false);
+      expect(frame.getObjectByName('desk-window-feather')).toBeUndefined();
       // Keep the terminal furniture away from the controller rays aimed at the rim.
       workspace.scene.getObjectByName('terminal-panel-pane-a')?.position.setX(-5);
       workspace.scene.getObjectByName('terminal-panel-pane-b')?.position.setX(5);
@@ -8367,9 +8368,7 @@ describe('native XR controller event routing', () => {
       fakeXR.frame?.(32);
       expect(frame.position.x).toBeCloseTo(initial.x + 0.16);
       expect(frame.quaternion.angleTo(initialRotation)).toBeGreaterThan(0.01);
-      expect(aperture.material.uniforms.editing.value).toBe(true);
       expect(rimMaterial.visible).toBe(true);
-      expect(close?.visible).toBe(true);
       (pad.axes as number[])[3] = 0;
       aimController(right, rimRight);
       right.dispatchEvent({ type: 'squeezestart' } as never);
@@ -8384,8 +8383,7 @@ describe('native XR controller event routing', () => {
       left.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
       right.quaternion.copy(left.quaternion);
       fakeXR.frame?.(80);
-      expect(aperture.material.uniforms.editing.value).toBe(false);
-      expect(rimMaterial.visible).toBe(false);
+      expect(rimMaterial.visible).toBe(true);
       expect(close?.visible).toBe(false);
       aimController(left, rimLeft);
       fakeXR.frame?.(96);

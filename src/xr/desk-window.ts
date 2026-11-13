@@ -9,7 +9,6 @@ const MASK_ORDER = -1_000_001;
 const WIDTH = 0.85;
 const HEIGHT = 0.46;
 const RIM = 0.014;
-const FEATHER_METRES = 0.055;
 const RIM_COLOR = 0x536e7d;
 const maskedRoots = new WeakSet<THREE.Object3D>();
 
@@ -79,14 +78,9 @@ export function createDeskBackdrop(): THREE.Mesh<THREE.PlaneGeometry, THREE.Shad
 // rotations and projection matrices still map those directions to the correct eye pixels.
 const APERTURE_VERTEX = `
   uniform vec3 viewerCenter;
-  uniform bool editing;
-  varying vec2 vUv;
   void main() {
-    vUv = uv;
     vec3 world = (modelMatrix * vec4(position, 1.0)).xyz;
-    vec3 direction = editing
-      ? (modelViewMatrix * vec4(position, 1.0)).xyz
-      : (viewMatrix * vec4(world - viewerCenter, 0.0)).xyz;
+    vec3 direction = (viewMatrix * vec4(world - viewerCenter, 0.0)).xyz;
     gl_Position = projectionMatrix * vec4(direction, 1.0);
   }
 `;
@@ -98,11 +92,10 @@ export function createDeskWindow(viewerCenter = new THREE.Vector3()): Widget {
   root.userData.widgetKind = DESK_WINDOW_KIND;
   root.userData.scaleLimits = [0.25, 2];
 
-  const editing = { value: false };
   const aperture = new THREE.Mesh(
     new THREE.PlaneGeometry(WIDTH, HEIGHT),
     new THREE.ShaderMaterial({
-      uniforms: { viewerCenter: { value: viewerCenter }, editing },
+      uniforms: { viewerCenter: { value: viewerCenter } },
       vertexShader: APERTURE_VERTEX,
       fragmentShader: 'void main() { gl_FragColor = vec4(0.0); }',
       side: THREE.DoubleSide,
@@ -122,47 +115,21 @@ export function createDeskWindow(viewerCenter = new THREE.Vector3()): Widget {
   aperture.raycast = () => undefined;
   root.add(aperture);
 
-  const feather = new THREE.Mesh(
-    aperture.geometry,
-    new THREE.ShaderMaterial({
-      uniforms: {
-        viewerCenter: { value: viewerCenter },
-        editing,
-        size: { value: new THREE.Vector2(WIDTH, HEIGHT) },
-        featherWidth: { value: FEATHER_METRES },
-      },
-      vertexShader: APERTURE_VERTEX,
-      fragmentShader: `
-        uniform vec2 size;
-        uniform float featherWidth;
-        varying vec2 vUv;
-        void main() {
-          vec2 distanceToEdge = min(vUv, 1.0 - vUv) * size;
-          float edge = min(distanceToEdge.x, distanceToEdge.y);
-          if (edge >= featherWidth) discard;
-          float opacity = 1.0 - smoothstep(0.0, featherWidth, edge);
-          gl_FragColor = vec4(0.009, 0.014, 0.022, opacity);
-          #include <colorspace_fragment>
-        }
-      `,
-      transparent: true,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      forceSinglePass: true,
-    }),
-  );
-  feather.name = 'desk-window-feather';
-  feather.renderOrder = MASK_ORDER + 2;
-  feather.frustumCulled = false;
-  feather.raycast = () => undefined;
-  root.add(feather);
-
   const rimMaterial = tagAccentMaterial(
     new THREE.MeshBasicMaterial({ color: RIM_COLOR, side: THREE.DoubleSide }),
     RIM_COLOR,
   );
-  // The edge remains pickable while its material is hidden.
-  rimMaterial.visible = false;
+  rimMaterial.onBeforeCompile = (shader) => {
+    shader.uniforms.viewerCenter = { value: viewerCenter };
+    shader.vertexShader = `uniform vec3 viewerCenter;\n${shader.vertexShader}`.replace(
+      '#include <project_vertex>',
+      `
+        vec3 world = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        vec4 mvPosition = viewMatrix * vec4(world - viewerCenter, 0.0);
+        gl_Position = projectionMatrix * vec4(mvPosition.xyz, 1.0);
+      `,
+    );
+  };
   const horizontal = new THREE.PlaneGeometry(WIDTH + RIM * 2, RIM);
   const vertical = new THREE.PlaneGeometry(RIM, HEIGHT);
   for (const sign of [-1, 1]) {
@@ -172,6 +139,7 @@ export function createDeskWindow(viewerCenter = new THREE.Vector3()): Widget {
     side.position.x = (sign * (WIDTH + RIM)) / 2;
     bar.name = sign < 0 ? 'desk-window-rim-bottom' : 'desk-window-rim-top';
     side.name = sign < 0 ? 'desk-window-rim-left' : 'desk-window-rim-right';
+    bar.frustumCulled = side.frustumCulled = false;
     root.add(bar, side);
   }
   const close = createScalableLabel('×', 0.065, 0.065, { background: '#223946' });
@@ -187,8 +155,6 @@ export function createDeskWindow(viewerCenter = new THREE.Vector3()): Widget {
     update: () => undefined,
     dispose: () => disposeOwned(root),
     setPointed: (pointed) => {
-      editing.value = pointed;
-      rimMaterial.visible = pointed;
       close.visible = pointed;
     },
   };
