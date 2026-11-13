@@ -16,7 +16,7 @@ const camera = new THREE.PerspectiveCamera(58, WIDTH / HEIGHT, 0.01, 200);
 camera.position.set(0, 1.6, 0);
 /** Degrees from facing -Z; a background whose life is above, behind or below is framed there. */
 const VIEWS: Partial<Record<BackgroundMode, { yaw: number; pitch: number }>> = {
-  aurora: { yaw: 180, pitch: 22 },
+  aurora: { yaw: 180, pitch: 14 },
   rooftop: { yaw: 180, pitch: 2 },
   summit: { yaw: 175, pitch: 4 },
   koi: { yaw: 150, pitch: -24 },

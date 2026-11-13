@@ -174,7 +174,7 @@ describe('aurora tundra environment', () => {
     environment.dispose();
   });
 
-  it('keeps the aurora above the panes in the front ±75° and the snow beyond them', () => {
+  it('keeps the aurora above the panes in the front ±75°, low enough to see, and the snow beyond them', () => {
     const environment = createAuroraTundraEnvironment();
     const position = aurora(environment).geometry.getAttribute('position');
     let front = 0;
@@ -185,10 +185,10 @@ describe('aurora tundra environment', () => {
       // A fold moves a vertex radially by up to the amplitude; test the worst case outward.
       const scale = (Math.hypot(x, z) + AURORA_TUNDRA_FOLD_AMPLITUDE) / Math.hypot(x, z);
       const elevation = elevationDegrees(x * scale, y, z * scale);
-      expect(elevation).toBeGreaterThan(15);
+      expect(elevation).toBeGreaterThan(12);
       if (Math.abs(azimuthDegrees(x, z)) >= 75) continue;
       front += 1;
-      expect(elevation).toBeGreaterThan(45);
+      expect(elevation).toBeGreaterThan(24);
     }
     expect(front).toBeGreaterThan(0);
     for (let frame = 0; frame < 720; frame += 1) {

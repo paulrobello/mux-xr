@@ -413,32 +413,32 @@ interface Curtain {
   seed: number;
 }
 
-// Azimuth from -Z toward +X. Anything within ±75° of -Z starts above 45° elevation, higher than a
-// pane top 1 m away, so the curtains never sit directly behind panes.
+// Azimuth from -Z toward +X. Anything within ±75° of -Z starts above 24° elevation, clear of a
+// two-row pane stack 2.3 m away (about 18°), and the rest sits low enough to see without craning.
 const CURTAINS: Curtain[] = [
   {
     radius: 34,
     fromDegrees: 105,
     toDegrees: 255,
-    baseY: 16,
-    height: 20,
+    baseY: 11,
+    height: 18,
     secondary: false,
     seed: 0.4,
   },
   {
-    radius: 18,
+    radius: 30,
     fromDegrees: -85,
     toDegrees: 85,
-    baseY: 25,
+    baseY: 17,
     height: 14,
     secondary: true,
     seed: 2.1,
   },
   {
-    radius: 14,
+    radius: 22,
     fromDegrees: 120,
     toDegrees: 240,
-    baseY: 28,
+    baseY: 13,
     height: 12,
     secondary: false,
     seed: 4.3,
