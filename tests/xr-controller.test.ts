@@ -95,6 +95,7 @@ import {
 import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
 import { createPictureController, type PictureLoaders } from '../src/workspace/pictures';
 import { BACKGROUND_LABELS } from '../src/xr/background-picker';
+import type { DeskWindowIntersection } from '../src/xr/desk-window';
 import { dimHandColor, HAND_COLOR_PRESETS } from '../src/xr/hand-colors';
 import { createHandContact } from '../src/xr/hand-contact';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
@@ -8363,6 +8364,7 @@ describe('native XR controller event routing', () => {
       expect(aperture.material.uniforms.viewerCenter.value).toBeInstanceOf(THREE.Vector3);
       expect(rimMaterial.visible).toBe(true);
       expect(close?.visible).toBe(false);
+      expect(close?.position.z).toBe(0);
       expect(frame.getObjectByName('desk-window-feather')).toBeUndefined();
       // Keep the terminal furniture away from the controller rays aimed at the rim.
       workspace.scene.getObjectByName('terminal-panel-pane-a')?.position.setX(-5);
@@ -8379,9 +8381,10 @@ describe('native XR controller event routing', () => {
       for (const offset of [leftEye, rightEye, new THREE.Vector3()]) {
         const point = rimPoint.clone().add(offset);
         ray.set(point.clone().addScaledVector(normal, 0.3), normal.clone().negate());
-        const match = ray.intersectObject(frame, true)[0];
+        const match = ray.intersectObject(frame, true)[0] as DeskWindowIntersection;
         expect(match?.object).toBe(rimLeft);
         expect(match?.point.distanceTo(point)).toBeLessThan(1e-6);
+        expect(match?.deskWindowPoint?.distanceTo(rimPoint)).toBeLessThan(1e-6);
       }
       const middle = frame.getWorldPosition(new THREE.Vector3());
       ray.set(middle.clone().addScaledVector(normal, 0.3), normal.clone().negate());
@@ -8423,7 +8426,19 @@ describe('native XR controller event routing', () => {
       fakeXR.frame?.(96);
       expect(rimMaterial.visible).toBe(true);
       expect(close?.visible).toBe(true);
-      hit(workspace, { inputAction: 'closeWidget', widgetKind: 'desk-window' });
+      if (!close) throw new Error('Desk Window close control is missing');
+      for (const offset of [leftEye, rightEye]) {
+        const center = close.getWorldPosition(new THREE.Vector3());
+        const point = center.clone().add(offset);
+        const facing = new THREE.Vector3(0, 0, 1).applyQuaternion(frame.quaternion);
+        ray.set(point.clone().addScaledVector(facing, 0.3), facing.negate());
+        const match = ray.intersectObject(frame, true)[0] as DeskWindowIntersection;
+        expect(match?.object).toBe(close);
+        expect(match?.deskWindowPoint?.distanceTo(center)).toBeLessThan(1e-6);
+      }
+      aimController(left, close);
+      left.position.add(rightEye);
+      left.dispatchEvent({ type: 'selectstart' } as never);
       expect(workspace.state.widgets).not.toContain('desk-window');
       expect(workspace.state.xrMode).toBe('ar');
       expect(workspace.scene.getObjectByName('desk-window-backdrop')?.visible).toBe(true);

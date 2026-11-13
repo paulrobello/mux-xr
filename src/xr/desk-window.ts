@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { tagAccentMaterial } from './accent-colors';
-import { createScalableLabel } from './labels';
 import { disposeOwned, type Widget } from './widgets';
 
 export const DESK_WINDOW_KIND = 'desk-window';
@@ -86,27 +85,83 @@ const APERTURE_VERTEX = `
   }
 `;
 
+export interface DeskWindowIntersection extends THREE.Intersection {
+  deskWindowPoint?: THREE.Vector3;
+}
+
+function projectDeskControl(material: THREE.MeshBasicMaterial, viewerCenter: THREE.Vector3): void {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.viewerCenter = { value: viewerCenter };
+    shader.vertexShader = `uniform vec3 viewerCenter;\n${shader.vertexShader}`.replace(
+      '#include <project_vertex>',
+      `
+        vec3 world = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        vec4 mvPosition = viewMatrix * vec4(world - viewerCenter, 0.0);
+        gl_Position = projectionMatrix * vec4(mvPosition.xyz, 1.0);
+      `,
+    );
+  };
+}
+
+export function projectDeskPointer(
+  material: THREE.MeshBasicMaterial | THREE.LineBasicMaterial,
+  viewerCenter: THREE.Vector3,
+  offset: THREE.Vector3,
+  active: { value: boolean },
+  endpointOnly: boolean,
+): void {
+  material.customProgramCacheKey = () => (endpointOnly ? 'desk-ray' : 'desk-contact');
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.deskViewerCenter = { value: viewerCenter };
+    shader.uniforms.deskPointerOffset = { value: offset };
+    shader.uniforms.deskPointerActive = active;
+    shader.vertexShader = `
+      uniform vec3 deskViewerCenter;
+      uniform vec3 deskPointerOffset;
+      uniform bool deskPointerActive;
+      ${shader.vertexShader}
+    `.replace(
+      '#include <project_vertex>',
+      `
+        #include <project_vertex>
+        if (deskPointerActive ${endpointOnly ? '&& position.z < 0.0' : ''}) {
+          vec3 shift = cameraPosition - deskViewerCenter + deskPointerOffset;
+          mvPosition += viewMatrix * vec4(shift, 0.0);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+    );
+  };
+}
+
 // The shader effectively translates the frame by eye position minus viewer center. Undo
 // that translation on the ray for each eye, and keep the space between the two edges pickable.
-function createRimRaycast(
+function createDeskControlRaycast(
   viewerCenter: THREE.Vector3,
   eyePositions: readonly THREE.Vector3[],
+  margin: number,
 ): THREE.Mesh['raycast'] {
   const inverse = new THREE.Matrix4();
   const localRay = new THREE.Ray();
   const localPoint = new THREE.Vector3();
   const worldPoint = new THREE.Vector3();
+  const projectedPoint = new THREE.Vector3();
   const offset = new THREE.Vector3();
   const scale = new THREE.Vector3();
   const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-  return function (this: THREE.Mesh<THREE.PlaneGeometry>, raycaster, hits): void {
+  return function (
+    this: THREE.Mesh<THREE.PlaneGeometry>,
+    raycaster,
+    hits: DeskWindowIntersection[],
+  ): void {
     inverse.copy(this.matrixWorld).invert();
     scale.setFromMatrixScale(this.matrixWorld);
     const { width, height } = this.geometry.parameters;
-    const marginX = RIM_HIT_MARGIN / scale.x;
-    const marginY = RIM_HIT_MARGIN / scale.y;
+    const marginX = margin / scale.x;
+    const marginY = margin / scale.y;
     let nearest = Infinity;
     let bestMiss = Infinity;
+    let bestCenterDistance = Infinity;
     for (let index = -1; index < eyePositions.length; index++) {
       const eye = index === -1 ? viewerCenter : eyePositions[index];
       offset.subVectors(eye, viewerCenter);
@@ -118,12 +173,15 @@ function createRimRaycast(
       const missY = Math.max(0, Math.abs(localPoint.y) - height / 2);
       if (missX > marginX || missY > marginY) continue;
       const miss = Math.hypot(missX * scale.x, missY * scale.y);
-      worldPoint.copy(localPoint).applyMatrix4(this.matrixWorld).add(offset);
-      const distance = raycaster.ray.origin.distanceTo(worldPoint);
+      const centerDistance = Math.hypot(localPoint.x / width, localPoint.y / height);
+      worldPoint.copy(localPoint).applyMatrix4(this.matrixWorld);
+      const distance = raycaster.ray.origin.distanceTo(worldPoint.add(offset));
       if (distance < raycaster.near || distance > raycaster.far) continue;
-      if (miss < bestMiss || (miss === bestMiss && distance < nearest)) {
+      if (miss < bestMiss || (miss === bestMiss && centerDistance < bestCenterDistance)) {
         bestMiss = miss;
+        bestCenterDistance = centerDistance;
         nearest = distance;
+        projectedPoint.copy(worldPoint).sub(offset);
       }
     }
     if (Number.isFinite(nearest))
@@ -131,6 +189,7 @@ function createRimRaycast(
         distance: nearest,
         point: raycaster.ray.at(nearest, new THREE.Vector3()),
         object: this,
+        deskWindowPoint: projectedPoint.clone(),
       });
   };
 }
@@ -173,18 +232,8 @@ export function createDeskWindow(
     new THREE.MeshBasicMaterial({ color: RIM_COLOR, side: THREE.DoubleSide }),
     RIM_COLOR,
   );
-  rimMaterial.onBeforeCompile = (shader) => {
-    shader.uniforms.viewerCenter = { value: viewerCenter };
-    shader.vertexShader = `uniform vec3 viewerCenter;\n${shader.vertexShader}`.replace(
-      '#include <project_vertex>',
-      `
-        vec3 world = (modelMatrix * vec4(transformed, 1.0)).xyz;
-        vec4 mvPosition = viewMatrix * vec4(world - viewerCenter, 0.0);
-        gl_Position = projectionMatrix * vec4(mvPosition.xyz, 1.0);
-      `,
-    );
-  };
-  const raycastRim = createRimRaycast(viewerCenter, eyePositions);
+  projectDeskControl(rimMaterial, viewerCenter);
+  const raycastRim = createDeskControlRaycast(viewerCenter, eyePositions, RIM_HIT_MARGIN);
   const horizontal = new THREE.PlaneGeometry(WIDTH + RIM * 2, RIM);
   const vertical = new THREE.PlaneGeometry(RIM, HEIGHT);
   for (const sign of [-1, 1]) {
@@ -198,11 +247,28 @@ export function createDeskWindow(
     bar.raycast = side.raycast = raycastRim;
     root.add(bar, side);
   }
-  const close = createScalableLabel('×', 0.065, 0.065, { background: '#223946' });
+  const closeSize = 0.065;
+  const closeMaterial = new THREE.MeshBasicMaterial({ color: 0x223946, side: THREE.DoubleSide });
+  projectDeskControl(closeMaterial, viewerCenter);
+  const close = new THREE.Mesh(new THREE.PlaneGeometry(closeSize, closeSize), closeMaterial);
   close.name = 'desk-window-close';
-  close.position.set(WIDTH / 2 + RIM / 2, HEIGHT / 2 + RIM + 0.034, 0.008);
+  close.position.set(WIDTH / 2 + RIM - closeSize / 2, HEIGHT / 2 + RIM + closeSize / 2, 0);
+  close.frustumCulled = false;
+  close.raycast = createDeskControlRaycast(viewerCenter, eyePositions, 0.009);
+  close.userData.labelText = '×';
   close.userData.inputAction = 'closeWidget';
   close.userData.helpText = 'Close the desk window and restore the virtual background';
+  const markMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  projectDeskControl(markMaterial, viewerCenter);
+  const markGeometry = new THREE.PlaneGeometry(0.023, 0.003);
+  for (const angle of [-Math.PI / 4, Math.PI / 4]) {
+    const mark = new THREE.Mesh(markGeometry, markMaterial);
+    mark.position.z = 0.001;
+    mark.rotation.z = angle;
+    mark.frustumCulled = false;
+    mark.raycast = () => undefined;
+    close.add(mark);
+  }
   close.visible = false;
   root.add(close);
 

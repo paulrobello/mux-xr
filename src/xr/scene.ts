@@ -105,6 +105,8 @@ import {
   createDeskBackdrop,
   createDeskWindow,
   DESK_WINDOW_KIND,
+  type DeskWindowIntersection,
+  projectDeskPointer,
   setEnvironmentWindowMask,
 } from './desk-window';
 import { XR_ENTRY_LABELS, type XrEntryMode } from './entry';
@@ -418,6 +420,7 @@ export interface InputTarget {
   kind: 'terminal' | 'key' | 'command' | 'keyboard';
   object?: THREE.Object3D;
   uv?: THREE.Vector2;
+  deskPointerOffset?: THREE.Vector3;
 }
 
 export interface InputCapture {
@@ -1083,6 +1086,10 @@ export function createWorkspaceScene(
   const controllerGrips = new Map<THREE.Group, THREE.Group>();
   /** Pointer rays and their contact dots, drawn over menus with the hands. */
   const pointerParts: THREE.Object3D[] = [];
+  const deskPointers = new Map<
+    THREE.Group,
+    { offset: THREE.Vector3; active: { value: boolean } }
+  >();
   const wristMenuButton = createLabelButton('Menu', 0.052, 0.035, { inputAction: 'wristMenu' });
   const wristWatch = createWristMenuWatch(wristMenuButton, uiEnvironment.texture);
   let wristMenuLastPressed = Number.NEGATIVE_INFINITY;
@@ -3557,6 +3564,11 @@ export function createWorkspaceScene(
             : targetFromController(controller, false);
         moveMouse(controller, target);
         moveTextSelection(controller, target);
+        const deskPointer = deskPointers.get(controller);
+        if (deskPointer) {
+          deskPointer.active.value = Boolean(target?.deskPointerOffset);
+          if (target?.deskPointerOffset) deskPointer.offset.copy(target.deskPointerOffset);
+        }
         const distance =
           (controller.userData.rayDistance as number | undefined) ?? CONTROLLER_RAY_LENGTH;
         const line = controller.children.find((child) => child instanceof THREE.Line) as
@@ -6562,6 +6574,9 @@ export function createWorkspaceScene(
           (hit.userData.terminalId as string | undefined) ?? mutableState.focusedTerminalId ?? '',
         kind: 'keyboard',
         object: hit,
+        deskPointerOffset: (intersection as DeskWindowIntersection).deskWindowPoint?.sub(
+          intersection.point,
+        ),
       };
     const owner = widgetOwning(hit)?.[1].root;
     if (owner)
@@ -6678,6 +6693,11 @@ export function createWorkspaceScene(
       );
       contact.raycast = () => undefined;
       contact.visible = false;
+      const offset = new THREE.Vector3();
+      const active = { value: false };
+      deskPointers.set(root, { offset, active });
+      projectDeskPointer(rayLine.material, deskWindowViewer, offset, active, true);
+      projectDeskPointer(contact.material, deskWindowViewer, offset, active, false);
       root.add(rayLine, contact);
       pointerParts.push(rayLine, contact);
       const onSelect = (): void => {
@@ -8603,6 +8623,7 @@ export function createWorkspaceScene(
     }
     controllerListeners.length = 0;
     controllerRoots.length = 0;
+    deskPointers.clear();
     scrollDue.clear();
     stripScrolls.clear();
     controllerGamepads.clear();
