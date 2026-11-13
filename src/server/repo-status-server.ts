@@ -379,6 +379,10 @@ export const createRepoStatusProbe = (options: RepoStatusProbeOptions = {}): Rep
     const value = (async () => {
       const home = await realHome();
       if (!home) return null;
+      // realpath on a path such as /net/<host>/... can trigger an automount, so only paths that
+      // already read as inside home reach it.
+      const lexical = resolve(cwd);
+      if (!isInside(lexical, resolve(homeDir())) && !isInside(lexical, home)) return null;
       const real = await confine(cwd, home);
       if (!real) return null;
       const result = await git(home, real, [

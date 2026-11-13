@@ -29,6 +29,9 @@ type InstallerOptions = {
   repoStatus: boolean;
   pictureProxy: boolean;
   pictureDepth: boolean;
+  boardFeeds: boolean;
+  serviceHealth: boolean;
+  meshInbox: boolean;
   toastLan: boolean;
 };
 export type ListenerMetadata = {
@@ -50,6 +53,9 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
   let repoStatus = false;
   let pictureProxy = false;
   let pictureDepth = false;
+  let boardFeeds = false;
+  let serviceHealth = false;
+  let meshInbox = false;
   let toastLan = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -61,6 +67,9 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
     else if (argument === '--repo-status') repoStatus = true;
     else if (argument === '--picture-proxy') pictureProxy = true;
     else if (argument === '--picture-depth') pictureDepth = true;
+    else if (argument === '--board-feeds') boardFeeds = true;
+    else if (argument === '--service-health') serviceHealth = true;
+    else if (argument === '--mesh-inbox') meshInbox = true;
     else if (argument === '--toast-lan') toastLan = true;
     else if (argument === '--repo') repository = argv[++index] ?? '';
     else if (argument === '--user') user = argv[++index] ?? '';
@@ -73,6 +82,9 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
   if (repoStatus && !agent) throw new Error('--repo-status is only supported with --agent.');
   if (pictureProxy && !agent) throw new Error('--picture-proxy is only supported with --agent.');
   if (pictureDepth && !agent) throw new Error('--picture-depth is only supported with --agent.');
+  if (boardFeeds && !agent) throw new Error('--board-feeds is only supported with --agent.');
+  if (serviceHealth && !agent) throw new Error('--service-health is only supported with --agent.');
+  if (meshInbox && !agent) throw new Error('--mesh-inbox is only supported with --agent.');
   if (toastLan && !agent) throw new Error('--toast-lan is only supported with --agent.');
   if (agent && migrateRunningListener)
     throw new Error('--agent installs never migrate a running listener.');
@@ -87,6 +99,9 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
     repoStatus,
     pictureProxy,
     pictureDepth,
+    boardFeeds,
+    serviceHealth,
+    meshInbox,
     toastLan,
   };
 };

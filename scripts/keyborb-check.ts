@@ -14,6 +14,7 @@ import {
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
 import { prepareQuestFixture } from './prepare-quest-fixture';
+import { pressWristMenu } from './wrist-menu-fixture';
 
 const baseUrl = process.env.MUX_XR_BASE_URL;
 const testRoot = process.env.MUX_XR_TEST_ROOT;
@@ -161,8 +162,8 @@ async function targetSelectHold(
   });
   await frames(page);
 }
-async function openKeyboard(page: Page): Promise<void> {
-  await targetSelect(page, { inputAction: 'toggleRadial' });
+async function openKeyboard(page: Page, leftConnected: boolean): Promise<void> {
+  await pressWristMenu(page, { leftConnected });
   await waitFor(
     page,
     async () =>
@@ -317,7 +318,7 @@ async function main(): Promise<void> {
       for (const joint of Object.values(hand.joints)) joint.visible = true;
     });
     await frames(page, 5);
-    await openKeyboard(page);
+    await openKeyboard(page, false);
     report.autoHands = await keyReport(page);
     const orb = await page.evaluate(() => {
       const w = window as unknown as FixtureWindow;
@@ -592,7 +593,7 @@ async function main(): Promise<void> {
       fullPage: true,
     });
     (report.screenshots as string[]).push('controller-hands-trigger.png');
-    await targetSelect(page, { inputAction: 'toggleRadial' });
+    await pressWristMenu(page, { leftConnected: true });
     await waitFor(
       page,
       async () =>

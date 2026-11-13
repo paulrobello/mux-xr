@@ -15,6 +15,7 @@ import {
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
 import { prepareQuestFixture } from './prepare-quest-fixture';
+import { pressWristMenu } from './wrist-menu-fixture';
 
 type Frame = { paneId: string; kind: string; data?: string };
 type FixtureWindow = Window & {
@@ -230,7 +231,7 @@ async function poke(page: Page, data: Record<string, unknown>, hold = 0): Promis
   await contact(page, data, 0.06);
 }
 async function radial(page: Page, action: string): Promise<void> {
-  await handAction(page, { inputAction: 'toggleRadial' });
+  await pressWristMenu(page, { leftConnected: true });
   await waitFor(
     page,
     async () =>

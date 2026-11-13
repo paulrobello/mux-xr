@@ -15,6 +15,7 @@ import {
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
 import { prepareQuestFixture } from './prepare-quest-fixture';
+import { pressWristMenu } from './wrist-menu-fixture';
 
 // Compares the render and script cost of the closed, standard and Keyborb keyboards in the
 // synthetic Quest fixture. Draw calls and per-frame script time are proxies for headset fps.
@@ -153,7 +154,7 @@ const visible = (page: Page, name: string) =>
     name,
   );
 async function openKeyboard(page: Page): Promise<void> {
-  await targetSelect(page, { inputAction: 'toggleRadial' });
+  await pressWristMenu(page, { leftConnected: LEFT_HAND !== 'none' });
   await waitFor(
     page,
     async () =>

@@ -1,6 +1,7 @@
 import { accessSync, constants, readFileSync } from 'node:fs';
 import { createServer } from 'node:https';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadClipboardSecret } from '../src/server/clipboard-server';
 import { createOnnxDepthEstimator } from '../src/server/depth-estimator';
 import { attachDictationServer } from '../src/server/dictation-server';
@@ -84,6 +85,23 @@ const depthModel = resolve(
 // Fail at start, not on the first request, when depth is on but the model was never fetched.
 if (pictureDepthFlag === 'on') accessSync(depthModel, constants.R_OK);
 console.log(`Picture depth ${pictureDepthFlag === 'on' ? 'enabled' : 'disabled'}.`);
+const boardFeedsFlag = parsed.get('--board-feeds') ?? 'off';
+if (boardFeedsFlag !== 'on' && boardFeedsFlag !== 'off')
+  throw new Error('--board-feeds takes on or off.');
+console.log(`Board feeds ${boardFeedsFlag === 'on' ? 'enabled' : 'disabled'}.`);
+const serviceHealthFlag = parsed.get('--service-health') ?? 'off';
+if (serviceHealthFlag !== 'on' && serviceHealthFlag !== 'off')
+  throw new Error('--service-health takes on or off.');
+// The token's default lives in this checkout whatever directory the server starts from.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const serviceHealthEnvFile = resolve(
+  parsed.get('--service-health-env-file') ?? resolve(repoRoot, '.local/par-obs-query.env'),
+);
+console.log(`Service health ${serviceHealthFlag === 'on' ? 'enabled' : 'disabled'}.`);
+const meshInboxFlag = parsed.get('--mesh-inbox') ?? 'off';
+if (meshInboxFlag !== 'on' && meshInboxFlag !== 'off')
+  throw new Error('--mesh-inbox takes on or off.');
+console.log(`Mesh inbox ${meshInboxFlag === 'on' ? 'enabled' : 'disabled'}.`);
 const toastLanFlag = parsed.get('--toast-lan') ?? 'off';
 if (toastLanFlag !== 'on' && toastLanFlag !== 'off')
   throw new Error('--toast-lan takes on or off.');
@@ -122,6 +140,25 @@ const attached = attachDictationServer(server, {
           ? `Picture depth: ${event.bytes} bytes in ${event.ms} ms`
           : `Picture depth refused: ${event.code}`,
       ),
+  },
+  // Runs the kanban CLI's read commands for a project a paired client names, so it needs its own
+  // explicit opt-in. Feed names and refusal codes only: projects and cards never reach the log.
+  boardFeeds: {
+    enabled: boardFeedsFlag === 'on',
+    onEvent: (event) => console.log(`Board feed ${event.feed} refused: ${event.code}`),
+  },
+  // Sends a Cloudflare Access service token to par-obs, so it needs its own explicit opt-in.
+  // Refusal codes only: the token and probe names never reach the log.
+  serviceHealth: {
+    enabled: serviceHealthFlag === 'on',
+    envFile: serviceHealthEnvFile,
+    onEvent: (event) => console.log(`Service health refused: ${event.code}`),
+  },
+  // Shows other agents' message subjects, so it needs its own explicit opt-in. Refusal codes
+  // only: addresses and subjects never reach the log.
+  meshInbox: {
+    enabled: meshInboxFlag === 'on',
+    onEvent: (event) => console.log(`Mesh inbox refused: ${event.code}`),
   },
   clipboard: {
     loadSecret: () => loadClipboardSecret(clipboardSecretFile),

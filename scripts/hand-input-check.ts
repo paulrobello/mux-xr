@@ -15,6 +15,7 @@ import {
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
 import { prepareQuestFixture } from './prepare-quest-fixture';
+import { pressWristMenu } from './wrist-menu-fixture';
 
 type Frame = { paneId: string; kind: string; data?: string };
 type FixtureWindow = Window & {
@@ -277,7 +278,7 @@ async function main(): Promise<void> {
       );
       w.__muxXR.selectPane('%1');
     });
-    await handAction(page, { inputAction: 'toggleRadial' });
+    await pressWristMenu(page, { leftConnected: true });
     await waitFor(
       page,
       async () =>
@@ -306,7 +307,7 @@ async function main(): Promise<void> {
     await page.evaluate(() => (window as unknown as FixtureWindow).__muxXR.selectPane('%2'));
     await handAction(page, { key: 'c' });
     await page.screenshot({ path: join(testRoot, 'hands-keyboard.png') });
-    await handAction(page, { inputAction: 'toggleRadial' });
+    await pressWristMenu(page, { leftConnected: true });
     await waitFor(
       page,
       async () =>

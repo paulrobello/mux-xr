@@ -15,6 +15,12 @@ export type DictationLaunchdOptions = {
   pictureProxy?: boolean;
   /** Opts the agent into `/picture-depth`, which decodes images a paired client uploads; off unless asked for. */
   pictureDepth?: boolean;
+  /** Opts the agent into the kanban feeds, which run the kanban CLI's read commands; off unless asked for. */
+  boardFeeds?: boolean;
+  /** Opts the agent into `/service-health`, which queries par-obs with a service token; off unless asked for. */
+  serviceHealth?: boolean;
+  /** Opts the agent into `/mesh-inbox`, which runs `par-mesh history`; off unless asked for. */
+  meshInbox?: boolean;
   /** Accepts `/toast` senders from other LAN hosts too; this Mac only unless asked for. */
   toastLan?: boolean;
 };
@@ -77,6 +83,10 @@ export const depthModelPath = (repository: string): string =>
 export const clipboardSecretPath = (repository: string): string =>
   `${repository}/.local/clipboard-secret`;
 
+/** The owner-created CF Access service token for par-obs Grafana; never created by an installer. */
+export const parObsQueryEnvPath = (repository: string): string =>
+  `${repository}/.local/par-obs-query.env`;
+
 export const agentPlistPath = (user: string): string =>
   `/Users/${validateUser(user)}/Library/LaunchAgents/${DICTATION_LABEL}.plist`;
 
@@ -130,6 +140,11 @@ export const buildLaunchAgentPlist = (options: DictationLaunchdOptions = {}): st
     ...(options.pictureDepth
       ? ['--picture-depth', 'on', '--depth-model', depthModelPath(repository)]
       : []),
+    ...(options.boardFeeds ? ['--board-feeds', 'on'] : []),
+    ...(options.serviceHealth
+      ? ['--service-health', 'on', '--service-health-env-file', parObsQueryEnvPath(repository)]
+      : []),
+    ...(options.meshInbox ? ['--mesh-inbox', 'on'] : []),
     ...(options.toastLan ? ['--toast-lan', 'on'] : []),
   ]);
   return `<?xml version="1.0" encoding="UTF-8"?>

@@ -439,6 +439,9 @@ async function main(): Promise<void> {
       `Space motion failed: ${JSON.stringify(spaceMotion)}`,
     );
     await page.screenshot({ path: join(testRoot, 'observatory-motion.png') });
+    // Exit arms on the first press and confirms on a second after CONFIRM_MIN_MS (350 ms).
+    await target(page, 'exit');
+    await page.waitForTimeout(450);
     await target(page, 'exit');
     await page.locator('[data-action="keyboard"]').click();
     const domShift = page.locator('[data-key="Shift"]').first();

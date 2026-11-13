@@ -68,6 +68,10 @@ describe('widget registry', () => {
       ['repo-status', 'Git & CI', [0.6, -0.1, -1.4]],
       ['weather', 'Weather', [-0.6, 0.574, -1.32]],
       ['picture', 'Picture', [-0.95, -0.55, -1.15]],
+      ['kanban-strip', 'Kanban strip', [0, -0.9, -1.2]],
+      ['booking-timeline', 'Host bookings', [-2.5, 0.05, -1.6]],
+      ['service-health', 'Service health', [2.65, -0.45, -1.6]],
+      ['mesh-inbox', 'Mesh inbox', [0, 1.55, -1.2]],
       ['sticky-note', 'Sticky note', [1.45, 0.7, -1.1]],
     ]);
     expect(widgetKinds()).toEqual([
@@ -82,6 +86,10 @@ describe('widget registry', () => {
       'repo-status',
       'weather',
       'picture',
+      'kanban-strip',
+      'booking-timeline',
+      'service-health',
+      'mesh-inbox',
       'sticky-note',
     ]);
   });

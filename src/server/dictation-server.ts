@@ -7,17 +7,35 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import {
+  BOOKINGS_PATH,
+  BOOKINGS_PROTOCOL,
+  createBookingsFeed,
+  createKanbanCli,
+  createKanbanStripFeed,
+  KANBAN_STRIP_PATH,
+  KANBAN_STRIP_PROTOCOL,
+  type KanbanCli,
+  type KanbanStripFeedOptions,
+} from './board-feeds';
+import {
   CLIPBOARD_PATH,
   type ClipboardServerOptions,
   createClipboardRoute,
   createFailureLimiter,
 } from './clipboard-server';
 import type { DictationTelemetry, TranscriptionOutcome } from './dictation-telemetry';
+import { createFeedRoute, type FeedRouteOptions } from './feed-route';
 import {
   createHostStatsRoute,
   HOST_STATS_PATH,
   type HostStatsRouteOptions,
 } from './host-stats-server';
+import {
+  createMeshInboxFeed,
+  MESH_INBOX_PATH,
+  MESH_INBOX_PROTOCOL,
+  type MeshInboxFeedOptions,
+} from './mesh-inbox';
 import {
   createPictureDepthRoute,
   PICTURE_DEPTH_PATH,
@@ -33,6 +51,12 @@ import {
   REPO_STATUS_PATH,
   type RepoStatusRouteOptions,
 } from './repo-status-server';
+import {
+  createServiceHealthFeed,
+  SERVICE_HEALTH_PATH,
+  SERVICE_HEALTH_PROTOCOL,
+  type ServiceHealthFeedOptions,
+} from './service-health';
 import { createToastHub, TOASTS_PATH, type ToastHubOptions } from './toast-server';
 import { createWeatherRoute, WEATHER_PATH, type WeatherRouteOptions } from './weather-server';
 
@@ -83,6 +107,32 @@ export type DictationServerOptions = {
     PictureDepthRouteOptions,
     'allowedOrigins' | 'loadSecret'
   >;
+  /**
+   * Kanban cards on `/kanban-strip` and host bookings on `/bookings`. They run the kanban CLI's
+   * read commands, the cards for a project a paired client's pane names, so they stay off unless
+   * `enabled`, and then also need the secret.
+   */
+  boardFeeds?: {
+    enabled: boolean;
+    cli?: KanbanCli;
+    strip?: Omit<KanbanStripFeedOptions, 'cli'>;
+    /** Clock for the bookings window. */
+    now?: () => number;
+  } & Pick<FeedRouteOptions, 'onEvent' | 'requestLimiter' | 'sessionTimeoutMs'>;
+  /**
+   * par-obs probe states on `/service-health`. The Mac queries Grafana with a Cloudflare Access
+   * service token read from `envFile`, so it stays off unless `enabled`, and then also needs the
+   * secret. The token never leaves this process.
+   */
+  serviceHealth?: { enabled: boolean } & ServiceHealthFeedOptions &
+    Pick<FeedRouteOptions, 'onEvent' | 'requestLimiter' | 'sessionTimeoutMs'>;
+  /**
+   * Recent par-mesh envelopes on `/mesh-inbox`: the Mac runs `par-mesh history` for its own host.
+   * Subjects name other agents' work, so it stays off unless `enabled`, and then also needs the
+   * secret. Bodies and ack notes never leave the Mac.
+   */
+  meshInbox?: { enabled: boolean } & MeshInboxFeedOptions &
+    Pick<FeedRouteOptions, 'onEvent' | 'requestLimiter' | 'sessionTimeoutMs'>;
   /**
    * Weather on `/weather`: the Mac looks up a US ZIP with zippopotam.us and the National Weather
    * Service. It only reaches those fixed hosts, so the clipboard pairing secret alone gates it.
@@ -222,6 +272,74 @@ export const attachDictationServer = (
     limiter: authLimiter,
     allowedOrigins: options.allowedOrigins,
   });
+  const boardSecret = options.boardFeeds?.enabled
+    ? loadSecret
+    : () => ({ enabled: false, reason: 'board feeds not enabled (--board-feeds on)' }) as const;
+  const kanbanCli = options.boardFeeds?.cli ?? createKanbanCli({ now: options.clipboard?.now });
+  const boardRoute = (
+    name: string,
+    protocol: string,
+    load: (request: string) => Promise<unknown>,
+  ): ReturnType<typeof createFeedRoute> =>
+    createFeedRoute({
+      name,
+      protocol,
+      // A second layer behind the disabled secret: off never reaches the kanban CLI.
+      load: options.boardFeeds?.enabled
+        ? load
+        : () => Promise.reject(new Error('board feeds not enabled')),
+      loadSecret: boardSecret,
+      limiter: authLimiter,
+      now: options.clipboard?.now,
+      allowedOrigins: options.allowedOrigins,
+      onEvent: options.boardFeeds?.onEvent,
+      requestLimiter: options.boardFeeds?.requestLimiter,
+      sessionTimeoutMs: options.boardFeeds?.sessionTimeoutMs,
+    });
+  const serviceHealth = options.serviceHealth;
+  const serviceHealthRoute = createFeedRoute({
+    name: 'service-health',
+    protocol: SERVICE_HEALTH_PROTOCOL,
+    load: serviceHealth?.enabled
+      ? createServiceHealthFeed(serviceHealth)
+      : () => Promise.reject(new Error('service health not enabled')),
+    loadSecret: serviceHealth?.enabled
+      ? loadSecret
+      : () => ({ enabled: false, reason: 'service health not enabled (--service-health on)' }),
+    limiter: authLimiter,
+    now: options.clipboard?.now,
+    allowedOrigins: options.allowedOrigins,
+    onEvent: serviceHealth?.onEvent,
+    requestLimiter: serviceHealth?.requestLimiter,
+    sessionTimeoutMs: serviceHealth?.sessionTimeoutMs,
+  });
+  const kanbanStripRoute = boardRoute(
+    'kanban-strip',
+    KANBAN_STRIP_PROTOCOL,
+    createKanbanStripFeed({ ...options.boardFeeds?.strip, cli: kanbanCli }),
+  );
+  const bookingsRoute = boardRoute(
+    'bookings',
+    BOOKINGS_PROTOCOL,
+    createBookingsFeed({ cli: kanbanCli, now: options.boardFeeds?.now }),
+  );
+  const meshInbox = options.meshInbox;
+  const meshInboxRoute = createFeedRoute({
+    name: 'mesh-inbox',
+    protocol: MESH_INBOX_PROTOCOL,
+    load: meshInbox?.enabled
+      ? createMeshInboxFeed({ now: options.clipboard?.now, ...meshInbox })
+      : () => Promise.reject(new Error('mesh inbox not enabled')),
+    loadSecret: meshInbox?.enabled
+      ? loadSecret
+      : () => ({ enabled: false, reason: 'mesh inbox not enabled (--mesh-inbox on)' }),
+    limiter: authLimiter,
+    now: options.clipboard?.now,
+    allowedOrigins: options.allowedOrigins,
+    onEvent: meshInbox?.onEvent,
+    requestLimiter: meshInbox?.requestLimiter,
+    sessionTimeoutMs: meshInbox?.sessionTimeoutMs,
+  });
   const weatherRoute = createWeatherRoute({
     ...options.weather,
     loadSecret,
@@ -273,6 +391,22 @@ export const attachDictationServer = (
     }
     if (requestUrl.pathname === PICTURE_FETCH_PATH && !requestUrl.search) {
       pictureFetchRoute.handleUpgrade(request, socket, head);
+      return;
+    }
+    if (requestUrl.pathname === BOOKINGS_PATH && !requestUrl.search) {
+      bookingsRoute.handleUpgrade(request, socket, head);
+      return;
+    }
+    if (requestUrl.pathname === MESH_INBOX_PATH && !requestUrl.search) {
+      meshInboxRoute.handleUpgrade(request, socket, head);
+      return;
+    }
+    if (requestUrl.pathname === SERVICE_HEALTH_PATH && !requestUrl.search) {
+      serviceHealthRoute.handleUpgrade(request, socket, head);
+      return;
+    }
+    if (requestUrl.pathname === KANBAN_STRIP_PATH && !requestUrl.search) {
+      kanbanStripRoute.handleUpgrade(request, socket, head);
       return;
     }
     if (requestUrl.pathname === WEATHER_PATH && !requestUrl.search) {
@@ -418,6 +552,10 @@ export const attachDictationServer = (
       await pictureFetchRoute.close();
       await pictureDepthRoute.close();
       await weatherRoute.close();
+      await kanbanStripRoute.close();
+      await bookingsRoute.close();
+      await serviceHealthRoute.close();
+      await meshInboxRoute.close();
       await toastHub.close();
     },
   };

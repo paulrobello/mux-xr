@@ -387,17 +387,41 @@ try {
     } as never);
   });
   await toggleKeyboardFromMenu(page);
-  const keyboardPose = await page.evaluate((): Pose => {
+  const keyboardPose = await page.evaluate(async (): Promise<Pose> => {
     const w = window as unknown as FixtureWindow;
     const keyboard = w.__questScene.getObjectByName('xr-keyboard-controls');
     if (!keyboard) throw new Error('Keyboard did not open for pose check');
-    keyboard.position.x += 0.08;
+    // Only a keyboard the wearer placed persists, so move it with a real grip on its backing.
+    let backing: import('three').Object3D | undefined;
+    keyboard.traverse((object) => {
+      if (!backing && object.visible && object.userData.inputAction === 'grabInput')
+        backing = object;
+    });
+    if (!backing) throw new Error('Keyboard grip backing missing');
+    const controller = w.__questControllers[0];
+    const rotation = backing.getWorldQuaternion(new w.__questThree.Quaternion());
+    controller.position
+      .copy(backing.getWorldPosition(new w.__questThree.Vector3()))
+      .add(new w.__questThree.Vector3(0, 0, 0.3).applyQuaternion(rotation));
+    controller.quaternion.copy(rotation);
+    w.__questScene.updateMatrixWorld(true);
+    const before = keyboard.position.x;
+    controller.dispatchEvent({ type: 'squeezestart' } as never);
+    controller.position.x += 0.08;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    controller.dispatchEvent({ type: 'squeezeend' } as never);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    if (Math.abs(keyboard.position.x - before) < 0.04)
+      throw new Error('Keyboard did not move with grip');
     return {
       position: keyboard.position.toArray(),
       quaternion: keyboard.quaternion.toArray(),
       scale: keyboard.scale.toArray(),
     };
   });
+  // Exit arms on the first press and confirms on a second after CONFIRM_MIN_MS (350 ms).
+  await target(page, 'exit');
+  await page.waitForTimeout(450);
   await target(page, 'exit');
   await waitFor(
     page,

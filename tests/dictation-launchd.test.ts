@@ -132,6 +132,39 @@ describe('Whisper LaunchDaemon definition', () => {
     expect(() => parseInstallerArgs(['--print', '--picture-depth'])).toThrow(/only supported/);
   });
 
+  it('leaves the kanban board feeds off unless the agent install opts in', () => {
+    expect(buildLaunchAgentPlist()).not.toContain('--board-feeds');
+    expect(buildLaunchDaemonPlist()).not.toContain('--board-feeds');
+    expect(buildLaunchAgentPlist({ boardFeeds: true })).toContain(
+      '<string>--board-feeds</string>\n    <string>on</string>',
+    );
+    expect(parseInstallerArgs(['--print', '--agent']).boardFeeds).toBe(false);
+    expect(parseInstallerArgs(['--print', '--agent', '--board-feeds']).boardFeeds).toBe(true);
+    expect(() => parseInstallerArgs(['--print', '--board-feeds'])).toThrow(/only supported/);
+  });
+
+  it('leaves service health off unless the agent install opts in, with the owner token path', () => {
+    expect(buildLaunchAgentPlist()).not.toContain('--service-health');
+    expect(buildLaunchDaemonPlist()).not.toContain('--service-health');
+    expect(buildLaunchAgentPlist({ serviceHealth: true })).toContain(
+      '<string>--service-health</string>\n    <string>on</string>\n    <string>--service-health-env-file</string>\n    <string>/Users/localuser/Repos/mux-xr/.local/par-obs-query.env</string>',
+    );
+    expect(parseInstallerArgs(['--print', '--agent']).serviceHealth).toBe(false);
+    expect(parseInstallerArgs(['--print', '--agent', '--service-health']).serviceHealth).toBe(true);
+    expect(() => parseInstallerArgs(['--print', '--service-health'])).toThrow(/only supported/);
+  });
+
+  it('leaves the mesh inbox off unless the agent install opts in', () => {
+    expect(buildLaunchAgentPlist()).not.toContain('--mesh-inbox');
+    expect(buildLaunchDaemonPlist()).not.toContain('--mesh-inbox');
+    expect(buildLaunchAgentPlist({ meshInbox: true })).toContain(
+      '<string>--mesh-inbox</string>\n    <string>on</string>',
+    );
+    expect(parseInstallerArgs(['--print', '--agent']).meshInbox).toBe(false);
+    expect(parseInstallerArgs(['--print', '--agent', '--mesh-inbox']).meshInbox).toBe(true);
+    expect(() => parseInstallerArgs(['--print', '--mesh-inbox'])).toThrow(/only supported/);
+  });
+
   it('accepts LAN toast senders only when the agent install opts in', () => {
     expect(buildLaunchAgentPlist()).not.toContain('--toast-lan');
     expect(buildLaunchAgentPlist({ toastLan: true })).toContain(

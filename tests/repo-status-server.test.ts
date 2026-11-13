@@ -240,6 +240,22 @@ describe('repo status probe', () => {
     expect(runner.calls).toEqual([]);
   });
 
+  it('never resolves a path that does not read as inside home, so no automount is touched', async () => {
+    const resolved: string[] = [];
+    const probe = createRepoStatusProbe({
+      run: fakeRunner().run,
+      homeDir: () => home,
+      realpath: async (path) => {
+        resolved.push(path);
+        return realpathSync(path);
+      },
+      findExecutable: async () => '/usr/bin/git',
+    });
+    for (const cwd of ['/net/fileserver/share', `${home}-other/repo`, join(home, '..', 'x')])
+      expect(await statusOf(probe, cwd), cwd).toEqual({ state: 'not-a-repo' });
+    expect(resolved.filter((path) => path !== home)).toEqual([]);
+  });
+
   it('follows a symlink that stays inside home', async () => {
     symlinkSync(join(home, 'repo'), join(home, 'link'));
     const runner = fakeRunner();

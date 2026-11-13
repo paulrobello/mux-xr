@@ -1,10 +1,14 @@
 import type * as THREE from 'three';
 import { createAgentBoardWidget } from './agent-board';
 import { createBellFeedWidget } from './bell-feed';
+import { createBookingTimelineWidget } from './booking-timeline';
 import { createHostLoadWidget } from './host-load';
+import { createKanbanStripWidget } from './kanban-strip';
+import { createMeshInboxWidget } from './mesh-inbox';
 import { createPerfGaugeWidget } from './perf-gauge';
 import { createPictureFrameWidget } from './picture-frame';
 import { createRepoStatusWidget } from './repo-status-widget';
+import { createServiceHealthWidget } from './service-health';
 import { createStickyNoteWidget } from './sticky-note';
 import { createStreamHealthWidget } from './stream-health';
 import { createTimerWidget } from './timer-widget';
@@ -123,6 +127,45 @@ export const WIDGET_REGISTRY = [
     faceViewer: true,
     // The menu spawns the placeholder; pictures picked on the page fill it.
     create: (envMap) => createPictureFrameWidget(envMap),
+  },
+  {
+    kind: 'kanban-strip',
+    displayName: 'Kanban strip',
+    // Centred below both HUD poses, a glance down. The Add Picture placeholder and the board fill
+    // the eye-level gaps, so a grid search found no clearer spot near the middle at 0.7 scale.
+    spawnOffset: [0, -0.9, -1.2],
+    spawnScale: 0.7,
+    faceViewer: true,
+    create: (envMap) => createKanbanStripWidget(envMap),
+  },
+  {
+    kind: 'booking-timeline',
+    displayName: 'Host bookings',
+    // Far left at eye level, past stream health; the grid search found no nearer clear spot this
+    // size once the kanban strip took the space below the HUD.
+    spawnOffset: [-2.5, 0.05, -1.6],
+    spawnScale: 0.7,
+    faceViewer: true,
+    create: (envMap) => createBookingTimelineWidget(envMap),
+  },
+  {
+    kind: 'service-health',
+    displayName: 'Service health',
+    // Far right just below eye level, mirroring the bookings panel; nearer spots this size overlap
+    // the board, a HUD pose or a picture slot.
+    spawnOffset: [2.65, -0.45, -1.6],
+    spawnScale: 0.7,
+    faceViewer: true,
+    create: (envMap) => createServiceHealthWidget(envMap),
+  },
+  {
+    kind: 'mesh-inbox',
+    displayName: 'Mesh inbox',
+    // Centred above both HUD poses, a glance up; every eye-level spot this size is taken.
+    spawnOffset: [0, 1.55, -1.2],
+    spawnScale: 0.7,
+    faceViewer: true,
+    create: (envMap) => createMeshInboxWidget(envMap),
   },
   {
     kind: 'sticky-note',
