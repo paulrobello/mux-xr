@@ -96,6 +96,7 @@ import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
 import { createPictureController, type PictureLoaders } from '../src/workspace/pictures';
 import { BACKGROUND_LABELS } from '../src/xr/background-picker';
 import { dimHandColor, HAND_COLOR_PRESETS } from '../src/xr/hand-colors';
+import { createHandContact } from '../src/xr/hand-contact';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
 import { PictureLoadError, pictureErrorNotice } from '../src/xr/picture-sizing';
 import {
@@ -8332,7 +8333,18 @@ describe('native XR controller event routing', () => {
     const { workspace, actions, container } = fixture();
     try {
       await workspace.enterXR('desk');
-      fakeXR.frame?.(0);
+      const viewer = { x: 0, y: 1.52, z: 0, w: 1 };
+      const orientation = { x: 0, y: 0, z: 0, w: 1 };
+      const framePose = {
+        getViewerPose: () => ({
+          transform: { position: viewer, orientation },
+          views: [
+            { eye: 'left', transform: { position: { ...viewer, x: -0.032, z: 0.012 } } },
+            { eye: 'right', transform: { position: { ...viewer, x: 0.032, z: -0.012 } } },
+          ],
+        }),
+      };
+      fakeXR.frame?.(0, framePose);
       expect(requestSession).toHaveBeenCalledWith('immersive-ar', expect.anything());
       expect(workspace.state.xrMode).toBe('ar');
       expect(workspace.state.widgets).toContain('desk-window');
@@ -8359,7 +8371,28 @@ describe('native XR controller event routing', () => {
       const right = fakeXR.controllers[1] as THREE.Group;
       const pad = connectController(0, [0, 0, 0, 0], 'left');
       connectController(1, [0, 0, 0, 0], 'right');
+      const leftEye = new THREE.Vector3(-0.032, 0, 0.012);
+      const rightEye = new THREE.Vector3(0.032, 0, -0.012);
+      const ray = new THREE.Raycaster();
+      const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(frame.quaternion);
+      const rimPoint = rimLeft.getWorldPosition(new THREE.Vector3());
+      for (const offset of [leftEye, rightEye, new THREE.Vector3()]) {
+        const point = rimPoint.clone().add(offset);
+        ray.set(point.clone().addScaledVector(normal, 0.3), normal.clone().negate());
+        const match = ray.intersectObject(frame, true)[0];
+        expect(match?.object).toBe(rimLeft);
+        expect(match?.point.distanceTo(point)).toBeLessThan(1e-6);
+      }
+      const middle = frame.getWorldPosition(new THREE.Vector3());
+      ray.set(middle.clone().addScaledVector(normal, 0.3), normal.clone().negate());
+      expect(ray.intersectObject(frame, true)).toEqual([]);
+      expect(
+        createHandContact().grip([{ point: middle, radius: 0.04 }], [frame as THREE.Group]),
+      ).toBeNull();
       aimController(left, rimLeft);
+      left.position.add(leftEye);
+      fakeXR.frame?.(16, framePose);
+      expect(left.userData.rayDistance).toBeCloseTo(0.3, 5);
       left.dispatchEvent({ type: 'squeezestart' } as never);
       const initial = frame.position.clone();
       const initialRotation = frame.quaternion.clone();
@@ -8371,6 +8404,7 @@ describe('native XR controller event routing', () => {
       expect(rimMaterial.visible).toBe(true);
       (pad.axes as number[])[3] = 0;
       aimController(right, rimRight);
+      right.position.add(rightEye);
       right.dispatchEvent({ type: 'squeezestart' } as never);
       const scale = frame.scale.x;
       left.position.x -= 0.1;

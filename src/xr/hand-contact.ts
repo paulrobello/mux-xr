@@ -294,7 +294,8 @@ export function createHandContact(): HandContact {
           gripHit.distance = Math.min(probe.radius, distance);
           root.traverse((object) => {
             const mesh = object as THREE.Mesh;
-            if (mesh.isMesh) checkMesh(mesh, probe.point, gripHit);
+            if (mesh.isMesh && !mesh.userData.excludeFromContactGrip)
+              checkMesh(mesh, probe.point, gripHit);
           });
           if (gripHit.mesh && gripHit.distance < distance) {
             owner = root;

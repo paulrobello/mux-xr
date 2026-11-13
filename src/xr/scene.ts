@@ -941,6 +941,8 @@ export function createWorkspaceScene(
   const deskBackdrop = createDeskBackdrop();
   scene.add(deskBackdrop);
   const deskWindowViewer = new THREE.Vector3();
+  const deskEyePositions: THREE.Vector3[] = [];
+  const deskEyePositionPool = [new THREE.Vector3(), new THREE.Vector3()];
   let deskWindowOnEntry = false;
   const panels = new Map<string, TerminalPanel>();
   const widgets = new Map<WidgetKey, Widget>();
@@ -2786,6 +2788,14 @@ export function createWorkspaceScene(
         xrHead.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
         xrHead.updateMatrixWorld(true);
         xrHeadFromFrame = true;
+        deskEyePositions.length = 0;
+        for (const view of viewerPose.views ?? []) {
+          const index = view.eye === 'left' ? 0 : view.eye === 'right' ? 1 : -1;
+          const eye = deskEyePositionPool[index];
+          if (!eye) continue;
+          const { x, y, z } = view.transform.position;
+          deskEyePositions.push(eye.set(x, y, z));
+        }
       }
       if (xrViewerPending && (!frame || viewerPose)) xrViewerPending = false;
     }
@@ -2793,6 +2803,7 @@ export function createWorkspaceScene(
       deskWindowOnEntry = false;
       openDeskWindow();
     }
+    if (widgets.has(DESK_WINDOW_KIND)) trackedHead().getWorldPosition(deskWindowViewer);
     syncKeyborb();
     pendingPokes.clear();
     const radialDelta =
@@ -3637,7 +3648,6 @@ export function createWorkspaceScene(
     }
     observatory.rotation.y = time * 0.00001;
     for (const panel of panels.values()) panel.surface.flush?.();
-    if (widgets.has(DESK_WINDOW_KIND)) trackedHead().getWorldPosition(deskWindowViewer);
     renderScene();
     if (!renderer && typeof window.requestAnimationFrame === 'function')
       frameHandle = window.requestAnimationFrame(render);
@@ -4046,7 +4056,7 @@ export function createWorkspaceScene(
     }
     mutableState.fullPassthrough = false;
     const saved = widgetPoseStore.read()[DESK_WINDOW_KIND];
-    const widget = createDeskWindow(deskWindowViewer);
+    const widget = createDeskWindow(deskWindowViewer, deskEyePositions);
     mountWidget(DESK_WINDOW_KIND, widget);
     if (saved && validPose(saved)) applyUIPose(widget.root, saved, [0.25, 2]);
     mutableState.widgets = [...widgets.keys()];
@@ -8129,6 +8139,7 @@ export function createWorkspaceScene(
       mutableState.xrMode = 'desktop';
       mutableState.fullPassthrough = false;
       deskWindowOnEntry = false;
+      deskEyePositions.length = 0;
       removeWidget(DESK_WINDOW_KIND, false);
       mutableState.renderGazeTerminalId = null;
       for (const panel of panels.values()) {

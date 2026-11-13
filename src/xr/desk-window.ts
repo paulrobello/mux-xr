@@ -9,6 +9,7 @@ const MASK_ORDER = -1_000_001;
 const WIDTH = 0.85;
 const HEIGHT = 0.46;
 const RIM = 0.014;
+const RIM_HIT_MARGIN = 0.018;
 const RIM_COLOR = 0x536e7d;
 const maskedRoots = new WeakSet<THREE.Object3D>();
 
@@ -85,7 +86,59 @@ const APERTURE_VERTEX = `
   }
 `;
 
-export function createDeskWindow(viewerCenter = new THREE.Vector3()): Widget {
+// The shader effectively translates the frame by eye position minus viewer center. Undo
+// that translation on the ray for each eye, and keep the space between the two edges pickable.
+function createRimRaycast(
+  viewerCenter: THREE.Vector3,
+  eyePositions: readonly THREE.Vector3[],
+): THREE.Mesh['raycast'] {
+  const inverse = new THREE.Matrix4();
+  const localRay = new THREE.Ray();
+  const localPoint = new THREE.Vector3();
+  const worldPoint = new THREE.Vector3();
+  const offset = new THREE.Vector3();
+  const scale = new THREE.Vector3();
+  const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+  return function (this: THREE.Mesh<THREE.PlaneGeometry>, raycaster, hits): void {
+    inverse.copy(this.matrixWorld).invert();
+    scale.setFromMatrixScale(this.matrixWorld);
+    const { width, height } = this.geometry.parameters;
+    const marginX = RIM_HIT_MARGIN / scale.x;
+    const marginY = RIM_HIT_MARGIN / scale.y;
+    let nearest = Infinity;
+    let bestMiss = Infinity;
+    for (let index = -1; index < eyePositions.length; index++) {
+      const eye = index === -1 ? viewerCenter : eyePositions[index];
+      offset.subVectors(eye, viewerCenter);
+      localRay.copy(raycaster.ray);
+      localRay.origin.sub(offset);
+      localRay.applyMatrix4(inverse);
+      if (!localRay.intersectPlane(plane, localPoint)) continue;
+      const missX = Math.max(0, Math.abs(localPoint.x) - width / 2);
+      const missY = Math.max(0, Math.abs(localPoint.y) - height / 2);
+      if (missX > marginX || missY > marginY) continue;
+      const miss = Math.hypot(missX * scale.x, missY * scale.y);
+      worldPoint.copy(localPoint).applyMatrix4(this.matrixWorld).add(offset);
+      const distance = raycaster.ray.origin.distanceTo(worldPoint);
+      if (distance < raycaster.near || distance > raycaster.far) continue;
+      if (miss < bestMiss || (miss === bestMiss && distance < nearest)) {
+        bestMiss = miss;
+        nearest = distance;
+      }
+    }
+    if (Number.isFinite(nearest))
+      hits.push({
+        distance: nearest,
+        point: raycaster.ray.at(nearest, new THREE.Vector3()),
+        object: this,
+      });
+  };
+}
+
+export function createDeskWindow(
+  viewerCenter = new THREE.Vector3(),
+  eyePositions: readonly THREE.Vector3[] = [],
+): Widget {
   const root = new THREE.Group();
   root.name = 'desk-window';
   root.userData.widgetId = DESK_WINDOW_KIND;
@@ -113,6 +166,7 @@ export function createDeskWindow(viewerCenter = new THREE.Vector3()): Widget {
   aperture.renderOrder = MASK_ORDER;
   aperture.frustumCulled = false;
   aperture.raycast = () => undefined;
+  aperture.userData.excludeFromContactGrip = true;
   root.add(aperture);
 
   const rimMaterial = tagAccentMaterial(
@@ -130,6 +184,7 @@ export function createDeskWindow(viewerCenter = new THREE.Vector3()): Widget {
       `,
     );
   };
+  const raycastRim = createRimRaycast(viewerCenter, eyePositions);
   const horizontal = new THREE.PlaneGeometry(WIDTH + RIM * 2, RIM);
   const vertical = new THREE.PlaneGeometry(RIM, HEIGHT);
   for (const sign of [-1, 1]) {
@@ -140,6 +195,7 @@ export function createDeskWindow(viewerCenter = new THREE.Vector3()): Widget {
     bar.name = sign < 0 ? 'desk-window-rim-bottom' : 'desk-window-rim-top';
     side.name = sign < 0 ? 'desk-window-rim-left' : 'desk-window-rim-right';
     bar.frustumCulled = side.frustumCulled = false;
+    bar.raycast = side.raycast = raycastRim;
     root.add(bar, side);
   }
   const close = createScalableLabel('×', 0.065, 0.065, { background: '#223946' });
