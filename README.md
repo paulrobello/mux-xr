@@ -2,6 +2,8 @@
 
 Mux XR is a LAN workspace for monitoring par-mux terminals and sending commands from a browser or Meta Quest 3. Open individual panes as flat terminals on the desktop or arrange them around you in XR. Use controllers, tracked hands, a virtual keyboard, or a paired physical keyboard to work with the selected pane.
 
+![Mux XR workspace](https://raw.githubusercontent.com/paulrobello/mux-xr/main/screenshot.jpg)
+
 ## Quick start
 
 Install the dependencies with Bun 1.4.4, then start Vite.
