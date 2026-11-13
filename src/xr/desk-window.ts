@@ -9,7 +9,7 @@ const MASK_ORDER = -1_000_001;
 const WIDTH = 0.85;
 const HEIGHT = 0.46;
 const RIM = 0.014;
-const FEATHER_METRES = 0.055;
+const FEATHER_METRES = 0.08;
 const RIM_COLOR = 0x536e7d;
 const maskedRoots = new WeakSet<THREE.Object3D>();
 
@@ -147,6 +147,8 @@ export function createDeskWindow(): Widget {
     new THREE.MeshBasicMaterial({ color: RIM_COLOR, side: THREE.DoubleSide }),
     RIM_COLOR,
   );
+  // The edge remains pickable while its material is hidden.
+  rimMaterial.visible = false;
   const horizontal = new THREE.PlaneGeometry(WIDTH + RIM * 2, RIM);
   const vertical = new THREE.PlaneGeometry(RIM, HEIGHT);
   for (const sign of [-1, 1]) {
@@ -163,7 +165,16 @@ export function createDeskWindow(): Widget {
   close.position.set(WIDTH / 2 + RIM / 2, HEIGHT / 2 + RIM + 0.034, 0.008);
   close.userData.inputAction = 'closeWidget';
   close.userData.helpText = 'Close the desk window and restore the virtual background';
+  close.visible = false;
   root.add(close);
 
-  return { root, update: () => undefined, dispose: () => disposeOwned(root) };
+  return {
+    root,
+    update: () => undefined,
+    dispose: () => disposeOwned(root),
+    setPointed: (pointed) => {
+      rimMaterial.visible = pointed;
+      close.visible = pointed;
+    },
+  };
 }

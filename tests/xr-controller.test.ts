@@ -8342,6 +8342,10 @@ describe('native XR controller event routing', () => {
       const rimLeft = frame?.getObjectByName('desk-window-rim-left');
       const rimRight = frame?.getObjectByName('desk-window-rim-right');
       if (!frame || !rimLeft || !rimRight) throw new Error('Desk window frame is missing');
+      const rimMaterial = (rimLeft as THREE.Mesh<THREE.PlaneGeometry, THREE.Material>).material;
+      const close = frame.getObjectByName('desk-window-close');
+      expect(rimMaterial.visible).toBe(false);
+      expect(close?.visible).toBe(false);
       // Keep the terminal furniture away from the controller rays aimed at the rim.
       workspace.scene.getObjectByName('terminal-panel-pane-a')?.position.setX(-5);
       workspace.scene.getObjectByName('terminal-panel-pane-b')?.position.setX(5);
@@ -8358,6 +8362,8 @@ describe('native XR controller event routing', () => {
       fakeXR.frame?.(32);
       expect(frame.position.x).toBeCloseTo(initial.x + 0.16);
       expect(frame.quaternion.angleTo(initialRotation)).toBeGreaterThan(0.01);
+      expect(rimMaterial.visible).toBe(true);
+      expect(close?.visible).toBe(true);
       (pad.axes as number[])[3] = 0;
       aimController(right, rimRight);
       right.dispatchEvent({ type: 'squeezestart' } as never);
@@ -8369,6 +8375,15 @@ describe('native XR controller event routing', () => {
       left.dispatchEvent({ type: 'squeezeend' } as never);
       right.dispatchEvent({ type: 'squeezeend' } as never);
       const saved = frame.position.clone();
+      left.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+      right.quaternion.copy(left.quaternion);
+      fakeXR.frame?.(80);
+      expect(rimMaterial.visible).toBe(false);
+      expect(close?.visible).toBe(false);
+      aimController(left, rimLeft);
+      fakeXR.frame?.(96);
+      expect(rimMaterial.visible).toBe(true);
+      expect(close?.visible).toBe(true);
       hit(workspace, { inputAction: 'closeWidget', widgetKind: 'desk-window' });
       expect(workspace.state.widgets).not.toContain('desk-window');
       expect(workspace.state.xrMode).toBe('ar');
