@@ -55,40 +55,39 @@ export function createTerminalWarpStore(storage: Storage | null = defaultStorage
   set(key: string, degrees: number): boolean;
   getOpacity(key: string, fallback?: number): number;
   setOpacity(key: string, value: number): boolean;
+  setAppearance(key: string, changes: { degrees?: number; opacity?: number }): boolean;
   clear(key: string): boolean;
 } {
+  const saveAppearance = (
+    key: string,
+    { degrees, opacity }: { degrees?: number; opacity?: number },
+  ): boolean => {
+    if (!storage) return false;
+    const document = readDocument(storage);
+    if (degrees !== undefined) document.values[key] = clampDegrees(degrees);
+    if (opacity !== undefined) {
+      document.opacity ??= {};
+      document.opacity[key] = clampOpacity(opacity);
+    }
+    try {
+      storage.setItem(STORAGE_KEY, JSON.stringify(document));
+      return true;
+    } catch {
+      return false;
+    }
+  };
   return {
     get(key, fallback = 0): number {
       if (!storage) return clampDegrees(fallback);
       return readDocument(storage).values[key] ?? clampDegrees(fallback);
     },
-    set(key, degrees): boolean {
-      if (!storage) return false;
-      const document = readDocument(storage);
-      document.values[key] = clampDegrees(degrees);
-      try {
-        storage.setItem(STORAGE_KEY, JSON.stringify(document));
-        return true;
-      } catch {
-        return false;
-      }
-    },
+    set: (key, degrees) => saveAppearance(key, { degrees }),
     getOpacity(key, fallback = 1): number {
       if (!storage) return clampOpacity(fallback);
       return readDocument(storage).opacity?.[key] ?? clampOpacity(fallback);
     },
-    setOpacity(key, value): boolean {
-      if (!storage) return false;
-      const document = readDocument(storage);
-      document.opacity ??= {};
-      document.opacity[key] = clampOpacity(value);
-      try {
-        storage.setItem(STORAGE_KEY, JSON.stringify(document));
-        return true;
-      } catch {
-        return false;
-      }
-    },
+    setOpacity: (key, opacity) => saveAppearance(key, { opacity }),
+    setAppearance: saveAppearance,
     clear(key): boolean {
       if (!storage) return false;
       const document = readDocument(storage);

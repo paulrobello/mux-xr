@@ -71,7 +71,7 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
       return "Forget this pane's saved glass opacity and warp so it follows the new-window defaults";
     case 'radialAction':
       return data.radialAction === 'warp'
-        ? 'Adjust terminal curvature: controllers use the right stick; hands use on-panel choices'
+        ? 'Right stick: left/right curves, up/down changes opacity. Hands use on-panel curvature controls.'
         : data.radialAction === 'layout'
           ? 'Arrange terminals and adjust layout distance'
           : data.radialAction === 'cancel'

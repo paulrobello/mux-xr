@@ -1405,8 +1405,8 @@ export function createWorkspaceScene(
   let radialController: THREE.Group | null = null;
   let warpEdit: {
     id: string;
-    original: number;
-    touched: boolean;
+    originalCurvature: number;
+    originalOpacity: number;
     controller: THREE.Group | null;
   } | null = null;
   let warpReadout: THREE.Mesh | null = null;
@@ -3170,11 +3170,16 @@ export function createWorkspaceScene(
           finishWarp(false);
         else if (controller) {
           const pad = controllerGamepads.get(controller);
-          const axis = pad?.axes[pad.axes.length >= 4 ? 2 : 0] ?? 0;
-          if (Math.abs(axis) >= 0.2) {
-            const panel = panels.get(warpEdit.id);
-            if (panel)
-              setTerminalCurvature(panel.id, panel.curvature + axis * 45 * deltaSeconds, false);
+          const panel = panels.get(warpEdit.id);
+          if (pad && panel) {
+            const index = pad.axes.length >= 4 ? 2 : 0;
+            const x = pad.axes[index] ?? 0;
+            const y = pad.axes[index + 1] ?? 0;
+            if (Math.abs(x) >= 0.2)
+              setTerminalCurvature(panel.id, panel.curvature + x * 45 * deltaSeconds, false);
+            if (Math.abs(y) >= 0.2)
+              previewTerminalOpacity(panel, panel.opacity - y * 0.5 * deltaSeconds);
+            if (Math.abs(x) >= 0.2 || Math.abs(y) >= 0.2) updateWarpReadout(panel);
           }
         }
       }
@@ -7397,11 +7402,17 @@ export function createWorkspaceScene(
     frame.needsUpdate = true;
   };
   const getTerminalOpacity = (id: string): number => panels.get(id)?.opacity ?? 1;
+  const previewTerminalOpacity = (panel: TerminalPanel, value: number): void => {
+    const opacity = THREE.MathUtils.clamp(value, 0.1, 1);
+    if (panel.opacity === opacity) return;
+    panel.opacity = opacity;
+    applyTerminalOpacity(panel);
+  };
   const setTerminalOpacity = (id: string, value: number): void => {
     const panel = panels.get(id);
     if (!panel || !Number.isFinite(value)) return;
-    panel.opacity = THREE.MathUtils.clamp(value, 0.1, 1);
-    applyTerminalOpacity(panel);
+    if (warpEdit?.id === id) finishWarp(false);
+    previewTerminalOpacity(panel, value);
     if (!warpStore.setOpacity(warpKey(panel.surface), panel.opacity))
       setNotice('Glass opacity could not be saved on this device');
     if (inputRoot && inputMode === 'terminal') refreshInputRoot('terminal');
@@ -7516,21 +7527,33 @@ export function createWorkspaceScene(
       disposeObject(warpReadout);
       warpReadout = null;
     }
-    if (commit) {
-      const panel = panels.get(edit.id);
+    const panel = panels.get(edit.id);
+    if (panel && commit) {
+      const degrees = panel.curvature !== edit.originalCurvature ? panel.curvature : undefined;
+      const opacity = panel.opacity !== edit.originalOpacity ? panel.opacity : undefined;
       if (
-        panel &&
-        (edit.touched || panel.curvature !== edit.original) &&
-        !warpStore.set(warpKey(panel.surface), panel.curvature)
+        (degrees !== undefined || opacity !== undefined) &&
+        !warpStore.setAppearance(warpKey(panel.surface), { degrees, opacity })
       )
-        setNotice('Curvature could not be saved on this device');
-    } else setTerminalCurvature(edit.id, edit.original, false);
+        setNotice('Warp and opacity could not be saved on this device');
+    } else if (panel) {
+      if (panel.curvature !== edit.originalCurvature)
+        setTerminalCurvature(edit.id, edit.originalCurvature, false);
+      previewTerminalOpacity(panel, edit.originalOpacity);
+    }
     floorCorrectionPending = true;
     correctTerminalFloor();
     scrollDue.clear();
     stripScrolls.clear();
     gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
     notify();
+  };
+  const updateWarpReadout = (panel: TerminalPanel): void => {
+    if (!warpReadout) return;
+    const label =
+      `Curve ${Math.round(panel.curvature)}° ←/→ · Opacity ${Math.round(panel.opacity * 100)}% ↑/↓\n` +
+      'A Save · B Cancel';
+    if (warpReadout.userData.labelText !== label) updateLabel(warpReadout, label);
   };
   const startWarp = (id: string | null, owner: THREE.Group | null): void => {
     const panel = panels.get(id ?? mutableState.selectedTerminalId ?? '');
@@ -7546,22 +7569,25 @@ export function createWorkspaceScene(
     selectTerminal(panel.id);
     const controller =
       owner ?? controllerRoots.find((root) => controllerHandedness.get(root) === 'right') ?? null;
-    warpEdit = { id: panel.id, original: panel.curvature, touched: false, controller };
+    warpEdit = {
+      id: panel.id,
+      originalCurvature: panel.curvature,
+      originalOpacity: panel.opacity,
+      controller,
+    };
     mutableState.warpTerminalId = panel.id;
     gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
     scrollDue.clear();
     stripScrolls.clear();
-    warpReadout = createLabelButton('', 1.25, 0.08, { inputAction: 'noop' });
+    warpReadout = createScalableLabel('', 1.4, 0.15, { wrap: true, fontSize: 0.048 });
+    warpReadout.userData.inputAction = 'noop';
     warpReadout.name = 'xr-warp-readout';
     warpReadout.position.set(0, panel.height / 2 + 0.22, 0.04);
     warpReadout.traverse((object) => {
       object.raycast = () => undefined;
     });
     panel.root.add(warpReadout);
-    updateLabel(
-      warpReadout,
-      `Warp ${Math.round(panel.curvature)}° · stick ← / → · A save · B cancel`,
-    );
+    updateWarpReadout(panel);
     notify();
   };
   const closeRadial = (): void => {
@@ -7693,17 +7719,11 @@ export function createWorkspaceScene(
     const panel = panels.get(id);
     if (!panel || !Number.isFinite(degrees)) return;
     panel.curvature = THREE.MathUtils.clamp(degrees, 0, 100);
-    if (warpEdit?.id === id) warpEdit.touched = true;
     if (warpPanelEdit?.id === id) warpPanelEdit.touched = true;
     syncPanelGrid(panel);
     correctTerminalFloor();
     if (persist && !warpStore.set(warpKey(panel.surface), panel.curvature))
       setNotice('Curvature could not be saved on this device');
-    if (warpEdit?.id === id && warpReadout)
-      updateLabel(
-        warpReadout,
-        `Warp ${Math.round(panel.curvature)}° · stick ← / → · A save · B cancel`,
-      );
     if (inputRoot && inputMode === 'warp') refreshInputRoot('warp');
     if (persist) notify();
   };

@@ -8245,8 +8245,10 @@ describe('native XR controller event routing', () => {
     const pad = connectController(1, [0, 0, 0, 0], 'right');
     selectRadialAction(workspace, pad, 'warp', 0);
     (pad.axes as number[])[2] = 1;
+    (pad.axes as number[])[3] = 1;
     fakeXR.frame?.(1200);
     const curve = workspace.getTerminalCurvature('pane-a');
+    const opacity = workspace.getTerminalOpacity('pane-a');
     const panel = workspace.scene.getObjectByName('terminal-panel-pane-a');
     if (!panel) throw new Error('Pane A missing');
     const position = panel.position.clone();
@@ -8255,10 +8257,12 @@ describe('native XR controller event routing', () => {
     left.position.x += 0.2;
     fakeXR.frame?.(1300);
     expect(workspace.getTerminalCurvature('pane-a')).toBe(curve);
+    expect(workspace.getTerminalOpacity('pane-a')).toBe(opacity);
     expect(panel.position.x).toBeCloseTo(position.x + 0.2);
     left.dispatchEvent({ type: 'squeezeend' } as never);
     fakeXR.frame?.(1400);
     expect(workspace.getTerminalCurvature('pane-a')).toBeGreaterThan(curve);
+    expect(workspace.getTerminalOpacity('pane-a')).toBeLessThan(opacity);
     expect(actions.sendKey).not.toHaveBeenCalled();
     expect(actions.resizeGrid).not.toHaveBeenCalled();
     workspace.dispose();
@@ -8487,7 +8491,7 @@ describe('native XR controller event routing', () => {
     }
   });
 
-  it('previews the aimed pane without persistence or UI broadcasts and saves with A', () => {
+  it('previews both axes for the aimed pane without broadcasts and saves both with A', () => {
     const { workspace, container } = fixture();
     const controller = fakeXR.controllers[1] as THREE.Group;
     const gamepad = connectController(1, [0, 0, 0, 0], 'right');
@@ -8501,16 +8505,30 @@ describe('native XR controller event routing', () => {
     expect(workspace.state.warpTerminalId).toBe('pane-b');
     expect(workspace.scene.getObjectByName('xr-warp-controls')).toBeUndefined();
     expect(workspace.scene.getObjectByName('xr-warp-readout')).toBeDefined();
+    const readout = workspace.scene.getObjectByName('xr-warp-readout');
+    expect(readout?.userData.labelText).toContain('Opacity 100%');
     const originalStorage = localStorage.getItem('mux-xr:terminal-warp:v1');
     const changed = vi.fn();
     const stop = workspace.subscribe(changed);
     (gamepad.axes as number[])[2] = 1;
+    (gamepad.axes as number[])[3] = 1;
     fakeXR.frame?.(8200);
     const preview = workspace.getTerminalCurvature('pane-b');
     expect(preview).toBeGreaterThan(0);
+    const opacity = workspace.getTerminalOpacity('pane-b');
+    expect(opacity).toBeLessThan(1);
+    expect(workspace.getTerminalOpacity('pane-a')).toBe(1);
+    expect(readout?.userData.labelText).toContain(`Opacity ${Math.round(opacity * 100)}%`);
+    (gamepad.axes as number[])[2] = 0;
+    (gamepad.axes as number[])[3] = -0.5;
+    fakeXR.frame?.(8216);
+    const savedOpacity = workspace.getTerminalOpacity('pane-b');
+    expect(savedOpacity).toBeGreaterThan(opacity);
+    expect(workspace.getTerminalCurvature('pane-b')).toBe(preview);
     expect(localStorage.getItem('mux-xr:terminal-warp:v1')).toBe(originalStorage);
     expect(changed).not.toHaveBeenCalled();
     (gamepad.axes as number[])[2] = 0;
+    (gamepad.axes as number[])[3] = 0;
     (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
     fakeXR.frame?.(8300);
     fakeXR.frame?.(8400);
@@ -8519,7 +8537,10 @@ describe('native XR controller event routing', () => {
     expect(workspace.state.warpTerminalId).toBeNull();
     expect(workspace.state.radialOpen).toBe(false);
     expect(workspace.getTerminalCurvature('pane-b')).toBe(preview);
-    expect(localStorage.getItem('mux-xr:terminal-warp:v1')).not.toBe(originalStorage);
+    expect(workspace.getTerminalOpacity('pane-b')).toBe(savedOpacity);
+    const saved = JSON.parse(localStorage.getItem('mux-xr:terminal-warp:v1') ?? '{}');
+    expect(Object.values(saved.values)).toEqual([preview]);
+    expect(Object.values(saved.opacity)).toEqual([savedOpacity]);
     stop();
     workspace.dispose();
     container.remove();
@@ -8546,6 +8567,7 @@ describe('native XR controller event routing', () => {
     expect(actions.sendMouse).toHaveBeenCalled();
     vi.mocked(actions.sendMouse)?.mockClear();
     workspace.setTerminalCurvature('pane-a', 30);
+    workspace.setTerminalOpacity('pane-a', 0.65);
     const saved = localStorage.getItem('mux-xr:terminal-warp:v1');
     workspace.setGazeInputEnabled(true);
     workspace.camera.lookAt(b.getWorldPosition(new THREE.Vector3()));
@@ -8557,6 +8579,7 @@ describe('native XR controller event routing', () => {
     controller.dispatchEvent({ type: 'selectstart' } as never);
     controller.dispatchEvent({ type: 'selectend' } as never);
     expect(workspace.getTerminalCurvature('pane-a')).toBeGreaterThan(30);
+    expect(workspace.getTerminalOpacity('pane-a')).toBeLessThan(0.65);
     expect(actions.scrollTerminal).not.toHaveBeenCalled();
     expect(workspace.state.gazeInputEnabled).toBe(true);
     expect(workspace.state.selectedTerminalId).toBe('pane-a');
@@ -8569,6 +8592,7 @@ describe('native XR controller event routing', () => {
     expect(workspace.state.warpTerminalId).toBeNull();
     expect(workspace.state.focusModeTerminalId).toBeNull();
     expect(workspace.getTerminalCurvature('pane-a')).toBe(30);
+    expect(workspace.getTerminalOpacity('pane-a')).toBe(0.65);
     expect(localStorage.getItem('mux-xr:terminal-warp:v1')).toBe(saved);
     workspace.dispose();
     container.remove();

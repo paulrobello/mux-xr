@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createTerminalWarpStore } from '../src/xr/terminal-warp-store';
 
 function memoryStorage(): Storage {
@@ -76,6 +76,18 @@ describe('terminal warp store', () => {
     const document = JSON.parse(storage.getItem('mux-xr:terminal-warp:v1') ?? '{}');
     expect(document.values.pane).toBe(42);
     expect(document.opacity.pane).toBe(0.35);
+  });
+
+  it('commits the changed appearance fields in one storage write', () => {
+    const storage = memoryStorage();
+    const write = vi.spyOn(storage, 'setItem');
+    const store = createTerminalWarpStore(storage);
+    expect(store.setAppearance('pane', { degrees: 27, opacity: 0.45 })).toBe(true);
+    expect(write).toHaveBeenCalledOnce();
+    expect(store.get('pane')).toBe(27);
+    expect(store.getOpacity('pane')).toBe(0.45);
+    expect(store.setAppearance('opacity-only', { opacity: 0.6 })).toBe(true);
+    expect(store.get('opacity-only', 42)).toBe(42);
   });
 
   it('returns false when storage is unavailable or blocked', () => {
