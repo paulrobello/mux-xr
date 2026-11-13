@@ -384,8 +384,8 @@ export function createBookingTimelineWidget(
     setText(message, view.message);
     overflow.visible = view.hiddenHosts > 0;
     if (view.hiddenHosts > 0) setText(overflow, `+${view.hiddenHosts} hosts`);
-    // Local full hours are UTC full hours: Etc/GMT+8 offsets are whole hours.
-    const firstHour = Math.ceil(view.start / 3_600_000) * 3_600_000;
+    const offsetMs = new Date(view.start).getTimezoneOffset() * 60_000;
+    const firstHour = Math.ceil((view.start - offsetMs) / 3_600_000) * 3_600_000 + offsetMs;
     ticks.forEach((tick, index) => {
       const at = firstHour + index * 3_600_000;
       const inside = at < view.start + BOOKING_WINDOW_MS;

@@ -759,7 +759,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     );
     const weatherZip = document.createElement('label');
     weatherZip.innerHTML =
-      '<span>Weather ZIP</span><input data-weather-zip type="text" inputmode="numeric" maxlength="5" pattern="[0-9]{5}" placeholder="e.g. 95814" aria-label="Weather ZIP code"><small>US ZIP for the XR weather widget; leave empty for none.</small>';
+      '<span>Weather ZIP</span><input data-weather-zip type="text" inputmode="numeric" maxlength="5" pattern="[0-9]{5}" placeholder="5-digit US ZIP" aria-label="Weather ZIP code"><small>US ZIP for the XR weather widget; leave empty for none.</small>';
     settingsPanel.insertBefore(
       weatherZip,
       settingsPanel.querySelector('[data-action="passthrough"]') ?? null,

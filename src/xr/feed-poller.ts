@@ -151,22 +151,20 @@ export function isWidgetShown(object: THREE.Object3D): boolean {
   return true;
 }
 
-const LOCAL_ZONE = 'Etc/GMT+8';
 const LOCAL_TIME = new Intl.DateTimeFormat('en-US', {
-  timeZone: LOCAL_ZONE,
   hour: 'numeric',
   minute: '2-digit',
 });
-const LOCAL_HOUR = new Intl.DateTimeFormat('en-US', { timeZone: LOCAL_ZONE, hour: 'numeric' });
+const LOCAL_HOUR = new Intl.DateTimeFormat('en-US', { hour: 'numeric' });
 // Newer ICU puts a narrow no-break space before AM/PM; the label fonts may lack it.
 const plainSpaces = (text: string): string => text.replace(/[  ]/g, ' ');
 
-/** "9:40 PM" in Etc/GMT+8. */
+/** "9:40 PM". */
 export function formatLocalTime(epochMs: number): string {
   return plainSpaces(LOCAL_TIME.format(new Date(epochMs)));
 }
 
-/** "10 PM" in Etc/GMT+8. */
+/** "10 PM". */
 export function formatLocalHour(epochMs: number): string {
   return plainSpaces(LOCAL_HOUR.format(new Date(epochMs)));
 }

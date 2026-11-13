@@ -44,8 +44,7 @@ import {
 
 afterEach(stopFeedServers);
 
-/** 2026-11-12 05:40 UTC, which is 9:40 PM on 11 November in Los Angeles (PST). */
-const NOW = Date.UTC(2026, 10, 12, 5, 40);
+const NOW = new Date(2026, 10, 11, 21, 40).getTime();
 const MIN = 60_000;
 
 const RESOURCES = [
@@ -194,7 +193,7 @@ const feed: BookingsFeed = parseBookingsFeed(
 };
 
 describe('booking timeline view', () => {
-  it('formats times in Etc/GMT+8 like 9:40 PM', () => {
+  it('formats times in the device time zone', () => {
     expect(formatLocalTime(NOW)).toBe('9:40 PM');
     expect(formatLocalHour(NOW + 20 * MIN)).toBe('10 PM');
     const booking = feed.bookings.find((entry) => entry.holder === 'claude-mux-xr') as Booking;

@@ -235,7 +235,6 @@ while (Date.now() < deadline) {
   if (OUT) appendFileSync(OUT, `${JSON.stringify(row)}\n`);
   const local = new Date().toLocaleTimeString('en-US', {
     hour12: false,
-    timeZone: 'Etc/GMT+8',
   });
   console.log(
     `${local} ${String(row.frames).padStart(4)}  ${row.intervalP50.toFixed(1)}/${row.intervalP95.toFixed(1)}/${row.intervalMax.toFixed(1)}`.padEnd(
