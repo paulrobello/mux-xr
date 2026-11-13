@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # Mux XR contributor guide
 
 Mux XR is a TypeScript, Vite and Three.js WebXR client for par-mux. The [README](README.md) is the first-run guide. Read the [architecture](docs/ARCHITECTURE.md) for module ownership, the [workspace guide](docs/WORKSPACE.md) for current controls, and [DESIGN.md](DESIGN.md) for interaction and visual design.
@@ -12,6 +16,8 @@ Mux XR is a TypeScript, Vite and Three.js WebXR client for par-mux. The [README]
 | `make checkall-ci` | Run the full local gate, including observatory asset checks, Gitleaks, and the high-severity dependency audit |
 | `make e2e` | Run the local GPU browser suite with synthetic streamer fixtures |
 | `make real-app-check` | Verify the built app against a private mux daemon and streamer |
+| `bun run test tests/<name>.test.ts` | Run one Vitest file. Unit tests live in `tests/` and run under happy-dom |
+| `make <feature>-check` | Targeted browser or protocol check, e.g. `make hierarchy-check`, `make focus-mode-check`; see [Testing](docs/TESTING.md) for the flags each one requires |
 
 Use [Testing](docs/TESTING.md) for fixture setup, exact flags, and evidence requirements. Any automated check that sends input, resizes a pane, creates a pane, or exercises stream lifecycle must use a private daemon and streamer. The live preview uses the shared default mux daemon. Record browser fixture, real-core and physical Quest results separately.
 
