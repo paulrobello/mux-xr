@@ -66,7 +66,8 @@ describe('weather view', () => {
       title: 'Sacramento, CA',
       temp: '71°',
       summary: 'Partly Sunny',
-      detail: 'Wind 3 mph SSW · Humidity 51% · Precip 1%\nUpdated 5 min ago',
+      detail: 'Wind 3 mph SSW · Humidity 51%',
+      updated: 'Updated 5 min ago',
       icon: 'partly',
     });
     expect(weatherView({ kind: 'no-zip' }, AT).summary).toBe('No ZIP code set');

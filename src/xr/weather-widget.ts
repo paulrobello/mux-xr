@@ -47,6 +47,7 @@ export interface WeatherView {
   temp: string;
   summary: string;
   detail: string;
+  updated: string;
   icon: WeatherIconKind | null;
   isDay: boolean;
   days: WeatherDay[];
@@ -66,6 +67,7 @@ const quiet = (title: string, summary: string, detail = ''): WeatherView => ({
   temp: '',
   summary,
   detail,
+  updated: '',
   icon: null,
   isDay: true,
   days: [],
@@ -98,14 +100,14 @@ export function weatherView(model: WeatherModel, nowMs: number): WeatherView {
   const parts = [
     now.windMph === null ? '' : `Wind ${now.windMph} mph${now.windDir ? ` ${now.windDir}` : ''}`,
     now.humidity === null ? '' : `Humidity ${now.humidity}%`,
-    now.precip === null ? '' : `Precip ${now.precip}%`,
   ].filter(Boolean);
   const updated = formatUpdated(report.fetchedAt, nowMs);
   return {
     title: [report.place, report.region].filter(Boolean).join(', ') || `ZIP ${report.zip}`,
     temp: `${now.tempF}°`,
     summary: now.summary || '—',
-    detail: [parts.join(' · '), updated && `Updated ${updated}`].filter(Boolean).join('\n'),
+    detail: parts.join(' · '),
+    updated: updated && `Updated ${updated}`,
     icon: weatherIconKind(now.summary),
     isDay: now.isDay,
     days: report.days,
@@ -269,7 +271,7 @@ function buildIcon(kit: IconKit, kind: WeatherIconKind, isDay: boolean): Weather
     movers.push((t) => {
       for (const [index, drop] of drops.entries()) {
         const phase = (t * speed + index * 0.37) % 1;
-        drop.position.y = -0.024 - phase * 0.03;
+        drop.position.y = -0.02 - phase * 0.02;
         drop.position.x = -0.022 + (index * 0.044) / Math.max(1, count - 1) - phase * 0.006;
         drop.visible = phase < 0.92;
         if (spin) drop.rotation.z = t * 1.5 + index;
@@ -357,7 +359,7 @@ const TILE_WIDTH = (RIGHT - TILES_LEFT - TILE_GAP * (DAY_SLOTS - 1)) / DAY_SLOTS
 const TILE_HEIGHT = 0.128;
 const TILE_Y = -0.022;
 const ICON_X = LEFT + 0.042;
-const ICON_Y = -0.002;
+const ICON_Y = 0.008;
 const ICON_SCALE = 1;
 const TILE_ICON_SCALE = 0.42;
 
@@ -431,27 +433,23 @@ export function createWeatherWidget(
 
   const TEXT_X = LEFT + 0.09;
   const TEXT_WIDTH = NOW_WIDTH - 0.09;
-  const temp = label('weather-temp', TEXT_WIDTH, 0.058, TEXT_X + TEXT_WIDTH / 2, 0.012, {
+  const temp = label('weather-temp', TEXT_WIDTH, 0.058, TEXT_X + TEXT_WIDTH / 2, 0.022, {
     align: 'left',
     fontSize: 0.05,
   });
-  const summary = label('weather-summary', TEXT_WIDTH, 0.036, TEXT_X + TEXT_WIDTH / 2, -0.034, {
+  const summary = label('weather-summary', TEXT_WIDTH, 0.03, TEXT_X + TEXT_WIDTH / 2, -0.024, {
     align: 'left',
     fontSize: 0.016,
     wrap: true,
   });
-  const detail = label(
-    'weather-detail',
-    NOW_WIDTH,
-    0.03,
-    LEFT + NOW_WIDTH / 2,
-    -TOP + PAD + 0.012,
-    {
-      align: 'left',
-      fontSize: 0.0125,
-      wrap: true,
-    },
-  );
+  const detail = label('weather-detail', NOW_WIDTH, 0.02, LEFT + NOW_WIDTH / 2, -0.058, {
+    align: 'left',
+    fontSize: 0.0135,
+  });
+  const updated = label('weather-updated', NOW_WIDTH, 0.018, LEFT + NOW_WIDTH / 2, -0.077, {
+    align: 'left',
+    fontSize: 0.0115,
+  });
 
   const iconSlot = new THREE.Group();
   iconSlot.name = 'weather-icon-slot';
@@ -524,6 +522,7 @@ export function createWeatherWidget(
     setText(temp, view.temp);
     setText(summary, view.summary);
     setText(detail, view.detail);
+    setText(updated, view.updated);
     const iconKey = view.icon ? `${view.icon}:${view.isDay}` : '';
     if (iconKey !== mainIconKey) {
       mainIconKey = iconKey;
@@ -532,7 +531,7 @@ export function createWeatherWidget(
     }
     // Status messages have no icon or temperature, so they start at the left edge.
     summary.position.x = view.temp ? TEXT_X + TEXT_WIDTH / 2 : LEFT + TEXT_WIDTH / 2;
-    summary.position.y = view.temp ? -0.034 : 0.0;
+    summary.position.y = view.temp ? -0.024 : 0.0;
     for (const [index, tile] of tiles.entries()) {
       const day = view.days[index];
       const shown = !!day;
