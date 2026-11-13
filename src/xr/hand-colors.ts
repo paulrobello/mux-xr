@@ -3,6 +3,7 @@ import * as THREE from 'three';
 /** Hand color choices offered in the XR World settings; an empty color keeps the model's own. */
 export const HAND_COLOR_PRESETS = [
   { name: 'Default', color: '' },
+  { name: 'Red', color: '#dc2626' },
   { name: 'Orange', color: '#ff672f' },
   { name: 'Blue', color: '#3b82f6' },
   { name: 'Green', color: '#22a55a' },

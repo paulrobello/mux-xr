@@ -18,7 +18,7 @@ export const WEATHER_POLL_MS = 10 * 60_000;
 export const WEATHER_RETRY_MS = 60_000;
 /** A banner: current conditions on the left, the day tiles on the right. */
 export const WEATHER_WIDTH = 0.66;
-export const WEATHER_HEIGHT = 0.2;
+export const WEATHER_HEIGHT = 0.22;
 
 export type WeatherIconKind = 'clear' | 'partly' | 'cloudy' | 'rain' | 'thunder' | 'snow' | 'fog';
 
@@ -357,9 +357,10 @@ const TILE_GAP = 0.008;
 const TILES_LEFT = LEFT + NOW_WIDTH + 0.012;
 const TILE_WIDTH = (RIGHT - TILES_LEFT - TILE_GAP * (DAY_SLOTS - 1)) / DAY_SLOTS;
 const TILE_HEIGHT = 0.128;
-const TILE_Y = -0.022;
+const LIFT = (WEATHER_HEIGHT - 0.2) / 2;
+const TILE_Y = -0.022 + LIFT;
 const ICON_X = LEFT + 0.042;
-const ICON_Y = 0.008;
+const ICON_Y = 0.008 + LIFT;
 const ICON_SCALE = 1;
 const TILE_ICON_SCALE = 0.42;
 
@@ -433,20 +434,27 @@ export function createWeatherWidget(
 
   const TEXT_X = LEFT + 0.09;
   const TEXT_WIDTH = NOW_WIDTH - 0.09;
-  const temp = label('weather-temp', TEXT_WIDTH, 0.058, TEXT_X + TEXT_WIDTH / 2, 0.022, {
+  const temp = label('weather-temp', TEXT_WIDTH, 0.058, TEXT_X + TEXT_WIDTH / 2, 0.022 + LIFT, {
     align: 'left',
     fontSize: 0.05,
   });
-  const summary = label('weather-summary', TEXT_WIDTH, 0.03, TEXT_X + TEXT_WIDTH / 2, -0.024, {
-    align: 'left',
-    fontSize: 0.016,
-    wrap: true,
-  });
-  const detail = label('weather-detail', NOW_WIDTH, 0.02, LEFT + NOW_WIDTH / 2, -0.058, {
+  const summary = label(
+    'weather-summary',
+    TEXT_WIDTH,
+    0.03,
+    TEXT_X + TEXT_WIDTH / 2,
+    -0.024 + LIFT,
+    {
+      align: 'left',
+      fontSize: 0.016,
+      wrap: true,
+    },
+  );
+  const detail = label('weather-detail', NOW_WIDTH, 0.02, LEFT + NOW_WIDTH / 2, -0.058 + LIFT, {
     align: 'left',
     fontSize: 0.0135,
   });
-  const updated = label('weather-updated', NOW_WIDTH, 0.018, LEFT + NOW_WIDTH / 2, -0.077, {
+  const updated = label('weather-updated', NOW_WIDTH, 0.018, LEFT + NOW_WIDTH / 2, -0.077 + LIFT, {
     align: 'left',
     fontSize: 0.0115,
   });

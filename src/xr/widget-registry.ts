@@ -96,7 +96,7 @@ export const WIDGET_REGISTRY = [
     displayName: 'Weather',
     // Above the left clock, right of host load and under the upper picture row; that gap is
     // short, so the widget is a wide banner at this scale.
-    spawnOffset: [-0.6, 0.58, -1.32],
+    spawnOffset: [-0.6, 0.574, -1.32],
     spawnScale: 0.62,
     faceViewer: true,
     create: (envMap) => createWeatherWidget(envMap),

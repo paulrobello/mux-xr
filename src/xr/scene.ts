@@ -4049,13 +4049,13 @@ export function createWorkspaceScene(
       label.position.y = y;
       root.add(label);
       for (const [index, { name, color }] of HAND_COLOR_PRESETS.entries()) {
-        const swatch = createLabelButton(color ? name : empty, 0.2, 0.1, {
+        const swatch = createLabelButton(color ? name : empty, 0.19, 0.1, {
           inputAction: action,
           [action]: color,
           labelBackground: color || '#1c2a35',
           ...(current === color ? { labelBorder: '#ffffff' } : {}),
         });
-        swatch.position.set((index - (HAND_COLOR_PRESETS.length - 1) / 2) * 0.23, y - 0.11, 0);
+        swatch.position.set((index - (HAND_COLOR_PRESETS.length - 1) / 2) * 0.21, y - 0.11, 0);
         root.add(swatch);
       }
     }
