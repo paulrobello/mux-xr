@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { BACKGROUND_MODES, type BackgroundMode, isBackgroundMode } from '../src/contracts';
 import {
   createEnvironmentManager,
+  createObservatoryAccent,
   ENVIRONMENT_FACTORIES,
   type EnvironmentInstance,
   registerEnvironmentUpdater,
@@ -21,9 +22,16 @@ const ROOT_NAMES: Record<(typeof ENV_MODES)[number], string> = {
 
 function harness() {
   const scene = new THREE.Scene();
-  const state: { background: BackgroundMode; xrMode: 'desktop' | 'vr' | 'ar' } = {
+  const state: {
+    background: BackgroundMode;
+    xrMode: 'desktop' | 'vr' | 'ar';
+    accentColor: string;
+    environmentAccentColor: string;
+  } = {
     background: 'observatory',
     xrMode: 'desktop',
+    accentColor: '',
+    environmentAccentColor: '',
   };
   const listeners = new Set<() => void>();
   const workspace = {
@@ -42,15 +50,21 @@ function harness() {
     mode: BackgroundMode;
     instance: EnvironmentInstance;
     dispose: ReturnType<typeof vi.fn>;
+    accent: string | null;
   }> = [];
   const factories = Object.fromEntries(
     ENV_MODES.map((mode) => [
       mode,
-      () => {
-        const instance = ENVIRONMENT_FACTORIES[mode]?.() as EnvironmentInstance;
+      (accent: THREE.Color | null) => {
+        const instance = ENVIRONMENT_FACTORIES[mode]?.(accent) as EnvironmentInstance;
         const dispose = vi.fn(instance.dispose);
         instance.dispose = dispose;
-        created.push({ mode, instance, dispose });
+        created.push({
+          mode,
+          instance,
+          dispose,
+          accent: accent ? `#${accent.getHexString()}` : null,
+        });
         return instance;
       },
     ]),
@@ -91,6 +105,46 @@ describe('environment manager', () => {
     expect(created[0].dispose).toHaveBeenCalledTimes(1);
     expect(liveRoots(scene)).toEqual([]);
     expect(scene.userData.updateEnvironment).toBeUndefined();
+  });
+
+  it('rebuilds the active environment once per environment accent change', () => {
+    const { workspace, set, created, factories } = harness();
+    const stop = createEnvironmentManager(workspace, factories);
+    set({ background: 'hangar' });
+    expect(created.map((entry) => entry.accent)).toEqual([null]);
+    set({ accentColor: '#ff672f' });
+    set({ xrMode: 'vr' });
+    expect(created.map((entry) => entry.accent)).toEqual([null, '#ff672f']);
+    expect(created[0].dispose).toHaveBeenCalledTimes(1);
+    set({ environmentAccentColor: '#22a55a' });
+    set({ accentColor: '#3b82f6' });
+    expect(created.map((entry) => entry.accent)).toEqual([null, '#ff672f', '#22a55a']);
+    set({ environmentAccentColor: '', accentColor: '' });
+    expect(created.at(-1)?.accent).toBeNull();
+    stop();
+  });
+
+  it('tints the observatory accent materials at their brightness and restores them', () => {
+    const cool = new THREE.MeshStandardMaterial({
+      name: 'observatory_cool_low',
+      color: new THREE.Color(0.07, 0.3, 0.39),
+      emissive: new THREE.Color(0.049, 0.21, 0.273),
+    });
+    const hull = new THREE.MeshStandardMaterial({ name: 'observatory_hull_low', color: 0x101820 });
+    const root = new THREE.Group();
+    root.add(
+      new THREE.Mesh(new THREE.BoxGeometry(), cool),
+      new THREE.Mesh(new THREE.BoxGeometry(), hull),
+    );
+    const authored = cool.color.clone();
+    const luminance = (c: THREE.Color) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    const apply = createObservatoryAccent(root);
+    apply('#ff672f');
+    expect(cool.color.r).toBeGreaterThan(cool.color.b);
+    expect(luminance(cool.color)).toBeCloseTo(luminance(authored), 6);
+    expect(hull.color.getHex()).toBe(0x101820);
+    apply('');
+    expect(cool.color.equals(authored)).toBe(true);
   });
 
   it('hides (disposes) in AR and restores outside AR', () => {
@@ -165,7 +219,7 @@ describe('environment manager', () => {
 describe('background modes', () => {
   it('reports floor Y from each environment for its mode and none for plain modes', () => {
     for (const mode of ENV_MODES) {
-      const instance = ENVIRONMENT_FACTORIES[mode]?.() as EnvironmentInstance;
+      const instance = ENVIRONMENT_FACTORIES[mode]?.(null) as EnvironmentInstance;
       expect(workspaceFloorY(mode, 'desktop')).toBeCloseTo(instance.floorY, 6);
       expect(workspaceFloorY(mode, 'vr')).toBeCloseTo(instance.floorY, 6);
       expect(workspaceFloorY(mode, 'ar')).toBe(0);

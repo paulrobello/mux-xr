@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { tintToLuminance } from '../accent-colors';
 
 export interface DeepWaterEnvironment {
   root: THREE.Group;
@@ -274,7 +275,9 @@ function createStructure(): THREE.Mesh {
   return structure;
 }
 
-function createAccents(): THREE.Mesh {
+const ACCENT_INLAY = 0x2a3e47;
+
+function createAccents(accent: THREE.Color | null): THREE.Mesh {
   const parts: THREE.BufferGeometry[] = [];
   // The inlay runs only from azimuth 60° to 300°, leaving the front pane field clear. After
   // rotateX the arc starts at azimuth 90°, so rotateY(30°) moves its start to 60°.
@@ -309,7 +312,7 @@ function createAccents(): THREE.Mesh {
     mergeOwned(parts, 'accents'),
     new THREE.MeshBasicMaterial({
       name: 'deep-water-accents',
-      color: 0x2a3e47,
+      color: tintToLuminance(new THREE.Color(), new THREE.Color(ACCENT_INLAY), accent),
       fog: false,
       dithering: true,
     }),
@@ -318,12 +321,15 @@ function createAccents(): THREE.Mesh {
   return accents;
 }
 
-export function createDeepWaterEnvironment(): DeepWaterEnvironment {
+/** `accent` retints the inlay and pillar strips; null keeps the authored teal. */
+export function createDeepWaterEnvironment(
+  accent: THREE.Color | null = null,
+): DeepWaterEnvironment {
   const root = new THREE.Group();
   root.name = 'deep-water-environment';
   const plates = createPlateTexture();
   const floor = createFloor(plates);
-  root.add(createWater(), floor, createStructure(), createAccents());
+  root.add(createWater(), floor, createStructure(), createAccents(accent));
   const waveA = floor.material.uniforms.uWaveA.value as THREE.Vector2;
   const waveB = floor.material.uniforms.uWaveB.value as THREE.Vector2;
   floor.userData.causticTime = 0;

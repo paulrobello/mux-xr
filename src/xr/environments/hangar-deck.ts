@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { tintToLuminance } from '../accent-colors';
 import { createSpaceBackground } from '../space-background';
 
 export interface HangarDeckEnvironment {
@@ -245,7 +246,7 @@ function addFloor(deck: DeckBuilder, random: () => number): void {
   }
 }
 
-function addSideWalls(deck: DeckBuilder, random: () => number): void {
+function addSideWalls(deck: DeckBuilder, random: () => number, glow: AccentGlow): void {
   for (const side of [-1, 1]) {
     const inward = side < 0 ? AXIS.px : AXIS.nx;
     const wallX = side * HALF;
@@ -276,7 +277,7 @@ function addSideWalls(deck: DeckBuilder, random: () => number): void {
         v3(0, 0.024, 0),
         inward,
         [0, 0, 0],
-        { emissive: COVE_GLOW, segU: 8, segV: 1 },
+        { emissive: glow.cove, segU: 8, segV: 1 },
       );
     }
     // Structural ribs; those across the window double as mullions.
@@ -308,7 +309,7 @@ function addSideWalls(deck: DeckBuilder, random: () => number): void {
       v3(0, 0.012, 0),
       inward,
       [0, 0, 0],
-      { emissive: SILL_GLOW, segU: 4, segV: 1 },
+      { emissive: glow.sill, segU: 4, segV: 1 },
     );
     // Handrail and a run of low lockers, kept off the window span.
     for (const [z0, z1] of [
@@ -418,11 +419,28 @@ function addRearWall(deck: DeckBuilder): void {
   }
 }
 
-function createDeckMesh(): THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial> {
+interface AccentGlow {
+  cove: Rgb;
+  sill: Rgb;
+}
+
+/** The cyan cove and sill glows, or `accent` at their authored brightness. */
+function accentGlow(accent: THREE.Color | null): AccentGlow {
+  const tint = (authored: Rgb): Rgb => {
+    if (!accent) return authored;
+    const color = tintToLuminance(new THREE.Color(), new THREE.Color(...authored), accent);
+    return [color.r, color.g, color.b];
+  };
+  return { cove: tint(COVE_GLOW), sill: tint(SILL_GLOW) };
+}
+
+function createDeckMesh(
+  accent: THREE.Color | null,
+): THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial> {
   const random = seededRandom(0x48414e47);
   const deck = new DeckBuilder();
   addFloor(deck, random);
-  addSideWalls(deck, random);
+  addSideWalls(deck, random, accentGlow(accent));
   addCeiling(deck);
   addFarWall(deck, random);
   addRearWall(deck);
@@ -477,12 +495,15 @@ function createWindowGlass(): THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMa
   return mesh;
 }
 
-export function createHangarDeckEnvironment(): HangarDeckEnvironment {
+/** `accent` retints the cove and sill glows; null keeps the authored cyan. */
+export function createHangarDeckEnvironment(
+  accent: THREE.Color | null = null,
+): HangarDeckEnvironment {
   const root = new THREE.Group();
   root.name = 'hangar-deck-environment';
   const background = createSpaceBackground();
   background.root.visible = true;
-  const deck = createDeckMesh();
+  const deck = createDeckMesh(accent);
   const glass = createWindowGlass();
   root.add(background.root, deck, glass);
   let disposed = false;

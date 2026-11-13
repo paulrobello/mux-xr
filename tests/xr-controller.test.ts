@@ -4920,6 +4920,53 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('recolors live XR accents from the Accent colors page and restores the default', () => {
+    const { workspace, container } = fixture();
+    workspace.selectTerminal('pane-a');
+    const panelPart = (id: string, name: string) =>
+      (
+        (workspace.scene.getObjectByName(`terminal-panel-${id}`) as THREE.Group).getObjectByName(
+          name,
+        ) as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>
+      ).material;
+    const frameAccent = (id: string) => panelPart(id, 'terminal-frame-accent');
+    const strip = panelPart('pane-b', 'terminal-scroll-strip');
+    expect(frameAccent('pane-b').color.getHex()).toBe(0x68d6ff);
+    expect(frameAccent('pane-a').color.getHex()).toBe(0xffffff);
+    workspace.showInput('settings');
+    hit(workspace, { inputAction: 'openInput', mode: 'world' });
+    hit(workspace, { inputAction: 'openInput', mode: 'accent' });
+    const swatches = (action: string): THREE.Object3D[] => {
+      const found: THREE.Object3D[] = [];
+      workspace.scene.traverse((object) => {
+        if (object.userData.inputAction === action) found.push(object);
+      });
+      return found;
+    };
+    expect(swatches('accentColor')).toHaveLength(HAND_COLOR_PRESETS.length);
+    expect(swatches('environmentAccentColor')).toHaveLength(HAND_COLOR_PRESETS.length);
+    hit(workspace, { inputAction: 'accentColor', accentColor: '#ff672f' });
+    expect(workspace.state.accentColor).toBe('#ff672f');
+    expect(frameAccent('pane-b').color.getHex()).toBe(0xff672f);
+    expect(strip.color.getHex()).toBe(0xff672f);
+    // The selected pane keeps its white frame until selection moves, then shows the new accent.
+    expect(frameAccent('pane-a').color.getHex()).toBe(0xffffff);
+    workspace.selectTerminal('pane-b');
+    expect(frameAccent('pane-a').color.getHex()).toBe(0xff672f);
+    const selected = swatches('accentColor').filter(
+      (swatch) => swatch.userData.labelBorder === '#ffffff',
+    );
+    expect(selected.map((swatch) => swatch.userData.accentColor)).toEqual(['#ff672f']);
+    hit(workspace, { inputAction: 'environmentAccentColor', environmentAccentColor: '#22a55a' });
+    expect(workspace.state.environmentAccentColor).toBe('#22a55a');
+    hit(workspace, { inputAction: 'accentColor', accentColor: '' });
+    expect(workspace.state.accentColor).toBe('');
+    expect(frameAccent('pane-a').color.getHex()).toBe(0x68d6ff);
+    expect(strip.color.getHex()).toBe(0x68d6ff);
+    workspace.dispose();
+    container.remove();
+  });
+
   it('sets the weather ZIP from a World keypad and clears it again', () => {
     const { workspace, container } = fixture();
     workspace.showInput('settings');

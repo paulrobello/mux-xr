@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { BackgroundMode } from './contracts';
 import type { WorkspaceScene } from './xr';
+import { accentColorOrNull, resolveEnvironmentAccent, tintToLuminance } from './xr/accent-colors';
 import { createDeepWaterEnvironment } from './xr/environments/deep-water';
 import { createDesertNightEnvironment } from './xr/environments/desert-night';
 import { createHangarDeckEnvironment } from './xr/environments/hangar-deck';
@@ -38,7 +39,9 @@ export interface EnvironmentInstance {
   floorY: number;
 }
 
-export type EnvironmentFactories = Partial<Record<BackgroundMode, () => EnvironmentInstance>>;
+/** Builds an environment; `accent` retints its accent glows, null keeps the authored cyan. */
+export type EnvironmentFactory = (accent: THREE.Color | null) => EnvironmentInstance;
+export type EnvironmentFactories = Partial<Record<BackgroundMode, EnvironmentFactory>>;
 
 export const ENVIRONMENT_FACTORIES: EnvironmentFactories = {
   hangar: createHangarDeckEnvironment,
@@ -49,13 +52,14 @@ export const ENVIRONMENT_FACTORIES: EnvironmentFactories = {
 
 /**
  * Keeps at most one procedural environment alive: created when its mode is selected outside AR,
- * fully disposed as soon as the mode changes or AR starts.
+ * fully disposed as soon as the mode changes or AR starts. An accent change rebuilds it, since
+ * some environments bake their glows into vertex colors.
  */
 export function createEnvironmentManager(
   workspace: WorkspaceScene,
   factories: EnvironmentFactories = ENVIRONMENT_FACTORIES,
 ): () => void {
-  let active: { mode: BackgroundMode; instance: EnvironmentInstance } | null = null;
+  let active: { mode: BackgroundMode; accent: string; instance: EnvironmentInstance } | null = null;
   let failedMode: BackgroundMode | null = null;
   const release = (): void => {
     if (!active) return;
@@ -72,13 +76,14 @@ export function createEnvironmentManager(
       release();
       return;
     }
-    if (active?.mode === background) return;
+    const accent = resolveEnvironmentAccent(workspace.state);
+    if (active?.mode === background && active.accent === accent) return;
     release();
     try {
-      const instance = wanted();
+      const instance = wanted(accentColorOrNull(accent));
       instance.root.visible = true;
       workspace.scene.add(instance.root);
-      active = { mode: background, instance };
+      active = { mode: background, accent, instance };
     } catch (error) {
       failedMode = background;
       console.warn(`Environment ${background} unavailable.`, error);
@@ -173,6 +178,42 @@ function disposeObjectResources(
   for (const material of materials) material.dispose();
 }
 
+/** Authored observatory materials that carry its cyan accent glow. */
+const OBSERVATORY_ACCENT_MATERIALS = new Set(['observatory_cool_low', 'observatory_display_low']);
+
+type AccentMaterial = THREE.Material & { color: THREE.Color; emissive: THREE.Color };
+
+/**
+ * Returns a function that retints the observatory's accent materials to an accent at their
+ * authored brightness; an empty accent restores the authored colors.
+ */
+export function createObservatoryAccent(root: THREE.Object3D): (accent: string) => void {
+  const entries: Array<{ material: AccentMaterial; color: THREE.Color; emissive: THREE.Color }> =
+    [];
+  const seen = new Set<THREE.Material>();
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+      if (seen.has(material) || !OBSERVATORY_ACCENT_MATERIALS.has(material.name)) continue;
+      seen.add(material);
+      const colored = material as AccentMaterial;
+      if (!colored.color || !colored.emissive) continue;
+      entries.push({
+        material: colored,
+        color: colored.color.clone(),
+        emissive: colored.emissive.clone(),
+      });
+    }
+  });
+  return (accent) => {
+    const color = accentColorOrNull(accent);
+    for (const entry of entries) {
+      tintToLuminance(entry.material.color, entry.color, color);
+      tintToLuminance(entry.material.emissive, entry.emissive, color);
+    }
+  };
+}
+
 export async function loadObservatory(
   workspace: WorkspaceScene,
   signal?: AbortSignal,
@@ -186,11 +227,18 @@ export async function loadObservatory(
   let planetPivot: THREE.Group | null = null;
   let unsubscribe = (): void => undefined;
   let unregisterUpdater = (): void => undefined;
+  let applyAccent: ((accent: string) => void) | null = null;
+  let appliedAccent = '';
   const sync = (): void => {
     const visible = workspace.state.background === 'observatory' && workspace.state.xrMode !== 'ar';
     background.root.visible = visible;
     if (root) root.visible = visible;
     if (placeholder) placeholder.visible = root === null && visible;
+    const accent = resolveEnvironmentAccent(workspace.state);
+    if (applyAccent && accent !== appliedAccent) {
+      appliedAccent = accent;
+      applyAccent(accent);
+    }
   };
   const dispose = (): void => {
     if (disposed) return;
@@ -231,6 +279,7 @@ export async function loadObservatory(
     root = gltf.scene;
     root.name = 'authored-observatory';
     quietObservatoryPlanet(root);
+    applyAccent = createObservatoryAccent(root);
     workspace.scene.add(root);
     const planet = findPlanetMesh(root);
     if (planet && !planetPivot) planetPivot = createPlanetPivot(planet);

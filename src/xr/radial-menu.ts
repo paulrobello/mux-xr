@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { tintToLuminance } from './accent-colors';
 import { createScalableLabel, disposeScalableLabel } from './labels';
 
 export type RadialMenuAction =
@@ -21,6 +22,8 @@ export interface RadialMenu {
   close(): void;
   update(deltaSeconds: number): void;
   setUpdateAvailable(available: boolean): void;
+  /** Recolors the outline and hover fill; an empty accent restores the authored cyan. */
+  setAccent(accent: string): void;
   setHovered(action: RadialMenuAction | null): void;
   dispose(): void;
 }
@@ -149,6 +152,7 @@ export function createRadialMenu(): RadialMenu {
   const geometries = new Set<THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>();
   const targets: Target[] = [];
+  let selectedColor: string = COLORS.selected;
   const outlineMaterial = new THREE.MeshBasicMaterial({
     color: COLORS.outline,
     transparent: true,
@@ -371,9 +375,20 @@ export function createRadialMenu(): RadialMenu {
       )
         return;
       hovered = action;
-      centerDisc.material.color.set(hovered === 'cancel' ? COLORS.selected : COLORS.cancel);
+      centerDisc.material.color.set(hovered === 'cancel' ? selectedColor : COLORS.cancel);
       for (const target of targets)
-        target.material.color.set(target.action === hovered ? COLORS.selected : COLORS.glass);
+        target.material.color.set(target.action === hovered ? selectedColor : COLORS.glass);
+    },
+    setAccent(accent): void {
+      outlineMaterial.color.set(accent || COLORS.outline);
+      // The hover fill keeps the authored fill's brightness so white labels stay readable on it.
+      const authored = new THREE.Color(COLORS.selected);
+      selectedColor = `#${tintToLuminance(new THREE.Color(), authored, accent ? new THREE.Color(accent) : null).getHexString()}`;
+      if (hovered !== null) {
+        const current = hovered;
+        hovered = null;
+        api.setHovered(current);
+      }
     },
     dispose(): void {
       if (disposed) return;

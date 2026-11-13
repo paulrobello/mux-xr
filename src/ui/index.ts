@@ -141,6 +141,10 @@ export interface WorkspaceSettings {
   handColor: string;
   /** `#rrggbb` arm tint, or empty to match the hands. */
   armColor: string;
+  /** `#rrggbb` XR interface accent, or empty for the default cyan. */
+  accentColor: string;
+  /** `#rrggbb` XR environment accent, or empty to match the interface accent. */
+  environmentAccentColor: string;
   /** Five-digit US ZIP for the weather widget, or empty when none is set. */
   weatherZip: string;
   /** par-mux `agent-rows` preset, or `custom` for {@link agentRowsCustom}. */
@@ -204,6 +208,10 @@ export interface WorkspaceUI {
   setHandColor(color: string, persist?: boolean): void;
   /** Applies an arm color chosen in XR; empty makes the arms match the hands. */
   setArmColor(color: string, persist?: boolean): void;
+  /** Applies an accent chosen in XR; empty restores the default cyan. */
+  setAccentColor(color: string, persist?: boolean): void;
+  /** Applies an environment accent chosen in XR; empty matches the interface accent. */
+  setEnvironmentAccentColor(color: string, persist?: boolean): void;
   /** Applies a weather ZIP chosen in XR; anything but five digits clears it. */
   setWeatherZip(zip: string, persist?: boolean): void;
   setBackground(mode: BackgroundMode, persist?: boolean): void;
@@ -222,6 +230,8 @@ export interface CommandStore {
 const SETTINGS_KEY = 'mux-xr:settings:v1';
 // The swatch the color picker shows while the hands keep their default color.
 const DEFAULT_HAND_SWATCH = '#b4b4b4';
+// The swatch the accent pickers show while the XR accent stays the default cyan.
+const DEFAULT_ACCENT_SWATCH = '#68d6ff';
 const AGENT_AGE_REFRESH_MS = 15_000;
 const COMMANDS_KEY = 'mux-xr:commands:v1';
 const COMMAND_STATS_KEY = 'mux-xr:command-stats:v1';
@@ -286,6 +296,8 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   handColor: '',
   weatherZip: '',
   armColor: '',
+  accentColor: '',
+  environmentAccentColor: '',
   agentRows: 'full',
   agentRowsCustom: '',
   agentsSort: DEFAULT_AGENT_ROSTER_LAYOUT.sort,
@@ -393,6 +405,8 @@ export function validateSettings(value: unknown): WorkspaceSettings {
     uiSounds: candidate.uiSounds !== false,
     handColor: validateHandColor(candidate.handColor),
     armColor: validateHandColor(candidate.armColor),
+    accentColor: validateHandColor(candidate.accentColor),
+    environmentAccentColor: validateHandColor(candidate.environmentAccentColor),
     weatherZip: validateWeatherZip(candidate.weatherZip),
     agentRows: AGENT_ROWS_CHOICES.includes(candidate.agentRows as AgentRowsChoice)
       ? (candidate.agentRows as AgentRowsChoice)
@@ -751,14 +765,19 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     );
     // A color picker plus a button that clears the color back to empty.
     const colorPicker = (
-      key: 'handColor' | 'armColor',
+      key: 'handColor' | 'armColor' | 'accentColor' | 'environmentAccentColor',
       label: string,
       reset: string,
       resetTitle: string,
       swatch: () => string,
     ): (() => void) => {
       const row = document.createElement('div');
-      const id = key === 'handColor' ? 'hand' : 'arm';
+      const id = {
+        handColor: 'hand',
+        armColor: 'arm',
+        accentColor: 'accent',
+        environmentAccentColor: 'environment-accent',
+      }[key];
       row.innerHTML = `<label for="mux-${id}-color">${label}</label><div class="hand-color-row"><input id="mux-${id}-color" type="color" data-${id}-color><button type="button" data-action="${id}-color-default" class="text-btn" title="${resetTitle}">${reset}</button></div>`;
       settingsPanel.insertBefore(row, settingsPanel.querySelector('[data-action="passthrough"]'));
       const input = row.querySelector<HTMLInputElement>(`[data-${id}-color]`);
@@ -794,9 +813,25 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       'Color the arms like the hands',
       () => settings.handColor || DEFAULT_HAND_SWATCH,
     );
+    const updateAccentPicker = colorPicker(
+      'accentColor',
+      'XR accent color',
+      'Default',
+      'Use the default cyan accent',
+      () => DEFAULT_ACCENT_SWATCH,
+    );
+    const updateEnvironmentAccentPicker = colorPicker(
+      'environmentAccentColor',
+      'Environment accent',
+      'Match accent',
+      'Tint environment glows like the XR accent',
+      () => settings.accentColor || DEFAULT_ACCENT_SWATCH,
+    );
     updateHandColorControls = () => {
       updateHandPicker();
       updateArmPicker();
+      updateAccentPicker();
+      updateEnvironmentAccentPicker();
     };
     updateHandColorControls();
     const filteringControls = document.createElement('div');
@@ -2176,6 +2211,20 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       if (settings.weatherZip === next) return;
       settings = { ...settings, weatherZip: next };
       qs<HTMLInputElement>('[data-weather-zip]').value = next;
+      if (persist) saveSettings();
+    },
+    setAccentColor(color, persist = false) {
+      const next = validateHandColor(color);
+      if (settings.accentColor === next) return;
+      settings = { ...settings, accentColor: next };
+      updateHandColorControls();
+      if (persist) saveSettings();
+    },
+    setEnvironmentAccentColor(color, persist = false) {
+      const next = validateHandColor(color);
+      if (settings.environmentAccentColor === next) return;
+      settings = { ...settings, environmentAccentColor: next };
+      updateHandColorControls();
       if (persist) saveSettings();
     },
     setHandColor(color, persist = false) {

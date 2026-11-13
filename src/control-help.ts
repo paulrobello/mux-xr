@@ -144,6 +144,14 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
         : 'Restore the default hand color';
     case 'armColor':
       return data.armColor ? 'Tint both arms with this color' : 'Color the arms like the hands';
+    case 'accentColor':
+      return data.accentColor
+        ? 'Use this color for XR highlights, frames and outlines'
+        : 'Restore the default cyan accent';
+    case 'environmentAccentColor':
+      return data.environmentAccentColor
+        ? 'Tint environment glows and inlays with this color'
+        : 'Tint environment glows like the interface accent';
     case 'zipDigit':
       return `Type ${String(data.zipDigit ?? 'a number')} into the weather ZIP`;
     case 'zipDelete':
@@ -183,16 +191,18 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
               : data.mode === 'display'
                 ? 'Choose colors, filtering, new-window opacity and focus preferences'
                 : data.mode === 'world'
-                  ? 'Choose VR background, passthrough, hand colors and the weather ZIP'
+                  ? 'Choose VR background, passthrough, hand and accent colors and the weather ZIP'
                   : data.mode === 'weather-zip'
                     ? 'Enter the US ZIP code the weather widget shows'
-                    : data.mode === 'widgets'
-                      ? 'Open movable digital and analog clocks'
-                      : data.mode === 'filtering'
-                        ? 'Choose filtering and viewed-terminal clarity'
-                        : data.mode === 'arrange'
-                          ? 'Arrange attached terminals in a spatial pattern'
-                          : 'Open saved quick commands';
+                    : data.mode === 'accent'
+                      ? 'Choose the interface and environment accent colors'
+                      : data.mode === 'widgets'
+                        ? 'Open movable digital and analog clocks'
+                        : data.mode === 'filtering'
+                          ? 'Choose filtering and viewed-terminal clarity'
+                          : data.mode === 'arrange'
+                            ? 'Arrange attached terminals in a spatial pattern'
+                            : 'Open saved quick commands';
     case 'exit':
       return 'Exit immersive mode or the 3D preview; press twice to confirm';
     case 'close':

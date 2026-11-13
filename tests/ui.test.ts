@@ -184,6 +184,35 @@ describe('mux XR local UI state', () => {
     localStorage.clear();
   });
 
+  it('edits and persists the XR and environment accent colors', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    const stored = () => JSON.parse(localStorage.getItem('mux-xr:settings:v1') ?? '{}');
+    expect(validateSettings(null).accentColor).toBe('');
+    expect(validateSettings({ environmentAccentColor: 'teal' }).environmentAccentColor).toBe('');
+    const accent = query<HTMLInputElement>(root, '[data-settings] [data-accent-color]');
+    const reset = query<HTMLButtonElement>(root, '[data-action="accent-color-default"]');
+    const environment = query<HTMLInputElement>(
+      root,
+      '[data-settings] [data-environment-accent-color]',
+    );
+    expect(accent.value).toBe('#68d6ff');
+    expect(reset.disabled).toBe(true);
+    accent.value = '#ff672f';
+    accent.dispatchEvent(new Event('input'));
+    expect(ui.getSettings().accentColor).toBe('#ff672f');
+    expect(stored().accentColor).toBe('#ff672f');
+    expect(environment.value).toBe('#ff672f');
+    ui.setEnvironmentAccentColor('#22A55A', true);
+    expect(environment.value).toBe('#22a55a');
+    expect(stored().environmentAccentColor).toBe('#22a55a');
+    reset.click();
+    expect(ui.getSettings().accentColor).toBe('');
+    ui.destroy();
+    localStorage.clear();
+  });
+
   it('defaults UI sounds on and persists the browser and XR toggle', () => {
     expect(validateSettings(null).uiSounds).toBe(true);
     expect(validateSettings({ uiSounds: 'no' }).uiSounds).toBe(true);

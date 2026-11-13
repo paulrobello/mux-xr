@@ -71,6 +71,14 @@ import {
   validateWindowPreferences,
   type WindowPreferences,
 } from '../workspace/window-preferences';
+import {
+  DEFAULT_ACCENT,
+  DEFAULT_ACCENT_HOVER,
+  resolveAccent,
+  resolveAccentCss,
+  resolveAccentHover,
+  retintAccentMaterials,
+} from './accent-colors';
 import { calculateArrangement } from './arrangements';
 import { installBatchedHandPoses } from './batched-hand-poses';
 import { createBellFeedStore } from './bell-feed';
@@ -198,7 +206,8 @@ type InputMode =
   | 'buttons'
   | 'picture-url'
   | 'picture-gallery'
-  | 'weather-zip';
+  | 'weather-zip'
+  | 'accent';
 
 /** Modes that show the virtual keyboard and edit text with it. */
 const isTypingMode = (mode: InputMode): boolean =>
@@ -238,6 +247,10 @@ export interface WorkspaceSceneState {
   handColor: string;
   /** `#rrggbb` arm tint, or empty to match the hands. */
   armColor: string;
+  /** `#rrggbb` XR interface accent, or empty for the default cyan. */
+  accentColor: string;
+  /** `#rrggbb` environment accent, or empty to match the interface accent. */
+  environmentAccentColor: string;
   /** Five-digit US ZIP for the weather widget, or empty when none is set. */
   weatherZip: string;
   dictation: DictationState;
@@ -297,6 +310,10 @@ export interface WorkspaceScene {
   setHandColor(color: string | null): void;
   /** Tints both arms; null makes them match the hands. */
   setArmColor(color: string | null): void;
+  /** Recolors the XR interface accent; null restores the default cyan. */
+  setAccentColor(color: string | null): void;
+  /** Recolors environment accents; null makes them match the interface accent. */
+  setEnvironmentAccentColor(color: string | null): void;
   /** Sets the weather widget's ZIP; anything but five digits clears it. */
   setWeatherZip(zip: string): void;
   setDictationState(state: DictationState): void;
@@ -439,7 +456,8 @@ const KEYBORB_DICTATION_COLUMN = 9;
 const SCROLL_STRIP_WIDTH = 0.05;
 const SCROLL_STRIP_OPACITY = 0.14;
 const SCROLL_STRIP_ACTIVE_OPACITY = 0.38;
-const ACCENT = 0x68d6ff;
+// The live XR accent; each scene resets it and its setter retints what was built with it.
+const accent = { hex: DEFAULT_ACCENT, hover: DEFAULT_ACCENT_HOVER };
 const SELECTED_FRAME_GLOW = 0.45;
 const CONTROLLER_RAY_LENGTH = 8;
 // An XR press becomes a drag only once its hit moves past both limits, so hand and controller
@@ -452,7 +470,7 @@ const CURSOR_HALF_ANGLE = Math.tan(THREE.MathUtils.degToRad(0.25));
 const CURSOR_PINCH_OPEN = 0.08;
 const CURSOR_PINCH_CLOSED = 0.02;
 const cursorColor = new THREE.Color();
-const cursorRest = new THREE.Color(ACCENT);
+const cursorRest = new THREE.Color(DEFAULT_ACCENT);
 const cursorPinched = new THREE.Color(0xffffff);
 const QUALITY_RANK: Record<TerminalRenderQuality, number> = {
   hidden: 0,
@@ -680,7 +698,7 @@ function stackAboveControls(root: THREE.Group, rows: THREE.Mesh[][], gap = 0.03)
 function setModifierVisual(object: THREE.Object3D, armed: boolean): void {
   object.userData.activeState = armed;
   const material = (object as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
-  if (material?.color) material.color.setHex(armed ? ACCENT : 0xffffff);
+  if (material?.color) material.color.setHex(armed ? accent.hex : 0xffffff);
 }
 
 // Transient HUD lines (notice, dismiss, toast, Reload, FPS) sit above the HUD bar, where a widget can
@@ -870,6 +888,9 @@ export function createWorkspaceScene(
 ): WorkspaceScene {
   const feedback = options.feedback ?? createUIFeedback();
   const scene = new THREE.Scene();
+  accent.hex = DEFAULT_ACCENT;
+  accent.hover = DEFAULT_ACCENT_HOVER;
+  cursorRest.setHex(DEFAULT_ACCENT);
   const camera = new THREE.PerspectiveCamera(58, 1, 0.01, 100);
   camera.position.set(0, 1.52, 0.45);
   camera.lookAt(0, 1.42, -1.05);
@@ -991,6 +1012,8 @@ export function createWorkspaceScene(
     uiSounds: true,
     handColor: '',
     armColor: '',
+    accentColor: '',
+    environmentAccentColor: '',
     weatherZip: '',
     dictation: { supported: false, status: 'idle', transcript: '', error: null },
     fps: null,
@@ -2198,7 +2221,7 @@ export function createWorkspaceScene(
         if (previous && ![...hoveredByController.values()].includes(previous)) {
           const material = (previous as THREE.Mesh).material as THREE.MeshBasicMaterial;
           if (material?.color)
-            material.color.setHex(previous.userData.activeState ? ACCENT : 0xffffff);
+            material.color.setHex(previous.userData.activeState ? accent.hex : 0xffffff);
         }
         showHover(null);
       }
@@ -2424,7 +2447,7 @@ export function createWorkspaceScene(
   };
   const hierarchyTouchMarker = new THREE.Mesh(
     new THREE.TorusGeometry(1, 0.05, 8, 48),
-    new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.9 }),
+    new THREE.MeshBasicMaterial({ color: accent.hex, transparent: true, opacity: 0.9 }),
   );
   hierarchyTouchMarker.name = 'hierarchy-touch-marker';
   hierarchyTouchMarker.raycast = () => undefined;
@@ -2542,7 +2565,7 @@ export function createWorkspaceScene(
     );
     const edge = new THREE.LineSegments(
       new THREE.EdgesGeometry(card.geometry),
-      new THREE.LineBasicMaterial({ color: ACCENT }),
+      new THREE.LineBasicMaterial({ color: accent.hex }),
     );
     const label = createScalableLabel(title, 1.1, 0.16);
     label.position.z = 0.01;
@@ -3447,13 +3470,13 @@ export function createWorkspaceScene(
         if (material?.color)
           material.color.setHex(
             (modifier && modifierState.active[modifier]) || previous.userData.activeState
-              ? ACCENT
+              ? accent.hex
               : ((previous.userData.restColor as number | undefined) ?? 0xffffff),
           );
       }
       for (const object of allHovered) {
         const material = (object as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
-        if (material?.color) material.color.setHex(0x9deaff);
+        if (material?.color) material.color.setHex(accent.hover);
       }
       hoveredByController.clear();
       for (const [controller, object] of nextHovered) hoveredByController.set(controller, object);
@@ -3519,7 +3542,7 @@ export function createWorkspaceScene(
     for (const panel of panels.values()) {
       const selected = panel.id === mutableState.selectedTerminalId;
       panel.frame.material.emissiveIntensity = selected ? SELECTED_FRAME_GLOW : 0;
-      panel.frameAccent.material.color.setHex(selected ? 0xffffff : ACCENT);
+      panel.frameAccent.material.color.setHex(selected ? 0xffffff : accent.hex);
       // The selected pane keeps a solid accent however far its glass is faded.
       panel.frameAccent.material.opacity = selected ? 1 : panel.opacity;
     }
@@ -3635,6 +3658,7 @@ export function createWorkspaceScene(
     widget.setAgentRoster?.(latestAgentRoster);
     widget.setBellFeed?.(bellFeed.entries());
     widget.setWeatherZip?.(mutableState.weatherZip);
+    retintAccentMaterials(widget.root, '', mutableState.accentColor);
     widgets.set(key, widget);
     scene.add(widget.root);
     if (place) placeWidget(key, widget);
@@ -4013,6 +4037,29 @@ export function createWorkspaceScene(
     for (const drag of dragStates.values()) if (drag.object === inputRoot) return;
     resetInputPose();
   };
+  /** Adds captioned rows of color swatches; each swatch shows its own color, a white border the current one. */
+  const addColorSwatchRows = (
+    root: THREE.Group,
+    top: number,
+    rows: ReadonlyArray<readonly [string, string, string, string]>,
+  ): void => {
+    for (const [row, [caption, action, current, empty]] of rows.entries()) {
+      const y = top - row * 0.24;
+      const label = createLabelButton(caption, 0.6, 0.08, { inputAction: 'noop' });
+      label.position.y = y;
+      root.add(label);
+      for (const [index, { name, color }] of HAND_COLOR_PRESETS.entries()) {
+        const swatch = createLabelButton(color ? name : empty, 0.2, 0.1, {
+          inputAction: action,
+          [action]: color,
+          labelBackground: color || '#1c2a35',
+          ...(current === color ? { labelBorder: '#ffffff' } : {}),
+        });
+        swatch.position.set((index - (HAND_COLOR_PRESETS.length - 1) / 2) * 0.23, y - 0.11, 0);
+        root.add(swatch);
+      }
+    }
+  };
   const refreshInputRoot = (mode: InputMode): void => {
     if (mode !== 'picture-gallery' && inputMode === 'picture-gallery') releaseRecentPictures();
     if (mode !== 'warp') settleWarpPanel(false);
@@ -4203,15 +4250,17 @@ export function createWorkspaceScene(
                       ? 'World settings'
                       : mode === 'weather-zip'
                         ? 'Weather ZIP code'
-                        : mode === 'filtering'
-                          ? 'Terminal filtering'
-                          : mode === 'warp'
-                            ? 'Terminal curvature'
-                            : mode === 'arrange'
-                              ? 'Arrange terminals'
-                              : mode === 'panes'
-                                ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
-                                : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? (mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard') : 'Terminal settings'} · ${targetTitle}`,
+                        : mode === 'accent'
+                          ? 'Accent colors'
+                          : mode === 'filtering'
+                            ? 'Terminal filtering'
+                            : mode === 'warp'
+                              ? 'Terminal curvature'
+                              : mode === 'arrange'
+                                ? 'Arrange terminals'
+                                : mode === 'panes'
+                                  ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
+                                  : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? (mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard') : 'Terminal settings'} · ${targetTitle}`,
       mode === 'panes' ? 1.8 : 0.9,
       0.12,
       { inputAction: 'grabInput' },
@@ -4365,37 +4414,35 @@ export function createWorkspaceScene(
         setModifierVisual(button, mutableState.xrMode === xrMode);
         inputRoot.add(button);
       }
-      for (const [row, [caption, action, current, empty]] of (
-        [
-          ['Hand color', 'handColor', mutableState.handColor, 'Default'],
-          ['Arm color', 'armColor', mutableState.armColor, 'Match'],
-        ] as const
-      ).entries()) {
-        const y = 0.15 - row * 0.24;
-        const label = createLabelButton(caption, 0.6, 0.08, { inputAction: 'noop' });
-        label.position.y = y;
-        inputRoot.add(label);
-        // Each swatch shows its own color; a white border marks the current one.
-        for (const [index, { name, color }] of HAND_COLOR_PRESETS.entries()) {
-          const swatch = createLabelButton(color ? name : empty, 0.2, 0.1, {
-            inputAction: action,
-            [action]: color,
-            labelBackground: color || '#1c2a35',
-            ...(current === color ? { labelBorder: '#ffffff' } : {}),
-          });
-          swatch.position.set((index - (HAND_COLOR_PRESETS.length - 1) / 2) * 0.23, y - 0.11, 0);
-          inputRoot.add(swatch);
-        }
-      }
+      addColorSwatchRows(inputRoot, 0.15, [
+        ['Hand color', 'handColor', mutableState.handColor, 'Default'],
+        ['Arm color', 'armColor', mutableState.armColor, 'Match'],
+      ]);
       const zip = createLabelButton(
         `Weather ZIP: ${mutableState.weatherZip || 'not set'}`,
-        0.8,
+        0.76,
         0.1,
         { inputAction: 'openInput', mode: 'weather-zip' },
       );
       zip.name = 'xr-weather-zip-button';
-      zip.position.y = -0.37;
-      inputRoot.add(zip);
+      zip.position.set(-0.4, -0.37, 0);
+      const accentButton = createLabelButton('Accent colors', 0.6, 0.1, {
+        inputAction: 'openInput',
+        mode: 'accent',
+      });
+      accentButton.name = 'xr-accent-colors-button';
+      accentButton.position.set(0.39, -0.37, 0);
+      inputRoot.add(zip, accentButton);
+    } else if (mode === 'accent') {
+      addColorSwatchRows(inputRoot, 0.38, [
+        ['Interface accent', 'accentColor', mutableState.accentColor, 'Default'],
+        [
+          'Environment accent',
+          'environmentAccentColor',
+          mutableState.environmentAccentColor,
+          'Match',
+        ],
+      ]);
     } else if (mode === 'weather-zip') {
       const field = createLabelButton(
         `ZIP: ${weatherZipDraft}${weatherZipDraft.length < 5 ? '|' : ''}`,
@@ -4618,7 +4665,12 @@ export function createWorkspaceScene(
         const button = createLabelButton(commandButtonLabel(command, 'command'), 0.7, 0.11, {
           inputAction: 'command',
           commandId: command.id,
-          ...(command.pinned ? { pinned: true, labelBorder: PINNED_BORDER } : {}),
+          ...(command.pinned
+            ? {
+                pinned: true,
+                labelBorder: resolveAccentCss(mutableState.accentColor, PINNED_BORDER),
+              }
+            : {}),
           ...(isArmed(command.id, 'command') ? ARMED_STYLE : {}),
         });
         const row = Math.floor(index / 2);
@@ -5035,9 +5087,11 @@ export function createWorkspaceScene(
               ? -0.51
               : mode === 'weather-zip'
                 ? -0.6
-                : mode === 'terminal' && terminalHasReset
-                  ? -0.78
-                  : -0.66,
+                : mode === 'accent'
+                  ? -0.2
+                  : mode === 'terminal' && terminalHasReset
+                    ? -0.78
+                    : -0.66,
       0,
     );
     if (mode === 'picture-gallery') close.position.set(0.3, -0.46, 0);
@@ -5047,11 +5101,20 @@ export function createWorkspaceScene(
       close.position.set(x, y, 0);
     }
     inputRoot.add(close);
-    if (['terminal', 'display', 'world', 'filtering', 'buttons', 'weather-zip'].includes(mode)) {
+    if (
+      ['terminal', 'display', 'world', 'filtering', 'buttons', 'weather-zip', 'accent'].includes(
+        mode,
+      )
+    ) {
       close.position.x = 0.22;
       const back = createLabelButton('Back', 0.3, 0.09, {
         inputAction: 'openInput',
-        mode: mode === 'filtering' ? 'display' : mode === 'weather-zip' ? 'world' : 'settings',
+        mode:
+          mode === 'filtering'
+            ? 'display'
+            : mode === 'weather-zip' || mode === 'accent'
+              ? 'world'
+              : 'settings',
       });
       back.position.set(
         -0.22,
@@ -5061,9 +5124,11 @@ export function createWorkspaceScene(
             ? -0.51
             : mode === 'weather-zip'
               ? -0.6
-              : mode === 'terminal' && terminalHasReset
-                ? -0.78
-                : -0.66,
+              : mode === 'accent'
+                ? -0.2
+                : mode === 'terminal' && terminalHasReset
+                  ? -0.78
+                  : -0.66,
         0,
       );
       inputRoot.add(back);
@@ -5356,6 +5421,14 @@ export function createWorkspaceScene(
     }
     if (action === 'armColor') {
       setArmColor(String(hit.userData.armColor ?? '') || null);
+      return true;
+    }
+    if (action === 'accentColor') {
+      setAccentColor(String(hit.userData.accentColor ?? '') || null);
+      return true;
+    }
+    if (action === 'environmentAccentColor') {
+      setEnvironmentAccentColor(String(hit.userData.environmentAccentColor ?? '') || null);
       return true;
     }
     if (action === 'uiSounds') {
@@ -6205,12 +6278,12 @@ export function createWorkspaceScene(
           new THREE.Vector3(0, 0, 0),
           new THREE.Vector3(0, 0, -CONTROLLER_RAY_LENGTH),
         ]),
-        new THREE.LineBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.65 }),
+        new THREE.LineBasicMaterial({ color: accent.hex, transparent: true, opacity: 0.65 }),
       );
       rayLine.raycast = () => undefined;
       const contact = new THREE.Mesh(
         new THREE.SphereGeometry(CURSOR_RADIUS, 8, 6),
-        new THREE.MeshBasicMaterial({ color: ACCENT }),
+        new THREE.MeshBasicMaterial({ color: accent.hex }),
       );
       contact.raycast = () => undefined;
       contact.visible = false;
@@ -6450,7 +6523,7 @@ export function createWorkspaceScene(
           if (material?.color)
             material.color.setHex(
               (modifier && modifierState.active[modifier]) || previous.userData.activeState
-                ? ACCENT
+                ? accent.hex
                 : 0xffffff,
             );
         }
@@ -6604,7 +6677,7 @@ export function createWorkspaceScene(
           vertexColors: true,
           roughness: 0.62,
           metalness: 0.35,
-          emissive: ACCENT,
+          emissive: accent.hex,
           emissiveIntensity: 0,
           side: THREE.DoubleSide,
           // Under glass opacity the default back-then-front pair marks the material changed
@@ -6625,7 +6698,7 @@ export function createWorkspaceScene(
         { chin: mutableState.windowPreferences.frameChin },
       ),
       new THREE.MeshBasicMaterial({
-        color: ACCENT,
+        color: accent.hex,
         transparent: true,
         side: THREE.DoubleSide,
         // Unlit uniform colour blends identically in any order, so the back-then-front pass is
@@ -6640,7 +6713,7 @@ export function createWorkspaceScene(
       const strip = new THREE.Mesh(
         new THREE.PlaneGeometry(SCROLL_STRIP_WIDTH, PANEL_HEIGHT),
         new THREE.MeshBasicMaterial({
-          color: ACCENT,
+          color: accent.hex,
           transparent: true,
           opacity: SCROLL_STRIP_OPACITY,
           depthWrite: false,
@@ -6663,7 +6736,7 @@ export function createWorkspaceScene(
       );
       const grip = new THREE.Mesh(
         mergeGeometries(marks),
-        new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.7 }),
+        new THREE.MeshBasicMaterial({ color: accent.hex, transparent: true, opacity: 0.7 }),
       );
       for (const mark of marks) mark.dispose();
       grip.name = 'terminal-scroll-strip-grip';
@@ -7090,6 +7163,7 @@ export function createWorkspaceScene(
     'display',
     'world',
     'weather-zip',
+    'accent',
     'terminal',
     'filtering',
     'buttons',
@@ -7334,6 +7408,27 @@ export function createWorkspaceScene(
     if (next === mutableState.armColor) return;
     mutableState.armColor = next;
     applyHandColors();
+  };
+  const setAccentColor = (color: string | null): void => {
+    const next = validateHandColor(color);
+    const previous = mutableState.accentColor;
+    if (next === previous) return;
+    mutableState.accentColor = next;
+    accent.hex = resolveAccent(next);
+    accent.hover = resolveAccentHover(next);
+    cursorRest.setHex(accent.hex);
+    retintAccentMaterials(scene, previous, next);
+    radialMenu.setAccent(next);
+    if (inputRoot && (inputMode === 'accent' || inputMode === 'commands'))
+      refreshInputRoot(inputMode);
+    notify();
+  };
+  const setEnvironmentAccentColor = (color: string | null): void => {
+    const next = validateHandColor(color);
+    if (next === mutableState.environmentAccentColor) return;
+    mutableState.environmentAccentColor = next;
+    if (inputRoot && inputMode === 'accent') refreshInputRoot(inputMode);
+    notify();
   };
   const applyHandColors = (): void => {
     const { handColor, armColor } = mutableState;
@@ -8175,6 +8270,8 @@ export function createWorkspaceScene(
     setUISounds,
     setHandColor,
     setArmColor,
+    setAccentColor,
+    setEnvironmentAccentColor,
     setWeatherZip,
     setDictationState,
     setAvailablePanes,

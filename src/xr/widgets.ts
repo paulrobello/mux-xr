@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { AgentRosterRow } from '../workspace/agent-roster';
+import { tagAccentMaterial } from './accent-colors';
 import type { BellFeedEntry } from './bell-feed';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import type { PerfSample } from './perf-gauge';
@@ -163,7 +164,7 @@ export function createClockWidget(kind: ClockKind, envMap: THREE.Texture | null 
     });
     const markers = new THREE.Mesh(
       mergeGeometries(markerGeometries),
-      lit({ color: ACCENT_COLOR, roughness: 0.65 }),
+      tagAccentMaterial(lit({ color: ACCENT_COLOR, roughness: 0.65 }), ACCENT_COLOR),
     );
     for (const geometry of markerGeometries) geometry.dispose();
     markers.name = 'clock-markers';
@@ -189,7 +190,7 @@ export function createClockWidget(kind: ClockKind, envMap: THREE.Texture | null 
     secondHand = addBox(
       root,
       new THREE.BoxGeometry(0.006, 0.21, 0.008),
-      lit({ color: ACCENT_COLOR }),
+      tagAccentMaterial(lit({ color: ACCENT_COLOR }), ACCENT_COLOR),
       'clock-second-hand',
     );
     for (const [index, hand] of [hourHand, minuteHand, secondHand].entries()) {
