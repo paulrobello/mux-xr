@@ -655,6 +655,24 @@ const upgradeStatus = (url: string, origin?: string) =>
 const settle = (ms = 50) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('/repo-status route', () => {
+  it('resolves a signed roster hint on the serving host and rejects traversal or remote hints', async () => {
+    const probe = fakeProbe();
+    const repos = join(home, 'Repos');
+    mkdirSync(join(repos, 'alpha'), { recursive: true });
+    symlinkSync(home, join(repos, 'escape'));
+    const url = await start({ repoStatus: { probe, homeDir: () => home } });
+    expect(await query(url, '~/Repos/alpha')).toMatchObject({ type: 'status', status: okStatus });
+    expect(probe.git).toHaveBeenCalledWith(join(repos, 'alpha'));
+    expect(await query(url, '~/Repos/escape')).toMatchObject({ status: { state: 'not-a-repo' } });
+    expect(await query(url, '~/Repos/../outside')).toMatchObject({
+      status: { state: 'not-a-repo' },
+    });
+    expect(await query(url, '~/Repos/alpha', { host: 'other-mac' })).toMatchObject({
+      status: { state: 'remote' },
+    });
+    expect(probe.git).toHaveBeenCalledOnce();
+  });
+
   it('answers an authenticated query and adds CI outside the git queue', async () => {
     const probe = fakeProbe({ status: okStatus, ci: { branch: 'main', slug: 'someone/repo' } });
     probe.ci.mockResolvedValue({

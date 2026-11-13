@@ -312,6 +312,19 @@ describe('kanban strip feed', () => {
     ]);
   });
 
+  it('resolves a signed roster hint through the same directory checks as OSC 7', async () => {
+    const runner = fakeRunner({ projects: ['alpha'], listings: { alpha: LISTING } });
+    const feed = feedFor(runner);
+    expect(await feed(stripRequest('~/Repos/alpha'))).toMatchObject({
+      state: 'ok',
+      project: 'alpha',
+    });
+    expect(await feed(stripRequest('~/Repos/../outside'))).toEqual({ state: 'outside' });
+    expect(await feed(stripRequest('~/Repos/escape'))).toEqual({ state: 'outside' });
+    expect(await feed(stripRequest('~/Repos/alpha', 'other-mac'))).toEqual({ state: 'remote' });
+    expect(runner.calls).toHaveLength(1);
+  });
+
   it('reports an outage, not an unregistered project, when the board cannot be read', async () => {
     const feed = feedFor(fakeRunner({ projects: null }));
     await expect(feed(stripRequest(join(repos, 'alpha')))).rejects.toMatchObject({

@@ -2,6 +2,7 @@ import { constants as fsConstants } from 'node:fs';
 import { access, realpath as fsRealpath, stat } from 'node:fs/promises';
 import { homedir, hostname as osHostname } from 'node:os';
 import { join, resolve, sep } from 'node:path';
+import { rosterDirectoryProject } from '../workspace/project-directory';
 import { FeedError } from './feed-route';
 import {
   CONTROL_CHARS,
@@ -306,7 +307,11 @@ export const createKanbanStripFeed = (
     const parsed = parseStripRequest(request);
     if (!parsed) return { state: 'outside' };
     if (!isLocalHost(parsed.host, localHostname())) return { state: 'remote' };
-    const project = await resolveProject(parsed.cwd);
+    const rosterProject = rosterDirectoryProject(parsed.cwd);
+    const directory = rosterProject
+      ? join((options.homeDir ?? homedir)(), 'Repos', rosterProject)
+      : parsed.cwd;
+    const project = await resolveProject(directory);
     if (!project) return { state: 'outside' };
     const listing = await options.cli.read([
       'item',

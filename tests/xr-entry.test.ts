@@ -153,6 +153,42 @@ describe('XR entry coordinator', () => {
     expect(automaticOnError).not.toHaveBeenCalled();
   });
 
+  it('lets the explicit desk-window button take the first gesture after automatic VR is denied', async () => {
+    const root = document.createElement('div');
+    const settingsButton = document.createElement('button');
+    settingsButton.dataset.action = 'settings';
+    const settingsPanel = document.createElement('div');
+    settingsPanel.dataset.settings = '';
+    const backgroundSelect = document.createElement('select');
+    const button = document.createElement('button');
+    button.dataset.action = 'desk-window';
+    settingsPanel.append(backgroundSelect, button);
+    root.append(settingsButton, settingsPanel);
+    const enter = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException('Activation required', 'NotAllowedError'))
+      .mockResolvedValue(undefined);
+    const controller = createXREntryController({
+      enter,
+      isActive: () => false,
+      onError: vi.fn(),
+      xr: { isSessionSupported: async () => true },
+      eventTarget: root,
+      userActivation: () => true,
+    });
+    await controller.enableAutoStart();
+    expect(controller.isFallbackArmed()).toBe(true);
+    settingsButton.dispatchEvent(new Event('pointerup', { bubbles: true }));
+    backgroundSelect.dispatchEvent(new Event('pointerup', { bubbles: true }));
+    expect(enter).toHaveBeenCalledOnce();
+    expect(controller.isFallbackArmed()).toBe(true);
+    button.dispatchEvent(new Event('pointerup', { bubbles: true }));
+    expect(enter).toHaveBeenCalledOnce();
+    await controller.start('desk');
+    expect(enter).toHaveBeenLastCalledWith('desk');
+    expect(controller.isFallbackArmed()).toBe(false);
+  });
+
   it('reports an already-active error when the active state is still false', async () => {
     const error = new Error('session already active');
     const onError = vi.fn();

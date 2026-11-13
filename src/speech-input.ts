@@ -4,6 +4,7 @@ export type DictationAction = 'start' | 'startNote' | 'stop' | 'cancel' | 'clear
 
 export interface DictationState {
   supported: boolean;
+  forNote?: boolean;
   status: DictationStatus;
   transcript: string;
   error: string | null;
@@ -147,6 +148,7 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
     if (!forNote && (!targetPaneId || !options.canInsert(targetPaneId))) {
       publish({
         status: 'error',
+        forNote: false,
         transcript: '',
         error: 'Select a connected pane before dictating.',
       });
@@ -156,13 +158,18 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
     try {
       instance = createRecognition();
     } catch {
-      publish({ status: 'error', transcript: '', error: 'Speech recognition could not start.' });
+      publish({
+        status: 'error',
+        forNote,
+        transcript: '',
+        error: 'Speech recognition could not start.',
+      });
       return;
     }
     recognition = instance;
     committedTranscript = '';
     seenFinalResults.clear();
-    publish({ status: 'listening', transcript: '', error: null });
+    publish({ status: 'listening', forNote, transcript: '', error: null });
     instance.lang = 'en-US';
     instance.interimResults = true;
     instance.continuous = true;
@@ -258,7 +265,7 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
     invalidate();
     stopRecognition(true);
     targetPaneId = null;
-    publish({ status: 'idle', transcript: '', error: null });
+    publish({ status: 'idle', forNote: false, transcript: '', error: null });
   };
   const clear = (): void => {
     if (state.status !== 'review' && !(state.status === 'error' && state.transcript.trim())) return;
@@ -266,7 +273,8 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
     publish({ status: 'review', transcript: '', error: null });
   };
   const insert = (): void => {
-    if (!['review', 'error'].includes(state.status) || !state.transcript.trim()) return;
+    if (state.forNote || !['review', 'error'].includes(state.status) || !state.transcript.trim())
+      return;
     const target = targetPaneId;
     if (!target || options.getTargetPaneId() !== target || !options.canInsert(target)) {
       publish({

@@ -1,5 +1,6 @@
 import type { PaneProcess } from './terminal/lifecycle';
 import type { TerminalLinkStats } from './terminal/link-stats';
+import type { XrEntryMode } from './xr/entry';
 
 export interface PaneDescriptor {
   id: string;
@@ -176,7 +177,7 @@ export interface WorkspaceActions {
   runCommand(command: QuickCommand, paneId: string): void;
   openKeyboard(): void;
   openCommands(): void;
-  setXREntryMode?(mode: 'vr' | 'ar'): void;
+  setXREntryMode?(mode: XrEntryMode): void;
   exitPreview?(): void;
   resizeGrid?(paneId: string, cols: number, rows: number): boolean;
   setTerminalColorMode?(mode: TerminalColorMode): void;

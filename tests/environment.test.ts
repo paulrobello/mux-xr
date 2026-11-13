@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { BackgroundMode } from '../src/contracts';
 import { loadObservatory, quietObservatoryPlanet } from '../src/environment';
 import type { WorkspaceScene } from '../src/xr';
+import type { WorkspaceSceneState } from '../src/xr/scene';
 
 describe('authored observatory display treatment', () => {
   it('dims only the authored distant planet material', () => {
@@ -34,9 +35,14 @@ describe('authored observatory display treatment', () => {
   it('keeps the exterior fallback visible when authored loading fails', async () => {
     const scene = new THREE.Scene();
     let listener: (() => void) | undefined;
-    const state: { background: BackgroundMode; xrMode: 'desktop' | 'vr' | 'ar' } = {
+    const state: Pick<
+      WorkspaceSceneState,
+      'background' | 'xrMode' | 'widgets' | 'fullPassthrough'
+    > = {
       background: 'observatory',
       xrMode: 'desktop',
+      widgets: [],
+      fullPassthrough: false,
     };
     const workspace = {
       scene,
@@ -55,6 +61,7 @@ describe('authored observatory display treatment', () => {
     const background = scene.getObjectByName('observatory-exterior-space');
     expect(background?.visible).toBe(true);
     state.xrMode = 'ar';
+    state.fullPassthrough = true;
     listener?.();
     expect(background?.visible).toBe(false);
     dispose();
@@ -64,9 +71,14 @@ describe('authored observatory display treatment', () => {
 
   it('disposes a late GLB result after abort without attaching it', async () => {
     const scene = new THREE.Scene();
-    const state: { background: BackgroundMode; xrMode: 'desktop' | 'vr' | 'ar' } = {
+    const state: Pick<
+      WorkspaceSceneState,
+      'background' | 'xrMode' | 'widgets' | 'fullPassthrough'
+    > = {
       background: 'observatory',
       xrMode: 'desktop',
+      widgets: [],
+      fullPassthrough: false,
     };
     const workspace = {
       scene,

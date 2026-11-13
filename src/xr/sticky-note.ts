@@ -23,6 +23,7 @@ export interface StickyNoteOptions {
   /** The note's store id; also its widget instance id. */
   id?: string;
   text?: string;
+  onRead?: (text: string) => void;
 }
 
 export function createStickyNoteWidget(
@@ -57,8 +58,9 @@ export function createStickyNoteWidget(
   strip.position.set(-CORNER / 2, STICKY_NOTE_HEIGHT / 2 - 0.01 - STRIP_HEIGHT / 2, 0.012);
   root.add(body, face, strip);
 
+  const fullText = options.text ?? '';
   const text = createScalableLabel(
-    options.text ?? '',
+    fullText,
     STICKY_NOTE_WIDTH - 0.05,
     STICKY_NOTE_HEIGHT - 0.03 - STRIP_HEIGHT - 0.03,
     { wrap: true, backplate: false, align: 'left' },
@@ -66,6 +68,14 @@ export function createStickyNoteWidget(
   text.name = 'sticky-note-text';
   text.position.set(0, -(STRIP_HEIGHT + 0.01) / 2, 0.014);
   root.add(text);
+  if (options.onRead && fullText) {
+    const read = createScalableLabel('Read', 0.083, CORNER, { background: '#223946' });
+    read.name = 'sticky-note-read';
+    read.position.set(-STICKY_NOTE_WIDTH / 2 + 0.052, STICKY_NOTE_HEIGHT / 2 - CORNER / 2, 0.02);
+    read.userData.inputAction = 'readStickyNote';
+    read.userData.helpText = 'Read the full note';
+    root.add(read);
+  }
 
   const close = createScalableLabel('×', CORNER, CORNER, { background: '#223946' });
   close.name = 'sticky-note-close';
@@ -96,7 +106,12 @@ export function createStickyNoteWidget(
     close.visible = true;
   };
   const activate = (target: THREE.Object3D): void => {
-    if (disposed || target !== close) return;
+    if (disposed) return;
+    if (target.name === 'sticky-note-read') {
+      options.onRead?.(fullText);
+      return;
+    }
+    if (target !== close) return;
     armedUntil = Date.now() + STICKY_NOTE_CONFIRM_MS;
     close.visible = false;
     confirm.visible = true;
@@ -132,4 +147,26 @@ export function stickyNoteSpawnOffset(
 ): [number, number, number] {
   const step = Math.max(0, Math.floor(slot)) % 6;
   return [base[0] - Math.sign(base[0]) * step * 0.07, base[1] - step * 0.04, base[2] + step * 0.03];
+}
+
+const NOTE_LINE_LENGTH = 30;
+const NOTE_LINES_PER_PAGE = 5;
+
+/** Wrap at spaces where possible, retaining every character of even an unbroken word. */
+export function stickyNotePages(text: string): string[] {
+  const characters = Array.from(text);
+  const lines: string[] = [];
+  for (let start = 0; start < characters.length; ) {
+    let end = Math.min(start + NOTE_LINE_LENGTH, characters.length);
+    if (end < characters.length && characters[end] !== ' ') {
+      const space = start + characters.slice(start, end).lastIndexOf(' ');
+      if (space > start) end = space;
+    }
+    lines.push(characters.slice(start, end).join(''));
+    start = end + Number(characters[end] === ' ');
+  }
+  const pages: string[] = [];
+  for (let start = 0; start < lines.length; start += NOTE_LINES_PER_PAGE)
+    pages.push(lines.slice(start, start + NOTE_LINES_PER_PAGE).join('\n'));
+  return pages;
 }

@@ -81,7 +81,7 @@ export function repoStatusView(model: RepoStatusModel, nowMs: number): RepoStatu
     case 'no-pane':
       return quiet('Git & CI', 'No pane focused');
     case 'no-cwd':
-      return quiet('Git & CI', 'Directory unknown', 'The shell does not report its cwd');
+      return quiet('Git & CI', 'Directory unknown', 'No shell directory or agent project');
     case 'loading':
       return quiet('Git & CI', 'Checking…');
     case 'failed':

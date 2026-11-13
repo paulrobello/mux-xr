@@ -18,6 +18,7 @@ import {
   STICKY_NOTE_CONFIRM_MS,
   STICKY_NOTE_HEIGHT,
   STICKY_NOTE_WIDTH,
+  stickyNotePages,
   stickyNoteSpawnOffset,
 } from '../src/xr/sticky-note';
 import {
@@ -25,7 +26,6 @@ import {
   isStickyNoteId,
   newStickyNoteId,
   normalizeStickyNoteText,
-  STICKY_NOTE_MAX_CHARS,
 } from '../src/xr/sticky-note-store';
 import { widgetKey, widgetKeyKind } from '../src/xr/widget-registry';
 
@@ -51,11 +51,16 @@ describe('sticky note store', () => {
     expect(isStickyNoteId('bad id')).toBe(false);
   });
 
-  it('collapses whitespace and caps long dictation', () => {
+  it('keeps and pages through the complete transcript, including long words', () => {
     expect(normalizeStickyNoteText('  a \n  b  ')).toBe('a b');
-    const long = normalizeStickyNoteText('x'.repeat(STICKY_NOTE_MAX_CHARS + 50));
-    expect(Array.from(long)).toHaveLength(STICKY_NOTE_MAX_CHARS);
-    expect(long.endsWith('…')).toBe(true);
+    const full = `Start ${'x'.repeat(340)} finish`;
+    const store = createStickyNoteStore(memoryStorage());
+    expect(store.save('note-long', full)).toBe(true);
+    expect(store.read()['note-long']).toBe(full);
+    const pages = stickyNotePages(store.read()['note-long']);
+    expect(pages.length).toBeGreaterThan(2);
+    expect(pages.join('').replace(/\s/g, '')).toBe(full.replace(/\s/g, ''));
+    expect(pages.every((page) => page.split('\n').length <= 5)).toBe(true);
   });
 
   it('saves, reads and removes notes, refusing empty text and bad ids', () => {

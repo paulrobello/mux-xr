@@ -65,6 +65,7 @@ import {
 import { validateKeyboardCurvature } from '../workspace/keyboard-curvature';
 import { type KeyborbMode, keyborbEnabled, validateKeyborbMode } from '../workspace/keyborb';
 import type { PaneCreationState } from '../workspace/pane-create';
+import { rosterProjectDirectory } from '../workspace/project-directory';
 import {
   DEFAULT_WINDOW_PREFERENCES,
   SCROLL_STRIP_SIDES,
@@ -100,9 +101,12 @@ import {
   draftFromCommand,
   editCommandDraft,
 } from './command-editor';
+import { createDeskBackdrop, DESK_WINDOW_KIND, setEnvironmentWindowMask } from './desk-window';
+import { XR_ENTRY_LABELS, type XrEntryMode } from './entry';
 import {
   keepLayoutAboveFloor,
   keepLayoutInsideRadius,
+  PANEL_FLOOR_CLEARANCE,
   workspaceFloorY,
   workspacePaneSafeRadius,
 } from './floor-layout';
@@ -160,6 +164,7 @@ import {
   createStickyNoteWidget,
   STICKY_NOTE_KIND,
   STICKY_NOTE_PIN_OFFSET,
+  stickyNotePages,
   stickyNoteSpawnOffset,
 } from './sticky-note';
 import {
@@ -209,6 +214,7 @@ import {
   widgetKeyKind,
   widgetSpawnYaw,
 } from './widget-registry';
+import { keepWidgetSpawnInView } from './widget-spawn';
 import type { Widget } from './widgets';
 import { createWristMenuWatch, WRIST_WATCH_PROBE_REACH } from './wrist-menu-watch';
 
@@ -221,6 +227,7 @@ type InputMode =
   | 'arrange'
   | 'command-editor'
   | 'widgets'
+  | 'sticky-note-reader'
   | 'filtering'
   | 'warp'
   | 'settings'
@@ -280,6 +287,7 @@ export interface WorkspaceSceneState {
   dictation: DictationState;
   fps: number | null;
   xrMode: 'desktop' | 'vr' | 'ar';
+  fullPassthrough: boolean;
   focusedTerminalId: string | null;
   focusModeTerminalId: string | null;
   renderGazeTerminalId: string | null;
@@ -361,7 +369,7 @@ export interface WorkspaceScene {
   setPictureDepth(id: string, depth: PictureImage): void;
   showInput(mode: InputMode): void;
   hideInput(): void;
-  enterXR(mode: 'vr' | 'ar'): Promise<void>;
+  enterXR(mode: XrEntryMode): Promise<void>;
   exitXR(): Promise<void>;
   setUpdateAvailable(available: boolean): void;
   setNotice(message: string | null, options?: NoticeOptions): void;
@@ -513,6 +521,7 @@ const GAZE_FULL_HOLD_MS = 2000;
 type ScrollStripMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
 
 interface XrSessionLike {
+  readonly environmentBlendMode?: XRSession['environmentBlendMode'];
   addEventListener(type: string, listener: () => void): void;
   readonly frameRate?: number;
   readonly visibilityState?: string;
@@ -904,6 +913,7 @@ export function createWorkspaceScene(
       canvas,
       antialias: true,
       alpha: true,
+      stencil: true,
       powerPreference: 'high-performance',
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -923,6 +933,9 @@ export function createWorkspaceScene(
   key.layers.enable(ON_TOP_LAYER);
   scene.add(ambient, key);
   const observatory = createObservatory(scene);
+  const deskBackdrop = createDeskBackdrop();
+  scene.add(deskBackdrop);
+  let deskWindowOnEntry = false;
   const panels = new Map<string, TerminalPanel>();
   const widgets = new Map<WidgetKey, Widget>();
   const touchedWidgets = new Set<WidgetKey>();
@@ -1012,6 +1025,7 @@ export function createWorkspaceScene(
     dictation: { supported: false, status: 'idle', transcript: '', error: null },
     fps: null,
     xrMode: 'desktop',
+    fullPassthrough: false,
     focusedTerminalId: null,
     focusModeTerminalId: null,
     renderGazeTerminalId: null,
@@ -1428,6 +1442,8 @@ export function createWorkspaceScene(
     return null;
   };
   let widgetsPage = 0;
+  let notePages: string[] = [];
+  let notePage = 0;
   let recentGeneration = 0;
   let commandPage = 0;
   let templateHint: string | null = null;
@@ -1460,6 +1476,7 @@ export function createWorkspaceScene(
   bellFeed.subscribe(() => {
     for (const widget of widgets.values()) widget.setBellFeed?.(bellFeed.entries());
   });
+  const rosterDirectories = new Map<string, string>();
   let agentRosterSignature = '';
   let agentRosterRows: AgentRows = DEFAULT_AGENT_ROSTER_LAYOUT.rows;
   let hierarchyOpened = false;
@@ -2766,6 +2783,10 @@ export function createWorkspaceScene(
       }
       if (xrViewerPending && (!frame || viewerPose)) xrViewerPending = false;
     }
+    if (deskWindowOnEntry && !xrViewerPending) {
+      deskWindowOnEntry = false;
+      openDeskWindow();
+    }
     syncKeyborb();
     pendingPokes.clear();
     const radialDelta =
@@ -2832,7 +2853,11 @@ export function createWorkspaceScene(
             widgetPoseStore.remove(kind);
             continue;
           }
-          const widget = createStickyNoteWidget(uiEnvironment.texture, { id, text });
+          const widget = createStickyNoteWidget(uiEnvironment.texture, {
+            id,
+            text,
+            onRead: readStickyNote,
+          });
           mountWidget(STICKY_NOTE_KIND, widget, false);
           if (!validPose(pose)) placeWidget(kind, widget);
           else {
@@ -2841,7 +2866,8 @@ export function createWorkspaceScene(
           }
           continue;
         }
-        if (!isWidgetKind(kind) || widgetKeyKind(kind) !== kind) continue;
+        if (kind === DESK_WINDOW_KIND || !isWidgetKind(kind) || widgetKeyKind(kind) !== kind)
+          continue;
         const widget = widgets.get(kind) ?? addWidget(kind);
         applyUIPose(widget.root, pose, [0.25, 2]);
       }
@@ -2849,7 +2875,11 @@ export function createWorkspaceScene(
       for (const [id, text] of Object.entries(savedNotes)) {
         const key = widgetKey(STICKY_NOTE_KIND, id);
         if (widgets.has(key) || touchedWidgets.has(key)) continue;
-        const widget = createStickyNoteWidget(uiEnvironment.texture, { id, text });
+        const widget = createStickyNoteWidget(uiEnvironment.texture, {
+          id,
+          text,
+          onRead: readStickyNote,
+        });
         saveWidgetPose(mountWidget(STICKY_NOTE_KIND, widget), widget);
       }
       widgetRestorePending = false;
@@ -2858,7 +2888,9 @@ export function createWorkspaceScene(
     }
     const nowMs = Date.now();
     const focusedPanel = panels.get(mutableState.focusedTerminalId ?? '');
-    const focusedCwd = focusedPanel?.surface.cwd ?? null;
+    const focusedCwd = focusedPanel
+      ? focusedPanel.surface.cwd || rosterDirectories.get(focusedPanel.id) || null
+      : null;
     for (const widget of widgets.values()) {
       widget.setFocusedPane?.(
         focusedPanel?.id ?? null,
@@ -2951,7 +2983,6 @@ export function createWorkspaceScene(
       for (const visual of handVisuals.values()) visual.hide();
       wristWatch.setVisible(false);
     }
-    respawnTypingForInputKind();
     updateHierarchyTouch();
     suppressKeyboardRays();
     updateKeyborbInput(deltaSeconds);
@@ -3671,12 +3702,9 @@ export function createWorkspaceScene(
     const view = poseViewer();
     view.updateWorldMatrix(true, false);
     const eye = view.getWorldPosition(new THREE.Vector3());
-    const forward = view.getWorldDirection(new THREE.Vector3());
-    forward.y = 0;
-    forward.normalize();
     const rotation = new THREE.Quaternion().setFromAxisAngle(
       new THREE.Vector3(0, 1, 0),
-      Math.atan2(-forward.x, -forward.z),
+      viewYaw(view),
     );
     const entry = getWidgetEntry(widgetKeyKind(key) ?? (key as WidgetKind));
     let offset = entry.spawnOffset;
@@ -3713,9 +3741,20 @@ export function createWorkspaceScene(
         widgetSpawnYaw({ ...entry, spawnOffset: [x, y, z] }),
       ),
     );
+    if (key === DESK_WINDOW_KIND) widget.root.rotateX(-Math.PI / 6);
     widget.root.scale.setScalar(
       widget.root.userData.picturePlaceholder ? PICTURE_PLACEHOLDER_SCALE : (entry.spawnScale ?? 1),
     );
+    if (inXRContext()) {
+      const floor = workspaceFloorY(mutableState.background, mutableState.xrMode) ?? 0;
+      keepWidgetSpawnInView(
+        widget.root,
+        eye,
+        rotation,
+        floor + PANEL_FLOOR_CLEARANCE,
+        key !== DESK_WINDOW_KIND,
+      );
+    }
   };
   const saveWidgetPose = (key: WidgetKey, widget: Widget): void => {
     // A placeholder's pose persists too, so a reload during the exit-to-pick flow keeps it.
@@ -3731,6 +3770,7 @@ export function createWorkspaceScene(
   const removeWidget = (kind: WidgetKey, persist = true): void => {
     const widget = widgets.get(kind);
     if (!widget) return;
+    if (persist && kind === DESK_WINDOW_KIND) saveWidgetPose(kind, widget);
     for (const [controller, drag] of dragStates)
       if (drag.object === widget.root) releaseGrab(controller);
     for (const [controller, object] of hoveredByController)
@@ -3739,13 +3779,18 @@ export function createWorkspaceScene(
     widget.root.removeFromParent();
     widget.dispose();
     widgets.delete(kind);
-    if (persist) widgetPoseStore.remove(kind);
+    if (persist && kind !== DESK_WINDOW_KIND) widgetPoseStore.remove(kind);
     const noteId = widget.root.userData.noteId;
     if (persist && typeof noteId === 'string') stickyNoteStore.remove(noteId);
     const pictureId = widget.root.userData.pictureId;
     if (persist && typeof pictureId === 'string' && !widget.root.userData.picturePlaceholder)
       options.onPictureClosed?.(pictureId);
     mutableState.widgets = [...widgets.keys()];
+    if (!disposed && kind === DESK_WINDOW_KIND && mutableState.xrMode === 'ar') {
+      setBackground(mutableState.background);
+      if (inputRoot && inputMode === 'world') refreshInputRoot('world');
+      return;
+    }
     if (!disposed && inputRoot && inputMode === 'widgets') refreshInputRoot('widgets');
     notify();
   };
@@ -3944,7 +3989,14 @@ export function createWorkspaceScene(
     notify();
     return evicted;
   };
-  // The Sticky note entry opens the keyboard panel listening; Pin as note there makes the note.
+  const readStickyNote = (text: string): void => {
+    hideInput();
+    inputTransform = null;
+    notePages = stickyNotePages(text);
+    notePage = 0;
+    showInput('sticky-note-reader');
+  };
+  // The Sticky note entry opens the keyboard with a target-free dictation draft.
   const startNoteDictation = (): void => {
     const { supported, status } = mutableState.dictation;
     if (!supported) {
@@ -3965,7 +4017,11 @@ export function createWorkspaceScene(
       setNotice('The note could not be saved on this device');
       return;
     }
-    const widget = createStickyNoteWidget(uiEnvironment.texture, { id, text });
+    const widget = createStickyNoteWidget(uiEnvironment.texture, {
+      id,
+      text,
+      onRead: readStickyNote,
+    });
     const key = mountWidget(STICKY_NOTE_KIND, widget, false);
     placeWidget(key, widget, STICKY_NOTE_PIN_OFFSET);
     widget.root.userData.picturePlaced = true;
@@ -3975,7 +4031,22 @@ export function createWorkspaceScene(
     setNotice('Pinned the note');
     notify();
   };
+  const openDeskWindow = (): void => {
+    if (widgets.has(DESK_WINDOW_KIND)) return;
+    if (activeSession?.environmentBlendMode !== 'alpha-blend') {
+      setNotice('Desk Window needs a headset with alpha-blended passthrough.');
+      return;
+    }
+    mutableState.fullPassthrough = false;
+    const saved = widgetPoseStore.read()[DESK_WINDOW_KIND];
+    const widget = addWidget(DESK_WINDOW_KIND);
+    if (saved && validPose(saved)) applyUIPose(widget.root, saved, [0.25, 2]);
+    mutableState.widgets = [...widgets.keys()];
+    hideInput();
+    setBackground(mutableState.background);
+  };
   const toggleWidget = (kind: WidgetKind): void => {
+    if (kind === DESK_WINDOW_KIND) return;
     if (kind === STICKY_NOTE_KIND) {
       startNoteDictation();
       return;
@@ -4164,18 +4235,6 @@ export function createWorkspaceScene(
     }
     inputRoot.scale.setScalar(0.38);
   };
-  const respawnTypingForInputKind = (): void => {
-    if (!inputRoot || !inputPoseSpawn?.typing || xrViewerPending) return;
-    const kind = definiteInputKind();
-    if (kind === null || kind === inputPoseSpawn.kind) return;
-    if (inputPoseSpawn.kind === null) {
-      inputPoseSpawn.kind = kind;
-      return;
-    }
-    if (pairGrabs.has(inputRoot)) return;
-    for (const drag of dragStates.values()) if (drag.object === inputRoot) return;
-    resetInputPose();
-  };
   /** Adds captioned rows of color swatches; each swatch shows its own color, a white border the current one. */
   const addColorSwatchRows = (
     root: THREE.Group,
@@ -4235,7 +4294,7 @@ export function createWorkspaceScene(
       const kind = definiteInputKind();
       if (
         inputPoseSpawn.typing !== typing ||
-        (typing && kind !== null && inputPoseSpawn.kind !== null && kind !== inputPoseSpawn.kind)
+        (!previousRoot && typing && kind !== null && kind !== inputPoseSpawn.kind)
       )
         inputTransform = null;
     }
@@ -4296,6 +4355,8 @@ export function createWorkspaceScene(
         inputRoot.add(step);
       }
       const dictation = mutableState.dictation;
+      const canReview =
+        ['review', 'error'].includes(dictation.status) && dictation.transcript.trim();
       // The Keyborb Mic orb starts and stops dictation, so its panel keeps only the review buttons.
       if (!mutableState.keyborbEnabled || !dictation.supported) {
         const dictate = createLabelButton(
@@ -4311,7 +4372,8 @@ export function createWorkspaceScene(
           {
             inputAction:
               dictation.supported && dictation.status !== 'transcribing' ? 'dictation' : 'noop',
-            dictationAction: dictation.status === 'listening' ? 'stop' : 'start',
+            dictationAction:
+              dictation.status === 'listening' ? 'stop' : dictation.forNote ? 'startNote' : 'start',
           },
         );
         dictate.name = 'xr-dictate-button';
@@ -4329,15 +4391,17 @@ export function createWorkspaceScene(
       const toHost = createLabelButton('Copy to host', 0.4, 0.09, { inputAction: 'copyToHost' });
       toHost.position.set(0.85, 0.7, 0);
       inputRoot.add(hostPaste, toHost);
-      if (dictation.transcript && dictation.status !== 'listening') {
-        const insert = createLabelButton('Insert text', 0.5, 0.1, {
-          inputAction: 'dictation',
-          dictationAction: 'insert',
-        });
-        insert.position.set(0.25, 0.87, 0);
-        inputRoot.add(insert);
-      }
-      if (['review', 'error'].includes(dictation.status) && dictation.transcript.trim()) {
+      if (canReview) {
+        const confirm = dictation.forNote
+          ? createLabelButton('Create note', 0.5, 0.1, { inputAction: 'pinNote' })
+          : createLabelButton('Insert text', 0.5, 0.1, {
+              inputAction: 'dictation',
+              dictationAction: 'insert',
+            });
+        if (dictation.forNote) confirm.name = 'xr-dictation-pin-note';
+        confirm.position.set(0.25, 0.87, 0);
+        inputRoot.add(confirm);
+
         const clear = createLabelButton('Clear', 0.38, 0.1, {
           inputAction: 'dictation',
           dictationAction: 'clear',
@@ -4360,11 +4424,16 @@ export function createWorkspaceScene(
         transcript.position.set(0, 1.17, 0);
         inputRoot.add(transcript);
         // Sits over the transcript box's left edge, the box being 1.85 wide and 0.34 tall.
-        const heading = createLabelButton('Transcript', 0.5, 0.1, { inputAction: 'noop' });
+        const heading = createLabelButton(
+          dictation.forNote ? 'Sticky note' : 'Transcript',
+          0.5,
+          0.1,
+          { inputAction: 'noop' },
+        );
         heading.name = 'xr-dictation-transcript-heading';
         heading.position.set(-0.925 + 0.25, 1.17 + 0.17 + 0.06, 0);
         inputRoot.add(heading);
-        if (['review', 'error'].includes(dictation.status) && dictation.transcript.trim()) {
+        if (canReview && !dictation.forNote) {
           // Mirrors the heading at the transcript box's right edge.
           const pin = createLabelButton('Pin as note', 0.5, 0.1, { inputAction: 'pinNote' });
           pin.name = 'xr-dictation-pin-note';
@@ -4384,31 +4453,33 @@ export function createWorkspaceScene(
           : mode === 'command-editor'
             ? commandEditorMessage ||
               (commandDraft?.editing ? 'Edit quick command' : 'New quick command')
-            : mode === 'widgets'
-              ? 'Widgets'
-              : mode === 'settings'
-                ? 'Settings'
-                : mode === 'buttons'
-                  ? 'Controller buttons'
-                  : mode === 'display'
-                    ? 'Display settings'
-                    : mode === 'world'
-                      ? 'World settings'
-                      : mode === 'backgrounds'
-                        ? 'Backgrounds'
-                        : mode === 'weather-zip'
-                          ? 'Weather ZIP code'
-                          : mode === 'accent'
-                            ? 'Accent colors'
-                            : mode === 'filtering'
-                              ? 'Terminal filtering'
-                              : mode === 'warp'
-                                ? 'Terminal curvature'
-                                : mode === 'arrange'
-                                  ? 'Arrange terminals'
-                                  : mode === 'panes'
-                                    ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
-                                    : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? (mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard') : 'Terminal settings'} · ${targetTitle}`,
+            : mode === 'sticky-note-reader'
+              ? `Sticky note  ${notePage + 1} / ${notePages.length}`
+              : mode === 'widgets'
+                ? 'Widgets'
+                : mode === 'settings'
+                  ? 'Settings'
+                  : mode === 'buttons'
+                    ? 'Controller buttons'
+                    : mode === 'display'
+                      ? 'Display settings'
+                      : mode === 'world'
+                        ? 'World settings'
+                        : mode === 'backgrounds'
+                          ? 'Backgrounds'
+                          : mode === 'weather-zip'
+                            ? 'Weather ZIP code'
+                            : mode === 'accent'
+                              ? 'Accent colors'
+                              : mode === 'filtering'
+                                ? 'Terminal filtering'
+                                : mode === 'warp'
+                                  ? 'Terminal curvature'
+                                  : mode === 'arrange'
+                                    ? 'Arrange terminals'
+                                    : mode === 'panes'
+                                      ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
+                                      : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? (mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard') : 'Terminal settings'} · ${targetTitle}`,
       mode === 'panes' ? 1.8 : 0.9,
       0.12,
       { inputAction: 'grabInput' },
@@ -4611,15 +4682,21 @@ export function createWorkspaceScene(
       const backgroundSelect = createBackgroundSelect(mutableState.background);
       backgroundSelect.position.y = 0.42;
       inputRoot.add(backgroundSelect);
+      const activeMode = widgets.has(DESK_WINDOW_KIND)
+        ? 'desk'
+        : mutableState.xrMode === 'ar' && !mutableState.fullPassthrough
+          ? 'vr'
+          : mutableState.xrMode;
       for (const [index, [label, xrMode]] of (
         [
           ['VR', 'vr'],
           ['Passthrough', 'ar'],
+          ['Desk Window', 'desk'],
         ] as const
       ).entries()) {
-        const button = createLabelButton(label, 0.65, 0.12, { inputAction: 'xrMode', xrMode });
-        button.position.set(index ? 0.38 : -0.38, 0.28, 0);
-        setModifierVisual(button, mutableState.xrMode === xrMode);
+        const button = createLabelButton(label, 0.46, 0.12, { inputAction: 'xrMode', xrMode });
+        button.position.set((index - 1) * 0.51, 0.28, 0);
+        setModifierVisual(button, activeMode === xrMode);
         inputRoot.add(button);
       }
       addColorSwatchRows(inputRoot, 0.15, [
@@ -5110,6 +5187,24 @@ export function createWorkspaceScene(
       // Shares the bottom row with Close, keeping the panel short and clear of the HUD bar.
       enterUrl.position.set(-0.3, -0.46, 0);
       inputRoot.add(enterUrl);
+    } else if (mode === 'sticky-note-reader') {
+      const text = createScalableLabel(notePages[notePage] ?? '', 1.72, 0.79, {
+        background: '#17212d',
+        align: 'left',
+        fontSize: 0.048,
+      });
+      text.name = 'sticky-note-page';
+      text.position.y = 0.05;
+      inputRoot.add(text);
+      for (const direction of [-1, 1]) {
+        if (notePage + direction < 0 || notePage + direction >= notePages.length) continue;
+        const button = createLabelButton(direction < 0 ? 'Previous' : 'Next', 0.36, 0.1, {
+          inputAction: 'stickyNotePage',
+          delta: direction,
+        });
+        button.position.set(direction * 0.4, -0.52, 0);
+        inputRoot.add(button);
+      }
     } else if (mode === 'widgets') {
       const layout = layoutWidgetPanel(WIDGET_REGISTRY.length, widgetsPage);
       widgetsPage = layout.page;
@@ -5250,7 +5345,7 @@ export function createWorkspaceScene(
         Object.assign(mic.userData, {
           keyborbSlot: keyboardKeys.length,
           inputAction: transcribing ? 'noop' : 'dictation',
-          dictationAction: listening ? 'stop' : 'start',
+          dictationAction: listening ? 'stop' : dictation.forNote ? 'startNote' : 'start',
         });
         mic.userData.helpText = transcribing
           ? 'Transcribing your dictation'
@@ -5526,7 +5621,9 @@ export function createWorkspaceScene(
   };
   const isTextEntryActive = (): boolean =>
     inputRoot !== null &&
-    ((inputMode === 'command-editor' && commandDraft !== null) || inputMode === 'picture-url');
+    ((inputMode === 'command-editor' && commandDraft !== null) ||
+      inputMode === 'picture-url' ||
+      (inputMode === 'keyboard' && Boolean(mutableState.dictation.forNote)));
   /** Picture controller notices: held for the open picker panel during its pick, else the HUD. */
   const notifyPicture = (message: string): void => {
     if (
@@ -5537,9 +5634,49 @@ export function createWorkspaceScene(
       pictureNotice = pictureNotice ? `${pictureNotice}. ${message}` : message;
     else setNotice(message);
   };
-  /** A physical key typed while the picture URL field is open; true when the field took it. */
+  const dictationReview = (): boolean =>
+    mutableState.dictation.status === 'review' ||
+    (mutableState.dictation.status === 'error' && Boolean(mutableState.dictation.transcript));
+  const editDictationKey = (key: string): void => {
+    if (key === 'Enter') {
+      if (mutableState.dictation.forNote) pinNote();
+      else actions.dictationAction?.('insert');
+      return;
+    }
+    if (key === 'Escape') {
+      actions.dictationAction?.('cancel');
+      return;
+    }
+    const characters = Array.from(mutableState.dictation.transcript);
+    dictationCursor = THREE.MathUtils.clamp(dictationCursor, 0, characters.length);
+    if (key === 'ArrowLeft') dictationCursor = Math.max(0, dictationCursor - 1);
+    else if (key === 'ArrowRight')
+      dictationCursor = Math.min(characters.length, dictationCursor + 1);
+    else if (key === 'ArrowUp') dictationCursor = Math.max(0, dictationCursor - 36);
+    else if (key === 'ArrowDown')
+      dictationCursor = Math.min(characters.length, dictationCursor + 36);
+    else if (key === 'Home') dictationCursor = 0;
+    else if (key === 'End') dictationCursor = characters.length;
+    else if (key === 'Backspace' && dictationCursor > 0) characters.splice(--dictationCursor, 1);
+    else if (key === 'Delete') characters.splice(dictationCursor, 1);
+    else if (Array.from(key).length === 1) {
+      characters.splice(
+        dictationCursor++,
+        0,
+        terminalKeyLabel(key, Boolean(modifierState.active.shift)),
+      );
+      consumeArmedModifiers();
+    }
+    actions.editDictation?.(characters.join(''));
+  };
   const typeTextEntryKey = (key: string): boolean => {
-    if (!inputRoot || inputMode !== 'picture-url') return false;
+    if (!inputRoot) return false;
+    if (inputMode === 'keyboard' && mutableState.dictation.forNote) {
+      if (dictationReview()) editDictationKey(key);
+      else if (key === 'Escape') actions.dictationAction?.('cancel');
+      return true;
+    }
+    if (inputMode !== 'picture-url') return false;
     if (key === 'Enter') submitPictureUrl();
     else if (key === 'Escape') hideInput();
     else {
@@ -5978,13 +6115,28 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'xrMode') {
-      const mode = hit.userData.xrMode as 'vr' | 'ar';
+      const mode = hit.userData.xrMode as XrEntryMode;
+      if (
+        mutableState.xrMode === 'ar' &&
+        (mode !== 'vr' || activeSession?.environmentBlendMode === 'alpha-blend')
+      ) {
+        if (mode === 'desk') openDeskWindow();
+        else {
+          mutableState.fullPassthrough = mode === 'ar';
+          if (widgets.has(DESK_WINDOW_KIND)) removeWidget(DESK_WINDOW_KIND);
+          else {
+            setBackground(mutableState.background);
+            refreshInputRoot('world');
+          }
+        }
+        return true;
+      }
       if (mutableState.xrMode !== mode) {
         void (async (): Promise<void> => {
           try {
             await exitXR();
             actions.setXREntryMode?.(mode);
-            setNotice(`Press ${mode === 'ar' ? 'Enter passthrough' : 'Enter VR'} to continue`);
+            setNotice(`Press ${XR_ENTRY_LABELS[mode]} to continue`);
           } catch (error) {
             setNotice(error instanceof Error ? error.message : 'XR mode could not be changed');
           }
@@ -6013,12 +6165,21 @@ export function createWorkspaceScene(
       if (isWidgetKind(hit.userData.widgetKind)) toggleWidget(hit.userData.widgetKind);
       return true;
     }
+    if (action === 'stickyNotePage') {
+      notePage = THREE.MathUtils.clamp(
+        notePage + Number(hit.userData.delta),
+        0,
+        notePages.length - 1,
+      );
+      refreshInputRoot('sticky-note-reader');
+      return true;
+    }
     if (action === 'closeWidget') {
       const kind = widgetOwning(hit)?.[0];
       if (kind) removeWidget(kind);
       return true;
     }
-    if (action === 'widgetControl') {
+    if (action === 'widgetControl' || action === 'readStickyNote') {
       widgetOwning(hit)?.[1].activate?.(hit);
       return true;
     }
@@ -6220,42 +6381,12 @@ export function createWorkspaceScene(
       refreshInputRoot('command-editor');
       return true;
     }
-    if (
-      action === 'key' &&
-      inputMode === 'keyboard' &&
-      (mutableState.dictation.status === 'review' ||
-        (mutableState.dictation.status === 'error' && mutableState.dictation.transcript))
-    ) {
-      const key = String(hit.userData.key);
-      const characters = Array.from(mutableState.dictation.transcript);
-      if (key === 'Enter') actions.dictationAction?.('insert');
-      else if (key === 'Escape') actions.dictationAction?.('cancel');
-      else if (hit.userData.modifier) {
-        modifierState.tap(hit.userData.modifier as KeyboardModifier);
+    if (action === 'key' && inputMode === 'keyboard' && dictationReview()) {
+      const modifier = hit.userData.modifier as KeyboardModifier | undefined;
+      if (modifier) {
+        modifierState.tap(modifier);
         syncModifierVisuals();
-      } else {
-        dictationCursor = Math.max(0, Math.min(characters.length, dictationCursor));
-        if (key === 'ArrowLeft') dictationCursor = Math.max(0, dictationCursor - 1);
-        else if (key === 'ArrowRight')
-          dictationCursor = Math.min(characters.length, dictationCursor + 1);
-        else if (key === 'ArrowUp') dictationCursor = Math.max(0, dictationCursor - 36);
-        else if (key === 'ArrowDown')
-          dictationCursor = Math.min(characters.length, dictationCursor + 36);
-        else if (key === 'Home') dictationCursor = 0;
-        else if (key === 'End') dictationCursor = characters.length;
-        else if (key === 'Backspace' && dictationCursor > 0)
-          characters.splice(--dictationCursor, 1);
-        else if (key === 'Delete') characters.splice(dictationCursor, 1);
-        else if (key.length === 1) {
-          characters.splice(
-            dictationCursor++,
-            0,
-            terminalKeyLabel(key, Boolean(modifierState.active.shift)),
-          );
-          consumeArmedModifiers();
-        }
-        actions.editDictation?.(characters.join(''));
-      }
+      } else editDictationKey(String(hit.userData.key));
       return true;
     }
     if (
@@ -7573,21 +7704,24 @@ export function createWorkspaceScene(
           setModifierVisual(child, child.userData.background === mode);
       });
     }
-    if (mutableState.xrMode === 'ar') {
-      observatory.visible = false;
-      scene.background = null;
-      scene.userData.backgroundVisible = false;
-      notify();
-      return;
+    const deskWindow = mutableState.xrMode === 'ar' && widgets.has(DESK_WINDOW_KIND);
+    const worldVisible = !mutableState.fullPassthrough;
+    const useDeskBackdrop = mutableState.xrMode === 'ar' && worldVisible;
+    observatory.visible = worldVisible && mode === 'observatory';
+    scene.userData.backgroundVisible = worldVisible;
+    setEnvironmentWindowMask(observatory, deskWindow);
+    if (mode === 'gradient' && worldVisible) gradientTexture ??= createGradientTexture();
+    else {
+      gradientTexture?.dispose();
+      gradientTexture = null;
     }
-    gradientTexture?.dispose();
-    gradientTexture = null;
-    if (mode === 'black') scene.background = new THREE.Color(0x000000);
-    else if (mode === 'gradient') {
-      gradientTexture = createGradientTexture();
-      scene.background = gradientTexture;
-    } else scene.background = new THREE.Color(0x050a10);
-    observatory.visible = mode === 'observatory';
+    const color = mode === 'black' ? 0x000000 : 0x050a10;
+    deskBackdrop.visible = useDeskBackdrop;
+    deskBackdrop.material.uniforms.backdropColor.value.setHex(color);
+    deskBackdrop.material.uniforms.gradient.value = gradientTexture;
+    deskBackdrop.material.uniforms.useGradient.value = gradientTexture !== null;
+    scene.background =
+      useDeskBackdrop || !worldVisible ? null : (gradientTexture ?? new THREE.Color(color));
     notify();
   };
   const setGazeInputEnabled = (enabled: boolean): void => {
@@ -7690,6 +7824,7 @@ export function createWorkspaceScene(
       if (
         previous.status !== state.status ||
         previous.supported !== state.supported ||
+        previous.forNote !== state.forNote ||
         Boolean(previous.transcript) !== Boolean(state.transcript)
       )
         refreshInputRoot('keyboard');
@@ -7741,6 +7876,11 @@ export function createWorkspaceScene(
     layout: AgentRosterLayout = DEFAULT_AGENT_ROSTER_LAYOUT,
   ): void => {
     latestAgentRoster = [...rows];
+    rosterDirectories.clear();
+    for (const row of rows) {
+      const directory = rosterProjectDirectory(row.project);
+      if (directory) rosterDirectories.set(row.paneId, directory);
+    }
     for (const widget of widgets.values()) widget.setAgentRoster?.(latestAgentRoster);
     const signature = agentRowsSignature(rows, layout);
     if (signature === agentRosterSignature) return;
@@ -7876,7 +8016,7 @@ export function createWorkspaceScene(
     clearInputCapture();
     notify();
   };
-  const startXR = async (mode: 'vr' | 'ar'): Promise<void> => {
+  const startXR = async (mode: XrEntryMode): Promise<void> => {
     if (!renderer) throw new Error('WebGL is unavailable');
     const xr = (
       navigator as Navigator & {
@@ -7884,14 +8024,19 @@ export function createWorkspaceScene(
       }
     ).xr;
     if (!xr) throw new Error('WebXR is unavailable');
-    const sessionMode = mode === 'ar' ? 'immersive-ar' : 'immersive-vr';
+    const immersiveMode = mode === 'vr' ? 'vr' : 'ar';
+    const sessionMode = immersiveMode === 'ar' ? 'immersive-ar' : 'immersive-vr';
     releaseAllMouse();
     const session = await xr.requestSession(
       sessionMode,
-      mode === 'ar'
+      immersiveMode === 'ar'
         ? { optionalFeatures: ['local-floor', 'dom-overlay', 'hand-tracking'] }
         : { optionalFeatures: ['local-floor', 'hand-tracking'] },
     );
+    if (mode === 'desk' && session.environmentBlendMode !== 'alpha-blend') {
+      await session.end().catch(() => undefined);
+      throw new Error('Desk Window needs a headset with alpha-blended passthrough.');
+    }
     activeSession = session;
     resetPerfStats();
     session.addEventListener('visibilitychange', markPerfPause);
@@ -7919,17 +8064,11 @@ export function createWorkspaceScene(
       await session.end().catch(() => undefined);
       throw error;
     }
-    mutableState.xrMode = mode;
+    mutableState.xrMode = immersiveMode;
+    mutableState.fullPassthrough = mode === 'ar';
+    deskWindowOnEntry = mode === 'desk';
     setNotice(null);
-    if (mode === 'ar') {
-      observatory.visible = false;
-      scene.background = null;
-      scene.userData.backgroundVisible = false;
-    } else {
-      setBackground(mutableState.background);
-      scene.userData.backgroundVisible = true;
-    }
-    notify();
+    setBackground(mutableState.background);
     session.addEventListener('end', () => {
       finishWarp(false);
       radialMenu.close();
@@ -7980,6 +8119,9 @@ export function createWorkspaceScene(
       showHover(null);
       gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
       mutableState.xrMode = 'desktop';
+      mutableState.fullPassthrough = false;
+      deskWindowOnEntry = false;
+      removeWidget(DESK_WINDOW_KIND, false);
       mutableState.renderGazeTerminalId = null;
       for (const panel of panels.values()) {
         panel.renderQuality = 'full';
@@ -7997,13 +8139,10 @@ export function createWorkspaceScene(
       }
       camera.position.copy(desktopCameraPosition);
       camera.quaternion.copy(desktopCameraQuaternion);
-      observatory.visible = mutableState.background === 'observatory';
-      scene.userData.backgroundVisible = true;
       setBackground(mutableState.background);
-      notify();
     });
   };
-  const enterXR = (mode: 'vr' | 'ar'): Promise<void> => {
+  const enterXR = (mode: XrEntryMode): Promise<void> => {
     if (activeSession || mutableState.xrMode !== 'desktop') return Promise.resolve();
     if (xrStartPromise) return xrStartPromise;
     const pending = startXR(mode).finally(() => {
@@ -8482,6 +8621,8 @@ export function createWorkspaceScene(
     disposeObject(hoverHelp);
     scene.clear();
     gradientTexture?.dispose();
+    deskBackdrop.geometry.dispose();
+    deskBackdrop.material.dispose();
     uiEnvironment.dispose();
     renderer?.dispose();
     if (canvas.parentElement === container) container.removeChild(canvas);

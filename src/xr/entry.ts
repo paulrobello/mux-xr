@@ -1,4 +1,10 @@
-export type XrEntryMode = 'vr' | 'ar';
+export type XrEntryMode = 'vr' | 'ar' | 'desk';
+
+export const XR_ENTRY_LABELS: Record<XrEntryMode, string> = {
+  vr: 'Enter VR',
+  ar: 'Enter passthrough',
+  desk: 'Enter with desk window',
+};
 
 interface XrSystemLike {
   isSessionSupported?: (mode: 'immersive-vr') => Promise<boolean>;
@@ -64,13 +70,16 @@ export function createXREntryController(options: XrEntryControllerOptions): XrEn
     autoFallbackArmed = true;
     onActivation = (event) => {
       const eventTarget = event.target;
-      if (
-        typeof Element !== 'undefined' &&
-        eventTarget instanceof Element &&
-        eventTarget.closest('[data-action="xr"],[data-action="passthrough"]')
-      ) {
-        removeFallbackListeners();
-        return;
+      if (typeof Element !== 'undefined' && eventTarget instanceof Element) {
+        if (
+          eventTarget.closest(
+            '[data-action="xr"],[data-action="passthrough"],[data-action="desk-window"]',
+          )
+        ) {
+          removeFallbackListeners();
+          return;
+        }
+        if (eventTarget.closest('[data-action="settings"],[data-settings]')) return;
       }
       if (options.userActivation && !options.userActivation()) return;
       void start('vr', true).catch(() => undefined);

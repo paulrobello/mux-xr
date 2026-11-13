@@ -48,18 +48,29 @@ describe('speech input', () => {
   it('dictates a note without a target pane, then refuses to insert it anywhere', () => {
     const recognition = installRecognition();
     const states: DictationState[] = [];
+    const onInsert = vi.fn(() => true);
     const input = createSpeechInput({
       onState: (state) => states.push(state),
       getTargetPaneId: () => null,
       canInsert: () => false,
-      onInsert: () => true,
+      onInsert,
     });
     input.dispatch('start');
     expect(states.at(-1)?.status).toBe('error');
     expect(recognition.start).not.toHaveBeenCalled();
     input.dispatch('startNote');
     expect(recognition.start).toHaveBeenCalledOnce();
-    expect(states.at(-1)?.status).toBe('listening');
+    expect(states.at(-1)).toMatchObject({ status: 'listening', forNote: true });
+    recognition.onresult?.(result('Check the desk lamp', true));
+    recognition.onend?.();
+    input.dispatch('insert');
+    expect(states.at(-1)).toMatchObject({
+      status: 'review',
+      transcript: 'Check the desk lamp',
+      error: null,
+      forNote: true,
+    });
+    expect(onInsert).not.toHaveBeenCalled();
     input.dispose();
   });
   it('prefers an explicitly configured recognizer over the browser speech service', () => {

@@ -4,9 +4,10 @@ import { constants as fsConstants } from 'node:fs';
 import { access, realpath as fsRealpath } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
 import { homedir, hostname as osHostname } from 'node:os';
-import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
+import { rosterDirectoryProject } from '../workspace/project-directory';
 import {
   type ClipboardSecret,
   clientKey,
@@ -192,6 +193,23 @@ export const validCwd = (value: unknown): value is string =>
   value.length <= MAX_CWD_CHARS &&
   isAbsolute(value) &&
   !CONTROL_CHARS.test(value);
+
+/** Resolve a roster hint only to a real directory inside the host's canonical checkout tree. */
+export async function resolveWidgetDirectory(
+  directory: string,
+  home: string,
+  realpath: (path: string) => Promise<string> = fsRealpath,
+): Promise<string | null> {
+  const project = rosterDirectoryProject(directory);
+  if (!project) return validCwd(directory) ? directory : null;
+  try {
+    const repos = await realpath(join(home, 'Repos'));
+    const canonical = await realpath(join(repos, project));
+    return canonical !== repos && isInside(canonical, repos) ? canonical : null;
+  } catch {
+    return null;
+  }
+}
 
 const shortName = (name: string): string => name.split('.')[0] ?? name;
 
@@ -507,6 +525,7 @@ export const repoStatusMac = (
     .digest();
 
 export interface RepoStatusRouteOptions {
+  homeDir?: () => string;
   allowedOrigins: string[];
   /** The clipboard pairing secret; this route adds no credential of its own. */
   loadSecret: () => ClipboardSecret;
@@ -533,7 +552,8 @@ const rawText = (data: RawData): string =>
   ).toString('utf8');
 
 export const createRepoStatusRoute = (options: RepoStatusRouteOptions): RepoStatusRoute => {
-  const probe = options.probe ?? createRepoStatusProbe({ now: options.now });
+  const homeDir = options.homeDir ?? homedir;
+  const probe = options.probe ?? createRepoStatusProbe({ homeDir, now: options.now });
   const localHostname = options.localHostname ?? osHostname;
   const limiter = options.limiter ?? createFailureLimiter(options.now);
   const requests =
@@ -689,11 +709,13 @@ export const createRepoStatusRoute = (options: RepoStatusRouteOptions): RepoStat
         return;
       }
       requests.fail(ip);
+      const local = isLocalHost(host, localHostname());
+      const cwd = local ? await resolveWidgetDirectory(message.cwd, homeDir()) : null;
       let status: RepoStatus;
-      if (!isLocalHost(host, localHostname())) status = { state: 'remote' };
-      else if (!validCwd(message.cwd)) status = { state: 'not-a-repo' };
+      if (!local) status = { state: 'remote' };
+      else if (!cwd) status = { state: 'not-a-repo' };
       else {
-        const result = await queuedGit(message.cwd, () => !finished);
+        const result = await queuedGit(cwd, () => !finished);
         if (!result || finished) return;
         status = result.status;
         if (status.state === 'ok' && 'ci' in result && result.ci) {

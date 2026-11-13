@@ -58,7 +58,7 @@ import {
 } from './workspace/pane-create';
 import { createPictureController } from './workspace/pictures';
 import { createWorkspaceScene, type WorkspaceScene } from './xr';
-import { createXREntryController, type XrEntryController } from './xr/entry';
+import { createXREntryController, type XrEntryController, type XrEntryMode } from './xr/entry';
 import {
   createIndexedDBPictureStorage,
   createIndexedDBRecentPictureStorage,
@@ -99,7 +99,7 @@ let updateChecker: UpdateChecker | undefined;
 let reloading = false;
 let updateAvailable = false;
 let enteringXR = false;
-let xrEntryMode: 'vr' | 'ar' = 'vr';
+let xrEntryMode: XrEntryMode = 'vr';
 let xrEntry: XrEntryController;
 let speechInput: SpeechInput | undefined;
 const DEMO_CREATION: PaneCreationState = {
@@ -151,7 +151,7 @@ function maybeReloadUpdate(): void {
   if (shouldAutoReload(updateAvailable, scene.state.xrMode, enteringXR)) void reloadApp();
 }
 
-async function enterXR(mode: 'vr' | 'ar'): Promise<void> {
+async function enterXR(mode: XrEntryMode): Promise<void> {
   await xrEntry.start(mode).catch(() => undefined);
 }
 
@@ -547,8 +547,8 @@ ui = mountWorkspaceUI(app, {
   onEnterXR: () => {
     void enterXR(xrEntryMode);
   },
-  onPassthrough: () => {
-    void enterXR('ar');
+  onPassthrough: (mode) => {
+    void enterXR(mode);
   },
   onSettingsChange: applySettings,
   onTerminalCurvature: (id, degrees) => scene.setTerminalCurvature(id, degrees),
@@ -642,6 +642,8 @@ xrEntry = createXREntryController({
     enteringXR = true;
     try {
       await scene.enterXR(mode);
+      xrEntryMode = 'vr';
+      ui.setXREntryMode('vr');
       scene.setNotice(pendingRestoreNotice);
       pendingRestoreNotice = null;
     } finally {

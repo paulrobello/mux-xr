@@ -125,9 +125,10 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
     case 'resetLayout':
       return 'Recover the workspace and UI near the current view; press twice to confirm';
     case 'xrMode':
+      if (data.xrMode === 'desk') return 'Show the virtual world with a movable passthrough window';
       return data.xrMode === 'ar'
-        ? 'Leave XR, then press Enter passthrough in the browser'
-        : 'Leave XR, then press Enter VR in the browser';
+        ? 'Show your real surroundings around the workspace'
+        : 'Show the virtual world without passthrough';
     case 'arrange':
       return data.pattern === 'sphere'
         ? 'Arrange terminals on a sphere in front of you'

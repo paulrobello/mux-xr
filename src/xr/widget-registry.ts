@@ -2,6 +2,7 @@ import type * as THREE from 'three';
 import { createAgentBoardWidget } from './agent-board';
 import { createBellFeedWidget } from './bell-feed';
 import { createBookingTimelineWidget } from './booking-timeline';
+import { createDeskWindow, DESK_WINDOW_KIND } from './desk-window';
 import { createHostLoadWidget } from './host-load';
 import { createKanbanStripWidget } from './kanban-strip';
 import { createMeshInboxWidget } from './mesh-inbox';
@@ -181,8 +182,15 @@ export const WIDGET_REGISTRY = [
   },
 ] as const satisfies readonly WidgetEntry[];
 
-/** Union of every registered kind; grows with each entry. */
-export type WidgetKind = (typeof WIDGET_REGISTRY)[number]['kind'];
+// The desk window belongs to World settings, where it can request a passthrough session.
+const DESK_WINDOW_ENTRY: WidgetEntry = {
+  kind: DESK_WINDOW_KIND,
+  displayName: 'Desk window',
+  spawnOffset: [0, -0.72, -1.05],
+  create: createDeskWindow,
+};
+
+export type WidgetKind = (typeof WIDGET_REGISTRY)[number]['kind'] | typeof DESK_WINDOW_KIND;
 
 export function widgetKinds(): WidgetKind[] {
   return WIDGET_REGISTRY.map((entry) => entry.kind);
@@ -197,6 +205,7 @@ export function getWidgetEntry(kind: WidgetKind): WidgetEntry {
 
 /** The entry for any value, or undefined when it is not a registered kind. */
 export function findWidgetEntry(kind: unknown): WidgetEntry | undefined {
+  if (kind === DESK_WINDOW_KIND) return DESK_WINDOW_ENTRY;
   return (WIDGET_REGISTRY as readonly WidgetEntry[]).find((entry) => entry.kind === kind);
 }
 

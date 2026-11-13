@@ -10,6 +10,7 @@ import {
 } from '../src/environment';
 import { loadSettings, validateSettings } from '../src/ui';
 import type { WorkspaceScene } from '../src/xr';
+import { DESK_WINDOW_KIND } from '../src/xr/desk-window';
 import { workspaceFloorY } from '../src/xr/floor-layout';
 
 const ENV_MODES = [
@@ -40,11 +41,15 @@ function harness() {
     xrMode: 'desktop' | 'vr' | 'ar';
     accentColor: string;
     environmentAccentColor: string;
+    widgets: string[];
+    fullPassthrough: boolean;
   } = {
     background: 'observatory',
     xrMode: 'desktop',
     accentColor: '',
     environmentAccentColor: '',
+    widgets: [],
+    fullPassthrough: false,
   };
   const listeners = new Set<() => void>();
   const workspace = {
@@ -165,12 +170,48 @@ describe('environment manager', () => {
     const stop = createEnvironmentManager(workspace, factories);
     set({ background: 'desert' });
     expect(liveRoots(scene)).toEqual([ROOT_NAMES.desert]);
-    set({ xrMode: 'ar' });
+    set({ xrMode: 'ar', fullPassthrough: true });
     expect(liveRoots(scene)).toEqual([]);
     expect(created[0].dispose).toHaveBeenCalledTimes(1);
-    set({ xrMode: 'vr' });
+    set({ xrMode: 'vr', fullPassthrough: false });
     expect(liveRoots(scene)).toEqual([ROOT_NAMES.desert]);
     expect(created).toHaveLength(2);
+    stop();
+  });
+
+  it('masks the selected environment only while the desk window is open in AR', () => {
+    const { scene, workspace, set, created, factories } = harness();
+    const stop = createEnvironmentManager(workspace, factories);
+    set({ background: 'studio', xrMode: 'ar', widgets: [DESK_WINDOW_KIND] });
+    expect(liveRoots(scene)).toEqual([ROOT_NAMES.studio]);
+    const checkMaterials = (enabled: boolean): void => {
+      const root = created.at(-1)?.instance.root;
+      const materials: THREE.Material[] = [];
+      root?.traverse((object) => {
+        const material = (object as THREE.Mesh).material;
+        if (material) materials.push(...(Array.isArray(material) ? material : [material]));
+      });
+      expect(materials.length).toBeGreaterThan(0);
+      for (const material of materials) {
+        expect(material.stencilWrite).toBe(enabled);
+        expect(material.stencilFunc).toBe(
+          enabled ? THREE.NotEqualStencilFunc : THREE.AlwaysStencilFunc,
+        );
+        expect(material.stencilWriteMask).toBe(enabled ? 0 : 0xff);
+      }
+    };
+    checkMaterials(true);
+    set({ xrMode: 'vr' });
+    expect(created).toHaveLength(1);
+    checkMaterials(false);
+    set({ xrMode: 'ar', background: 'hangar' });
+    expect(liveRoots(scene)).toEqual([ROOT_NAMES.hangar]);
+    checkMaterials(true);
+    set({ widgets: [] });
+    expect(liveRoots(scene)).toEqual([ROOT_NAMES.hangar]);
+    checkMaterials(false);
+    set({ fullPassthrough: true });
+    expect(liveRoots(scene)).toEqual([]);
     stop();
   });
 
@@ -206,7 +247,7 @@ describe('environment manager', () => {
 
   it('starts directly in AR without creating anything', () => {
     const { workspace, set, created, factories } = harness();
-    set({ background: 'hangar', xrMode: 'ar' });
+    set({ background: 'hangar', xrMode: 'ar', fullPassthrough: true });
     const stop = createEnvironmentManager(workspace, factories);
     expect(created).toHaveLength(0);
     stop();

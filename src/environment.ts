@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { BackgroundMode } from './contracts';
 import type { WorkspaceScene } from './xr';
 import { accentColorOrNull, resolveEnvironmentAccent, tintToLuminance } from './xr/accent-colors';
+import { DESK_WINDOW_KIND, setEnvironmentWindowMask } from './xr/desk-window';
 import { createAuroraTundraEnvironment } from './xr/environments/aurora-tundra';
 import { createCloudSummitEnvironment } from './xr/environments/cloud-summit';
 import { createDeepWaterEnvironment } from './xr/environments/deep-water';
@@ -59,9 +60,8 @@ export const ENVIRONMENT_FACTORIES: EnvironmentFactories = {
 };
 
 /**
- * Keeps at most one procedural environment alive: created when its mode is selected outside AR,
- * fully disposed as soon as the mode changes or AR starts. An accent change rebuilds it, since
- * some environments bake their glows into vertex colors.
+ * Keeps at most one procedural environment alive while its mode is selected and the world is
+ * visible. An accent change rebuilds it because some environments bake glows into vertex colors.
  */
 export function createEnvironmentManager(
   workspace: WorkspaceScene,
@@ -77,19 +77,24 @@ export function createEnvironmentManager(
     instance.dispose();
   };
   const sync = (): void => {
-    const { background, xrMode } = workspace.state;
+    const { background, xrMode, widgets, fullPassthrough } = workspace.state;
+    const deskWindow = xrMode === 'ar' && widgets.includes(DESK_WINDOW_KIND);
     if (failedMode !== background) failedMode = null;
-    const wanted = xrMode === 'ar' || failedMode === background ? undefined : factories[background];
+    const wanted = fullPassthrough || failedMode === background ? undefined : factories[background];
     if (!wanted) {
       release();
       return;
     }
     const accent = resolveEnvironmentAccent(workspace.state);
-    if (active?.mode === background && active.accent === accent) return;
+    if (active?.mode === background && active.accent === accent) {
+      setEnvironmentWindowMask(active.instance.root, deskWindow);
+      return;
+    }
     release();
     try {
       const instance = wanted(accentColorOrNull(accent));
       instance.root.visible = true;
+      setEnvironmentWindowMask(instance.root, deskWindow);
       workspace.scene.add(instance.root);
       active = { mode: background, accent, instance };
     } catch (error) {
@@ -238,7 +243,11 @@ export async function loadObservatory(
   let applyAccent: ((accent: string) => void) | null = null;
   let appliedAccent = '';
   const sync = (): void => {
-    const visible = workspace.state.background === 'observatory' && workspace.state.xrMode !== 'ar';
+    const { background: mode, xrMode, widgets, fullPassthrough } = workspace.state;
+    const deskWindow = xrMode === 'ar' && widgets.includes(DESK_WINDOW_KIND);
+    const visible = mode === 'observatory' && !fullPassthrough;
+    setEnvironmentWindowMask(background.root, deskWindow);
+    if (root) setEnvironmentWindowMask(root, deskWindow);
     background.root.visible = visible;
     if (root) root.visible = visible;
     if (placeholder) placeholder.visible = root === null && visible;

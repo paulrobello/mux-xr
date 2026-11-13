@@ -1,9 +1,6 @@
 const STORAGE_KEY = 'mux-xr:sticky-notes:v1';
 const VERSION = 1;
 
-/** Longest note kept; dictation beyond this is cut so a note stays readable at arm's length. */
-export const STICKY_NOTE_MAX_CHARS = 280;
-
 /** Matches the widget registry's instance id rule, so a note id is always a valid pose key. */
 const NOTE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -17,15 +14,9 @@ export function newStickyNoteId(now = Date.now(), random = Math.random): string 
     .padStart(6, '0')}`;
 }
 
-/** Collapses whitespace and caps the length; empty when nothing printable is left. */
+/** Collapses whitespace; empty when nothing printable is left. */
 export function normalizeStickyNoteText(text: string): string {
-  const characters = Array.from(text.replace(/\s+/g, ' ').trim());
-  return characters.length <= STICKY_NOTE_MAX_CHARS
-    ? characters.join('')
-    : `${characters
-        .slice(0, STICKY_NOTE_MAX_CHARS - 1)
-        .join('')
-        .trimEnd()}…`;
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 /** Note text by id; headset-local, kept beside the widget poses that place each note. */

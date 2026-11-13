@@ -29,7 +29,7 @@ export interface Widget {
   setStreamLinks?: (links: readonly StreamLinkInput[], nowMs: number) => void;
   /** Drops frame-time history; called when an XR session starts. */
   resetPerf?: () => void;
-  /** Receives the focused pane, its OSC 7 cwd and hostname every frame; widgets dedupe repeats. */
+  /** Receives the focused pane, directory or roster hint, and hostname. Widgets dedupe repeats. */
   setFocusedPane?: (paneId: string | null, cwd: string | null, host?: string | null) => void;
   /** Applies a new texture anisotropy, already capped to the renderer maximum. */
   setTextureAnisotropy?: (anisotropy: number) => void;

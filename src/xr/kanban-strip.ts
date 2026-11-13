@@ -109,7 +109,7 @@ export function kanbanStripView(model: KanbanStripModel): KanbanStripView {
     case 'no-pane':
       return quiet('No pane focused');
     case 'no-cwd':
-      return quiet('Directory unknown: the shell does not report its cwd');
+      return quiet('Directory unknown: no shell path or agent project');
     case 'loading':
       return quiet('Checking…');
     case 'failed':

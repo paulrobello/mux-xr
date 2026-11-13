@@ -14,7 +14,7 @@ const BACKGROUND_FLOOR_Y: Partial<Record<BackgroundMode, number>> = {
   summit: 0.035,
   koi: 0.035,
 };
-const PANEL_FLOOR_CLEARANCE = 0.06;
+export const PANEL_FLOOR_CLEARANCE = 0.06;
 
 /** Environments whose walls end panes' usable space; others are unbounded. */
 const BACKGROUND_PANE_SAFE_RADIUS: Partial<Record<BackgroundMode, number>> = {

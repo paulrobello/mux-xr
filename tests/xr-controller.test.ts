@@ -1,5 +1,26 @@
 const handPoses = vi.hoisted(() => ({ count: 0, probeReads: 0 }));
 vi.mock('../src/xr/labels', () => import('./helpers/labels'));
+const focusedDirectories = vi.hoisted(() => ({ git: vi.fn(), kanban: vi.fn() }));
+vi.mock('../src/xr/repo-status-widget', async (original) => {
+  const actual = await original<typeof import('../src/xr/repo-status-widget')>();
+  return {
+    ...actual,
+    createRepoStatusWidget: (texture: THREE.Texture | null) => ({
+      ...actual.createRepoStatusWidget(texture),
+      setFocusedPane: focusedDirectories.git,
+    }),
+  };
+});
+vi.mock('../src/xr/kanban-strip', async (original) => {
+  const actual = await original<typeof import('../src/xr/kanban-strip')>();
+  return {
+    ...actual,
+    createKanbanStripWidget: (texture: THREE.Texture | null) => ({
+      ...actual.createKanbanStripWidget(texture),
+      setFocusedPane: focusedDirectories.kanban,
+    }),
+  };
+});
 vi.mock('../src/xr/standard-hand', async () => {
   const { createCartoonHand } = await import('../src/xr/cartoon-hand');
   return {
@@ -1678,24 +1699,32 @@ describe('native XR controller event routing', () => {
     const tilt = (object: THREE.Object3D): number =>
       new THREE.Vector3(0, 0, 1).applyQuaternion(object.quaternion).y;
 
-    it('re-spawns a hand keyboard at the controller pose when controllers take over', () => {
-      const { workspace } = setup();
-      connectHand();
-      workspace.showInput('keyboard');
-      expect(keyboardRoot(workspace).position.distanceTo(eyeAt(HAND_SPAWN))).toBeLessThan(1e-6);
-      connectController(0);
-      connectController(1, [0, 0, 0, 0], 'left');
-      // A controller held normally rests right where the near hand keyboard was.
-      const parked = fakeXR.controllers[1] as THREE.Group;
-      parked.position.copy(eyeAt(new THREE.Vector3(-0.05, -0.38, -0.42)));
-      for (let frame = 0; frame < 4; frame++) fakeXR.frame?.(40 + frame * 16);
-      const keyboard = keyboardRoot(workspace);
-      expect(keyboard.position.distanceTo(eyeAt(PANEL_SPAWN))).toBeLessThan(1e-6);
-      expect(tilt(keyboard)).toBeCloseTo(0, 5);
-      workspace.toggleRadialMenu(fakeXR.controllers[0] as THREE.Group);
-      fakeXR.frame?.(1000);
-      expect(workspace.state.radialOpen).toBe(true);
-    });
+    it.each(['controller', 'hand'] as const)(
+      'keeps an open Keyborb in place when switching from %s input',
+      (from) => {
+        const { workspace } = setup('auto');
+        if (from === 'hand') connectHand();
+        else connectController(0);
+        workspace.showInput('keyboard');
+        expect(workspace.state.keyborbEnabled).toBe(from === 'hand');
+        const before = keyboardRoot(workspace);
+        const position = before.position.clone();
+        const quaternion = before.quaternion.clone();
+        const scale = before.scale.clone();
+        if (from === 'hand') connectController(0);
+        else connectHand();
+        for (let frame = 0; frame < 4; frame++) fakeXR.frame?.(40 + frame * 16);
+        expect(workspace.state.keyborbEnabled).toBe(from === 'controller');
+        const after = keyboardRoot(workspace);
+        expect(after.position.distanceTo(position)).toBeLessThan(1e-6);
+        expect(after.quaternion.angleTo(quaternion)).toBeLessThan(1e-6);
+        expect(after.scale.equals(scale)).toBe(true);
+        workspace.hideInput();
+        workspace.showInput('keyboard');
+        const next = from === 'hand' ? PANEL_SPAWN : HAND_SPAWN;
+        expect(keyboardRoot(workspace).position.distanceTo(eyeAt(next))).toBeLessThan(1e-6);
+      },
+    );
 
     it('spawns the hand keyboard near even after a far panel was open first', () => {
       const { workspace } = setup();
@@ -2713,6 +2742,60 @@ describe('native XR controller event routing', () => {
     });
   });
 
+  it.each([
+    { eyeHeight: 0.85, yaw: 0.8, pitch: -0.34 },
+    { eyeHeight: 1.7, yaw: -1.2, pitch: 0.3 },
+  ])(
+    'spawns the widgets above the floor and inside the forward view from $eyeHeight m',
+    ({ eyeHeight, yaw, pitch }) => {
+      const { workspace, container } = fixture();
+      try {
+        const eye = new THREE.Vector3(1.3, eyeHeight, 0.5);
+        workspace.camera.position.copy(eye);
+        workspace.camera.rotation.set(pitch, yaw, 0, 'YXZ');
+        workspace.camera.updateMatrixWorld(true);
+        const inverseHeading = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(0, 1, 0),
+          -yaw,
+        );
+        for (const { kind } of WIDGET_REGISTRY) {
+          if (kind === 'sticky-note') continue;
+          workspace.showInput('widgets');
+          hit(workspace, { inputAction: 'toggleWidget', widgetKind: kind });
+          const widget = workspace.scene.children.find(
+            (child) => child.userData.widgetKind === kind,
+          );
+          if (!widget) throw new Error(`Widget did not open: ${kind}`);
+          widget.updateWorldMatrix(true, true);
+          const bounds = new THREE.Box3();
+          widget.traverseVisible((child) => {
+            const geometry = (child as THREE.Mesh).geometry;
+            if (!geometry || child.parent?.userData.labelTextObject === child) return;
+            geometry.computeBoundingBox();
+            const box = geometry.boundingBox;
+            if (!box || box.isEmpty()) return;
+            for (const x of [box.min.x, box.max.x])
+              for (const y of [box.min.y, box.max.y])
+                for (const z of [box.min.z, box.max.z]) {
+                  const point = child.localToWorld(new THREE.Vector3(x, y, z));
+                  expect(point.y, kind).toBeGreaterThanOrEqual(0.095 - 1e-6);
+                  bounds.expandByPoint(point.sub(eye).applyQuaternion(inverseHeading));
+                }
+          });
+          const center = bounds.getCenter(new THREE.Vector3());
+          expect(center.z, kind).toBeLessThan(0);
+          expect(Math.abs(center.x / center.z), kind).toBeLessThanOrEqual(1 + 1e-6);
+          expect(Math.abs(center.y / center.z), kind).toBeLessThanOrEqual(
+            Math.tan(Math.PI / 5) + 1e-6,
+          );
+        }
+      } finally {
+        workspace.dispose();
+        container.remove();
+      }
+    },
+  );
+
   it('replaces the HUD keyboard shortcut with Widgets and closes clocks without typing', () => {
     const { workspace, actions, container } = fixture();
     const hud = workspace.scene.getObjectByName('xr-workspace-hud');
@@ -3067,6 +3150,36 @@ describe('native XR controller event routing', () => {
       sessionName: 'S',
       windowName: 'W',
     });
+    it('uses the focused agent project when its shell sends no directory', () => {
+      const { workspace, left, container } = fixture();
+      try {
+        for (const kind of ['repo-status', 'kanban-strip']) {
+          workspace.showInput('widgets');
+          hit(workspace, { inputAction: 'toggleWidget', widgetKind: kind });
+        }
+        workspace.selectTerminal('pane-a');
+        workspace.setAgentRoster([
+          { ...rosterRow('pane-a'), project: 'alpha' },
+          { ...rosterRow('pane-b'), project: 'beta' },
+        ]);
+        fakeXR.frame?.(0);
+        for (const probe of Object.values(focusedDirectories))
+          expect(probe).toHaveBeenLastCalledWith('pane-a', '~/Repos/alpha', null);
+        Object.assign(left, { cwd: '/actual/worktree', cwdHost: 'other-mac' });
+        fakeXR.frame?.(16);
+        for (const probe of Object.values(focusedDirectories))
+          expect(probe).toHaveBeenLastCalledWith('pane-a', '/actual/worktree', 'other-mac');
+        Object.assign(left, { cwd: null, cwdHost: null });
+        workspace.setAgentRoster([{ ...rosterRow('pane-b'), project: 'beta' }]);
+        fakeXR.frame?.(32);
+        for (const probe of Object.values(focusedDirectories))
+          expect(probe).toHaveBeenLastCalledWith('pane-a', null, null);
+      } finally {
+        workspace.dispose();
+        container.remove();
+      }
+    });
+
     const aim = (
       workspace: ReturnType<typeof createWorkspaceScene>,
       target: THREE.Vector3,
@@ -6988,6 +7101,41 @@ describe('native XR controller event routing', () => {
       container.remove();
     });
 
+    it.each(['button', 'Enter', 'physical Enter'] as const)(
+      'creates a target-free sticky note with %s',
+      (method) => {
+        const { workspace, actions, container } = fixture();
+        const dictationAction = vi.fn();
+        actions.dictationAction = dictationAction;
+        try {
+          workspace.selectTerminal(null);
+          workspace.setDictationState({ ...review('Check the desk lamp'), forNote: true });
+          workspace.showInput('keyboard');
+          expect(workspace.isTextEntryActive()).toBe(true);
+          expect(
+            visibleWithData(workspace, { inputAction: 'dictation', dictationAction: 'insert' }),
+          ).toBeUndefined();
+          const expected =
+            method === 'physical Enter' ? 'Check the desk lamp!' : 'Check the desk lamp';
+          if (method === 'button') hit(workspace, { inputAction: 'pinNote' });
+          else if (method === 'Enter') hit(workspace, { inputAction: 'key', key: 'Enter' });
+          else {
+            actions.editDictation = (text) =>
+              workspace.setDictationState({ ...review(text), forNote: true });
+            expect(workspace.typeTextEntryKey('!')).toBe(true);
+            expect(workspace.typeTextEntryKey('Enter')).toBe(true);
+          }
+          expect(Object.values(notes())).toEqual([expected]);
+          expect(dictationAction.mock.calls).toEqual([['cancel']]);
+          expect(actions.sendKey).not.toHaveBeenCalled();
+          expect(actions.sendText).not.toHaveBeenCalled();
+        } finally {
+          workspace.dispose();
+          container.remove();
+        }
+      },
+    );
+
     it('pins the reviewed transcript in view as a placed note and ends dictation', () => {
       const { workspace, actions, container } = fixture();
       const dictationAction = vi.fn();
@@ -7004,6 +7152,44 @@ describe('native XR controller event routing', () => {
       expect(text?.userData.labelText).toBe('Call the vet');
       workspace.dispose();
       container.remove();
+    });
+
+    it('reads a restored long note through the last page and back', () => {
+      const text = `First sentence. ${'Repeated words. '.repeat(22)} Final sentence.`;
+      localStorage.setItem(
+        'mux-xr:sticky-notes:v1',
+        JSON.stringify({
+          version: 1,
+          notes: { 'note-long': text },
+        }),
+      );
+      const { workspace, container } = fixture();
+      try {
+        fakeXR.frame?.(0);
+        hit(workspace, {
+          widgetKind: 'sticky-note',
+          inputAction: 'readStickyNote',
+          helpText: 'Read the full note',
+        });
+        const page = () =>
+          String(workspace.scene.getObjectByName('sticky-note-page')?.userData.labelText);
+        expect(page()).toContain('First sentence.');
+        for (
+          let count = 0;
+          count < 12 && visibleWithData(workspace, { inputAction: 'stickyNotePage', delta: 1 });
+          count++
+        )
+          hit(workspace, { inputAction: 'stickyNotePage', delta: 1 });
+        expect(page().replace(/\s+/g, ' ')).toContain('Final sentence.');
+        expect(
+          visibleWithData(workspace, { inputAction: 'stickyNotePage', delta: 1 }),
+        ).toBeUndefined();
+        hit(workspace, { inputAction: 'stickyNotePage', delta: -1 });
+        expect(page()).not.toContain('Final');
+      } finally {
+        workspace.dispose();
+        container.remove();
+      }
     });
 
     it('deletes a note only on a second press within the confirm window', () => {
@@ -8127,6 +8313,104 @@ describe('native XR controller event routing', () => {
       expect(request).toHaveBeenCalledOnce();
       expect(workspace.state.xrMode).toBe('desktop');
       expect(workspace.state.notice).toContain('Enter passthrough');
+    } finally {
+      workspace.dispose();
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('opens a desk window in AR, moves and scales it by the rim, and restores its pose', async () => {
+    const listeners = new Map<string, () => void>();
+    const session = {
+      environmentBlendMode: 'alpha-blend',
+      addEventListener: (type: string, listener: () => void) => listeners.set(type, listener),
+      end: vi.fn(async () => listeners.get('end')?.()),
+    };
+    const requestSession = vi.fn(async () => session);
+    vi.stubGlobal('navigator', { xr: { requestSession } });
+    const { workspace, actions, container } = fixture();
+    try {
+      await workspace.enterXR('desk');
+      fakeXR.frame?.(0);
+      expect(requestSession).toHaveBeenCalledWith('immersive-ar', expect.anything());
+      expect(workspace.state.xrMode).toBe('ar');
+      expect(workspace.state.widgets).toContain('desk-window');
+      expect(workspace.scene.background).toBeNull();
+      expect(workspace.scene.getObjectByName('desk-window-backdrop')?.visible).toBe(true);
+      const frame = workspace.scene.getObjectByName('desk-window');
+      const rimLeft = frame?.getObjectByName('desk-window-rim-left');
+      const rimRight = frame?.getObjectByName('desk-window-rim-right');
+      if (!frame || !rimLeft || !rimRight) throw new Error('Desk window frame is missing');
+      // Keep the terminal furniture away from the controller rays aimed at the rim.
+      workspace.scene.getObjectByName('terminal-panel-pane-a')?.position.setX(-5);
+      workspace.scene.getObjectByName('terminal-panel-pane-b')?.position.setX(5);
+      const left = fakeXR.controllers[0] as THREE.Group;
+      const right = fakeXR.controllers[1] as THREE.Group;
+      const pad = connectController(0, [0, 0, 0, 0], 'left');
+      connectController(1, [0, 0, 0, 0], 'right');
+      aimController(left, rimLeft);
+      left.dispatchEvent({ type: 'squeezestart' } as never);
+      const initial = frame.position.clone();
+      const initialRotation = frame.quaternion.clone();
+      left.position.x += 0.16;
+      (pad.axes as number[])[3] = 0.8;
+      fakeXR.frame?.(32);
+      expect(frame.position.x).toBeCloseTo(initial.x + 0.16);
+      expect(frame.quaternion.angleTo(initialRotation)).toBeGreaterThan(0.01);
+      (pad.axes as number[])[3] = 0;
+      aimController(right, rimRight);
+      right.dispatchEvent({ type: 'squeezestart' } as never);
+      const scale = frame.scale.x;
+      left.position.x -= 0.1;
+      right.position.x += 0.1;
+      fakeXR.frame?.(64);
+      expect(frame.scale.x).toBeGreaterThan(scale);
+      left.dispatchEvent({ type: 'squeezeend' } as never);
+      right.dispatchEvent({ type: 'squeezeend' } as never);
+      const saved = frame.position.clone();
+      hit(workspace, { inputAction: 'closeWidget', widgetKind: 'desk-window' });
+      expect(workspace.state.widgets).not.toContain('desk-window');
+      expect(workspace.state.xrMode).toBe('ar');
+      expect(workspace.scene.getObjectByName('desk-window-backdrop')?.visible).toBe(true);
+      expect(workspace.state.fullPassthrough).toBe(false);
+      expect(session.end).not.toHaveBeenCalled();
+      workspace.showInput('world');
+      hit(workspace, { inputAction: 'xrMode', xrMode: 'desk' });
+      const restored = workspace.scene.getObjectByName('desk-window');
+      expect(restored?.position.distanceTo(saved)).toBeLessThan(1e-6);
+      workspace.showInput('world');
+      hit(workspace, { inputAction: 'xrMode', xrMode: 'vr' });
+      expect(workspace.state.widgets).not.toContain('desk-window');
+      expect(workspace.scene.getObjectByName('desk-window-backdrop')?.visible).toBe(true);
+      expect(workspace.state.fullPassthrough).toBe(false);
+      hit(workspace, { inputAction: 'xrMode', xrMode: 'ar' });
+      expect(workspace.state.fullPassthrough).toBe(true);
+      expect(workspace.scene.getObjectByName('desk-window-backdrop')?.visible).toBe(false);
+      hit(workspace, { inputAction: 'xrMode', xrMode: 'desk' });
+      expect(workspace.state.widgets).toContain('desk-window');
+      expect(session.end).not.toHaveBeenCalled();
+      expect(requestSession).toHaveBeenCalledOnce();
+      expect(actions.sendKey).not.toHaveBeenCalled();
+      await workspace.exitXR();
+      expect(workspace.state.xrMode).toBe('desktop');
+      expect(workspace.scene.getObjectByName('desk-window')).toBeUndefined();
+    } finally {
+      workspace.dispose();
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('rejects desk-window entry when the compositor cannot blend camera passthrough', async () => {
+    const session = { environmentBlendMode: 'additive', end: vi.fn(async () => undefined) };
+    vi.stubGlobal('navigator', { xr: { requestSession: async () => session } });
+    const { workspace, container } = fixture();
+    try {
+      await expect(workspace.enterXR('desk')).rejects.toThrow('alpha-blended passthrough');
+      expect(session.end).toHaveBeenCalledOnce();
+      expect(workspace.state.xrMode).toBe('desktop');
+      expect(workspace.scene.getObjectByName('desk-window')).toBeUndefined();
     } finally {
       workspace.dispose();
       container.remove();
