@@ -17,12 +17,14 @@ import {
   samePaneId,
   sameProcess,
 } from './lifecycle';
+import { createLinkStatsRecorder } from './link-stats';
 import { createTerminalPainter, type TerminalDamageHint } from './painter';
 import {
   createFocusMessage,
   createInputMessage,
   createMouseMessage,
   createPasteMessage,
+  createPingMessage,
   createResizeMessage,
   decodeServerMessage,
   encodeClientMessage,
@@ -176,6 +178,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   let cwd: string | null = null;
   let cwdHost: string | null = null;
   let paneCreateAllowed: boolean | undefined;
+  const link = createLinkStatsRecorder();
   const listeners = new Set<() => void>();
   const notify = (): void => {
     for (const listener of listeners) listener();
@@ -386,6 +389,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     };
     ws.onmessage = (event) => {
       if (token !== generation || ws !== socket) return;
+      link.noteMessage(event.data instanceof ArrayBuffer ? event.data.byteLength : 0);
       try {
         const msg = decodeServerMessage(event.data as ArrayBuffer);
         switch (msg.message.case) {
@@ -396,6 +400,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             cwd = connected.cwd?.startsWith('/') ? connected.cwd : null;
             cwdHost = cwd ? (connected.cwdHostname ?? null) : null;
             paneCreateAllowed = connected.paneCreateAllowed;
+            link.noteConnected();
             mouseTrackingFallback = 'none';
             mouseTrackingDisabled = false;
             serverMouseMode = null;
@@ -427,11 +432,15 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
               output.damageGeneration === undefined
                 ? null
                 : { generation: output.damageGeneration, ranges: output.damage };
+            link.noteOutput(damage !== null);
             writeTerminal(output.data, token, true, damage);
             break;
           }
           case 'bell':
             markBell(token, true);
+            break;
+          case 'pong':
+            link.notePong(performance.now());
             break;
           case 'resize':
             if (!validGrid(msg.message.value.cols, msg.message.value.rows)) break;
@@ -509,6 +518,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     };
     ws.onclose = () => {
       if (token !== generation) return;
+      link.noteClosed();
       socket = null;
       ready = false;
       if (!disposed && status !== 'exited') {
@@ -555,6 +565,14 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     get paneCreateAllowed() {
       return paneCreateAllowed;
     },
+    linkStats: link.stats,
+    // Bypasses send(): readonly panes still answer pings, and their RTT matters as much.
+    pingLink: (nowMs) =>
+      link.ping(nowMs, () => {
+        if (!ready || !socket || socket.readyState !== WebSocket.OPEN) return false;
+        socket.send(encodeClientMessage(createPingMessage()));
+        return true;
+      }),
     get bellPending() {
       return bellPending;
     },

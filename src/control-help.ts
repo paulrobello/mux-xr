@@ -41,6 +41,8 @@ export function getControlHelp(data: Record<string, unknown>): string | undefine
       return "Send the Quest clipboard, or text highlighted in Mux XR, to the Mac's clipboard";
     case 'keyboardCurvature':
       return 'Curve the keyboard without changing terminal size';
+    case 'pinNote':
+      return 'Pin the reviewed transcript in space as a sticky note';
     case 'dictation':
       return data.dictationAction === 'insert'
         ? 'Insert the reviewed transcript without pressing Enter'

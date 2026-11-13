@@ -160,18 +160,8 @@ function hit(
   event = 'selectstart',
   distance = 0.3,
 ): void {
-  let button: THREE.Object3D | undefined;
-  workspace.scene.traverse((object) => {
-    let visible = true;
-    for (let parent: THREE.Object3D | null = object; parent; parent = parent.parent)
-      if (!parent.visible) visible = false;
-    if (
-      visible &&
-      !button &&
-      Object.entries(data).every(([key, value]) => object.userData[key] === value)
-    )
-      button = object;
-  });
+  if (data.inputAction === 'toggleWidget') turnToWidget(workspace, data);
+  const button = visibleWithData(workspace, data);
   if (!button) throw new Error(`Control not found: ${JSON.stringify(data)}`);
   workspace.scene.updateMatrixWorld(true);
   const controller = fakeXR.controllers[0] as THREE.Group;
@@ -184,6 +174,37 @@ function hit(
   controller.quaternion.copy(orientation);
   workspace.scene.updateMatrixWorld(true);
   controller.dispatchEvent({ type: event } as never);
+}
+
+function visibleWithData(
+  workspace: ReturnType<typeof createWorkspaceScene>,
+  data: Record<string, unknown>,
+): THREE.Object3D | undefined {
+  let found: THREE.Object3D | undefined;
+  workspace.scene.traverse((object) => {
+    let visible = true;
+    for (let parent: THREE.Object3D | null = object; parent; parent = parent.parent)
+      if (!parent.visible) visible = false;
+    if (
+      visible &&
+      !found &&
+      Object.entries(data).every(([key, value]) => object.userData[key] === value)
+    )
+      found = object;
+  });
+  return found;
+}
+
+/** The Widgets panel pages once the registry outgrows one page: turn to the entry's page. */
+function turnToWidget(
+  workspace: ReturnType<typeof createWorkspaceScene>,
+  data: Record<string, unknown>,
+): void {
+  for (const delta of [-1, 1])
+    for (let turns = 0; turns < 8 && !visibleWithData(workspace, data); turns += 1) {
+      if (!visibleWithData(workspace, { inputAction: 'widgetsPage', delta })) break;
+      hit(workspace, { inputAction: 'widgetsPage', delta });
+    }
 }
 
 function objectWithData(
@@ -286,6 +307,7 @@ describe('native XR controller event routing', () => {
     fakeXR.presenting = true;
     localStorage.removeItem('mux-xr:ui-poses:v2');
     localStorage.removeItem('mux-xr:widget-poses:v2');
+    localStorage.removeItem('mux-xr:sticky-notes:v1');
     localStorage.removeItem('mux-xr:terminal-warp:v1');
     fakeXR.controllers.forEach((controller) => {
       const object = controller as THREE.Group;
@@ -2963,14 +2985,16 @@ describe('native XR controller event routing', () => {
       const b = projected(right);
       return a.x[0] < b.x[1] && b.x[0] < a.x[1] && a.y[0] < b.y[1] && b.y[0] < a.y[1];
     };
+    // Notes come from Pin as note, not the panel; the sticky note entry is last, so indexes hold.
+    const spawned = WIDGET_REGISTRY.filter(({ kind }) => kind !== 'sticky-note');
     const spawnAll = (workspace: ReturnType<typeof createWorkspaceScene>): THREE.Object3D[] => {
-      for (const { kind } of WIDGET_REGISTRY) {
+      for (const { kind } of spawned) {
         workspace.showInput('widgets');
         hit(workspace, { inputAction: 'toggleWidget', widgetKind: kind });
       }
-      expect(workspace.state.widgets).toHaveLength(WIDGET_REGISTRY.length);
+      expect(workspace.state.widgets).toHaveLength(spawned.length);
       const roots: THREE.Object3D[] = [];
-      for (const { kind } of WIDGET_REGISTRY) {
+      for (const { kind } of spawned) {
         let root = objectWithData(workspace, { widgetKind: kind });
         while (root.parent && root.parent !== workspace.scene) root = root.parent;
         roots.push(root);
@@ -3396,10 +3420,9 @@ describe('native XR controller event routing', () => {
     const { workspace, container } = fixture();
     workspace.showInput('widgets');
     for (const { kind, displayName } of WIDGET_REGISTRY) {
-      expect(
-        objectWithData(workspace, { inputAction: 'toggleWidget', widgetKind: kind }).userData
-          .labelText,
-      ).toBe(`Add ${displayName}`);
+      const control = { inputAction: 'toggleWidget', widgetKind: kind };
+      turnToWidget(workspace, control);
+      expect(objectWithData(workspace, control).userData.labelText).toBe(`Add ${displayName}`);
     }
     hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'digital-clock' });
     workspace.showInput('widgets');
@@ -3440,6 +3463,7 @@ describe('native XR controller event routing', () => {
       workspace.showInput('widgets');
       hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'picture' });
       workspace.showInput('widgets');
+      turnToWidget(workspace, { inputAction: 'toggleWidget', widgetKind: 'picture' });
       expect(
         objectWithData(workspace, { inputAction: 'toggleWidget', widgetKind: 'picture' }).userData
           .labelText,
@@ -6926,6 +6950,176 @@ describe('native XR controller event routing', () => {
     expect(workspace.scene.getObjectByName('xr-fps-counter')?.userData.labelText).toBe('FPS 60');
     workspace.dispose();
     container.remove();
+  });
+
+  describe('sticky notes', () => {
+    const review = (transcript: string) =>
+      ({ supported: true, status: 'review', transcript, error: null }) as const;
+    const notes = (): Record<string, string> =>
+      JSON.parse(localStorage.getItem('mux-xr:sticky-notes:v1') ?? '{"notes":{}}').notes;
+    const poses = (): Record<string, { placed?: true }> =>
+      JSON.parse(localStorage.getItem('mux-xr:widget-poses:v2') ?? '{"poses":{}}').poses;
+    const pin = (workspace: ReturnType<typeof createWorkspaceScene>, text: string): string => {
+      workspace.setDictationState(review(text));
+      workspace.showInput('keyboard');
+      hit(workspace, { inputAction: 'pinNote' });
+      const key = workspace.state.widgets.find((entry) => entry.startsWith('sticky-note:'));
+      if (!key) throw new Error('note missing');
+      return key;
+    };
+
+    it('starts note dictation from the Widgets panel, or explains when speech is unavailable', () => {
+      const { workspace, actions, container } = fixture();
+      const dictationAction = vi.fn();
+      actions.dictationAction = dictationAction;
+      workspace.showInput('widgets');
+      hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'sticky-note' });
+      expect(dictationAction).not.toHaveBeenCalled();
+      expect(workspace.state.notice).toBe(
+        'Speech is unavailable here, so a note cannot be dictated',
+      );
+      workspace.setDictationState({ supported: true, status: 'idle', transcript: '', error: null });
+      workspace.showInput('widgets');
+      hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'sticky-note' });
+      expect(dictationAction).toHaveBeenLastCalledWith('startNote');
+      expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeDefined();
+      expect(workspace.state.widgets).toEqual([]);
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('pins the reviewed transcript in view as a placed note and ends dictation', () => {
+      const { workspace, actions, container } = fixture();
+      const dictationAction = vi.fn();
+      actions.dictationAction = dictationAction;
+      workspace.setDictationState({ ...review(''), status: 'listening' });
+      workspace.showInput('keyboard');
+      expect(workspace.scene.getObjectByName('xr-dictation-pin-note')).toBeUndefined();
+      const key = pin(workspace, '  Call   the   vet  ');
+      const id = key.slice('sticky-note:'.length);
+      expect(notes()).toEqual({ [id]: 'Call the vet' });
+      expect(poses()[key]?.placed).toBe(true);
+      expect(dictationAction).toHaveBeenLastCalledWith('cancel');
+      const text = workspace.scene.getObjectByName('sticky-note-text');
+      expect(text?.userData.labelText).toBe('Call the vet');
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('deletes a note only on a second press within the confirm window', () => {
+      vi.useFakeTimers();
+      const { workspace, container } = fixture();
+      try {
+        const key = pin(workspace, 'Ship it');
+        hit(workspace, { inputAction: 'widgetControl', widgetKind: 'sticky-note' });
+        expect(workspace.state.widgets).toContain(key);
+        const confirm = workspace.scene.getObjectByName('sticky-note-confirm');
+        expect(confirm?.visible).toBe(true);
+        vi.advanceTimersByTime(3100);
+        fakeXR.frame?.(100);
+        expect(confirm?.visible).toBe(false);
+        hit(workspace, { inputAction: 'widgetControl', widgetKind: 'sticky-note' });
+        hit(workspace, { inputAction: 'closeWidget', widgetKind: 'sticky-note' });
+        expect(workspace.state.widgets).not.toContain(key);
+        expect(notes()).toEqual({});
+        expect(poses()[key]).toBeUndefined();
+      } finally {
+        workspace.dispose();
+        container.remove();
+        vi.useRealTimers();
+      }
+    });
+
+    it('restores notes after a reload, including one whose pose never saved', () => {
+      const first = fixture();
+      const key = pin(first.workspace, 'Water the plants');
+      first.workspace.dispose();
+      first.container.remove();
+      const stored = JSON.parse(localStorage.getItem('mux-xr:sticky-notes:v1') ?? '{}');
+      stored.notes['note-orphan'] = 'Orphan';
+      localStorage.setItem('mux-xr:sticky-notes:v1', JSON.stringify(stored));
+      const { workspace, container } = fixture();
+      fakeXR.frame?.(16);
+      expect(workspace.state.widgets).toEqual(
+        expect.arrayContaining([key, 'sticky-note:note-orphan']),
+      );
+      const texts: unknown[] = [];
+      workspace.scene.traverse((object) => {
+        if (object.name === 'sticky-note-text') texts.push(object.userData.labelText);
+      });
+      expect(texts.sort()).toEqual(['Orphan', 'Water the plants']);
+      expect(poses()['sticky-note:note-orphan']).toBeDefined();
+      workspace.dispose();
+      container.remove();
+    });
+  });
+
+  describe('stream health feed', () => {
+    const links = (left: TerminalSurface, right: TerminalSurface) => {
+      const stats = {
+        bytesReceived: 0,
+        reconnects: 0,
+        resyncs: 0,
+        missedPings: 0,
+        rttMs: 24 as number | null,
+      };
+      const ping = vi.fn(() => true);
+      Object.assign(left, { linkStats: stats, pingLink: ping });
+      Object.assign(right, { linkStats: { ...stats, rttMs: null }, pingLink: ping });
+      return { stats, ping };
+    };
+    const run = (start: number, seconds: number): number => {
+      let time = start;
+      for (let frame = 0; frame < seconds * 60; frame += 1) {
+        time += 1000 / 60;
+        fakeXR.frame?.(time);
+      }
+      return time;
+    };
+
+    it('neither pings nor samples streams while no stream health widget is open', () => {
+      const { workspace, container, left, right } = fixture();
+      const { ping } = links(left, right);
+      const linkStats = vi.fn(() => undefined);
+      Object.defineProperty(left, 'linkStats', { get: linkStats });
+      run(0, 5);
+      expect(ping).not.toHaveBeenCalled();
+      expect(linkStats).not.toHaveBeenCalled();
+      workspace.dispose();
+      container.remove();
+    });
+
+    it('pings each pane about once a second and shows its rate and round trip', () => {
+      const { workspace, container, left, right } = fixture();
+      const { stats, ping } = links(left, right);
+      workspace.showInput('widgets');
+      hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'stream-health' });
+      let time = run(0, 1);
+      const pings = ping.mock.calls.length;
+      expect(pings).toBeGreaterThanOrEqual(2);
+      expect(pings).toBeLessThanOrEqual(4);
+      stats.bytesReceived = 50 * 1024;
+      time = run(time, 2);
+      expect(ping.mock.calls.length - pings).toBeGreaterThanOrEqual(2);
+      expect(ping.mock.calls.length - pings).toBeLessThanOrEqual(6);
+      const label = (name: string) => workspace.scene.getObjectByName(name)?.userData.labelText;
+      const rows = [1, 2].map((row) => ({
+        name: label(`stream-health-row-${row}-name`),
+        rate: label(`stream-health-row-${row}-rate`),
+        rtt: label(`stream-health-row-${row}-rtt`),
+      }));
+      const a = rows.find((row) => row.name === 'A');
+      expect(a?.rtt).toBe('24 ms');
+      expect(a?.rate).toMatch(/kB\/s$/);
+      expect(a?.rate).not.toBe('-- kB/s');
+      expect(rows.find((row) => row.name === 'B')?.rtt).toBe('-- ms');
+      hit(workspace, { inputAction: 'closeWidget', widgetKind: 'stream-health' });
+      const closed = ping.mock.calls.length;
+      run(time, 3);
+      expect(ping.mock.calls.length).toBe(closed);
+      workspace.dispose();
+      container.remove();
+    });
   });
 
   describe('performance gauge feed', () => {

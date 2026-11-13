@@ -1,5 +1,6 @@
 export type DictationStatus = 'idle' | 'listening' | 'transcribing' | 'review' | 'error';
-export type DictationAction = 'start' | 'stop' | 'cancel' | 'clear' | 'insert';
+/** `startNote` dictates a sticky note, so it needs no target pane; its text is pinned, not inserted. */
+export type DictationAction = 'start' | 'startNote' | 'stop' | 'cancel' | 'clear' | 'insert';
 
 export interface DictationState {
   supported: boolean;
@@ -138,12 +139,12 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
       // Recognition may already have ended.
     }
   };
-  const start = (): void => {
+  const start = (forNote = false): void => {
     if (!createRecognition || disposed || ['listening', 'transcribing'].includes(state.status))
       return;
     const currentGeneration = invalidate();
-    targetPaneId = options.getTargetPaneId();
-    if (!targetPaneId || !options.canInsert(targetPaneId)) {
+    targetPaneId = forNote ? null : options.getTargetPaneId();
+    if (!forNote && (!targetPaneId || !options.canInsert(targetPaneId))) {
       publish({
         status: 'error',
         transcript: '',
@@ -288,6 +289,7 @@ export function createSpeechInput(options: SpeechInputOptions): SpeechInput {
   const dispatch = (action: DictationAction): void => {
     if (disposed) return;
     if (action === 'start') start();
+    else if (action === 'startNote') start(true);
     else if (action === 'stop') stop();
     else if (action === 'cancel') cancel();
     else if (action === 'clear') clear();

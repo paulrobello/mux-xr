@@ -1,4 +1,5 @@
 import type { PaneProcess } from './terminal/lifecycle';
+import type { TerminalLinkStats } from './terminal/link-stats';
 
 export interface PaneDescriptor {
   id: string;
@@ -86,6 +87,10 @@ export interface TerminalSurface {
   readonly cwdHost?: string | null;
   /** The streamer's advertised pane-create capability; undefined when it does not advertise one. */
   readonly paneCreateAllowed?: boolean;
+  /** Cumulative stream counters for the stream health widget. */
+  readonly linkStats?: Readonly<TerminalLinkStats>;
+  /** Sends a keepalive ping to time the round trip; at most one is in flight. */
+  pingLink?(nowMs: number): boolean;
   readonly bellPending?: boolean;
   acknowledgeBell?(): void;
   readonly canResizeGrid: boolean;

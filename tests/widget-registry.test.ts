@@ -64,9 +64,11 @@ describe('widget registry', () => {
       ['bell-feed', 'Bell feed', [1.05, 0.15, -1.1]],
       ['perf-gauge', 'Performance', [-1, 0.15, -1.1]],
       ['host-load', 'Host load', [-1.15, 0.53, -1.3]],
+      ['stream-health', 'Stream health', [-1.6, 0.6, -1.1]],
       ['repo-status', 'Git & CI', [0.6, -0.1, -1.4]],
       ['weather', 'Weather', [-0.6, 0.574, -1.32]],
       ['picture', 'Picture', [-0.95, -0.55, -1.15]],
+      ['sticky-note', 'Sticky note', [1.45, 0.7, -1.1]],
     ]);
     expect(widgetKinds()).toEqual([
       'digital-clock',
@@ -76,9 +78,11 @@ describe('widget registry', () => {
       'bell-feed',
       'perf-gauge',
       'host-load',
+      'stream-health',
       'repo-status',
       'weather',
       'picture',
+      'sticky-note',
     ]);
   });
 

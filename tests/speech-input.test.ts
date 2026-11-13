@@ -45,6 +45,23 @@ const result = (text: string, isFinal: boolean, index = 0): unknown => ({
 });
 
 describe('speech input', () => {
+  it('dictates a note without a target pane, then refuses to insert it anywhere', () => {
+    const recognition = installRecognition();
+    const states: DictationState[] = [];
+    const input = createSpeechInput({
+      onState: (state) => states.push(state),
+      getTargetPaneId: () => null,
+      canInsert: () => false,
+      onInsert: () => true,
+    });
+    input.dispatch('start');
+    expect(states.at(-1)?.status).toBe('error');
+    expect(recognition.start).not.toHaveBeenCalled();
+    input.dispatch('startNote');
+    expect(recognition.start).toHaveBeenCalledOnce();
+    expect(states.at(-1)?.status).toBe('listening');
+    input.dispose();
+  });
   it('prefers an explicitly configured recognizer over the browser speech service', () => {
     const native = installRecognition();
     const local: SpeechRecognitionLike = {

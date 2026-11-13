@@ -5,6 +5,8 @@ import { createHostLoadWidget } from './host-load';
 import { createPerfGaugeWidget } from './perf-gauge';
 import { createPictureFrameWidget } from './picture-frame';
 import { createRepoStatusWidget } from './repo-status-widget';
+import { createStickyNoteWidget } from './sticky-note';
+import { createStreamHealthWidget } from './stream-health';
 import { createTimerWidget } from './timer-widget';
 import { createWeatherWidget } from './weather-widget';
 import { createClockWidget, type Widget } from './widgets';
@@ -82,6 +84,16 @@ export const WIDGET_REGISTRY = [
     create: (envMap) => createHostLoadWidget(envMap),
   },
   {
+    kind: 'stream-health',
+    displayName: 'Stream health',
+    // Left of host load and the weather banner, beside the other diagnostics; the only clear
+    // spot at a readable scale once every earlier default is spawned.
+    spawnOffset: [-1.6, 0.6, -1.1],
+    spawnScale: 0.6,
+    faceViewer: true,
+    create: (envMap) => createStreamHealthWidget(envMap),
+  },
+  {
     kind: 'repo-status',
     displayName: 'Git & CI',
     // Right of the board, below the analog clock, near eye level; the only clear spot at this
@@ -111,6 +123,18 @@ export const WIDGET_REGISTRY = [
     faceViewer: true,
     // The menu spawns the placeholder; pictures picked on the page fill it.
     create: (envMap) => createPictureFrameWidget(envMap),
+  },
+  {
+    kind: 'sticky-note',
+    displayName: 'Sticky note',
+    // Pin as note places each note in view; this upper-right spot, the only one clear of every
+    // default, picture slot and HUD pose, takes notes restored without a saved pose.
+    spawnOffset: [1.45, 0.7, -1.1],
+    spawnScale: 0.7,
+    multiInstance: true,
+    faceViewer: true,
+    // The menu starts dictation; Pin as note creates each note with its text.
+    create: (envMap) => createStickyNoteWidget(envMap),
   },
 ] as const satisfies readonly WidgetEntry[];
 

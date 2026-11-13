@@ -6,6 +6,7 @@ import type { BellFeedEntry } from './bell-feed';
 import { createScalableLabel, disposeScalableLabel, updateScalableLabel } from './labels';
 import type { PerfSample } from './perf-gauge';
 import type { PictureImage } from './picture-image';
+import type { StreamLinkInput } from './stream-health';
 import { applyUIEnvironment } from './ui-environment';
 
 export type ClockKind = 'digital-clock' | 'analog-clock';
@@ -24,6 +25,8 @@ export interface Widget {
   setPointed?: (pointed: boolean) => void;
   /** Receives frame stats each time the scene's frame counter reports (about 2 Hz). */
   setPerfSample?: (sample: PerfSample) => void;
+  /** Receives every pane stream about once a second, only while such a widget is mounted. */
+  setStreamLinks?: (links: readonly StreamLinkInput[], nowMs: number) => void;
   /** Drops frame-time history; called when an XR session starts. */
   resetPerf?: () => void;
   /** Receives the focused pane, its OSC 7 cwd and hostname every frame; widgets dedupe repeats. */

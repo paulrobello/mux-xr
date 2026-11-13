@@ -156,6 +156,18 @@ import { PICTURE_LIMITS } from './picture-store';
 import { createRadialMenu, type RadialMenuAction } from './radial-menu';
 import { ON_TOP_LAYER } from './render-layers';
 import { createStandardHand } from './standard-hand';
+import {
+  createStickyNoteWidget,
+  STICKY_NOTE_KIND,
+  STICKY_NOTE_PIN_OFFSET,
+  stickyNoteSpawnOffset,
+} from './sticky-note';
+import {
+  createStickyNoteStore,
+  newStickyNoteId,
+  normalizeStickyNoteText,
+} from './sticky-note-store';
+import { STREAM_HEALTH_SAMPLE_MS, type StreamLinkInput } from './stream-health';
 import { terminalQualityAtDistance } from './terminal-lod';
 import {
   createTerminalMaterial,
@@ -187,6 +199,7 @@ import { intersectVisible } from './visible-raycast';
 import { layoutWidgetPanel } from './widget-panel-layout';
 import { createWidgetPoseStore, type WidgetPose } from './widget-poses';
 import {
+  findWidgetEntry,
   getWidgetEntry,
   isWidgetKind,
   WIDGET_REGISTRY,
@@ -930,6 +943,7 @@ export function createWorkspaceScene(
   const terminalRestoredPoses = new Map<string, SavedUIPose>();
   const poseStore = createUIPoseStore();
   const widgetPoseStore = createWidgetPoseStore();
+  const stickyNoteStore = createStickyNoteStore();
   const warpStore = createTerminalWarpStore();
   const warpKey = (surface: TerminalSurface): string =>
     JSON.stringify([
@@ -1191,8 +1205,8 @@ export function createWorkspaceScene(
     const reach = far ?? (previous?.object === object && previous.far);
     const widgetKeyed = object.userData.widgetKey as WidgetKey | undefined;
     if (widgetKeyed) touchedWidgets.add(widgetKeyed);
-    if (object.userData.widgetKind === PICTURE_KIND) {
-      // A grabbed picture is user-placed: recenter leaves it, and its slot frees for new frames.
+    if (findWidgetEntry(object.userData.widgetKind)?.multiInstance) {
+      // A grabbed picture or note is user-placed: recenter leaves it, and its slot frees.
       object.userData.picturePlaced = true;
       delete object.userData.widgetSlot;
     }
@@ -1347,6 +1361,7 @@ export function createWorkspaceScene(
   const frameCounter = createFrameCounter();
   let perfWorstFrameMs = 0;
   let perfWasHidden = false;
+  let streamSampleAt = Number.NEGATIVE_INFINITY;
   /** XR session start and end: drop the running worst frame and every gauge's history. */
   const resetPerfStats = (): void => {
     perfWorstFrameMs = 0;
@@ -2717,6 +2732,26 @@ export function createWorkspaceScene(
       scene.background = background;
     }
   };
+  // Pings and per-pane sampling run only while a stream health widget is mounted.
+  const sampleStreamLinks = (time: number): void => {
+    const consumers: Widget[] = [];
+    for (const widget of widgets.values()) if (widget.setStreamLinks) consumers.push(widget);
+    if (!consumers.length) return;
+    const links: StreamLinkInput[] = [];
+    const pingAt = performance.now();
+    for (const [paneId, panel] of panels) {
+      const { surface } = panel;
+      surface.pingLink?.(pingAt);
+      const { pane } = surface;
+      links.push({
+        paneId,
+        label: pane.title || pane.windowName || pane.sessionName || paneId,
+        status: surface.status,
+        stats: surface.linkStats,
+      });
+    }
+    for (const widget of consumers) widget.setStreamLinks?.(links, time);
+  };
   const render = (time = 0, frame?: XRFrame): void => {
     if (disposed) return;
     if (renderer?.xr.isPresenting) {
@@ -2773,6 +2808,7 @@ export function createWorkspaceScene(
       floorCorrectionPending = true;
     }
     if (widgetRestorePending) {
+      const savedNotes = stickyNoteStore.read();
       for (const [kind, pose] of Object.entries(widgetPoseStore.read())) {
         // Multi-instance widgets (pictures) restore from their own records, not from a pose.
         if (!pose || touchedWidgets.has(kind)) continue;
@@ -2789,9 +2825,32 @@ export function createWorkspaceScene(
           }
           continue;
         }
+        if (widgetKeyKind(kind) === STICKY_NOTE_KIND && !widgets.has(kind)) {
+          const id = kind.slice(STICKY_NOTE_KIND.length + 1);
+          const text = savedNotes[id];
+          if (!text) {
+            widgetPoseStore.remove(kind);
+            continue;
+          }
+          const widget = createStickyNoteWidget(uiEnvironment.texture, { id, text });
+          mountWidget(STICKY_NOTE_KIND, widget, false);
+          if (!validPose(pose)) placeWidget(kind, widget);
+          else {
+            applyUIPose(widget.root, pose, [0.25, 2]);
+            if (pose.placed) widget.root.userData.picturePlaced = true;
+          }
+          continue;
+        }
         if (!isWidgetKind(kind) || widgetKeyKind(kind) !== kind) continue;
         const widget = widgets.get(kind) ?? addWidget(kind);
         applyUIPose(widget.root, pose, [0.25, 2]);
+      }
+      // A note whose pose never saved still comes back, at its spawn spot.
+      for (const [id, text] of Object.entries(savedNotes)) {
+        const key = widgetKey(STICKY_NOTE_KIND, id);
+        if (widgets.has(key) || touchedWidgets.has(key)) continue;
+        const widget = createStickyNoteWidget(uiEnvironment.texture, { id, text });
+        saveWidgetPose(mountWidget(STICKY_NOTE_KIND, widget), widget);
       }
       widgetRestorePending = false;
       mutableState.widgets = [...widgets.keys()];
@@ -2968,6 +3027,10 @@ export function createWorkspaceScene(
       };
       for (const widget of widgets.values()) widget.setPerfSample?.(sample);
       perfWorstFrameMs = 0;
+    }
+    if (time - streamSampleAt >= STREAM_HEALTH_SAMPLE_MS) {
+      streamSampleAt = time;
+      sampleStreamLinks(time);
     }
     if (inputMode === 'terminal' && inputRoot) {
       const surface = mutableState.inputTargetId
@@ -3600,7 +3663,11 @@ export function createWorkspaceScene(
     }
     return undefined;
   };
-  const placeWidget = (key: WidgetKey, widget: Widget): void => {
+  const placeWidget = (
+    key: WidgetKey,
+    widget: Widget,
+    at?: readonly [number, number, number],
+  ): void => {
     const view = poseViewer();
     view.updateWorldMatrix(true, false);
     const eye = view.getWorldPosition(new THREE.Vector3());
@@ -3613,7 +3680,8 @@ export function createWorkspaceScene(
     );
     const entry = getWidgetEntry(widgetKeyKind(key) ?? (key as WidgetKind));
     let offset = entry.spawnOffset;
-    if (entry.multiInstance && widget.root.userData.picturePlaceholder) {
+    if (at) offset = at;
+    else if (entry.multiInstance && widget.root.userData.picturePlaceholder) {
       offset = PICTURE_PLACEHOLDER_OFFSET;
       // An unmoved frame that filled an earlier placeholder still sits on this spot: give it a slot.
       for (const [otherKey, other] of widgets)
@@ -3623,14 +3691,18 @@ export function createWorkspaceScene(
           saveWidgetPose(otherKey, other);
         }
     } else if (entry.multiInstance) {
+      const kind = widget.root.userData.widgetKind;
       if (typeof widget.root.userData.widgetSlot !== 'number')
         widget.root.userData.widgetSlot = freePictureSlot(
           [...widgets.values()]
-            .filter((other) => other !== widget)
+            .filter((other) => other !== widget && other.root.userData.widgetKind === kind)
             .map((other) => other.root.userData.widgetSlot)
             .filter((slot): slot is number => typeof slot === 'number'),
         );
-      offset = pictureSpawnOffset(entry.spawnOffset, widget.root.userData.widgetSlot);
+      offset = (kind === STICKY_NOTE_KIND ? stickyNoteSpawnOffset : pictureSpawnOffset)(
+        entry.spawnOffset,
+        widget.root.userData.widgetSlot,
+      );
     }
     const [x, y, z] = offset;
     widget.root.position.copy(new THREE.Vector3(x, y, z).applyQuaternion(rotation).add(eye));
@@ -3648,7 +3720,7 @@ export function createWorkspaceScene(
   const saveWidgetPose = (key: WidgetKey, widget: Widget): void => {
     // A placeholder's pose persists too, so a reload during the exit-to-pick flow keeps it.
     const pose: WidgetPose = captureUIPose(widget.root);
-    if (widget.root.userData.widgetKind === PICTURE_KIND) {
+    if (findWidgetEntry(widget.root.userData.widgetKind)?.multiInstance) {
       const slot = widget.root.userData.widgetSlot;
       if (typeof slot === 'number') pose.slot = slot;
       if (widget.root.userData.picturePlaced) pose.placed = true;
@@ -3668,6 +3740,8 @@ export function createWorkspaceScene(
     widget.dispose();
     widgets.delete(kind);
     if (persist) widgetPoseStore.remove(kind);
+    const noteId = widget.root.userData.noteId;
+    if (persist && typeof noteId === 'string') stickyNoteStore.remove(noteId);
     const pictureId = widget.root.userData.pictureId;
     if (persist && typeof pictureId === 'string' && !widget.root.userData.picturePlaceholder)
       options.onPictureClosed?.(pictureId);
@@ -3870,7 +3944,42 @@ export function createWorkspaceScene(
     notify();
     return evicted;
   };
+  // The Sticky note entry opens the keyboard panel listening; Pin as note there makes the note.
+  const startNoteDictation = (): void => {
+    const { supported, status } = mutableState.dictation;
+    if (!supported) {
+      setNotice('Speech is unavailable here, so a note cannot be dictated');
+      return;
+    }
+    showInput('keyboard');
+    if (status !== 'listening' && status !== 'transcribing') actions.dictationAction?.('startNote');
+  };
+  const pinNote = (): void => {
+    const text = normalizeStickyNoteText(mutableState.dictation.transcript);
+    if (!text) {
+      setNotice('Nothing to pin: the transcript is empty');
+      return;
+    }
+    const id = newStickyNoteId();
+    if (!stickyNoteStore.save(id, text)) {
+      setNotice('The note could not be saved on this device');
+      return;
+    }
+    const widget = createStickyNoteWidget(uiEnvironment.texture, { id, text });
+    const key = mountWidget(STICKY_NOTE_KIND, widget, false);
+    placeWidget(key, widget, STICKY_NOTE_PIN_OFFSET);
+    widget.root.userData.picturePlaced = true;
+    saveWidgetPose(key, widget);
+    actions.dictationAction?.('cancel');
+    mutableState.widgets = [...widgets.keys()];
+    setNotice('Pinned the note');
+    notify();
+  };
   const toggleWidget = (kind: WidgetKind): void => {
+    if (kind === STICKY_NOTE_KIND) {
+      startNoteDictation();
+      return;
+    }
     if (getWidgetEntry(kind).multiInstance) {
       // One placeholder at a time: asking again brings the open one back into view.
       const open = [...widgets.entries()].find(
@@ -4255,6 +4364,13 @@ export function createWorkspaceScene(
         heading.name = 'xr-dictation-transcript-heading';
         heading.position.set(-0.925 + 0.25, 1.17 + 0.17 + 0.06, 0);
         inputRoot.add(heading);
+        if (['review', 'error'].includes(dictation.status) && dictation.transcript.trim()) {
+          // Mirrors the heading at the transcript box's right edge.
+          const pin = createLabelButton('Pin as note', 0.5, 0.1, { inputAction: 'pinNote' });
+          pin.name = 'xr-dictation-pin-note';
+          pin.position.set(0.925 - 0.25, 1.17 + 0.17 + 0.06, 0);
+          inputRoot.add(pin);
+        }
       }
     }
     const targetTitle = mutableState.inputTargetTitle
@@ -5770,6 +5886,10 @@ export function createWorkspaceScene(
     }
     if (action === 'dictation') {
       actions.dictationAction?.(hit.userData.dictationAction as DictationAction);
+      return true;
+    }
+    if (action === 'pinNote') {
+      pinNote();
       return true;
     }
     if (radialMenu.root.visible && !radialMenu.interactive) return true;
