@@ -7,12 +7,14 @@ import {
   agentPlistPath,
   buildLaunchAgentPlist,
   buildLaunchDaemonPlist,
-  DEFAULT_REPOSITORY,
-  DEFAULT_USER,
   DICTATION_LABEL,
-  DICTATION_PLIST_PATH,
+  daemonPlistPath,
+  defaultDictationUser,
   depthModelPath,
+  type HostConfig,
   isOwnedPlist,
+  readHostConfig,
+  validateLabel,
   validateRepository,
   validateUser,
 } from '../src/server/dictation-launchd';
@@ -26,6 +28,8 @@ type InstallerOptions = {
   migrateRunningListener: boolean;
   repository: string;
   user: string;
+  origins?: string[];
+  label: string;
   repoStatus: boolean;
   pictureProxy: boolean;
   pictureDepth: boolean;
@@ -42,12 +46,12 @@ export type ListenerMetadata = {
   args: string[];
 };
 
-export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
+export const parseInstallerArgs = (argv: string[], config: HostConfig = {}): InstallerOptions => {
   let install = false;
   let uninstall = false;
   let print = false;
-  let repository = DEFAULT_REPOSITORY;
-  let user = DEFAULT_USER;
+  let repository = config.repository ?? process.cwd();
+  let user = config.user ?? defaultDictationUser();
   let migrateRunningListener = false;
   let agent = false;
   let repoStatus = false;
@@ -96,6 +100,8 @@ export const parseInstallerArgs = (argv: string[]): InstallerOptions => {
     migrateRunningListener,
     repository: validateRepository(repository),
     user: validateUser(user),
+    origins: config.origins,
+    label: validateLabel(config.launchdLabel ?? DICTATION_LABEL),
     repoStatus,
     pictureProxy,
     pictureDepth,
@@ -133,9 +139,8 @@ const launchctl = (args: string[], allowFailure = false): string => {
   }
 };
 
-const ownedJobPid = (): number | undefined =>
-  Number(/\bpid\s*=\s*(\d+)/.exec(launchctl(['print', `system/${DICTATION_LABEL}`], true))?.[1]) ||
-  undefined;
+const ownedJobPid = (label: string): number | undefined =>
+  Number(/\bpid\s*=\s*(\d+)/.exec(launchctl(['print', `system/${label}`], true))?.[1]) || undefined;
 
 export const parseListenerPid = (output: string): number | undefined => {
   const fields = output.trim().split(/\s+/).filter(Boolean);
@@ -295,10 +300,11 @@ export const assertNoAgentLoaded = (
   user: string,
   uid: number,
   isLoaded: (target: string) => boolean,
+  label = DICTATION_LABEL,
 ): void => {
-  if (isLoaded(`gui/${uid}/${DICTATION_LABEL}`))
+  if (isLoaded(`gui/${uid}/${label}`))
     throw new Error(
-      `The per-user LaunchAgent gui/${uid}/${DICTATION_LABEL} is loaded. Run make uninstall-whisper-agent as ${user} first, then retry.`,
+      `The per-user LaunchAgent gui/${uid}/${label} is loaded. Run make uninstall-whisper-agent as ${user} first, then retry.`,
     );
 };
 
@@ -306,6 +312,8 @@ const launchdTargetLoaded = (target: string): boolean =>
   spawnSync('/bin/launchctl', ['print', target]).status === 0;
 
 const install = async (plist: string, options: InstallerOptions): Promise<void> => {
+  const { label } = options;
+  const plistPath = daemonPlistPath(label);
   if (process.getuid?.() !== 0)
     throw new Error('--install requires root. Use --print as a non-root user.');
   preflight(options.repository, options.user);
@@ -313,17 +321,18 @@ const install = async (plist: string, options: InstallerOptions): Promise<void> 
     options.user,
     Number(execFileSync('/usr/bin/id', ['-u', options.user], { encoding: 'utf8' }).trim()),
     launchdTargetLoaded,
+    label,
   );
   let existing: string | undefined;
   try {
-    existing = await readFile(DICTATION_PLIST_PATH, 'utf8');
+    existing = await readFile(plistPath, 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  if (existing !== undefined && !isOwnedPlist(existing, plist))
-    throw new Error(`Refusing to replace foreign or changed ${DICTATION_PLIST_PATH}.`);
+  if (existing !== undefined && !isOwnedPlist(existing, plist, label))
+    throw new Error(`Refusing to replace foreign or changed ${plistPath}.`);
   const initialPid = listenerPid();
-  const existingLaunchdPid = ownedJobPid();
+  const existingLaunchdPid = ownedJobPid(label);
   if (
     initialPid !== undefined &&
     initialPid !== existingLaunchdPid &&
@@ -332,7 +341,7 @@ const install = async (plist: string, options: InstallerOptions): Promise<void> 
     throw new Error(
       'Port 4242 is occupied. Pass --migrate-running-listener to replace a recognized Bun listener.',
     );
-  const temporary = `${DICTATION_PLIST_PATH}.tmp-${process.pid}`;
+  const temporary = `${plistPath}.tmp-${process.pid}`;
   let migrated: ListenerMetadata | undefined;
   let installed = false;
   try {
@@ -343,16 +352,16 @@ const install = async (plist: string, options: InstallerOptions): Promise<void> 
     if (initialPid !== undefined && initialPid !== existingLaunchdPid) {
       migrated = await migrateListener(options.repository, options.user, initialPid);
     }
-    await rename(temporary, DICTATION_PLIST_PATH);
+    await rename(temporary, plistPath);
     installed = true;
-    launchctl(['bootout', `system/${DICTATION_LABEL}`], true);
-    launchctl(['bootstrap', 'system', DICTATION_PLIST_PATH]);
+    launchctl(['bootout', `system/${label}`], true);
+    launchctl(['bootstrap', 'system', plistPath]);
     await waitFor(
       () => {
         const pid = listenerPid();
         return (
           pid !== undefined &&
-          pid === ownedJobPid() &&
+          pid === ownedJobPid(label) &&
           listenerMetadata(pid).uid ===
             Number(
               execFileSync('/usr/bin/id', ['-u', options.user], { encoding: 'utf8' }).trim(),
@@ -369,27 +378,27 @@ const install = async (plist: string, options: InstallerOptions): Promise<void> 
     try {
       let previousJobRestored = false;
       if (installed) {
-        launchctl(['bootout', `system/${DICTATION_LABEL}`], true);
+        launchctl(['bootout', `system/${label}`], true);
         if (existing !== undefined) {
-          await writeFile(DICTATION_PLIST_PATH, existing, { mode: 0o644 });
-          await chmod(DICTATION_PLIST_PATH, 0o644);
-          await chown(DICTATION_PLIST_PATH, 0, 0);
-          launchctl(['bootstrap', 'system', DICTATION_PLIST_PATH]);
+          await writeFile(plistPath, existing, { mode: 0o644 });
+          await chmod(plistPath, 0o644);
+          await chown(plistPath, 0, 0);
+          launchctl(['bootstrap', 'system', plistPath]);
           try {
             await waitFor(
               () => {
                 const pid = listenerPid();
-                return pid !== undefined && pid === ownedJobPid() && healthReady();
+                return pid !== undefined && pid === ownedJobPid(label) && healthReady();
               },
               20_000,
               'Previous LaunchDaemon did not recover.',
             );
             previousJobRestored = true;
           } catch (restoreError) {
-            launchctl(['bootout', `system/${DICTATION_LABEL}`], true);
+            launchctl(['bootout', `system/${label}`], true);
             if (!migrated) throw restoreError;
           }
-        } else await unlink(DICTATION_PLIST_PATH);
+        } else await unlink(plistPath);
       }
       if (migrated && !previousJobRestored) await restoreListener(migrated, options.user);
     } catch (rollbackFailure) {
@@ -406,6 +415,7 @@ const install = async (plist: string, options: InstallerOptions): Promise<void> 
 export type AgentInstallDeps = {
   uid: number;
   path: string;
+  label?: string;
   launchctl: (args: string[], allowFailure?: boolean) => string;
   daemonLoaded: () => boolean;
   agentLoaded: () => boolean;
@@ -423,8 +433,8 @@ export type AgentInstallDeps = {
 
 const PORT_FREE_TIMEOUT_MS = 15_000;
 
-const ownedAgentPlist = (contents: string): boolean =>
-  contents.includes(`<string>${DICTATION_LABEL}</string>`);
+const ownedAgentPlist = (contents: string, label: string): boolean =>
+  contents.includes(`<string>${label}</string>`);
 
 /**
  * Installs the per-user LaunchAgent. Refuses while the system LaunchDaemon is loaded. A previous
@@ -432,13 +442,14 @@ const ownedAgentPlist = (contents: string): boolean =>
  * restores and re-bootstraps the previous plist.
  */
 export const performAgentInstall = async (plist: string, deps: AgentInstallDeps): Promise<void> => {
-  const target = `gui/${deps.uid}/${DICTATION_LABEL}`;
+  const label = deps.label ?? DICTATION_LABEL;
+  const target = `gui/${deps.uid}/${label}`;
   if (deps.daemonLoaded())
     throw new Error(
-      `The system LaunchDaemon is still loaded. First run: sudo launchctl bootout system/${DICTATION_LABEL} && sudo rm ${DICTATION_PLIST_PATH}`,
+      `The system LaunchDaemon is still loaded. First run: sudo launchctl bootout system/${label} && sudo rm ${daemonPlistPath(label)}`,
     );
   const existing = await deps.readFile(deps.path);
-  if (existing !== undefined && !ownedAgentPlist(existing))
+  if (existing !== undefined && !ownedAgentPlist(existing, deps.label ?? DICTATION_LABEL))
     throw new Error(`Refusing to replace foreign ${deps.path}.`);
   const previousLoaded = deps.agentLoaded();
   const temporary = `${deps.path}.tmp-${deps.pid}`;
@@ -494,10 +505,10 @@ export const performAgentInstall = async (plist: string, deps: AgentInstallDeps)
 /** Boots out the per-user LaunchAgent, waits for port 4242 to free, and removes its plist. */
 export const performAgentUninstall = async (deps: AgentInstallDeps): Promise<void> => {
   const existing = await deps.readFile(deps.path);
-  if (existing !== undefined && !ownedAgentPlist(existing))
+  if (existing !== undefined && !ownedAgentPlist(existing, deps.label ?? DICTATION_LABEL))
     throw new Error(`Refusing to remove foreign ${deps.path}.`);
   if (deps.agentLoaded()) {
-    deps.launchctl(['bootout', `gui/${deps.uid}/${DICTATION_LABEL}`], true);
+    deps.launchctl(['bootout', `gui/${deps.uid}/${deps.label ?? DICTATION_LABEL}`], true);
     await deps.waitFor(
       () => deps.listenerPid() === undefined,
       PORT_FREE_TIMEOUT_MS,
@@ -517,10 +528,11 @@ const agentDeps = (options: InstallerOptions): AgentInstallDeps => {
     throw new Error(`--agent install and uninstall must run as ${options.user}.`);
   return {
     uid,
-    path: agentPlistPath(options.user),
+    path: agentPlistPath(options.user, options.label),
+    label: options.label,
     launchctl,
-    daemonLoaded: () => launchdTargetLoaded(`system/${DICTATION_LABEL}`),
-    agentLoaded: () => launchdTargetLoaded(`gui/${uid}/${DICTATION_LABEL}`),
+    daemonLoaded: () => launchdTargetLoaded(`system/${options.label}`),
+    agentLoaded: () => launchdTargetLoaded(`gui/${uid}/${options.label}`),
     listenerPid,
     listenerUid: (pid) => listenerMetadata(pid).uid,
     healthy: healthReady,
@@ -544,7 +556,11 @@ const agentDeps = (options: InstallerOptions): AgentInstallDeps => {
 };
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const options = parseInstallerArgs(process.argv.slice(2));
+  const repository = fileURLToPath(new URL('..', import.meta.url));
+  const options = parseInstallerArgs(process.argv.slice(2), {
+    repository,
+    ...readHostConfig(repository),
+  });
   const plist = options.agent ? buildLaunchAgentPlist(options) : buildLaunchDaemonPlist(options);
   if (options.print) process.stdout.write(plist);
   else if (options.agent && options.uninstall) await performAgentUninstall(agentDeps(options));

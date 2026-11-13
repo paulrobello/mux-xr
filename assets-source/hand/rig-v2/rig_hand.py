@@ -13,7 +13,8 @@ from pathlib import Path
 from mathutils import Quaternion, Vector
 
 OUT = Path(__file__).resolve().parent
-LIVE = '/path/to/editable-hand.blend'
+host_config = Path(__file__).resolve().parents[3] / '.local' / 'host-config.json'
+LIVE = str(Path(json.loads(host_config.read_text())['handSource']).expanduser().resolve())
 rig = bpy.data.objects['AuthoredHandRig']
 hand = bpy.data.objects['AuthoredHandMesh']
 mesh = hand.data

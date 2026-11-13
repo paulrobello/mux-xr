@@ -24,7 +24,7 @@ Background budget: <=60,000 triangles, <=16 materials/draw calls, <=2048px textu
 
 ## Invocation and Resource Window
 
-Use /Applications/Blender.app/Contents/MacOS/Blender headless with --python-exit-code 1. Initial CPU authoring/export/static checks used dev-workstation load-tolerant booking 01a1958be47f722780e7554b21004123, which is closed. Future runs need a fresh reservation. GPU rendering and timing measurements require an appropriate booked window and actual host-load verification. Use deterministic seeds and record Blender version.
+Use /Applications/Blender.app/Contents/MacOS/Blender headless with --python-exit-code 1. Initial CPU authoring/export/static checks used workstation load-tolerant booking 01a1958be47f722780e7554b21004123, which is closed. Future runs need a fresh reservation. GPU rendering and timing measurements require an appropriate booked window and actual host-load verification. Use deterministic seeds and record Blender version.
 
 ## Runtime exterior overlay — 2026-11-02
 

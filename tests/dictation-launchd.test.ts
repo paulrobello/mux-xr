@@ -14,6 +14,13 @@ import {
   validateUser,
 } from '../src/server/dictation-launchd';
 
+const TEST_REPO = '/Users/localuser/Repos/mux-xr';
+const TEST_CONFIG = { repository: TEST_REPO, user: 'localuser' };
+const buildAgent = (options: Parameters<typeof buildLaunchAgentPlist>[0] = {}) =>
+  buildLaunchAgentPlist({ ...TEST_CONFIG, ...options });
+const buildDaemon = (options: Parameters<typeof buildLaunchDaemonPlist>[0] = {}) =>
+  buildLaunchDaemonPlist({ ...TEST_CONFIG, ...options });
+
 describe('Whisper LaunchDaemon definition', () => {
   it('parses PID-only listener output and deduplicates dual-stack rows', () => {
     expect(parseListenerPid('123\n123\n')).toBe(123);
@@ -22,7 +29,7 @@ describe('Whisper LaunchDaemon definition', () => {
     expect(() => parseListenerPid('123\n456\n')).toThrow(/multiple/);
   });
   it('starts directly through Bun and never depends on par-mux', () => {
-    const plist = buildLaunchDaemonPlist();
+    const plist = buildDaemon();
     expect(plist).toContain('<true/>');
     expect(plist).not.toContain('par-mux');
     expect(plist).toContain('/opt/homebrew/bin/bun');
@@ -30,7 +37,7 @@ describe('Whisper LaunchDaemon definition', () => {
   });
 
   it('escapes XML values and rejects unstable paths and invalid users', () => {
-    expect(buildLaunchDaemonPlist({ repository: '/Users/p/a&b<repo>', user: 'paul_1' })).toContain(
+    expect(buildDaemon({ repository: '/Users/p/a&b<repo>', user: 'paul_1' })).toContain(
       'a&amp;b&lt;repo&gt;',
     );
     expect(() => validateRepository('/Users/p/.codex/worktrees/mux-xr')).toThrow(/stable checkout/);
@@ -38,7 +45,7 @@ describe('Whisper LaunchDaemon definition', () => {
   });
 
   it('fails closed for a changed plist even when its label is ours', () => {
-    const expected = buildLaunchDaemonPlist();
+    const expected = buildDaemon();
     expect(isOwnedPlist(expected, expected)).toBe(true);
     expect(isOwnedPlist(expected.replace('4242', '4243'), expected)).toBe(false);
     expect(expected).toContain(`<string>${DICTATION_LABEL}</string>`);
@@ -57,6 +64,23 @@ describe('Whisper LaunchDaemon definition', () => {
       install: false,
       repository: '/Users/localuser/Repos/mux-xr',
     });
+  });
+
+  it('renders local launchd settings and preserves explicit installer overrides', () => {
+    const options = parseInstallerArgs(['--print', '--user', 'operator'], {
+      repository: TEST_REPO,
+      user: 'localuser',
+      origins: ['https://mux-host.example.test:4240', 'https://localhost:4240'],
+      launchdLabel: 'test.mux-xr.whisper',
+    });
+    const plist = buildLaunchDaemonPlist(options);
+    expect(plist).toContain('<string>test.mux-xr.whisper</string>');
+    expect(plist).toContain('<string>operator</string>');
+    expect(plist).toContain('<string>https://mux-host.example.test:4240</string>');
+    expect(isOwnedPlist(plist, plist, options.label)).toBe(true);
+    expect(() => buildDaemon({ origins: ['https://mux-host.example.test/path'] })).toThrow(
+      /HTTPS origins/,
+    );
   });
 
   it('only permits migration of the selected Bun listener', () => {
@@ -81,11 +105,11 @@ describe('Whisper LaunchDaemon definition', () => {
   });
 
   it('keeps the LaunchDaemon free of clipboard access so its installed plist still matches', () => {
-    expect(buildLaunchDaemonPlist()).not.toContain('clipboard');
+    expect(buildDaemon()).not.toContain('clipboard');
   });
 
   it('builds a gui-session LaunchAgent that points at the user-created clipboard secret', () => {
-    const plist = buildLaunchAgentPlist();
+    const plist = buildAgent();
     expect(plist).toContain(`<string>${DICTATION_LABEL}</string>`);
     expect(plist).not.toContain('<key>UserName</key>');
     expect(plist).toContain('<key>LimitLoadToSessionType</key>\n  <string>Aqua</string>');
@@ -100,9 +124,9 @@ describe('Whisper LaunchDaemon definition', () => {
   });
 
   it('leaves /repo-status off unless the agent install opts in', () => {
-    expect(buildLaunchAgentPlist()).not.toContain('--repo-status');
-    expect(buildLaunchDaemonPlist()).not.toContain('--repo-status');
-    expect(buildLaunchAgentPlist({ repoStatus: true })).toContain(
+    expect(buildAgent()).not.toContain('--repo-status');
+    expect(buildDaemon()).not.toContain('--repo-status');
+    expect(buildAgent({ repoStatus: true })).toContain(
       '<string>--repo-status</string>\n    <string>on</string>',
     );
     expect(parseInstallerArgs(['--print', '--agent']).repoStatus).toBe(false);
@@ -111,9 +135,9 @@ describe('Whisper LaunchDaemon definition', () => {
   });
 
   it('leaves /picture-fetch off unless the agent install opts in', () => {
-    expect(buildLaunchAgentPlist()).not.toContain('--picture-proxy');
-    expect(buildLaunchDaemonPlist()).not.toContain('--picture-proxy');
-    expect(buildLaunchAgentPlist({ pictureProxy: true })).toContain(
+    expect(buildAgent()).not.toContain('--picture-proxy');
+    expect(buildDaemon()).not.toContain('--picture-proxy');
+    expect(buildAgent({ pictureProxy: true })).toContain(
       '<string>--picture-proxy</string>\n    <string>on</string>',
     );
     expect(parseInstallerArgs(['--print', '--agent']).pictureProxy).toBe(false);
@@ -122,9 +146,9 @@ describe('Whisper LaunchDaemon definition', () => {
   });
 
   it('leaves /picture-depth off unless the agent install opts in, and passes the model path', () => {
-    expect(buildLaunchAgentPlist()).not.toContain('--picture-depth');
-    expect(buildLaunchDaemonPlist()).not.toContain('--picture-depth');
-    expect(buildLaunchAgentPlist({ pictureDepth: true })).toContain(
+    expect(buildAgent()).not.toContain('--picture-depth');
+    expect(buildDaemon()).not.toContain('--picture-depth');
+    expect(buildAgent({ pictureDepth: true })).toContain(
       '<string>--picture-depth</string>\n    <string>on</string>\n    <string>--depth-model</string>\n    <string>/Users/localuser/Repos/mux-xr/.local/models/depth-anything-v2-small.onnx</string>',
     );
     expect(parseInstallerArgs(['--print', '--agent']).pictureDepth).toBe(false);
@@ -133,9 +157,9 @@ describe('Whisper LaunchDaemon definition', () => {
   });
 
   it('leaves the kanban board feeds off unless the agent install opts in', () => {
-    expect(buildLaunchAgentPlist()).not.toContain('--board-feeds');
-    expect(buildLaunchDaemonPlist()).not.toContain('--board-feeds');
-    expect(buildLaunchAgentPlist({ boardFeeds: true })).toContain(
+    expect(buildAgent()).not.toContain('--board-feeds');
+    expect(buildDaemon()).not.toContain('--board-feeds');
+    expect(buildAgent({ boardFeeds: true })).toContain(
       '<string>--board-feeds</string>\n    <string>on</string>',
     );
     expect(parseInstallerArgs(['--print', '--agent']).boardFeeds).toBe(false);
@@ -144,9 +168,9 @@ describe('Whisper LaunchDaemon definition', () => {
   });
 
   it('leaves service health off unless the agent install opts in, with the owner token path', () => {
-    expect(buildLaunchAgentPlist()).not.toContain('--service-health');
-    expect(buildLaunchDaemonPlist()).not.toContain('--service-health');
-    expect(buildLaunchAgentPlist({ serviceHealth: true })).toContain(
+    expect(buildAgent()).not.toContain('--service-health');
+    expect(buildDaemon()).not.toContain('--service-health');
+    expect(buildAgent({ serviceHealth: true })).toContain(
       '<string>--service-health</string>\n    <string>on</string>\n    <string>--service-health-env-file</string>\n    <string>/Users/localuser/Repos/mux-xr/.local/par-obs-query.env</string>',
     );
     expect(parseInstallerArgs(['--print', '--agent']).serviceHealth).toBe(false);
@@ -155,9 +179,9 @@ describe('Whisper LaunchDaemon definition', () => {
   });
 
   it('leaves the mesh inbox off unless the agent install opts in', () => {
-    expect(buildLaunchAgentPlist()).not.toContain('--mesh-inbox');
-    expect(buildLaunchDaemonPlist()).not.toContain('--mesh-inbox');
-    expect(buildLaunchAgentPlist({ meshInbox: true })).toContain(
+    expect(buildAgent()).not.toContain('--mesh-inbox');
+    expect(buildDaemon()).not.toContain('--mesh-inbox');
+    expect(buildAgent({ meshInbox: true })).toContain(
       '<string>--mesh-inbox</string>\n    <string>on</string>',
     );
     expect(parseInstallerArgs(['--print', '--agent']).meshInbox).toBe(false);
@@ -166,8 +190,8 @@ describe('Whisper LaunchDaemon definition', () => {
   });
 
   it('accepts LAN toast senders only when the agent install opts in', () => {
-    expect(buildLaunchAgentPlist()).not.toContain('--toast-lan');
-    expect(buildLaunchAgentPlist({ toastLan: true })).toContain(
+    expect(buildAgent()).not.toContain('--toast-lan');
+    expect(buildAgent({ toastLan: true })).toContain(
       '<string>--toast-lan</string>\n    <string>on</string>',
     );
     expect(parseInstallerArgs(['--print', '--agent']).toastLan).toBe(false);

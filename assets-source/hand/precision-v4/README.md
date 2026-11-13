@@ -21,6 +21,6 @@ Blender -b candidate.blend --python validate_export.py
 
 `render_views.py` (with `RENDER_TAG` and `RENDER_DIR` set) writes the front, spread and spread-back review renders.
 
-- Pre-edit SHA-256: `e0faeffd04ef1a55896f9342c509177d136e405c32ede38ea5ca51be17302827`
-- Candidate SHA-256: `5119677a0e44efc799a334dd40593b53afc4d3f11f5353a52064e09f110d882a`
+- Pre-edit SHA-256: `2d83b9c47d81cc4d059b6428d8fd95465707e06f9911148c1df6d56a6a302cbd`
+- Candidate SHA-256: `d15311e38500133d9f80be4fa141824c1111169dd481c7c031f781b64c39ade3`
 - Staged GLB SHA-256: `836fabdaccd984fe1bf45fcc7611424f51bbf5b333038c5815de1aad5f5790a5`

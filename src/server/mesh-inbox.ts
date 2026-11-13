@@ -40,7 +40,7 @@ export interface MeshInbox {
   messages: MeshMessage[];
 }
 
-/** This Mac's par-mesh host: the short hostname, lowercased (dev-workstation is `dev-workstation`). */
+/** This Mac's par-mesh host: the short hostname, lowercased (workstation is `workstation`). */
 export const meshHostName = (hostname: string = osHostname()): string | null => {
   const short = hostname.split('.')[0]?.toLowerCase() ?? '';
   return HOST_NAME.test(short) ? short : null;

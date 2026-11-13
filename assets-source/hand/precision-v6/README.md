@@ -113,7 +113,7 @@ NAME=thumb_fold_left bun run assets-source/hand/precision-v6/fold_morph.ts asset
 
 It reads `authored-hand.staged.glb` (`GLB` overrides), replaces any existing keys with two zero keys and steps the runtime with a long frame time so each weight settles on its target, so re-running it on the v12 asset reproduces the JSON exactly.
 
-- Pre-edit SHA-256: `ea5d289720e933fce2714a7c1323573b2abdc1b64ae627be488f759a75c4b378`
-- Rebound SHA-256: `dd3ec19458a3e693a8eeaff671e249d1e10e82ff4dcf0b28ecf666fbbbf7adb1`
+- Pre-edit SHA-256: `1676bc6f09859cb5773a862c8f7f9cfaafd4709b23f6a6f6c62c989146bb93f9`
+- Rebound SHA-256: `8bbe6cb13274a2ec27b9b5cdaf73aae99dfe50e81c4e2e931e52c73a24f9df9b`
 - Candidate SHA-256 after `rebind.py`: `a35d3961fc0d0c9e7e72cd6f28f44adf6095284e584ee6c410a791970381d058`; after `corrective.py`: `440bef277ef60eca3176254f9ec5e37f2f6a0313093e6d4651e774be09e70924`
 - Staged GLB SHA-256: `da47d759738c38b79c105d676cec8bf2642d56939fae9a0e07d4caa291e85010`

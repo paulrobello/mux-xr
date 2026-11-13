@@ -44,10 +44,10 @@ const MIN = 60_000;
 
 const historyRow = (overrides: Record<string, unknown>) => ({
   msgid: 'm_test',
-  from_addr: 'claude-b50c@dev-workstation:par-rt-db',
-  to_addr: 'director-2@dev-workstation:par-director',
-  target: 'director-2@dev-workstation:par-director',
-  host: 'dev-workstation',
+  from_addr: 'claude-b50c@workstation:par-rt-db',
+  to_addr: 'director-2@workstation:par-director',
+  target: 'director-2@workstation:par-director',
+  host: 'workstation',
   priority: 'next-turn',
   subject: 'deploy notice',
   ts_ms: NOW - 3 * MIN,
@@ -62,8 +62,8 @@ const historyRow = (overrides: Record<string, unknown>) => ({
 const HISTORY = [
   historyRow({}),
   historyRow({
-    from_addr: 'director-2@dev-workstation:par-director',
-    to_addr: 'claude-9294@dev-workstation:par-mesh',
+    from_addr: 'director-2@workstation:par-director',
+    to_addr: 'claude-9294@workstation:par-mesh',
     priority: 'interrupt',
     subject: 'stop\u001b[31m now\u0000 please',
     ts_ms: NOW - MIN,
@@ -85,7 +85,7 @@ const feedFor = (stdout: string, code = 0, now: () => number = () => NOW) => {
     run: runner.run,
     homeDir: () => '/Users/test',
     findExecutable: async (candidates) => candidates[0] ?? null,
-    hostname: () => 'dev-workstation.local',
+    hostname: () => 'workstation.local',
     now,
   });
   return { ...runner, feed };
@@ -102,7 +102,7 @@ describe('mesh inbox feed', () => {
           '/Users/test/.bun/bin/par-mesh',
           'history',
           '--host',
-          'dev-workstation',
+          'workstation',
           '--limit',
           '12',
           '--format',
@@ -115,7 +115,7 @@ describe('mesh inbox feed', () => {
         },
       },
     ]);
-    expect(inbox.host).toBe('dev-workstation');
+    expect(inbox.host).toBe('workstation');
     expect(inbox.now).toBe(NOW);
     expect(meshHostName('bad host!')).toBeNull();
   });
@@ -124,8 +124,8 @@ describe('mesh inbox feed', () => {
     const messages = parseMeshHistory(HISTORY);
     expect(messages).toEqual([
       {
-        from: 'director-2@dev-workstation:par-director',
-        to: 'claude-9294@dev-workstation:par-mesh',
+        from: 'director-2@workstation:par-director',
+        to: 'claude-9294@workstation:par-mesh',
         subject: 'stop [31m now please',
         priority: 'interrupt',
         ts: NOW - MIN,
@@ -133,8 +133,8 @@ describe('mesh inbox feed', () => {
         sealed: false,
       },
       {
-        from: 'claude-b50c@dev-workstation:par-rt-db',
-        to: 'director-2@dev-workstation:par-director',
+        from: 'claude-b50c@workstation:par-rt-db',
+        to: 'director-2@workstation:par-director',
         subject: 'deploy notice',
         priority: 'next-turn',
         ts: NOW - 3 * MIN,
@@ -169,11 +169,11 @@ describe('mesh inbox feed', () => {
       run,
       homeDir: () => '/Users/test',
       findExecutable: async (candidates: readonly string[]) => candidates[0] ?? null,
-      hostname: () => 'dev-workstation',
+      hostname: () => 'workstation',
     };
     const on = await startFeedServer({ meshInbox: { enabled: true, ...options } });
     const { reply } = await requestFeed(`${on.base}/mesh-inbox`, MESH_INBOX_PROTOCOL, '{}');
-    expect(reply).toMatchObject({ type: 'feed', data: { host: 'dev-workstation' } });
+    expect(reply).toMatchObject({ type: 'feed', data: { host: 'workstation' } });
     expect(JSON.stringify(reply)).not.toContain('private ack note');
     expect(JSON.stringify(reply)).not.toContain('msgid');
     const parsed = await clientRequest(
@@ -225,24 +225,24 @@ const ROSTER = [
 
 const serverAnswer = {
   now: NOW,
-  host: 'dev-workstation',
+  host: 'workstation',
   messages: parseMeshHistory(HISTORY),
 };
 
 describe('mesh inbox view', () => {
   it('maps a recipient to its pane only when the roster names exactly one', () => {
-    expect(recipientPane('claude-9294@dev-workstation:par-mesh', 'dev-workstation', ROSTER)).toBe('%10');
-    expect(recipientPane('omp-1fac@dev-workstation:par-director', 'dev-workstation', ROSTER)).toBe('%21');
-    expect(recipientPane('director-2@dev-workstation:par-director', 'dev-workstation', ROSTER)).toBeNull();
-    expect(recipientPane('claude-1@dev-workstation:kanban', 'dev-workstation', ROSTER)).toBeNull();
-    expect(recipientPane('claude-9294@test-mac:par-mesh', 'dev-workstation', ROSTER)).toBeNull();
-    expect(recipientPane('*@dev-workstation:par-mesh', 'dev-workstation', ROSTER)).toBeNull();
+    expect(recipientPane('claude-9294@workstation:par-mesh', 'workstation', ROSTER)).toBe('%10');
+    expect(recipientPane('omp-1fac@workstation:par-director', 'workstation', ROSTER)).toBe('%21');
+    expect(recipientPane('director-2@workstation:par-director', 'workstation', ROSTER)).toBeNull();
+    expect(recipientPane('claude-1@workstation:kanban', 'workstation', ROSTER)).toBeNull();
+    expect(recipientPane('claude-9294@test-mac:par-mesh', 'workstation', ROSTER)).toBeNull();
+    expect(recipientPane('*@workstation:par-mesh', 'workstation', ROSTER)).toBeNull();
   });
 
   it('lists sender, recipient, subject, priority and age, newest first', () => {
     const inbox = parseMeshInbox(serverAnswer, NOW) as MeshInbox;
     const view = meshInboxView({ kind: 'inbox', inbox }, NOW + MIN, ROSTER);
-    expect(view.header).toBe('Mesh inbox · dev-workstation');
+    expect(view.header).toBe('Mesh inbox · workstation');
     expect(
       view.rows.map((row) => [
         row.route,

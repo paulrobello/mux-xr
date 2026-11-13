@@ -40,7 +40,7 @@ On November 12, 2026, the official 0.81.0 streamer was run on loopback against a
 ## LAN deployment
 
 - Since 0.80.0 the streamer refuses a non-loopback bind that serves shells without authentication unless `--allow-unauthenticated` is passed. Paul chose that flag on November 12, 2026. The LAN preview keeps TLS and its origin allow-list, and has no authentication.
-- The 0.81.0 binary replaced `.local/bin/streamer-candidate` in place, and the 0.78.1 binary is kept as `.local/bin/streamer-candidate-0.78.1`. Both are signed with the same Developer ID identity. The macOS firewall rule for that path still admits it: test-mac fetched `https://192.0.2.10:4240/` with HTTP 200.
+- The 0.81.0 binary replaced `.local/bin/streamer-candidate` in place, and the 0.78.1 binary is kept as `.local/bin/streamer-candidate-0.78.1`. Both are signed with the same Developer ID identity. The macOS firewall rule for that path still admits it: test-mac fetched the configured LAN preview URL with HTTP 200.
 - The `mux-xr-streamer` pane was respawned with its previous flags plus `--allow-unauthenticated`. The default par-mux daemon was not restarted. The browser e2e suite passed on all three viewports against the live streamer.
 
 ## Pane-create adoption check

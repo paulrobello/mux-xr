@@ -10,7 +10,8 @@ import json
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent
-LIVE = '/path/to/editable-hand.blend'
+host_config = Path(__file__).resolve().parents[3] / '.local' / 'host-config.json'
+LIVE = str(Path(json.loads(host_config.read_text())['handSource']).expanduser().resolve())
 obj = bpy.data.objects['AuthoredHandMesh']
 mesh = obj.data
 assert bpy.data.filepath == LIVE and obj.mode == 'OBJECT' and mesh.shape_keys is None

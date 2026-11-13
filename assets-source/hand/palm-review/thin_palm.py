@@ -12,7 +12,8 @@ import math
 from pathlib import Path
 
 out: Path = Path(__file__).resolve().parent
-original: str = '/path/to/editable-hand.blend'
+host_config = Path(__file__).resolve().parents[3] / '.local' / 'host-config.json'
+original: str = str(Path(json.loads(host_config.read_text())['handSource']).expanduser().resolve())
 obj = bpy.data.objects['AuthoredHandMesh']
 mesh = obj.data
 assert bpy.data.filepath == original and obj.mode == 'OBJECT' and mesh.shape_keys is None

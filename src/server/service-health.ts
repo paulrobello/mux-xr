@@ -4,7 +4,6 @@ import { FeedError } from './feed-route';
 
 export const SERVICE_HEALTH_PATH = '/service-health';
 export const SERVICE_HEALTH_PROTOCOL = 'mux-xr-service-health-v1';
-export const PAR_OBS_GRAFANA_URL = 'https://grafana.example.test';
 /** A probe's availability; a bare `par_obs_up == 0` keeps reading down after recovery. */
 export const PAR_OBS_UP_QUERY = 'min by (host, service) (last_over_time(par_obs_up[5m]))';
 /** Present only for checks configured `expected: down` (red-path canaries). */
@@ -166,7 +165,7 @@ export const createServiceHealthFeed = (
   const fetcher: ServiceHealthFetch =
     options.fetch ?? ((url, init) => fetch(url, init) as Promise<Response>);
   const now = options.now ?? Date.now;
-  const baseUrl = options.baseUrl ?? PAR_OBS_GRAFANA_URL;
+  const baseUrl = URL.parse(options.baseUrl ?? '');
   const seen = new Map<string, { state: ProbeState; since: number; exact: boolean }>();
   let cached: { at: number; value: Promise<ServiceHealth> } | null = null;
   const warn = options.warn ?? ((line: string) => console.warn(line));
@@ -181,8 +180,12 @@ export const createServiceHealthFeed = (
     },
   };
 
-  const query = async (credential: ParObsCredential, promql: string): Promise<Sample[]> => {
-    const url = new URL(QUERY_PATH, baseUrl);
+  const query = async (
+    base: URL,
+    credential: ParObsCredential,
+    promql: string,
+  ): Promise<Sample[]> => {
+    const url = new URL(QUERY_PATH, base);
     url.search = new URLSearchParams({ query: promql }).toString();
     let response: Pick<Response, 'status' | 'body'>;
     try {
@@ -216,10 +219,12 @@ export const createServiceHealthFeed = (
   };
 
   const load = async (): Promise<ServiceHealth> => {
+    if (baseUrl?.protocol !== 'https:' || baseUrl.username || baseUrl.password)
+      throw new FeedError('not_configured');
     const credential = loadParObsCredential(options.envFile, access);
     if (!credential) throw new FeedError('not_configured');
-    const up = await query(credential, PAR_OBS_UP_QUERY);
-    const expected = await query(credential, PAR_OBS_EXPECTED_DOWN_QUERY);
+    const up = await query(baseUrl, credential, PAR_OBS_UP_QUERY);
+    const expected = await query(baseUrl, credential, PAR_OBS_EXPECTED_DOWN_QUERY);
     const canaries = new Set(
       expected.filter((sample) => sample.value >= 1).map((s) => `${s.host}\n${s.service}`),
     );

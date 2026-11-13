@@ -17,7 +17,7 @@ For an independent fresh rebuild, add `-- --repro --no-render` to the Blender co
 
 - `observatory-high.blend`: 292 editable mesh components, three-segment bevels and a 128×64 planet sphere. It includes a CPU preview rig, which is excluded from export.
 - `observatory-low.blend`: the runtime geometry, with one-segment bevels and a 96×48 planet sphere, batched into ten material meshes. Preview camera and lights are excluded from export.
-- `archive/`: immutable superseded source revisions retained by content hash.
+- `archive/`: superseded source revisions. Filenames retain their original content identifiers. Repository copies have local paths redacted.
 - `maps/planet-basecolor.png`: original seeded, spherical noise color field materialized as a 2048×1024 sRGB PNG. The same image drives the distant planet's base and low emissive color. It contains no directional lighting.
 - Architecture uses portable scalar PBR colors, metallic and roughness values. Bevels remain actual geometry. There are no procedural Blender nodes, normal maps, projected details or omitted relief requiring a high-to-low projection bake.
 - No external art, paid provider, audio, collider, animation, socket or runtime lighting asset is used.

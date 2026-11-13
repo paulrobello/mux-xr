@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Product | Mux XR |
-| Repo | /Users/localuser/Repos/mux-xr |
+| Repo | mux-xr |
 | Owner | Paul Robello |
 | Status | Owner reports the controller build works well on Quest 3; hand input requires separate headset acceptance |
 | Date | November 3, 2026, Etc/GMT+8 |
@@ -56,8 +56,8 @@ Keyboard curvature is a saved 0–100° preference, and curved backing/key geome
 
 ### Upstream Dependencies
 
-- [Full hierarchy/layout streaming](https://board.example.test/board?card=01a19579caef72cb9ccc955871ab48c7): implemented in core `95dbb69f` and published in 0.76.0; metadata-only selector is `/ws?metadata=1`. Required for production hierarchy navigation. Integrate that supported contract rather than a second mux-control bridge.
-- [Pane lifecycle streaming](https://board.example.test/board?card=01a1957a2aa8739abc2c5cb116818793): shipped upstream in 0.76.0 for accurate exited/running status and late-join state. Viewer badges remain a non-blocking follow-up. Do not infer exit from silence or label a connection as proof of a running process.
+- Full hierarchy/layout streaming: implemented in core `95dbb69f` and published in 0.76.0; metadata-only selector is `/ws?metadata=1`. Required for production hierarchy navigation. Integrate that supported contract rather than a second mux-control bridge.
+- Pane lifecycle streaming: shipped upstream in 0.76.0 for accurate exited/running status and late-join state. Viewer badges remain a non-blocking follow-up. Do not infer exit from silence or label a connection as proof of a running process.
 
 ## Phases
 

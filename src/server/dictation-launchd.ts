@@ -1,14 +1,56 @@
-import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { userInfo } from 'node:os';
+import { join, resolve } from 'node:path';
 
 export const DICTATION_LABEL = 'org.mux-xr.whisper';
-export const DICTATION_PLIST_PATH = '/Library/LaunchDaemons/org.mux-xr.whisper.plist';
-export const DEFAULT_REPOSITORY = '/Users/localuser/Repos/mux-xr';
-export const DEFAULT_USER = 'localuser';
+export const daemonPlistPath = (label = DICTATION_LABEL): string =>
+  `/Library/LaunchDaemons/${validateLabel(label)}.plist`;
+const DEFAULT_ORIGINS = ['https://localhost:4240'];
+
+export interface HostConfig {
+  repository?: string;
+  user?: string;
+  origins?: string[];
+  grafanaUrl?: string;
+  launchdLabel?: string;
+  handSource?: string;
+}
+
+export function readHostConfig(repository: string): HostConfig {
+  let raw: string;
+  try {
+    raw = readFileSync(join(repository, '.local/host-config.json'), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw error;
+  }
+  const value = JSON.parse(raw) as HostConfig | null;
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    (value.repository !== undefined && typeof value.repository !== 'string') ||
+    (value.user !== undefined && typeof value.user !== 'string') ||
+    (value.launchdLabel !== undefined && typeof value.launchdLabel !== 'string') ||
+    (value.handSource !== undefined && typeof value.handSource !== 'string') ||
+    (value.grafanaUrl !== undefined && typeof value.grafanaUrl !== 'string') ||
+    (value.origins !== undefined &&
+      (!Array.isArray(value.origins) ||
+        value.origins.length === 0 ||
+        value.origins.some((origin) => typeof origin !== 'string')))
+  )
+    throw new Error('Invalid .local/host-config.json.');
+  return value;
+}
+
+export const defaultDictationUser = (): string => process.env.SUDO_USER || userInfo().username;
 export const DICTATION_PORT = 4242;
 
 export type DictationLaunchdOptions = {
   repository?: string;
   user?: string;
+  origins?: readonly string[];
+  label?: string;
   /** Opts the agent into `/repo-status`, which runs git and gh; off unless asked for. */
   repoStatus?: boolean;
   /** Opts the agent into `/picture-fetch`, which fetches URLs for a paired client; off unless asked for. */
@@ -33,6 +75,12 @@ const xml = (value: string): string =>
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&apos;');
 
+export function validateLabel(label: string): string {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$/.test(label))
+    throw new Error('Invalid launchd label.');
+  return label;
+}
+
 export const validateUser = (user: string): string => {
   if (!/^[a-z_][a-z0-9_-]{0,30}$/.test(user)) throw new Error(`Invalid macOS user: ${user}`);
   if (user === 'root') throw new Error('LaunchDaemon user must be non-root.');
@@ -47,7 +95,15 @@ export const validateRepository = (repository: string): string => {
   return normalized;
 };
 
-const serverArguments = (repository: string): string[] => {
+const serverArguments = (repository: string, origins: readonly string[]): string[] => {
+  if (
+    origins.length === 0 ||
+    origins.some((origin) => {
+      const url = URL.parse(origin);
+      return !url || url.origin !== origin || url.protocol !== 'https:';
+    })
+  )
+    throw new Error('Dictation origins must be HTTPS origins without a path.');
   const script = `${repository}/scripts/dictation-server.ts`;
   const model = `${repository}/.local/models/ggml-base.en.bin`;
   const pem = `${repository}/.local/https/_cert.pem`;
@@ -59,10 +115,7 @@ const serverArguments = (repository: string): string[] => {
     '0.0.0.0',
     '--port',
     String(DICTATION_PORT),
-    '--origin',
-    'https://192.0.2.10:4240',
-    '--origin',
-    'https://localhost:4240',
+    ...origins.flatMap((origin) => ['--origin', origin]),
     '--cert',
     pem,
     '--key',
@@ -87,19 +140,19 @@ export const clipboardSecretPath = (repository: string): string =>
 export const parObsQueryEnvPath = (repository: string): string =>
   `${repository}/.local/par-obs-query.env`;
 
-export const agentPlistPath = (user: string): string =>
-  `/Users/${validateUser(user)}/Library/LaunchAgents/${DICTATION_LABEL}.plist`;
+export const agentPlistPath = (user: string, label = DICTATION_LABEL): string =>
+  `/Users/${validateUser(user)}/Library/LaunchAgents/${validateLabel(label)}.plist`;
 
 export const buildLaunchDaemonPlist = (options: DictationLaunchdOptions = {}): string => {
-  const repository = validateRepository(options.repository ?? DEFAULT_REPOSITORY);
-  const user = validateUser(options.user ?? DEFAULT_USER);
-  const array = plistArray(serverArguments(repository));
+  const repository = validateRepository(options.repository ?? process.cwd());
+  const user = validateUser(options.user ?? defaultDictationUser());
+  const array = plistArray(serverArguments(repository, options.origins ?? DEFAULT_ORIGINS));
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${DICTATION_LABEL}</string>
+  <string>${validateLabel(options.label ?? DICTATION_LABEL)}</string>
   <key>UserName</key>
   <string>${xml(user)}</string>
   <key>ProgramArguments</key>
@@ -130,9 +183,9 @@ ${array}
  * the user's pasteboard (com.apple.pboard), so clipboard sync needs this instead of the LaunchDaemon.
  */
 export const buildLaunchAgentPlist = (options: DictationLaunchdOptions = {}): string => {
-  const repository = validateRepository(options.repository ?? DEFAULT_REPOSITORY);
+  const repository = validateRepository(options.repository ?? process.cwd());
   const array = plistArray([
-    ...serverArguments(repository),
+    ...serverArguments(repository, options.origins ?? DEFAULT_ORIGINS),
     '--clipboard-secret-file',
     clipboardSecretPath(repository),
     ...(options.repoStatus ? ['--repo-status', 'on'] : []),
@@ -152,7 +205,7 @@ export const buildLaunchAgentPlist = (options: DictationLaunchdOptions = {}): st
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${DICTATION_LABEL}</string>
+  <string>${validateLabel(options.label ?? DICTATION_LABEL)}</string>
   <key>ProgramArguments</key>
   <array>
 ${array}
@@ -178,7 +231,11 @@ ${array}
 `;
 };
 
-export const isOwnedPlist = (contents: string, expected: string): boolean => {
-  const label = /<key>Label<\/key>\s*<string>([^<]+)<\/string>/.exec(contents)?.[1];
-  return label === DICTATION_LABEL && contents === expected;
+export const isOwnedPlist = (
+  contents: string,
+  expected: string,
+  label = DICTATION_LABEL,
+): boolean => {
+  const actualLabel = /<key>Label<\/key>\s*<string>([^<]+)<\/string>/.exec(contents)?.[1];
+  return actualLabel === label && contents === expected;
 };

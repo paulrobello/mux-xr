@@ -1,0 +1,8 @@
+{
+  "repository": "/path/to/mux-xr",
+  "user": "localuser",
+  "origins": ["https://mux-host.example.test:4240", "https://localhost:4240"],
+  "launchdLabel": "org.mux-xr.whisper",
+  "grafanaUrl": "https://grafana.example.test",
+  "handSource": "/path/to/editable-hand.blend"
+}

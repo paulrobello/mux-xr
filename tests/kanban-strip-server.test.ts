@@ -109,7 +109,7 @@ const feedFor = (runner: ReturnType<typeof fakeRunner>) =>
   createKanbanStripFeed({
     cli: cliFor(runner),
     homeDir: () => home,
-    localHostname: () => 'dev-workstation.local',
+    localHostname: () => 'workstation.local',
     now: () => NOW,
   });
 
@@ -300,7 +300,7 @@ describe('kanban strip feed', () => {
     expect(await feed(stripRequest(join(repos, 'alpha'), 'other-mac'))).toEqual({
       state: 'remote',
     });
-    expect(await feed(stripRequest(join(repos, 'alpha'), 'dev-workstation'))).toMatchObject({
+    expect(await feed(stripRequest(join(repos, 'alpha'), 'workstation'))).toMatchObject({
       state: 'ok',
     });
     expect(await feed('not json')).toEqual({ state: 'outside' });
@@ -342,7 +342,7 @@ describe('kanban strip route', () => {
       boardFeeds: {
         enabled,
         cli: cliFor(runner),
-        strip: { homeDir: () => home, localHostname: () => 'dev-workstation', now: () => NOW },
+        strip: { homeDir: () => home, localHostname: () => 'workstation', now: () => NOW },
       },
     }).then((server) => ({ ...server, url: `${server.base}/kanban-strip`, runner }));
 

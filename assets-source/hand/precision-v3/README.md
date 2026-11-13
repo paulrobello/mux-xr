@@ -8,11 +8,11 @@ Open, Fist, Pointing, Thumbs Up, and a diagnostic pinch were inspected in Blende
 
 To regenerate, open `pre-edit.blend` in Blender 5.2.2 and run `slim_hand.py`, then run `fit_bases.py` through Blender MCP. Alternatively, open `pre-straight.blend` and run only `fit_bases.py`. These scripts write a candidate and staged GLB but do not overwrite the live file. Run `validate_export.py` and `inspect_pinch.py` in Blender; restore Open at frame 1 afterward. The owner file was separately saved after validation.
 
-- Preserved source SHA-256: `203f505b1e95afecd24ad79bf38b6c5be137c2d6bca4bda9f2f7072010ec94f9`
-- Candidate blend SHA-256: `4faf4cbed8a69f1235ac7e95490f761dba09af4bc695e7bf6cbac9f45357de55`
+- Preserved source SHA-256: `d4836053669cf5321ac1196985a27797ce8c4ec63e23496c7cf28bae3245ac2d`
+- Candidate blend SHA-256: `226005a70951d8ea20d0cf6b357c4b39c1376986e838f3c4854eff22aa5a4c35`
 - Final staged GLB SHA-256: `95714f02a92e58eba41a26ebf1e8197369c336da9844ce36d15bad147af51e0d`
 
-The prior base-fit source SHA-256 is `bd71dcc2df4c6b892b67f639758d30076bcdbf5d996e76df9813299c582b4af6`. The pre-straightening snapshot SHA-256 is `10a1b97efe868de97fed00261595c1e29d0f1156a730c3f75272683535757151`. The outer root is at x=−42 mm, z=127.5 mm and the index root at x=46.55 mm, z=127.5 mm. Both three-bone chains run straight to their unchanged tips. Existing normalized weights were retained after inspecting the resulting poses. `basefit-measurements.json` records the joint positions and geometry preservation digest.
+The prior base-fit source SHA-256 is `3e0dd1919822cf277e105b2fe13c4bb0ffd50878c8f8bd4e07ba964e7e6d7652`. The pre-straightening snapshot SHA-256 is `71a03e9b5efc4d5562ed07ef73300730cb2b88bc099a0c68cf776fc236fd251b`. The outer root is at x=−42 mm, z=127.5 mm and the index root at x=46.55 mm, z=127.5 mm. Both three-bone chains run straight to their unchanged tips. Existing normalized weights were retained after inspecting the resulting poses. `basefit-measurements.json` records the joint positions and geometry preservation digest.
 
 The first slimmed GLB, before base fitting, had historical SHA-256 `a7e011227cea64b9e71607f7a02e43a54f82a155f89a6bf8c10797fb99152926`. It is superseded by the final staged GLB above.
 

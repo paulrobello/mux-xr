@@ -25,6 +25,12 @@ The serving origin is the default streamer endpoint. The app remembers a custom 
 
 For the prepared preview, look up the exact address, socket and owning pane in the stable checkout’s gitignored `.local/runtime.json` and local launch configuration. The preview mirrors the shared default daemon. Use [isolated fixtures](TESTING.md#private-real-streamer-checks) for automated commands, pane creation, and grid changes.
 
+## Local host configuration
+
+Copy [host-config.example.json](../host-config.example.json) to `.local/host-config.json` and replace the example values for this checkout. The installer defaults to the current checkout, the invoking non-root user, and the HTTPS localhost origin. Use `origins` to add the exact frontend origins used by the headset. The optional `launchdLabel` lets an existing installation keep its job label. Set `grafanaUrl` to your HTTPS Grafana origin if you enable Service health. The hand editing scripts use `handSource` to verify the editable Blender file before they write to it.
+
+Existing PEMs, tokens, and runtime records remain separate under `.local/`.
+
 ## Local Whisper dictation
 
 The optional companion serves `/dictate` on port 4242 and accepts the configured frontend origins. It converts audio with FFmpeg and transcribes with local `whisper-cli`. Recording is bounded to 60 seconds and 8 MiB. Temporary audio is removed after processing. See [keyboard and dictation](WORKSPACE.md#keyboard-and-dictation) for the browser workflow.
@@ -58,7 +64,7 @@ Transfers use the dictation server on port 4242 at `/clipboard` and are off unti
 
 The pasteboard (`com.apple.pboard`) is registered only in the logged-in user's `gui/<uid>` launchd domain, so the clipboard route needs the server in that domain. `make whisper-agent-plist` prints the LaunchAgent, which is the same server with `--clipboard-secret-file <repo>/.local/clipboard-secret`, `LimitLoadToSessionType Aqua` and no `UserName`.
 
-To switch from the LaunchDaemon, run `sudo launchctl bootout system/org.mux-xr.whisper && sudo rm /Library/LaunchDaemons/org.mux-xr.whisper.plist`, then `make install-whisper-agent` as yourself (no sudo). That installer refuses while the LaunchDaemon is still loaded or anything else owns port 4242, then checks HTTPS health. Dictation then runs only while you are logged in to the Mac.
+To switch from the LaunchDaemon, run `sudo launchctl bootout system/org.mux-xr.whisper && sudo rm /Library/LaunchDaemons/org.mux-xr.whisper.plist`, using the job label in your local config if set. Then run `make install-whisper-agent` as yourself (no sudo). That installer refuses while the LaunchDaemon is still loaded or anything else owns port 4242, then checks HTTPS health. Dictation then runs only while you are logged in to the Mac.
 
 To switch back to the LaunchDaemon, run `make uninstall-whisper-agent` as yourself (it boots the agent out, waits for port 4242 to free and removes its plist), then `make install-whisper-service`. The LaunchDaemon installer refuses while the agent is loaded, because KeepAlive would restart an agent it stopped and the two would fight over the port. A failed agent install restores and restarts the previous agent.
 
@@ -83,7 +89,7 @@ The LaunchAgent installer accepts the flags below after `--install --agent`. Pas
 | Picture proxy | `/picture-fetch` | `--picture-proxy` |
 | Picture depth | `/picture-depth` | `--picture-depth` and the pinned ONNX model |
 | Kanban strip and Host bookings | `/kanban-strip`, `/bookings` | `--board-feeds` and a working kanban CLI |
-| Service health | `/service-health` | `--service-health` and an owner-only `.local/par-obs-query.env` |
+| Service health | `/service-health` | `--service-health` with `grafanaUrl` in the local host config and an owner-only `.local/par-obs-query.env` |
 | Mesh inbox | `/mesh-inbox` | `--mesh-inbox` and a working par-mesh CLI |
 | Toasts | `/toast`, `/toasts` | Clipboard pairing. `--toast-lan` allows posts from other LAN hosts. |
 

@@ -20,7 +20,7 @@ Blender -b candidate.blend --python validate_export.py
 
 `render_views.py` (with `RENDER_TAG` and `RENDER_DIR` set, and `SPREAD_ANGLE` optional) writes front, spread, Fist and curled review renders.
 
-- Pre-edit SHA-256: `5119677a0e44efc799a334dd40593b53afc4d3f11f5353a52064e09f110d882a`
-- Narrowed SHA-256: `cca8f76e359e855e5157cf9cc07f7aad8e8de54774c897f3a4f0856aa0ab50ce`
-- Candidate SHA-256: `ea5d289720e933fce2714a7c1323573b2abdc1b64ae627be488f759a75c4b378`
+- Pre-edit SHA-256: `d15311e38500133d9f80be4fa141824c1111169dd481c7c031f781b64c39ade3`
+- Narrowed SHA-256: `a58de32cd68f67cfcfa7ac730bc27c4c21ec3953e8107caa42f73fdc250d7b54`
+- Candidate SHA-256: `1676bc6f09859cb5773a862c8f7f9cfaafd4709b23f6a6f6c62c989146bb93f9`
 - Staged GLB SHA-256: `6f2274e0a39497d629c70049e5b0d9f18a698dd8f0de50504bba17940f2baf97`

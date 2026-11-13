@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadClipboardSecret } from '../src/server/clipboard-server';
 import { createOnnxDepthEstimator } from '../src/server/depth-estimator';
+import { readHostConfig } from '../src/server/dictation-launchd';
 import { attachDictationServer } from '../src/server/dictation-server';
 import { createDictationTelemetry } from '../src/server/dictation-telemetry';
 
@@ -152,6 +153,7 @@ const attached = attachDictationServer(server, {
   serviceHealth: {
     enabled: serviceHealthFlag === 'on',
     envFile: serviceHealthEnvFile,
+    baseUrl: serviceHealthFlag === 'on' ? readHostConfig(repoRoot).grafanaUrl : undefined,
     onEvent: (event) => console.log(`Service health refused: ${event.code}`),
   },
   // Shows other agents' message subjects, so it needs its own explicit opt-in. Refusal codes

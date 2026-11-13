@@ -63,7 +63,7 @@ const ownerOnly = (path: string): number => {
   if (path !== ENV_FILE) throw new Error('ENOENT');
   return 0o100600;
 };
-const io = { readFile: readEnv, fileMode: ownerOnly };
+const io = { readFile: readEnv, fileMode: ownerOnly, baseUrl: 'https://grafana.example.test' };
 const textFile = (text: string) => ({ readFile: () => text, fileMode: ownerOnly });
 
 const vector = (rows: Array<[string, string, number]>) => ({
@@ -145,6 +145,7 @@ describe('par-obs credential file', () => {
       envFile: ENV_FILE,
       readFile: readEnv,
       fileMode: () => 0o100644,
+      baseUrl: io.baseUrl,
       warn: (line) => warned.push(line),
       fetch,
     });
@@ -186,7 +187,7 @@ describe('service health feed', () => {
       PAR_OBS_EXPECTED_DOWN_QUERY,
     ]);
     const [first] = calls;
-    expect(first?.url.origin).toBe('https://grafana.example.test');
+    expect(first?.url.origin).toBe(io.baseUrl);
     expect(first?.url.pathname).toBe('/api/datasources/proxy/uid/prometheus/api/v1/query');
     expect(first?.url.href).not.toContain(CLIENT_SECRET);
     expect(first?.init.redirect).toBe('manual');
@@ -206,7 +207,8 @@ describe('service health feed', () => {
     ];
     const fetch: ServiceHealthFetch = async (url) => {
       const query = new URL(url).searchParams.get('query');
-      const body = query === PAR_OBS_UP_QUERY ? vector(up) : vector([['build-host-1', 'red-path', 1]]);
+      const body =
+        query === PAR_OBS_UP_QUERY ? vector(up) : vector([['build-host-1', 'red-path', 1]]);
       return { status: 200, body: bodyOf(JSON.stringify(body)) };
     };
     const feed = createServiceHealthFeed({

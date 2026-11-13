@@ -146,14 +146,14 @@ describe('kanban strip widget', () => {
     const widget = mounted(source, () => now);
     widget.update(now);
     expect(calls).toHaveLength(0);
-    widget.setFocusedPane?.('pane-a', '/Users/me/Repos/mux-xr', 'dev-workstation');
+    widget.setFocusedPane?.('pane-a', '/Users/me/Repos/mux-xr', 'workstation');
     expect(text(widget, 'kanban-strip-message')).toBe('Checking…');
     widget.update(now);
     expect(calls).toHaveLength(0);
     now += KANBAN_STRIP_SETTLE_MS;
     widget.update(now);
     expect(calls.map((call) => JSON.parse(call.request))).toEqual([
-      { cwd: '/Users/me/Repos/mux-xr', host: 'dev-workstation' },
+      { cwd: '/Users/me/Repos/mux-xr', host: 'workstation' },
     ]);
     calls[0]?.resolve({
       ok: true,
@@ -177,7 +177,7 @@ describe('kanban strip widget', () => {
     expect(text(widget, 'kanban-strip-row-2-priority')).toBe('med');
     expect(shown(widget, 'kanban-strip-row-3-title')).toBe(false);
     // Repeats are ignored; the next poll waits for the interval.
-    widget.setFocusedPane?.('pane-a', '/Users/me/Repos/mux-xr', 'dev-workstation');
+    widget.setFocusedPane?.('pane-a', '/Users/me/Repos/mux-xr', 'workstation');
     widget.update(now + 1_000);
     expect(calls).toHaveLength(1);
     widget.update(now + KANBAN_STRIP_POLL_MS);
