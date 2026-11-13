@@ -121,6 +121,10 @@ export const BACKGROUND_MODES = [
   'deep-water',
   'studio',
   'desert',
+  'aurora',
+  'koi',
+  'summit',
+  'rooftop',
 ] as const;
 
 export type BackgroundMode = (typeof BACKGROUND_MODES)[number];

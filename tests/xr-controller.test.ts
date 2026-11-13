@@ -65,9 +65,15 @@ vi.mock('three', async (importOriginal) => {
 });
 
 import * as THREE from 'three';
-import type { PaneDescriptor, TerminalSurface, WorkspaceActions } from '../src/contracts';
+import {
+  BACKGROUND_MODES,
+  type PaneDescriptor,
+  type TerminalSurface,
+  type WorkspaceActions,
+} from '../src/contracts';
 import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
 import { createPictureController, type PictureLoaders } from '../src/workspace/pictures';
+import { BACKGROUND_LABELS } from '../src/xr/background-picker';
 import { dimHandColor, HAND_COLOR_PRESETS } from '../src/xr/hand-colors';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
 import { PictureLoadError, pictureErrorNotice } from '../src/xr/picture-sizing';
@@ -4999,88 +5005,98 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('owns the background selector only in World and closes it after selection', () => {
+  it('opens the Backgrounds picker from World and picks a background in place', () => {
     const { workspace, container } = fixture();
     workspace.showInput('settings');
     hit(workspace, { inputAction: 'openInput', mode: 'world' });
-    const world = workspace.scene.getObjectByName('xr-world-controls');
-    if (!world) throw new Error('World missing');
-    const menu = world.getObjectByName('background-options');
-    expect(menu?.visible).toBe(false);
-    hit(workspace, { inputAction: 'backgroundSelect', backgroundSelectOwner: 'input' });
-    expect(menu?.visible).toBe(true);
-    hit(workspace, { inputAction: 'background', background: 'gradient' });
+    expect(workspace.scene.getObjectByName('xr-world-controls')).toBeTruthy();
+    hit(workspace, { inputAction: 'backgroundSelect' });
+    const picker = (): THREE.Object3D => {
+      const root = workspace.scene.getObjectByName('xr-backgrounds-controls');
+      if (!root) throw new Error('Backgrounds picker missing');
+      return root;
+    };
+    const captions = (): string[] =>
+      picker()
+        .children.filter((child) => child.userData.inputAction === 'background')
+        .map((child) => child.userData.labelText as string);
+    expect(captions()).toEqual(BACKGROUND_MODES.slice(0, 6).map((mode) => BACKGROUND_LABELS[mode]));
+    const tiles = picker().children.filter(
+      (child) => child.userData.inputAction === 'backgroundTile',
+    );
+    expect(tiles.map((tile) => tile.userData.background)).toEqual(BACKGROUND_MODES.slice(0, 6));
+    hit(workspace, { inputAction: 'backgroundTile', background: 'gradient' });
     expect(workspace.state.background).toBe('gradient');
-    expect(menu?.visible).toBe(false);
-    const widths = menu?.children
-      .filter((child) => child.userData.inputAction === 'background')
-      .map((child) => child.userData.labelWidth);
-    expect(widths).toHaveLength(7);
-    expect(new Set(widths).size).toBe(1);
+    const selected = picker().getObjectByName('xr-background-selected');
+    const gradientTile = picker().children.find(
+      (child) =>
+        child.userData.inputAction === 'backgroundTile' && child.userData.background === 'gradient',
+    );
+    expect(selected?.position.x).toBeCloseTo(gradientTile?.position.x ?? Number.NaN);
+    expect(selected?.position.y).toBeCloseTo(gradientTile?.position.y ?? Number.NaN);
     const hud = workspace.scene.getObjectByName('xr-workspace-hud');
     expect(hud?.children.some((child) => child.userData.inputAction === 'backgroundSelect')).toBe(
       false,
     );
-    workspace.showInput('keyboard');
-    expect(workspace.scene.getObjectByName('background-options')).toBeUndefined();
+    hit(workspace, { inputAction: 'openInput', mode: 'world' });
+    const trigger = workspace.scene.getObjectByName('background-select-trigger');
+    expect(trigger?.userData.labelText).toBe('Gradient');
     workspace.dispose();
     container.remove();
   });
 
-  it('lists all seven backgrounds in the World selector without overlapping other controls', () => {
+  it('scrolls the Backgrounds picker by row and keeps its controls apart', () => {
     const { workspace, container } = fixture();
-    workspace.showInput('settings');
-    hit(workspace, { inputAction: 'openInput', mode: 'world' });
-    const world = workspace.scene.getObjectByName('xr-world-controls');
-    if (!world) throw new Error('World missing');
-    hit(workspace, { inputAction: 'backgroundSelect', backgroundSelectOwner: 'input' });
-    world.updateMatrixWorld(true);
-    const options = (world.getObjectByName('background-options') as THREE.Object3D).children.filter(
-      (child) => child.userData.inputAction === 'background',
-    );
-    expect(options.map((option) => option.userData.labelText)).toEqual([
-      'Black',
-      'Gradient',
-      'Observatory',
-      'Hangar deck',
-      'Deep-water station',
-      'Minimal studio',
-      'Desert night',
-    ]);
-    const boxOf = (object: THREE.Object3D): THREE.Box3 => {
-      const center = world.worldToLocal(object.getWorldPosition(new THREE.Vector3()));
-      const width = object.userData.labelWidth as number;
-      const height = object.userData.labelHeight as number;
-      return new THREE.Box3(
-        new THREE.Vector3(center.x - width / 2, center.y - height / 2, -1),
-        new THREE.Vector3(center.x + width / 2, center.y + height / 2, 1),
-      );
+    workspace.setBackground(BACKGROUND_MODES[BACKGROUND_MODES.length - 1]);
+    workspace.showInput('world');
+    hit(workspace, { inputAction: 'backgroundSelect' });
+    const picker = (): THREE.Object3D => {
+      const root = workspace.scene.getObjectByName('xr-backgrounds-controls');
+      if (!root) throw new Error('Backgrounds picker missing');
+      return root;
     };
-    const others: THREE.Object3D[] = [];
-    world.traverse((object) => {
-      const action = object.userData.inputAction;
-      // The title (grabInput) is excluded on purpose: the popup closes when an option is picked.
-      if (
-        action &&
-        action !== 'background' &&
-        action !== 'noop' &&
-        action !== 'grabInput' &&
-        object.userData.labelWidth &&
-        object.userData.labelHeight
-      )
-        others.push(object);
-    });
-    expect(others.length).toBeGreaterThanOrEqual(4);
-    const optionBoxes = options.map(boxOf);
-    optionBoxes.forEach((box, index) => {
-      for (const later of optionBoxes.slice(index + 1))
-        expect(box.intersectsBox(later)).toBe(false);
-      for (const other of others) {
-        expect(
-          box.intersectsBox(boxOf(other)),
-          `${options[index].userData.labelText} overlaps ${other.userData.labelText}`,
-        ).toBe(false);
-      }
+    const shown = (): string[] =>
+      picker()
+        .children.filter((child) => child.userData.inputAction === 'backgroundTile')
+        .map((child) => child.userData.background as string);
+    // Opening on the last background scrolls it into view.
+    expect(shown()).toContain(BACKGROUND_MODES[BACKGROUND_MODES.length - 1]);
+    const down = (): THREE.Object3D | undefined =>
+      picker().getObjectByName('xr-background-scroll-down');
+    const up = (): THREE.Object3D | undefined =>
+      picker().getObjectByName('xr-background-scroll-up');
+    expect(down()?.userData.inputAction).toBe('noop');
+    expect(up()?.userData.inputAction).toBe('backgroundScroll');
+    while (up()?.userData.inputAction === 'backgroundScroll')
+      hit(workspace, { inputAction: 'backgroundScroll', delta: -1 });
+    expect(shown()).toEqual(BACKGROUND_MODES.slice(0, 6));
+    expect(down()?.userData.inputAction).toBe('backgroundScroll');
+    hit(workspace, { inputAction: 'backgroundScroll', delta: 1 });
+    expect(shown()).toEqual(BACKGROUND_MODES.slice(3, 9));
+    const root = picker();
+    root.updateMatrixWorld(true);
+    const boxes: { label: string; box: THREE.Box3 }[] = [];
+    for (const object of root.children) {
+      const plane =
+        object.name === 'xr-background-thumbnail'
+          ? ((object as THREE.Mesh).geometry as THREE.PlaneGeometry).parameters
+          : undefined;
+      const width = (object.userData.labelWidth as number | undefined) ?? plane?.width;
+      const height = (object.userData.labelHeight as number | undefined) ?? plane?.height;
+      if (!width || !height) continue;
+      const center = object.position;
+      boxes.push({
+        label: String(object.userData.labelText ?? object.userData.background ?? object.name),
+        box: new THREE.Box3(
+          new THREE.Vector3(center.x - width / 2, center.y - height / 2, -1),
+          new THREE.Vector3(center.x + width / 2, center.y + height / 2, 1),
+        ),
+      });
+    }
+    expect(boxes.length).toBeGreaterThanOrEqual(10);
+    boxes.forEach(({ label, box }, index) => {
+      for (const later of boxes.slice(index + 1))
+        expect(box.intersectsBox(later.box), `${label} overlaps ${later.label}`).toBe(false);
     });
     workspace.dispose();
     container.remove();

@@ -80,6 +80,14 @@ import {
   retintAccentMaterials,
 } from './accent-colors';
 import { calculateArrangement } from './arrangements';
+import {
+  BACKGROUND_LABELS,
+  BACKGROUND_TILE_HEIGHT,
+  BACKGROUND_TILE_WIDTH,
+  backgroundPickerRowShowing,
+  backgroundThumbnailUrl,
+  layoutBackgroundPicker,
+} from './background-picker';
 import { installBatchedHandPoses } from './batched-hand-poses';
 import { createBellFeedStore } from './bell-feed';
 import type { CartoonHand } from './cartoon-hand';
@@ -203,6 +211,7 @@ type InputMode =
   | 'settings'
   | 'display'
   | 'world'
+  | 'backgrounds'
   | 'buttons'
   | 'picture-url'
   | 'picture-gallery'
@@ -727,25 +736,16 @@ function updateLabel(object: THREE.Mesh, label: string): void {
   object.userData.labelText = label;
 }
 
-const BACKGROUND_LABELS: Record<BackgroundMode, string> = {
-  black: 'Black',
-  gradient: 'Gradient',
-  observatory: 'Observatory',
-  hangar: 'Hangar deck',
-  'deep-water': 'Deep-water station',
-  studio: 'Minimal studio',
-  desert: 'Desert night',
-};
-
-function createBackgroundSelect(mode: BackgroundMode, owner: 'hud' | 'input'): THREE.Group {
+/** The World panel's background button; it opens the Backgrounds picker. */
+function createBackgroundSelect(mode: BackgroundMode): THREE.Group {
   const root = new THREE.Group();
   root.name = 'background-select';
   const trigger = createLabelButton(BACKGROUND_LABELS[mode], 0.48, 0.09, {
     inputAction: 'backgroundSelect',
-    backgroundSelectOwner: owner,
   });
   trigger.name = 'background-select-trigger';
-  const shape = new THREE.Shape().moveTo(-0.009, 0.006).lineTo(0.009, 0.006).lineTo(0, -0.006);
+  trigger.userData.helpText = 'Choose a background';
+  const shape = new THREE.Shape().moveTo(-0.006, 0.009).lineTo(-0.006, -0.009).lineTo(0.006, 0);
   shape.closePath();
   const arrow = new THREE.Mesh(
     new THREE.ShapeGeometry(shape),
@@ -753,37 +753,11 @@ function createBackgroundSelect(mode: BackgroundMode, owner: 'hud' | 'input'): T
   );
   arrow.position.set(0.2, 0, 0.003);
   arrow.raycast = () => undefined;
-  const options = new THREE.Group();
-  options.name = 'background-options';
-  options.visible = false;
-  options.position.z = 0.03;
-  const modes = Object.keys(BACKGROUND_LABELS) as BackgroundMode[];
-  const rows = Math.ceil(modes.length / 2);
-  const backing = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.02, rows * 0.11),
-    new THREE.MeshBasicMaterial({ color: 0x0d1720 }),
-  );
-  backing.position.set(0, 0.11 + (rows - 1) * 0.055, -0.005);
-  backing.userData.inputAction = 'noop';
-  options.add(backing);
-  modes.forEach((background, index) => {
-    const option = createLabelButton(BACKGROUND_LABELS[background], 0.48, 0.09, {
-      inputAction: 'background',
-      background,
-    });
-    option.position.set(
-      index % 2 === 0 ? -0.25 : 0.25,
-      0.11 + (rows - 1 - Math.floor(index / 2)) * 0.11,
-      0,
-    );
-    setModifierVisual(option, background === mode);
-    options.add(option);
-  });
-  root.add(trigger, arrow, options);
+  root.add(trigger, arrow);
   return root;
 }
 
-function createGradientTexture(): THREE.CanvasTexture {
+export function createGradientTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 2;
   canvas.height = 256;
@@ -1401,6 +1375,31 @@ export function createWorkspaceScene(
   let pictureNotice: string | null = null;
   let recentPictures: ReadonlyArray<RecentPictureEntry> | null | 'loading' = 'loading';
   let recentPage = 0;
+  let backgroundRow = 0;
+  /** Thumbnails load once per scene; a closed panel frees only their GPU copy. */
+  const backgroundThumbnails = new Map<BackgroundMode, THREE.Texture | 'loading' | 'failed'>();
+  /** The loaded thumbnail, or null while it loads or after it failed (the tile shows its label). */
+  const backgroundThumbnail = (mode: BackgroundMode): THREE.Texture | null => {
+    const cached = backgroundThumbnails.get(mode);
+    if (cached instanceof THREE.Texture) return cached;
+    if (cached) return null;
+    backgroundThumbnails.set(mode, 'loading');
+    new THREE.TextureLoader().load(
+      backgroundThumbnailUrl(mode),
+      (texture) => {
+        if (disposed) {
+          texture.dispose();
+          return;
+        }
+        texture.colorSpace = THREE.SRGBColorSpace;
+        backgroundThumbnails.set(mode, texture);
+        if (inputRoot && inputMode === 'backgrounds') refreshInputRoot('backgrounds');
+      },
+      undefined,
+      () => backgroundThumbnails.set(mode, 'failed'),
+    );
+    return null;
+  };
   let widgetsPage = 0;
   let recentGeneration = 0;
   let commandPage = 0;
@@ -1458,12 +1457,6 @@ export function createWorkspaceScene(
   };
   const hierarchyHiddenPanels = new Map<THREE.Object3D, boolean>();
   let hudRoot: THREE.Group | null = null;
-  const closeBackgroundMenus = (): void => {
-    for (const owner of [hudRoot, inputRoot]) {
-      const options = owner?.getObjectByName('background-options');
-      if (options) options.visible = false;
-    }
-  };
   let updateNotice: THREE.Mesh | null = null;
   let statusNotice: THREE.Mesh | null = null;
   let statusDismiss: THREE.Mesh | null = null;
@@ -3059,7 +3052,7 @@ export function createWorkspaceScene(
           warpEdit ||
           radialMenu.root.visible ||
           pad.buttons[3]?.pressed ||
-          (inputRoot && inputMode !== 'keyboard')
+          (inputRoot && inputMode !== 'keyboard' && inputMode !== 'backgrounds')
         ) {
           scrollDue.delete(controller);
           continue;
@@ -3071,6 +3064,21 @@ export function createWorkspaceScene(
         }
         if (time < (scrollDue.get(controller) ?? 0)) continue;
         const target = targetFromController(controller);
+        if (inputMode === 'backgrounds') {
+          let onPicker = false;
+          target?.object?.traverseAncestors((ancestor) => {
+            if (ancestor === inputRoot) onPicker = true;
+          });
+          if (onPicker && inputRoot) {
+            const next = layoutBackgroundPicker(backgroundRow + Math.sign(axis)).firstRow;
+            if (next !== backgroundRow) {
+              backgroundRow = next;
+              refreshInputRoot('backgrounds');
+            }
+            scrollDue.set(controller, time + 400);
+          }
+          continue;
+        }
         const panel = target?.terminalId ? panels.get(target.terminalId) : undefined;
         if (panel && target?.uv && target.object === panel.screen) {
           actions.scrollTerminal?.(panel.id, Math.sign(axis) * 3, cellAtUV(panel, target.uv));
@@ -4248,19 +4256,21 @@ export function createWorkspaceScene(
                     ? 'Display settings'
                     : mode === 'world'
                       ? 'World settings'
-                      : mode === 'weather-zip'
-                        ? 'Weather ZIP code'
-                        : mode === 'accent'
-                          ? 'Accent colors'
-                          : mode === 'filtering'
-                            ? 'Terminal filtering'
-                            : mode === 'warp'
-                              ? 'Terminal curvature'
-                              : mode === 'arrange'
-                                ? 'Arrange terminals'
-                                : mode === 'panes'
-                                  ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
-                                  : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? (mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard') : 'Terminal settings'} · ${targetTitle}`,
+                      : mode === 'backgrounds'
+                        ? 'Backgrounds'
+                        : mode === 'weather-zip'
+                          ? 'Weather ZIP code'
+                          : mode === 'accent'
+                            ? 'Accent colors'
+                            : mode === 'filtering'
+                              ? 'Terminal filtering'
+                              : mode === 'warp'
+                                ? 'Terminal curvature'
+                                : mode === 'arrange'
+                                  ? 'Arrange terminals'
+                                  : mode === 'panes'
+                                    ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
+                                    : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? (mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard') : 'Terminal settings'} · ${targetTitle}`,
       mode === 'panes' ? 1.8 : 0.9,
       0.12,
       { inputAction: 'grabInput' },
@@ -4399,8 +4409,68 @@ export function createWorkspaceScene(
       sounds.position.y = -0.71;
       setModifierVisual(sounds, mutableState.uiSounds);
       inputRoot.add(sounds);
+    } else if (mode === 'backgrounds') {
+      const layout = layoutBackgroundPicker(backgroundRow);
+      backgroundRow = layout.firstRow;
+      for (const { mode: background, x, y } of layout.tiles) {
+        const selected = background === mutableState.background;
+        const label = BACKGROUND_LABELS[background];
+        const thumbnail = backgroundThumbnail(background);
+        const tile = new THREE.Mesh(
+          new THREE.PlaneGeometry(BACKGROUND_TILE_WIDTH, BACKGROUND_TILE_HEIGHT),
+          new THREE.MeshBasicMaterial({
+            map: thumbnail,
+            color: thumbnail ? 0xffffff : 0x16222c,
+            toneMapped: false,
+          }),
+        );
+        tile.name = 'xr-background-thumbnail';
+        // Not 'background': setBackground tints that action's meshes, which would tint the picture.
+        Object.assign(tile.userData, {
+          inputAction: 'backgroundTile',
+          background,
+          helpText: label,
+        });
+        tile.position.set(x, y, 0);
+        inputRoot.add(tile);
+        if (selected) {
+          const frame = new THREE.Mesh(
+            new THREE.PlaneGeometry(BACKGROUND_TILE_WIDTH + 0.024, BACKGROUND_TILE_HEIGHT + 0.024),
+            new THREE.MeshBasicMaterial({ color: accent.hex }),
+          );
+          frame.name = 'xr-background-selected';
+          frame.userData.inputAction = 'noop';
+          frame.position.set(x, y, -0.004);
+          inputRoot.add(frame);
+        }
+        const caption = createLabelButton(label, BACKGROUND_TILE_WIDTH, 0.07, {
+          inputAction: 'background',
+          background,
+        });
+        caption.position.set(x, y - BACKGROUND_TILE_HEIGHT / 2 - 0.05, 0);
+        setModifierVisual(caption, selected);
+        inputRoot.add(caption);
+      }
+      for (const [glyph, delta, y, enabled] of [
+        ['▲', -1, 0.26, layout.canScrollUp],
+        ['▼', 1, -0.14, layout.canScrollDown],
+      ] as const) {
+        const button = createLabelButton(glyph, 0.12, 0.2, {
+          inputAction: enabled ? 'backgroundScroll' : 'noop',
+          delta,
+        });
+        button.name = delta < 0 ? 'xr-background-scroll-up' : 'xr-background-scroll-down';
+        button.userData.helpText = delta < 0 ? 'Scroll up' : 'Scroll down';
+        button.position.set(0.82, y, 0);
+        button.visible = enabled;
+        inputRoot.add(button);
+      }
+      const rows = createLabelButton(layout.caption, 0.26, 0.06, { inputAction: 'noop' });
+      rows.name = 'xr-background-rows';
+      rows.position.set(0.86, 0.06, 0);
+      inputRoot.add(rows);
     } else if (mode === 'world') {
-      const backgroundSelect = createBackgroundSelect(mutableState.background, 'input');
+      const backgroundSelect = createBackgroundSelect(mutableState.background);
       backgroundSelect.position.y = 0.42;
       inputRoot.add(backgroundSelect);
       for (const [index, [label, xrMode]] of (
@@ -5094,13 +5164,21 @@ export function createWorkspaceScene(
                     : -0.66,
       0,
     );
-    if (mode === 'picture-gallery') close.position.set(0.3, -0.46, 0);
+    if (mode === 'picture-gallery' || mode === 'backgrounds') close.position.set(0.3, -0.46, 0);
     if (mode === 'picture-url') close.position.set(1, 1.04, 0);
     if (mode === 'widgets') {
       const { x, y } = layoutWidgetPanel(WIDGET_REGISTRY.length, widgetsPage).close;
       close.position.set(x, y, 0);
     }
     inputRoot.add(close);
+    if (mode === 'backgrounds') {
+      const back = createLabelButton('Back', 0.3, 0.09, {
+        inputAction: 'openInput',
+        mode: 'world',
+      });
+      back.position.set(-0.3, -0.46, 0);
+      inputRoot.add(back);
+    }
     if (
       ['terminal', 'display', 'world', 'filtering', 'buttons', 'weather-zip', 'accent'].includes(
         mode,
@@ -5465,10 +5543,15 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'backgroundSelect') {
-      const options = hit.parent?.getObjectByName('background-options');
-      const open = !options?.visible;
-      closeBackgroundMenus();
-      if (options) options.visible = open;
+      backgroundRow = backgroundPickerRowShowing(mutableState.background, 0);
+      showInput('backgrounds');
+      return true;
+    }
+    if (action === 'backgroundScroll') {
+      backgroundRow = layoutBackgroundPicker(
+        backgroundRow + (Number(hit.userData.delta) || 0),
+      ).firstRow;
+      if (inputRoot && inputMode === 'backgrounds') refreshInputRoot('backgrounds');
       return true;
     }
     if (!action || action === 'noop') return false;
@@ -5765,7 +5848,7 @@ export function createWorkspaceScene(
       else actions.exitPreview?.();
       return true;
     }
-    if (action === 'background') {
+    if (action === 'background' || action === 'backgroundTile') {
       setBackground(hit.userData.background as BackgroundMode);
       return true;
     }
@@ -6200,7 +6283,6 @@ export function createWorkspaceScene(
       if (action !== 'exit') return;
       finishWarp(false);
     }
-    if (target?.object?.userData.inputAction !== 'backgroundSelect') closeBackgroundMenus();
     if (!target) return;
     if (target.kind === 'keyboard' && target.object) {
       handleInputTarget(target.object);
@@ -7162,6 +7244,7 @@ export function createWorkspaceScene(
     'settings',
     'display',
     'world',
+    'backgrounds',
     'weather-zip',
     'accent',
     'terminal',
@@ -7315,7 +7398,10 @@ export function createWorkspaceScene(
   const setBackground = (mode: BackgroundMode): void => {
     floorCorrectionPending = true;
     mutableState.background = mode;
-    closeBackgroundMenus();
+    if (inputRoot && inputMode === 'backgrounds') {
+      backgroundRow = backgroundPickerRowShowing(mode, backgroundRow);
+      refreshInputRoot('backgrounds');
+    }
     for (const owner of [hudRoot, inputRoot]) {
       const select = owner?.getObjectByName('background-select');
       const trigger = select?.getObjectByName('background-select-trigger') as
@@ -7873,7 +7959,6 @@ export function createWorkspaceScene(
     if (gripActive()) return;
     releaseAllMouse();
     stripScrolls.clear();
-    closeBackgroundMenus();
     showHover(null);
     gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
     if (paneFocus.activeId) {
@@ -8137,6 +8222,9 @@ export function createWorkspaceScene(
     disarmCommand();
     clearTimeout(paneCreationRetry);
     clearTimeout(agentRosterRetry);
+    for (const thumbnail of backgroundThumbnails.values())
+      if (thumbnail instanceof THREE.Texture) thumbnail.dispose();
+    backgroundThumbnails.clear();
     if (armedControlTimer !== undefined) clearTimeout(armedControlTimer);
     armedControl = null;
     resetHandContacts(false);

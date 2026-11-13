@@ -12,12 +12,25 @@ import { loadSettings, validateSettings } from '../src/ui';
 import type { WorkspaceScene } from '../src/xr';
 import { workspaceFloorY } from '../src/xr/floor-layout';
 
-const ENV_MODES = ['hangar', 'deep-water', 'studio', 'desert'] as const;
+const ENV_MODES = [
+  'hangar',
+  'deep-water',
+  'studio',
+  'desert',
+  'aurora',
+  'koi',
+  'summit',
+  'rooftop',
+] as const;
 const ROOT_NAMES: Record<(typeof ENV_MODES)[number], string> = {
   hangar: 'hangar-deck-environment',
   'deep-water': 'deep-water-environment',
   studio: 'minimal-studio-environment',
   desert: 'desert-night-environment',
+  aurora: 'aurora-tundra-environment',
+  rooftop: 'rain-rooftop-environment',
+  summit: 'cloud-summit-environment',
+  koi: 'koi-garden-environment',
 };
 
 function harness() {
@@ -90,7 +103,7 @@ describe('environment manager', () => {
       set({ background: mode });
       expect(liveRoots(scene)).toEqual([]);
     }
-    expect(created).toHaveLength(4);
+    expect(created).toHaveLength(ENV_MODES.length);
     for (const entry of created) expect(entry.dispose).toHaveBeenCalledTimes(1);
     stop();
   });

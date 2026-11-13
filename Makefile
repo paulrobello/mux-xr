@@ -18,6 +18,9 @@ checkall-ci: checkall asset-check
 	bun audit --audit-level high
 e2e:
 	bun run e2e
+.PHONY: background-thumbnails
+background-thumbnails:
+	bun run scripts/background-thumbnails.ts $(MODES)
 .PHONY: publish-commands
 publish-commands:
 	bun run scripts/publish-commands.ts "$(FILE)"

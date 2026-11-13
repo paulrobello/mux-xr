@@ -3,10 +3,14 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { BackgroundMode } from './contracts';
 import type { WorkspaceScene } from './xr';
 import { accentColorOrNull, resolveEnvironmentAccent, tintToLuminance } from './xr/accent-colors';
+import { createAuroraTundraEnvironment } from './xr/environments/aurora-tundra';
+import { createCloudSummitEnvironment } from './xr/environments/cloud-summit';
 import { createDeepWaterEnvironment } from './xr/environments/deep-water';
 import { createDesertNightEnvironment } from './xr/environments/desert-night';
 import { createHangarDeckEnvironment } from './xr/environments/hangar-deck';
+import { createKoiGardenEnvironment } from './xr/environments/koi-garden';
 import { createMinimalStudioEnvironment } from './xr/environments/minimal-studio';
+import { createRainRooftopEnvironment } from './xr/environments/rain-rooftop';
 import { createSpaceBackground } from './xr/space-background';
 
 type EnvironmentUpdater = (deltaSeconds: number) => void;
@@ -48,6 +52,10 @@ export const ENVIRONMENT_FACTORIES: EnvironmentFactories = {
   'deep-water': createDeepWaterEnvironment,
   studio: createMinimalStudioEnvironment,
   desert: createDesertNightEnvironment,
+  aurora: createAuroraTundraEnvironment,
+  rooftop: createRainRooftopEnvironment,
+  summit: createCloudSummitEnvironment,
+  koi: createKoiGardenEnvironment,
 };
 
 /**

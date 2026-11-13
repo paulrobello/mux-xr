@@ -9,6 +9,10 @@ const BACKGROUND_FLOOR_Y: Partial<Record<BackgroundMode, number>> = {
   'deep-water': 0.035,
   studio: 0.035,
   desert: 0.035,
+  aurora: 0.035,
+  rooftop: 0.035,
+  summit: 0.035,
+  koi: 0.035,
 };
 const PANEL_FLOOR_CLEARANCE = 0.06;
 
