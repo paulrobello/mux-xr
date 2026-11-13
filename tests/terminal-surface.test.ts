@@ -190,6 +190,23 @@ beforeEach(() => {
 });
 
 describe('terminal surface lifecycle', () => {
+  it('reports focus without moving DOM focus when asked', async () => {
+    const { Terminal } = await import('@xterm/xterm');
+    const focus = vi.spyOn(Terminal.prototype, 'focus');
+    const blur = vi.spyOn(Terminal.prototype, 'blur');
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    surface.focus(true, false);
+    surface.focus(false, false);
+    expect(focus).not.toHaveBeenCalled();
+    expect(blur).not.toHaveBeenCalled();
+    surface.focus(true);
+    surface.focus(false);
+    expect(focus).toHaveBeenCalledOnce();
+    expect(blur).toHaveBeenCalledOnce();
+    surface.dispose();
+  });
+
   it('writes connected seed before subsequent output and gates input on handshake', async () => {
     const { createTerminalSurface } = await import('../src/terminal/surface');
     const surface = createTerminalSurface('http://127.0.0.1:9', pane());

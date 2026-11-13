@@ -706,10 +706,12 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       return true;
     },
     paste: (text) => send(createPasteMessage(text)),
-    focus: (focused) => {
+    focus: (focused, moveDomFocus = true) => {
       if (focused) acknowledgeBell();
-      if (focused) terminal.focus();
-      else terminal.blur();
+      if (moveDomFocus) {
+        if (focused) terminal.focus();
+        else terminal.blur();
+      }
       return send(createFocusMessage(focused));
     },
     resizeGrid: (nextCols, nextRows) => {

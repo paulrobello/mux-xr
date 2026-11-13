@@ -105,7 +105,8 @@ export interface TerminalSurface {
   scroll?(lines: number, cell?: { col: number; row: number }): boolean;
   readonly mouseTracking?: TerminalMouseTrackingMode;
   paste(text: string): boolean;
-  focus(focused: boolean): void;
+  /** `moveDomFocus` false only reports focus to the streamer, leaving the page's DOM focus. */
+  focus(focused: boolean, moveDomFocus?: boolean): void;
   resizeGrid(cols: number, rows: number): boolean;
   setColorMode(mode: TerminalColorMode): void;
   subscribe(listener: () => void): () => void;

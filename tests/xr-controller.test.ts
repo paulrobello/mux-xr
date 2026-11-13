@@ -8192,6 +8192,22 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
+  it('reports terminal focus without moving DOM focus while presenting XR', () => {
+    const { workspace, left, right, container } = fixture();
+    left.focus = vi.fn();
+    right.focus = vi.fn();
+    workspace.selectTerminal('pane-b');
+    expect(right.focus).toHaveBeenLastCalledWith(true, false);
+    expect(left.focus).toHaveBeenLastCalledWith(false, false);
+    fakeXR.presenting = false;
+    fakeXR.frame?.(20);
+    workspace.selectTerminal('pane-a');
+    expect(left.focus).toHaveBeenLastCalledWith(true, true);
+    expect(right.focus).toHaveBeenLastCalledWith(false, true);
+    workspace.dispose();
+    container.remove();
+  });
+
   it('promotes the head-gazed far pane without changing manual input focus', () => {
     const { workspace, actions, left, right, container } = fixture();
     left.setRenderQuality = vi.fn();

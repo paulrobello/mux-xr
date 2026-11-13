@@ -6889,8 +6889,11 @@ export function createWorkspaceScene(
       }
       refreshInputRoot(inputMode);
     }
+    // In XR the keyboard router owns input, and DOM focus moves cost Quest ~20 ms each, which
+    // gaze keyboard targeting triggers on every head turn between panes.
+    const moveDomFocus = !renderer?.xr.isPresenting;
     for (const panel of panels.values())
-      panel.surface.focus(panel.id === mutableState.focusedTerminalId);
+      panel.surface.focus(panel.id === mutableState.focusedTerminalId, moveDomFocus);
     setSelectedVisual();
     notify();
   };
