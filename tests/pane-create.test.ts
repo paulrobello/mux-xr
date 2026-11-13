@@ -11,6 +11,7 @@ import {
 import {
   createPaneCreator,
   describePaneCreateOutcome,
+  PANE_CREATE_WINDOW_NAME,
   type PaneCreateOutcome,
   type PaneCreateSocket,
   requestPaneCreate,
@@ -38,11 +39,11 @@ class MockSocket implements PaneCreateSocket {
     frame.set(payload, 1);
     this.onmessage?.({ data: frame.buffer });
   }
-  connected(readonly = false): void {
+  connected(readonly = false, paneCreateAllowed?: boolean): void {
     this.receive({
       message: {
         case: 'connected',
-        value: create(ConnectedSchema, { cols: 80, rows: 24, readonly }),
+        value: create(ConnectedSchema, { cols: 80, rows: 24, readonly, paneCreateAllowed }),
       },
     });
   }
@@ -93,7 +94,11 @@ describe('requestPaneCreate', () => {
     const sent = socket.decodedSent();
     expect(sent).toHaveLength(1);
     expect(sent[0].message.case).toBe('paneCreateRequest');
-    expect(sent[0].message.value).toMatchObject({ correlationId: 'c-1', sessionId: '$1' });
+    expect(sent[0].message.value).toMatchObject({
+      correlationId: 'c-1',
+      sessionId: '$1',
+      name: PANE_CREATE_WINDOW_NAME,
+    });
     socket.receive({
       message: {
         case: 'paneCreated',
@@ -177,6 +182,21 @@ describe('requestPaneCreate', () => {
     sockets[0].connected(true);
     await expect(promise).resolves.toMatchObject({ kind: 'refused', reason: 'read_only' });
     expect(sockets[0].sent).toHaveLength(0);
+  });
+
+  it('never sends when the handshake says creation is not allowed', async () => {
+    const { sockets, socketFactory } = harness();
+    const promise = requestPaneCreate('ws://h/ws', '%1', '$1', { socketFactory });
+    sockets[0].connected(false, false);
+    await expect(promise).resolves.toMatchObject({ kind: 'refused', reason: 'disabled' });
+    expect(sockets[0].sent).toHaveLength(0);
+  });
+
+  it('sends a caller-supplied window name', async () => {
+    const { sockets, socketFactory } = harness();
+    void requestPaneCreate('ws://h/ws', '%1', '$1', { socketFactory, name: 'build' });
+    sockets[0].connected(false, true);
+    expect(sockets[0].decodedSent()[0].message.value).toMatchObject({ name: 'build' });
   });
 
   it('reports an unreachable streamer as certain when nothing was sent', async () => {
@@ -337,6 +357,32 @@ describe('createPaneCreator', () => {
     expect(deps.notify).toHaveBeenLastCalledWith(expect.stringContaining('has not appeared'));
     expect(deps.request).toHaveBeenCalledTimes(1);
     expect(subject.state.pending).toBe(false);
+  });
+
+  it('disables creation from the handshake capability before any request', () => {
+    const { deps, creator: subject } = creator([]);
+    subject.observeCapability(undefined);
+    subject.observeCapability(true);
+    expect(subject.state.available).toBe(true);
+    expect(deps.onChange).not.toHaveBeenCalled();
+    subject.observeCapability(false);
+    expect(subject.state).toMatchObject({ available: false, pending: false });
+    expect(subject.state.reason).toContain('--allow-pane-create');
+    subject.observeCapability(false);
+    expect(deps.onChange).toHaveBeenCalledTimes(1);
+    expect(subject.create('$1', [pane('%1')])).toBe(false);
+    expect(deps.request).not.toHaveBeenCalled();
+    subject.reset();
+    expect(subject.state.available).toBe(true);
+  });
+
+  it('keeps an in-flight request when a capability arrives mid-request', async () => {
+    const { creator: subject } = creator([created('%9')]);
+    subject.create('$1', [pane('%1')]);
+    subject.observeCapability(false);
+    expect(subject.state.pending).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(subject.state.available).toBe(true);
   });
 
   it.each(['disabled', 'read_only', 'no_daemon'] as const)(

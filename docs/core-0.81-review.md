@@ -19,12 +19,12 @@ Every change is an optional field, so this client and older streamers stay compa
 ## Adopted in this pin
 
 - The terminal surface reads the cwd hostname from `Connected`, so the git and CI widget knows the cwd host from the first frame instead of waiting for a `CwdChanged`.
+- The create-terminal controls read `Connected.paneCreateAllowed`. A streamer that says `false` disables them as soon as a pane attaches, and a create request is refused locally without being sent. Streamers before 0.81 omit the field and keep the old behavior, where the refusal reply disables the controls.
+- Every create request names its window `xr` through `PaneCreateRequest.name`, so windows made from the headset are recognizable in `list-windows`.
 
 ## Benefits that need the 0.81.0 streamer running
 
 - Pane cwd for mux-backed sessions, which the git and CI widget depends on.
-- `paneCreateAllowed` lets the create-pane controls show "unavailable" before the first attempt. Today they learn it from a refusal.
-- Named windows for panes created from XR.
 - Agent roster presence stamps refresh every 60 seconds, and `report-state` claims and blocked reasons arrive in roster deltas. Both improve the agent board with no client change.
 - After a broadcast lag, the stream re-sends the pane's process state, so a held pane that exited no longer shows as running.
 - `worktree-remove -f`, `kill-window` and `kill-session` release agent-roster rows, so the board stops showing ghost agents.
@@ -42,3 +42,11 @@ On November 12, 2026, the official 0.81.0 streamer was run on loopback against a
 - Since 0.80.0 the streamer refuses a non-loopback bind that serves shells without authentication unless `--allow-unauthenticated` is passed. Paul chose that flag on November 12, 2026. The LAN preview keeps TLS and its origin allow-list, and has no authentication.
 - The 0.81.0 binary replaced `.local/bin/streamer-candidate` in place, and the 0.78.1 binary is kept as `.local/bin/streamer-candidate-0.78.1`. Both are signed with the same Developer ID identity. The macOS firewall rule for that path still admits it: test-mac fetched `https://192.0.2.10:4240/` with HTTP 200.
 - The `mux-xr-streamer` pane was respawned with its previous flags plus `--allow-unauthenticated`. The default par-mux daemon was not restarted. The browser e2e suite passed on all three viewports against the live streamer.
+
+## Pane-create adoption check
+
+On November 12, 2026, two 0.81.0 streamers ran on loopback against a private par-mux 0.80.0 daemon, one with `--allow-pane-create` and one without.
+
+- `scripts/pane-create-check.ts` passed for `created`, `disabled` and `read_only`. The created pane's window was named `xr`, and the disabled case was refused from the handshake with nothing sent.
+- `scripts/pane-create-app-check.ts` passed in the built app. On the disabled streamer the New terminal control was disabled after attach and zero create requests were sent. On the allowed streamer exactly one request created one pane, which attached with no resize.
+- The 1-minute load was 147 to 155, so these are functional checks with no timing claim.

@@ -384,6 +384,20 @@ describe('terminal surface lifecycle', () => {
     expect(surface.cwdHost).toBe('build-box');
     connect('relative', 'build-box');
     expect(surface.cwdHost).toBeNull();
+    expect(surface.paneCreateAllowed).toBeUndefined();
+    for (const paneCreateAllowed of [false, true]) {
+      ws.message(
+        frame(
+          create(ServerMessageSchema, {
+            message: {
+              case: 'connected',
+              value: create(ConnectedSchema, { cols: 80, rows: 24, paneCreateAllowed }),
+            },
+          }),
+        ),
+      );
+      expect(surface.paneCreateAllowed).toBe(paneCreateAllowed);
+    }
     surface.dispose();
   });
 

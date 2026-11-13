@@ -3,7 +3,11 @@ import type { PaneDescriptor } from '../src/contracts';
 import { decodeServerMessage, encodeClientMessage } from '../src/terminal/protocol';
 import { ClientMessageSchema, MuxTreeRequestSchema } from '../src/terminal/vendor/terminal_pb';
 import { normalizeTree } from '../src/workspace/hierarchy';
-import { type PaneCreateOutcome, requestPaneCreate } from '../src/workspace/pane-create';
+import {
+  PANE_CREATE_WINDOW_NAME,
+  type PaneCreateOutcome,
+  requestPaneCreate,
+} from '../src/workspace/pane-create';
 
 // Private-daemon check of the real pane-create wire contract. Run only against an isolated
 // streamer and par-mux socket: the `created` case adds a real default-shell window.
@@ -108,7 +112,7 @@ async function main(): Promise<void> {
     elapsedMs,
     panesBefore: before.map((pane) => `${pane.id}@${pane.sessionId} ${pane.cols}x${pane.rows}`),
     panesAfter: after.map((pane) => `${pane.id}@${pane.sessionId} ${pane.cols}x${pane.rows}`),
-    added: added.map((pane) => pane.id),
+    added: added.map((pane) => `${pane.id} window ${pane.windowId} "${pane.windowName}"`),
     geometryChanged,
   };
   console.log(JSON.stringify(result, null, 2));
@@ -123,6 +127,10 @@ async function main(): Promise<void> {
     );
     assert(added[0].sessionId === anchor.sessionId, 'The new pane is in another session');
     assert(added[0].windowId === outcome.windowId, 'The new pane is not in the returned window');
+    assert(
+      added[0].windowName === PANE_CREATE_WINDOW_NAME,
+      `The new window is named ${JSON.stringify(added[0].windowName)}, not ${PANE_CREATE_WINDOW_NAME}`,
+    );
   } else {
     assert(added.length === 0, 'A refused or unanswered request created a pane');
     if (EXPECT === 'old')

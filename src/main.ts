@@ -50,6 +50,7 @@ import {
 } from './workspace/open-views';
 import {
   createPaneCreator,
+  PANE_CREATE_WINDOW_NAME,
   type PaneCreationState,
   requestPaneCreate,
 } from './workspace/pane-create';
@@ -109,6 +110,7 @@ const paneCreator = createPaneCreator({
     const current = generation;
     return requestPaneCreate(endpoint, anchorPaneId, sessionId, {
       signal,
+      name: PANE_CREATE_WINDOW_NAME,
       onLateReply: (outcome) => {
         if (current === generation) paneCreator.lateReply(outcome, token);
       },
@@ -226,6 +228,7 @@ function selectPane(id: string): void {
         ui.setConnection(surface.status, `${pane.title} · ${surface.error ?? surface.status}`);
       ui.setPaneStatus?.(id, surface.status, surface.process);
       ui.setTerminalGrid(id, surface.cols, surface.rows, surface.canResizeGrid);
+      if (!demo) paneCreator.observeCapability(surface.paneCreateAllowed);
     });
     surfaceUnsubscribes.set(id, unsubscribe);
     surface.setColorMode(ui.getSettings().colorMode);

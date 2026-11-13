@@ -100,9 +100,27 @@ async function main(): Promise<void> {
       .evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).dataset.select));
     const resizeBefore = sent.resize ?? 0;
     const button = page.locator(`[data-create-session="${target.sessionId}"]`);
-    assert(!(await button.isDisabled()), 'creation control starts disabled');
-    await button.click();
     let added: Pane[] = [];
+    if (EXPECT === 'disabled') {
+      // Core 0.81 streamers advertise the capability at handshake, so nothing is ever sent.
+      await waitFor(
+        () => button.isDisabled(),
+        Boolean,
+        'creation stayed enabled after the handshake refused it',
+      );
+      await page
+        .locator('.tree-create-note', { hasText: 'turned off' })
+        .waitFor({ timeout: 15_000 });
+      await button.click({ force: true });
+      await page.waitForTimeout(1500);
+      await page.locator('[data-action="refresh"]').click();
+      await page.waitForTimeout(1000);
+      added = latest.filter((pane) => !before.some((old) => old.id === pane.id));
+      assert(added.length === 0, 'a disabled control created a pane');
+    } else {
+      assert(!(await button.isDisabled()), 'creation control starts disabled');
+      await button.click();
+    }
     if (EXPECT === 'created') {
       added = await waitFor(
         () => latest.filter((pane) => !before.some((old) => old.id === pane.id)),
@@ -121,10 +139,8 @@ async function main(): Promise<void> {
         (disabled) => !disabled,
         'control stayed locked',
       );
-    } else {
-      await page
-        .locator('.tree-create-note', { hasText: EXPECT === 'old' ? '0.77.0' : 'turned off' })
-        .waitFor({ timeout: EXPECT === 'old' ? 60_000 : 15_000 });
+    } else if (EXPECT === 'old') {
+      await page.locator('.tree-create-note', { hasText: '0.77.0' }).waitFor({ timeout: 60_000 });
       assert(await button.isDisabled(), `creation stayed enabled after the ${EXPECT} outcome`);
       await page.waitForTimeout(1500);
       await page.locator('[data-action="refresh"]').click();
@@ -170,7 +186,11 @@ async function main(): Promise<void> {
     await writeFile(join(OUT, `app-${EXPECT}.json`), `${JSON.stringify(result, null, 2)}\n`);
     console.log(JSON.stringify(result, null, 2));
     assert(errors.length === 0, `page errors: ${errors.join('; ')}`);
-    assert((sent.paneCreateRequest ?? 0) === 1, 'expected exactly one create request');
+    const expectedRequests = EXPECT === 'disabled' ? 0 : 1;
+    assert(
+      (sent.paneCreateRequest ?? 0) === expectedRequests,
+      `expected ${expectedRequests} create request(s), saw ${sent.paneCreateRequest ?? 0}`,
+    );
     assert((sent.resize ?? 0) === 0, 'a resize was sent');
     assert(geometryChanged.length === 0, 'an existing pane changed size or disappeared');
     assert(

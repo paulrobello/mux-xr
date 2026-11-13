@@ -55,7 +55,12 @@ export interface PaneCreateRequestOptions {
   onLateReply?: (outcome: CreatedOutcome) => void;
   /** Aborting closes the stream; a pending result resolves `unreachable` (unsent) or `uncertain`. */
   signal?: AbortSignal;
+  /** The new window's name; defaults to {@link PANE_CREATE_WINDOW_NAME}. */
+  name?: string;
 }
+
+/** Windows created from mux-xr carry this name in `list-windows` (core 0.81 bounds it at 64 bytes). */
+export const PANE_CREATE_WINDOW_NAME = 'xr';
 
 const REFUSAL_CODES: Record<string, PaneCreateRefusal> = {
   pane_create_disabled: 'disabled',
@@ -68,11 +73,15 @@ export function refusalFromCode(code: string | undefined): PaneCreateRefusal {
   return (code && REFUSAL_CODES[code]) || 'error';
 }
 
-export function paneCreateMessage(correlationId: string, sessionId: string): ClientMessage {
+export function paneCreateMessage(
+  correlationId: string,
+  sessionId: string,
+  name?: string,
+): ClientMessage {
   return create(ClientMessageSchema, {
     message: {
       case: 'paneCreateRequest',
-      value: create(PaneCreateRequestSchema, { correlationId, sessionId }),
+      value: create(PaneCreateRequestSchema, { correlationId, sessionId, name }),
     },
   });
 }
@@ -179,7 +188,20 @@ export function requestPaneCreate(
           });
           return;
         }
-        socket.send(encodeClientMessage(paneCreateMessage(correlationId, sessionId)));
+        // Absent on streamers before core 0.81, which only answer the request itself.
+        if (value.value.paneCreateAllowed === false) {
+          finish({
+            kind: 'refused',
+            reason: 'disabled',
+            message: 'This streamer does not allow terminal creation.',
+          });
+          return;
+        }
+        socket.send(
+          encodeClientMessage(
+            paneCreateMessage(correlationId, sessionId, options.name ?? PANE_CREATE_WINDOW_NAME),
+          ),
+        );
         sent = true;
         clearTimeout(timer);
         timer = setTimeout(expire, timeoutMs);
@@ -282,6 +304,8 @@ export interface PaneCreator {
   observeSnapshot(panes: readonly PaneDescriptor[]): void;
   /** A correlated reply that arrived after its request timed out; `token` is the request's. */
   lateReply(outcome: CreatedOutcome, token: number): void;
+  /** A surface's handshake capability; `false` disables creation until reset, before any request. */
+  observeCapability(allowed: boolean | undefined): void;
   reset(): void;
 }
 
@@ -473,6 +497,14 @@ export function createPaneCreator(deps: PaneCreatorDeps): PaneCreator {
       clearConfirm();
       deps.notify(describePaneCreateOutcome(outcome));
       awaitAttach(outcome.paneId, '');
+    },
+    observeCapability(allowed) {
+      if (allowed !== false || state.pending || !state.available) return;
+      set({
+        available: false,
+        pending: false,
+        reason: describePaneCreateOutcome({ kind: 'refused', reason: 'disabled', message: '' }),
+      });
     },
     reset() {
       epoch += 1;

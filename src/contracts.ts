@@ -84,6 +84,8 @@ export interface TerminalSurface {
   readonly cwd?: string | null;
   /** The OSC 7 hostname for `cwd`; null when the shell sent none. The host decides if it is local. */
   readonly cwdHost?: string | null;
+  /** The streamer's advertised pane-create capability; undefined when it does not advertise one. */
+  readonly paneCreateAllowed?: boolean;
   readonly bellPending?: boolean;
   acknowledgeBell?(): void;
   readonly canResizeGrid: boolean;

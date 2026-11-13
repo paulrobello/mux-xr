@@ -175,6 +175,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   let processState: PaneProcess = pane.process ?? RUNNING_PROCESS;
   let cwd: string | null = null;
   let cwdHost: string | null = null;
+  let paneCreateAllowed: boolean | undefined;
   const listeners = new Set<() => void>();
   const notify = (): void => {
     for (const listener of listeners) listener();
@@ -392,6 +393,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
             readonly = connected.readonly ?? false;
             cwd = connected.cwd?.startsWith('/') ? connected.cwd : null;
             cwdHost = cwd ? (connected.cwdHostname ?? null) : null;
+            paneCreateAllowed = connected.paneCreateAllowed;
             mouseTrackingFallback = 'none';
             mouseTrackingDisabled = false;
             serverMouseMode = null;
@@ -547,6 +549,9 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     },
     get cwdHost() {
       return cwdHost;
+    },
+    get paneCreateAllowed() {
+      return paneCreateAllowed;
     },
     get bellPending() {
       return bellPending;
