@@ -117,6 +117,7 @@ import {
   workspaceFloorY,
   workspacePaneSafeRadius,
 } from './floor-layout';
+import { createFocusQuadLayer, type FocusQuadLayer, supportsQuadLayers } from './focus-quad-layer';
 import { createFrameCounter } from './fps';
 import { HAND_COLOR_PRESETS, validateHandColor } from './hand-colors';
 import { createHandContact, type HandContact, type HandContactSample } from './hand-contact';
@@ -2783,7 +2784,12 @@ export function createWorkspaceScene(
     }
     for (const widget of consumers) widget.setStreamLinks?.(links, time);
   };
+  let focusQuadLayer: FocusQuadLayer | null = null;
   const render = (time = 0, frame?: XRFrame): void => {
+    if (frame && focusQuadLayer) {
+      focusQuadLayer.update(frame);
+      focusQuadLayer.notifyCanvasResized();
+    }
     if (disposed) return;
     if (renderer?.xr.isPresenting) {
       const space = frame ? renderer.xr.getReferenceSpace() : null;
@@ -8046,6 +8052,42 @@ export function createWorkspaceScene(
     clearInputCapture();
     notify();
   };
+  const syncFocusQuadLayer = (): void => {
+    focusQuadLayer?.dispose();
+    focusQuadLayer = null;
+    if (!activeSession || mutableState.xrMode !== 'vr') return;
+    const id = mutableState.focusModeTerminalId;
+    if (!id) return;
+    const panel = panels.get(id);
+    if (!panel) return;
+    if ((panel.focusCurvature ?? panel.curvature) > 1) return;
+    if (!supportsQuadLayers(activeSession as unknown as { enabledFeatures?: string[] })) return;
+    focusQuadLayer = createFocusQuadLayer({
+      surface: panel.surface,
+      planeSize: {
+        width: PANEL_WIDTH * panel.root.scale.x,
+        height: PANEL_HEIGHT * panel.root.scale.x,
+      },
+      worldTransform: () => {
+        panel.root.updateMatrixWorld(true);
+        return {
+          position: panel.root.getWorldPosition(new THREE.Vector3()),
+          quaternion: panel.root.getWorldQuaternion(new THREE.Quaternion()),
+        };
+      },
+      setSurfaceVisible: (visible: boolean): void => {
+        panel.screen.material.colorWrite = visible;
+        panel.screen.material.needsUpdate = true;
+        panel.screen.visible = visible || panel.screen.material.colorWrite;
+        panel.screen.visible = true;
+      },
+      session: activeSession as unknown as Parameters<typeof createFocusQuadLayer>[0]['session'],
+      space: renderer?.xr.getReferenceSpace(),
+      gl: renderer?.getContext() as WebGL2RenderingContext,
+    });
+    focusQuadLayer.activate();
+  };
+
   const startXR = async (mode: XrEntryMode): Promise<void> => {
     if (!renderer) throw new Error('WebGL is unavailable');
     const xr = (
@@ -8061,7 +8103,7 @@ export function createWorkspaceScene(
       sessionMode,
       immersiveMode === 'ar'
         ? { optionalFeatures: ['local-floor', 'dom-overlay', 'hand-tracking'] }
-        : { optionalFeatures: ['local-floor', 'hand-tracking'] },
+        : { optionalFeatures: ['local-floor', 'hand-tracking', 'layers'] },
     );
     if (mode === 'desk' && session.environmentBlendMode !== 'alpha-blend') {
       await session.end().catch(() => undefined);
@@ -8100,6 +8142,8 @@ export function createWorkspaceScene(
     setNotice(null);
     setBackground(mutableState.background);
     session.addEventListener('end', () => {
+      focusQuadLayer?.dispose();
+      focusQuadLayer = null;
       finishWarp(false);
       radialMenu.close();
       mutableState.radialOpen = false;
@@ -8193,6 +8237,7 @@ export function createWorkspaceScene(
     }
     paneFocus.exit(immediate);
     mutableState.focusModeTerminalId = null;
+    syncFocusQuadLayer();
     floorCorrectionPending = true;
     syncBringButtons();
   };
@@ -8311,6 +8356,7 @@ export function createWorkspaceScene(
       rotation,
     );
     mutableState.focusModeTerminalId = panel.id;
+    syncFocusQuadLayer();
     syncBringButtons();
     notify();
   };
@@ -8336,6 +8382,7 @@ export function createWorkspaceScene(
     panel.focusCurvature = null;
     syncPanelGrid(panel);
     mutableState.focusModeTerminalId = null;
+    syncFocusQuadLayer();
     floorCorrectionPending = true;
     correctTerminalFloor();
     syncBringButtons();
@@ -8585,6 +8632,8 @@ export function createWorkspaceScene(
     canvas.removeEventListener('pointercancel', onPointerUp);
     canvas.removeEventListener('lostpointercapture', onPointerUp);
     renderer?.setAnimationLoop(null);
+    focusQuadLayer?.dispose();
+    focusQuadLayer = null;
     labelBatcher.dispose();
     for (const id of [...panels.keys()]) removeTerminal(id);
     radialMenu.dispose();
