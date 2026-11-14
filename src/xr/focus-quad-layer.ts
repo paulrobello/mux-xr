@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { TerminalTextureSurface } from './terminal-texture';
+import type { TerminalSurface } from '../contracts';
 
 /**
  * Focused-terminal composition layer (WebXR layers feature, immersive-vr
@@ -8,25 +8,25 @@ import type { TerminalTextureSurface } from './terminal-texture';
  * instead. Background panes keep their mesh textures, so gaze-priority LOD,
  * fades, and transforms are untouched.
  *
- * The layer receives the painter's complete canvas for each acquired frame.
+ * Each acquired image receives a complete copy of the latest GPU texture.
  */
 
-export interface XrLayerGl {
-  getParameter(pname: number): unknown;
-  bindTexture(target: number, texture: WebGLTexture | null): void;
-  pixelStorei(pname: number, value: boolean | number): void;
-  texSubImage2D(
-    target: number,
-    level: number,
-    xoffset: number,
-    yoffset: number,
-    width: number,
-    height: number,
-    format: number,
-    type: number,
-    source: TexImageSource,
-  ): void;
-}
+type XrLayerGl = Pick<
+  WebGL2RenderingContext,
+  | 'getParameter'
+  | 'getError'
+  | 'bindTexture'
+  | 'createTexture'
+  | 'deleteTexture'
+  | 'pixelStorei'
+  | 'texImage2D'
+  | 'texSubImage2D'
+  | 'createFramebuffer'
+  | 'deleteFramebuffer'
+  | 'bindFramebuffer'
+  | 'framebufferTexture2D'
+  | 'copyTexSubImage2D'
+>;
 
 export interface XrQuadLayerLike {
   transform: unknown;
@@ -71,7 +71,7 @@ interface XrSessionLayerApi {
 
 export interface FocusQuadLayerHost {
   /** Terminal surface for the focused pane. */
-  readonly surface: TerminalTextureSurface;
+  readonly surface: Pick<TerminalSurface, 'canvas' | 'revision'>;
   /** World-space size of the terminal plane in meters. */
   readonly planeSize: () => { width: number; height: number };
   /** The effective horizontal warp in radians, fixed for the lifetime of this layer host. */
@@ -108,6 +108,10 @@ const GL_TEXTURE_2D = 0x0de1;
 const QUAD_PHYSICAL_SCALE = 0.5;
 const GL_TEXTURE_BINDING_2D = 0x8069;
 const GL_RGBA = 0x1908;
+const GL_RGBA8 = 0x8058;
+const GL_READ_FRAMEBUFFER = 0x8ca8;
+const GL_READ_FRAMEBUFFER_BINDING = 0x8caa;
+const GL_COLOR_ATTACHMENT0 = 0x8ce0;
 const GL_UNSIGNED_BYTE = 0x1401;
 const GL_UNPACK_FLIP_Y_WEBGL = 0x9240;
 const GL_UNPACK_PREMULTIPLY_ALPHA_WEBGL = 0x9241;
@@ -132,6 +136,9 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
   const binding: XrWebGlBindingLike | null = createBinding();
   let layer: XrQuadLayerLike | null = null;
   let active = false;
+  let source: { texture: WebGLTexture; framebuffer: WebGLFramebuffer } | null = null;
+  let uploaded: { revision: number; width: number; height: number } | null = null;
+  let checkedCopy = false;
 
   function createBinding(): XrWebGlBindingLike | null {
     if (!supported) return null;
@@ -202,6 +209,7 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
     layerPixelH = canvasHeight();
     lastWidth = width;
     lastHeight = height;
+    checkedCopy = false;
   };
 
   const rigidTransform = (
@@ -238,14 +246,54 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
     return scratch;
   };
 
-  const upload = (
-    x: number,
-    y: number,
+  const createSource = (gl: XrLayerGl): NonNullable<typeof source> => {
+    const texture = gl.createTexture();
+    if (!texture) throw new Error('Cannot allocate terminal compositor texture');
+    const framebuffer = gl.createFramebuffer();
+    if (!framebuffer) {
+      gl.deleteTexture(texture);
+      throw new Error('Cannot allocate terminal compositor framebuffer');
+    }
+    return { texture, framebuffer };
+  };
+
+  const updateSource = (
+    gl: XrLayerGl,
+    cache: NonNullable<typeof source>,
     width: number,
     height: number,
-    canvas: HTMLCanvasElement,
   ): void => {
-    host.gl.texSubImage2D(GL_TEXTURE_2D, 0, x, y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, canvas);
+    const revision = host.surface.revision;
+    if (uploaded?.revision === revision && uploaded.width === width && uploaded.height === height)
+      return;
+    const canvas =
+      width === canvasWidth() && height === canvasHeight()
+        ? host.surface.canvas
+        : prepareCanvas(width, height);
+    const flip = gl.getParameter(GL_UNPACK_FLIP_Y_WEBGL) as boolean;
+    const premultiply = gl.getParameter(GL_UNPACK_PREMULTIPLY_ALPHA_WEBGL) as boolean;
+    const colorSpace = gl.getParameter(GL_UNPACK_COLORSPACE_CONVERSION_WEBGL) as number;
+    try {
+      gl.bindTexture(GL_TEXTURE_2D, cache.texture);
+      applyUnpackState(gl);
+      if (uploaded?.width === width && uploaded.height === height) {
+        gl.texSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GL_RGBA, GL_UNSIGNED_BYTE, canvas);
+      } else {
+        gl.texImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, canvas);
+        gl.framebufferTexture2D(
+          GL_READ_FRAMEBUFFER,
+          GL_COLOR_ATTACHMENT0,
+          GL_TEXTURE_2D,
+          cache.texture,
+          0,
+        );
+      }
+    } finally {
+      gl.pixelStorei(GL_UNPACK_FLIP_Y_WEBGL, flip);
+      gl.pixelStorei(GL_UNPACK_PREMULTIPLY_ALPHA_WEBGL, premultiply);
+      gl.pixelStorei(GL_UNPACK_COLORSPACE_CONVERSION_WEBGL, colorSpace);
+    }
+    uploaded = { revision, width, height };
   };
 
   const uploadForFrame = (frame: unknown): void => {
@@ -269,25 +317,23 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
       height <= 0
     )
       throw new Error('Invalid terminal compositor viewport');
-    const canvas =
-      width === canvasWidth() && height === canvasHeight()
-        ? host.surface.canvas
-        : prepareCanvas(width, height);
     const gl = host.gl;
+    source ??= createSource(gl);
     const texture = gl.getParameter(GL_TEXTURE_BINDING_2D) as WebGLTexture | null;
-    const flip = gl.getParameter(GL_UNPACK_FLIP_Y_WEBGL) as boolean;
-    const premultiply = gl.getParameter(GL_UNPACK_PREMULTIPLY_ALPHA_WEBGL) as boolean;
-    const colorSpace = gl.getParameter(GL_UNPACK_COLORSPACE_CONVERSION_WEBGL) as number;
+    const framebuffer = gl.getParameter(GL_READ_FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
     try {
+      gl.bindFramebuffer(GL_READ_FRAMEBUFFER, source.framebuffer);
+      updateSource(gl, source, width, height);
       gl.bindTexture(GL_TEXTURE_2D, colorTexture);
-      applyUnpackState(gl);
       // A reused WebGL texture handle does not guarantee the compositor kept the previous frame.
-      upload(x, y, width, height, canvas);
+      gl.copyTexSubImage2D(GL_TEXTURE_2D, 0, x, y, 0, 0, width, height);
+      if (!checkedCopy) {
+        if (gl.getError() !== GL_NONE) throw new Error('Terminal compositor rejected the GPU copy');
+        checkedCopy = true;
+      }
     } finally {
       gl.bindTexture(GL_TEXTURE_2D, texture);
-      gl.pixelStorei(GL_UNPACK_FLIP_Y_WEBGL, flip);
-      gl.pixelStorei(GL_UNPACK_PREMULTIPLY_ALPHA_WEBGL, premultiply);
-      gl.pixelStorei(GL_UNPACK_COLORSPACE_CONVERSION_WEBGL, colorSpace);
+      gl.bindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
     }
     host.setSurfaceVisible(false);
   };
@@ -299,6 +345,12 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
     if (!active) return;
     active = false;
     destroyLayer();
+    if (source) {
+      host.gl.deleteFramebuffer(source.framebuffer);
+      host.gl.deleteTexture(source.texture);
+      source = null;
+      uploaded = null;
+    }
     host.setSurfaceVisible(true);
   };
 

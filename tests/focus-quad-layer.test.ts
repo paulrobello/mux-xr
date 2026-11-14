@@ -25,7 +25,7 @@ function makeHost(features?: string[], cylinderSupported = true): FocusQuadLayer
   swapBuffers = false;
   viewport = { x: 0, y: 0, width: 512, height: 256 };
   const canvas = { width: 512, height: 256 } as unknown as HTMLCanvasElement;
-  const surface = { canvas, dirtyRows: new Uint8Array([0, 0]) };
+  const surface = { canvas, revision: 0 };
   const createQuadLayer = vi.fn((init: Record<string, unknown>) => {
     const marker = { destroyed: false };
     destroyed.push(marker);
@@ -70,10 +70,19 @@ function makeHost(features?: string[], cylinderSupported = true): FocusQuadLayer
   }
   const gl = {
     getParameter: vi.fn(() => null),
+    getError: vi.fn(() => 0),
     bindTexture: vi.fn(),
+    createTexture: vi.fn(() => ({ id: 'owned-texture' })),
+    deleteTexture: vi.fn(),
     pixelStorei: vi.fn(),
-    texSubImage2D: vi.fn((_target, _level, x, y, w, h, _format, _type, source) => {
-      glCalls.push([x, y, w, h, source === undefined ? null : 'canvas']);
+    texImage2D: vi.fn(),
+    texSubImage2D: vi.fn(),
+    createFramebuffer: vi.fn(() => ({ id: 'owned-framebuffer' })),
+    deleteFramebuffer: vi.fn(),
+    bindFramebuffer: vi.fn(),
+    framebufferTexture2D: vi.fn(),
+    copyTexSubImage2D: vi.fn((_target, _level, x, y, sourceX, sourceY, w, h) => {
+      glCalls.push([x, y, sourceX, sourceY, w, h]);
     }),
   };
   return {
@@ -173,7 +182,7 @@ describe('createFocusQuadLayer', () => {
       expect(transform.position.z).toBeCloseTo(position.z);
       expect(position.toArray()).toEqual([1, 2, 3]);
       layer.update({ frame: 1 });
-      expect(glCalls).toEqual([[0, 0, 512, 256, 'canvas']]);
+      expect(glCalls).toEqual([[0, 0, 0, 0, 512, 256]]);
       expect(surfaceVisible).toEqual([false]);
     },
   );
@@ -197,8 +206,9 @@ describe('createFocusQuadLayer', () => {
     });
   });
 
-  it('supplies a full frame even when the texture handle and terminal rows are unchanged', () => {
-    const layer = createFocusQuadLayer(makeHost());
+  it('copies the complete GPU image each frame without reuploading an unchanged canvas', () => {
+    const host = makeHost();
+    const layer = createFocusQuadLayer(host);
     layer.activate();
     layer.update({ frame: 1 });
     layer.update({ frame: 2 });
@@ -206,24 +216,28 @@ describe('createFocusQuadLayer', () => {
     layer.update({ frame: 3 });
     expect(textures).toHaveLength(2);
     expect(glCalls).toEqual([
-      [0, 0, 512, 256, 'canvas'],
-      [0, 0, 512, 256, 'canvas'],
-      [0, 0, 512, 256, 'canvas'],
+      [0, 0, 0, 0, 512, 256],
+      [0, 0, 0, 0, 512, 256],
+      [0, 0, 0, 0, 512, 256],
     ]);
+    expect(host.gl.texImage2D).toHaveBeenCalledTimes(1);
+    expect(host.gl.texSubImage2D).not.toHaveBeenCalled();
   });
 
-  it('uses viewport offsets and submits all rows when only part of the canvas changed', () => {
+  it('updates the GPU cache on a new revision and copies it at the viewport offset', () => {
     const host = makeHost();
     const layer = createFocusQuadLayer(host);
     layer.activate();
     viewport = { x: 16, y: 32, width: 512, height: 256 };
     layer.update({ frame: 1 });
-    host.surface.dirtyRows?.set([0, 1]);
+    (host.surface as { revision: number }).revision++;
     layer.update({ frame: 2 });
     expect(glCalls).toEqual([
-      [16, 32, 512, 256, 'canvas'],
-      [16, 32, 512, 256, 'canvas'],
+      [16, 32, 0, 0, 512, 256],
+      [16, 32, 0, 0, 512, 256],
     ]);
+    expect(host.gl.texImage2D).toHaveBeenCalledTimes(1);
+    expect(host.gl.texSubImage2D).toHaveBeenCalledTimes(1);
   });
 
   it('scales the entire canvas when the runtime allocates a smaller or moved viewport', () => {
@@ -239,14 +253,18 @@ describe('createFocusQuadLayer', () => {
       layer.update({ frame: 1 });
       layer.update({ frame: 2 });
       expect(glCalls).toEqual([
-        [11, 17, 384, 192, 'canvas'],
-        [11, 17, 384, 192, 'canvas'],
+        [11, 17, 0, 0, 384, 192],
+        [11, 17, 0, 0, 384, 192],
       ]);
       expect(drawImage).toHaveBeenCalledWith(host.surface.canvas, 0, 0, 384, 192);
       viewport = { x: 19, y: 17, width: 384, height: 192 };
       layer.update({ frame: 3 });
-      expect(glCalls.at(-1)).toEqual([19, 17, 384, 192, 'canvas']);
-      expect(drawImage).toHaveBeenCalledTimes(3);
+      expect(glCalls.at(-1)).toEqual([19, 17, 0, 0, 384, 192]);
+      expect(drawImage).toHaveBeenCalledTimes(1);
+      viewport = { x: 19, y: 17, width: 256, height: 128 };
+      layer.update({ frame: 4 });
+      expect(glCalls.at(-1)).toEqual([19, 17, 0, 0, 256, 128]);
+      expect(drawImage).toHaveBeenCalledTimes(2);
     } finally {
       getContext.mockRestore();
     }
@@ -266,28 +284,31 @@ describe('createFocusQuadLayer', () => {
     expect(glCalls).toHaveLength(2);
   });
 
-  it('restores texture and unpack state when a compositor upload throws', () => {
+  it('restores renderer state and releases owned GPU resources when the copy fails', () => {
     const host = makeHost();
     const boundTexture = { id: 'three-texture' };
+    const boundFramebuffer = { id: 'three-framebuffer' };
     vi.mocked(host.gl.getParameter).mockImplementation((parameter) => {
       if (parameter === 0x8069) return boundTexture;
+      if (parameter === 0x8caa) return boundFramebuffer;
       if (parameter === 0x9243) return 0x9244;
       return parameter === 0x9241;
     });
-    vi.mocked(host.gl.texSubImage2D).mockImplementation(() => {
-      throw new Error('lost buffer');
-    });
+    vi.mocked(host.gl.getError).mockReturnValue(0x0502);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       const layer = createFocusQuadLayer(host);
       layer.activate();
       layer.update({ frame: 1 });
       expect(host.gl.bindTexture).toHaveBeenLastCalledWith(0x0de1, boundTexture);
+      expect(host.gl.bindFramebuffer).toHaveBeenLastCalledWith(0x8ca8, boundFramebuffer);
       expect(vi.mocked(host.gl.pixelStorei).mock.calls.slice(-3)).toEqual([
         [0x9240, false],
         [0x9241, true],
         [0x9243, 0x9244],
       ]);
+      expect(host.gl.deleteTexture).toHaveBeenCalledWith({ id: 'owned-texture' });
+      expect(host.gl.deleteFramebuffer).toHaveBeenCalledWith({ id: 'owned-framebuffer' });
       expect(sessionLayers).toEqual([{ id: 'base' }]);
       expect(surfaceVisible).toEqual([true]);
     } finally {
