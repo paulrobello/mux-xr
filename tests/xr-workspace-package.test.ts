@@ -1,10 +1,14 @@
 import {
   BUILT_IN_ENVIRONMENTS,
   createEnvironmentController,
+  createPerfGaugeWidget,
+  createPictureFrameWidget,
   createRadialMenu,
   createSpatialKeyboard,
   createStandardHand,
+  createStickyNoteWidget,
   createTimerWidget,
+  stickyNotePages,
 } from '@par/xr-workspace';
 import * as THREE from 'three';
 import type { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -106,5 +110,66 @@ describe('private XR workspace package', () => {
     expect(color('elastic-hand-arm').g).toBeGreaterThan(0);
     expect(await hand.assetReady).toBe(false);
     hand.dispose();
+  });
+  it('lets the host read and close notes independently of storage', () => {
+    const onRead = vi.fn();
+    const onClose = vi.fn();
+    const text = 'a'.repeat(200);
+    const note = createStickyNoteWidget(null, { id: 'note-1', text, onRead, onClose });
+    const control = (name: string): THREE.Object3D =>
+      note.root.getObjectByName(`sticky-note-${name}`) as THREE.Object3D;
+    note.activate?.(control('read'));
+    expect(onRead).toHaveBeenCalledWith(text);
+    expect(stickyNotePages(text).join('').replaceAll('\n', '')).toBe(text);
+    note.activate?.(control('confirm'));
+    expect(onClose).not.toHaveBeenCalled();
+    note.activate?.(control('close'));
+    note.activate?.(control('confirm'));
+    expect(onClose).toHaveBeenCalledExactlyOnceWith('note-1');
+    note.dispose();
+  });
+
+  it('uses host picker actions and leaves caller-owned picture canvases intact', () => {
+    const source = document.createElement('canvas');
+    source.width = 64;
+    source.height = 32;
+    const depth = document.createElement('canvas');
+    depth.width = 64;
+    depth.height = 32;
+    const onChoose = vi.fn();
+    const onClose = vi.fn();
+    const frame = createPictureFrameWidget(null, {
+      id: 'frame-1',
+      image: { source, width: 64, height: 32 },
+      depth: { source: depth, width: 64, height: 32 },
+      onClose,
+      picker: { actions: [{ id: 'upload', label: 'Upload', activate: onChoose }] },
+    });
+    const control = (name: string): THREE.Object3D =>
+      frame.root.getObjectByName(`picture-${name}`) as THREE.Object3D;
+    frame.activate?.(control('upload-choice'));
+    expect(onChoose).not.toHaveBeenCalled();
+    frame.activate?.(control('change'));
+    frame.activate?.(control('upload-choice'));
+    expect(onChoose).toHaveBeenCalledExactlyOnceWith('frame-1');
+    frame.activate?.(control('close'));
+    expect(onClose).toHaveBeenCalledExactlyOnceWith('frame-1');
+    frame.dispose();
+    expect(source.width).toBe(64);
+    expect(depth.width).toBe(64);
+  });
+
+  it('reports frame samples without a pane count and still accepts one when supplied', () => {
+    const gauge = createPerfGaugeWidget();
+    const panes = gauge.root.getObjectByName('perf-gauge-panes') as THREE.Object3D;
+    gauge.setPerfSample({ fps: 72, worstFrameMs: 18, targetHz: 72 });
+    expect(panes.visible).toBe(false);
+    expect(gauge.root.getObjectByName('perf-gauge-fps')?.userData.labelText).toBe('72 / 72 fps');
+    gauge.setPerfSample({ fps: 72, worstFrameMs: 18, targetHz: 72, shownPanes: 0 });
+    expect(panes.visible).toBe(true);
+    expect(panes.userData.labelText).toBe('0 panes shown');
+    gauge.setPerfSample({ fps: 72, worstFrameMs: 18, targetHz: 72 });
+    expect(panes.visible).toBe(false);
+    gauge.dispose();
   });
 });

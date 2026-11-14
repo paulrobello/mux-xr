@@ -19,6 +19,25 @@ export { type KeyModifiers, keyboardKeyLabel } from './keyboard';
 export { createKeyborbInput } from './keyborb-input';
 export { configureLabelFonts, createScalableLabel, disposeScalableLabel } from './labels';
 export {
+  createPerfGaugeWidget,
+  type PerfGaugeOptions,
+  type PerfGaugeWidget,
+  type PerfSample,
+} from './perf-gauge';
+export {
+  DEFAULT_DEPTH_VIEW,
+  normalizeDepthView,
+  type PictureDepthView,
+} from './picture-depth';
+export {
+  createPictureFrameWidget,
+  type PictureCanvas,
+  type PictureFrameImage,
+  type PictureFrameOptions,
+  type PictureFrameWidget,
+  type PicturePickerAction,
+} from './picture-frame';
+export {
   createRadialMenu,
   type RadialMenu,
   type RadialMenuItem,
@@ -31,6 +50,7 @@ export {
   type SpatialKeyboardOptions,
 } from './spatial-keyboard';
 export { createStandardHand, type StandardHand, type StandardHandOptions } from './standard-hand';
+export { createStickyNoteWidget, type StickyNoteOptions, stickyNotePages } from './sticky-note';
 export { createTimerWidget } from './timer-widget';
 export type { SpatialWidget } from './widget';
 export { createWristMenuWatch, type WristMenuWatch } from './wrist-menu-watch';

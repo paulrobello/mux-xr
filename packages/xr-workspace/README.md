@@ -9,7 +9,7 @@ For a sibling app, add `"@par/xr-workspace": "file:../mux-xr/packages/xr-workspa
 | Environments | Call `createEnvironmentController(parent)` for the built-in procedural worlds, or supply a record of factories keyed by your own world IDs. Call `select` to switch worlds or apply a new accent. Use `enabled: false` for full passthrough. Call `update(deltaSeconds)` each frame and `dispose()` at teardown. |
 | Hands and arms | Pass `handColor` and `armColor` to `createStandardHand` as `#rrggbb` strings. Call `setColor` to retint at runtime. An omitted arm tint follows the hand. Feed the tracked Three.js hand or controller pose into the visual. Hand sampling and contact probes are available separately. |
 | Wrist and radial menu | Give `createRadialMenu` two to eight app-defined items and an optional `accentColor`. Mount its root, call `open` and `update(deltaSeconds)`, and route a pick through `actionAt`. `createWristMenuWatch` accepts a caller-owned button and reports when hand contact activates it. |
-| Widgets | Mount a clock, timer, or your own `SpatialWidget`. Pass wall-clock time in milliseconds to `update`. A widget can expose `activate(target)` and `setPointed(pointed)` for the host to route control hits and hover. |
+| Widgets | Mount a clock, timer, note, picture frame, performance gauge, or your own `SpatialWidget`. Pass wall-clock time in milliseconds to `update`. A widget can expose `activate(target)` and `setPointed(pointed)` for the host to route control hits and hover. |
 | Keyboards | `createSpatialKeyboard` supports flat or curved panel keys and Keyborb. Feed a picked object to `press`. The `onKey` callback receives a semantic key and a snapshot of its modifiers. Call `update` after animating the orbs. |
 
 ```ts
@@ -46,4 +46,8 @@ For near-hand Keyborb typing, mount the keyboard with `style: 'keyborb'`, pass i
 
 Serve the Noto files and license notices from [public/fonts](../../public/fonts) at the app's `/fonts/` path, or call `configureLabelFonts` with their URLs before creating any UI. Serve the standard hand models from [public/assets/xr-hands](../../public/assets/xr-hands) at `/assets/xr-hands/` or set `assetUrls` when creating a hand. The [hand asset provenance and license](../../assets-source/xr-hands) are in the repository.
 
-Mux XR uses the toolkit's environments, hand visual and sampling, radial and wrist UI, clock and timer, and keyboard geometry and input primitives. Its scene still owns spatial manipulation, focus, persistence, terminal routing, dictation, and service widgets.
+- Use `createStickyNoteWidget(null, { id, text, onRead, onClose })` for notes. Route hits to `activate`, pass the full text through `stickyNotePages` to build a reader, and save or delete notes in your app.
+- Use `createPictureFrameWidget(null, { image, depth, onDepthView, onClose })` for flat, depth, or stereo pictures. Supply a decoded canvas with its width and height, plus an optional right-eye canvas. You can provide up to two picker actions through `picker.actions`. The app loads and stores images. Canvases stay caller-owned by default. Pass `ownsCanvases: true` to let the frame clear them on replacement or disposal.
+- Use `createPerfGaugeWidget()` with `setPerfSample({ fps, worstFrameMs, targetHz })` about twice a second. Include `shownPanes` to show the count. Call `resetPerf()` at the start of an XR session.
+
+Mux XR uses the toolkit's environments, hand visual and sampling, radial and wrist UI, clock, timer, note, picture and performance widgets, and keyboard geometry and input primitives. Its scene still owns spatial manipulation, focus, persistence, terminal routing, dictation, and service widgets.

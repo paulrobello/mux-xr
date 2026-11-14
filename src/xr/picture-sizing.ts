@@ -1,3 +1,7 @@
+import type { Size } from '@par/xr-workspace/internal/picture-sizing';
+
+export * from '@par/xr-workspace/internal/picture-sizing';
+
 /** Longest texture edge a picture frame uploads; larger images are downscaled to fit. */
 export const MAX_PICTURE_EDGE = 2048;
 /** Largest source file or download accepted before decoding. */
@@ -13,16 +17,6 @@ export const MAX_PICTURE_SOURCE_PIXELS = 64 * 1024 * 1024;
 export const MAX_UNPROBED_PICTURE_BYTES = 8 * 1024 * 1024;
 /** A URL fetch, body included, is aborted after this long so a hung server cannot stall picks. */
 export const PICTURE_FETCH_TIMEOUT_MS = 20_000;
-/** Long edge of a frame's image plane at scale 1, in metres. */
-export const PICTURE_LONG_EDGE = 0.6;
-/** Aspect ratio of the empty placeholder frame. */
-export const PLACEHOLDER_ASPECT = 4 / 3;
-
-export interface Size {
-  width: number;
-  height: number;
-}
-
 /** Scales `width` x `height` down (never up) so the long edge is at most `maxEdge`. */
 export function fitWithin(width: number, height: number, maxEdge = MAX_PICTURE_EDGE): Size {
   if (!(width > 0 && height > 0)) throw new RangeError('Image has no size');
@@ -31,14 +25,6 @@ export function fitWithin(width: number, height: number, maxEdge = MAX_PICTURE_E
     width: Math.max(1, Math.round(width * scale)),
     height: Math.max(1, Math.round(height * scale)),
   };
-}
-
-/** The image plane size in metres for an image of `width` x `height` pixels. */
-export function frameSize(width: number, height: number, longEdge = PICTURE_LONG_EDGE): Size {
-  if (!(width > 0 && height > 0)) throw new RangeError('Image has no size');
-  return width >= height
-    ? { width: longEdge, height: (longEdge * height) / width }
-    : { width: (longEdge * width) / height, height: longEdge };
 }
 
 /**

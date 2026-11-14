@@ -1,3 +1,4 @@
+import type { PictureFrameImage } from '@par/xr-workspace/internal/picture-frame';
 import {
   createDefaultPictureProxy,
   type PictureProxyFailure,
@@ -16,12 +17,8 @@ import {
   probeImageSize,
 } from './picture-sizing';
 
-/** A decoded picture drawn into a canvas no larger than MAX_PICTURE_EDGE on its long edge. */
-export interface PictureImage {
-  source: HTMLCanvasElement;
-  width: number;
-  height: number;
-  /** The right eye of a stereo pair (an iPhone spatial photo); `source` is then the left eye. */
+/** A decoded picture that can be shown and saved by the app. */
+export interface PictureImage extends PictureFrameImage {
   right?: StereoEye;
 }
 
