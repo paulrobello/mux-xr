@@ -391,7 +391,8 @@ describe('repo status probe against real git (SEC-001)', () => {
       'tracked.txt filter=evil\nprocessed.txt filter=proc\n',
     );
     run(repo, 'config', 'filter.evil.clean', `touch ${markers.clean}; cat`);
-    run(repo, 'config', 'filter.proc.process', `touch ${markers.process}`);
+    // A `process` filter without the protocol handshake deadlocks git on Linux; plant a clean filter instead.
+    run(repo, 'config', 'filter.proc.clean', `touch ${markers.process}; cat`);
     run(repo, 'config', 'core.fsmonitor', `touch ${markers.fsmonitor}`);
     const touchTracked = (seconds: number) => {
       const at = new Date(Date.now() + seconds * 1000);
