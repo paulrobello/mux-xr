@@ -68,6 +68,7 @@ import type { PaneCreationState } from '../workspace/pane-create';
 import { rosterProjectDirectory } from '../workspace/project-directory';
 import {
   DEFAULT_WINDOW_PREFERENCES,
+  MAX_TERMINAL_CURVATURE_DEGREES,
   SCROLL_STRIP_SIDES,
   type ScrollStripSide,
   validateWindowPreferences,
@@ -117,6 +118,7 @@ import {
   workspaceFloorY,
   workspacePaneSafeRadius,
 } from './floor-layout';
+import { createFocusQuadLayer, type FocusQuadLayer, supportsQuadLayers } from './focus-quad-layer';
 import { createFrameCounter } from './fps';
 import { HAND_COLOR_PRESETS, validateHandColor } from './hand-colors';
 import { createHandContact, type HandContact, type HandContactSample } from './hand-contact';
@@ -2783,6 +2785,8 @@ export function createWorkspaceScene(
     }
     for (const widget of consumers) widget.setStreamLinks?.(links, time);
   };
+  let focusQuadLayer: FocusQuadLayer | null = null;
+  let focusQuadPending = false;
   const render = (time = 0, frame?: XRFrame): void => {
     if (disposed) return;
     if (renderer?.xr.isPresenting) {
@@ -2839,6 +2843,11 @@ export function createWorkspaceScene(
       },
     });
     paneFocus.update(deltaSeconds);
+    if (frame && focusQuadPending && !paneFocus.moving) syncFocusQuadLayer();
+    if (frame && focusQuadLayer) {
+      focusQuadLayer.notifyCanvasResized();
+      focusQuadLayer.update(frame);
+    }
     radialMenu.update(radialDelta);
     if (poseRestorePending && renderer?.xr.isPresenting) {
       const saved = poseStore.read('hud');
@@ -4846,10 +4855,11 @@ export function createWorkspaceScene(
           ],
           ['defaultCurvature', `New window warp: ${Math.round(preferences.defaultCurvature)}°`, 5],
           ['focusDistance', `Focus distance: ${preferences.focusDistance.toFixed(1)} m`, 0.1],
-          ['focusCurvature', `Focus warp: ${Math.round(preferences.focusCurvature)}°`, 5],
+          ['focusCurvature', `Focus warp angle: ${Math.round(preferences.focusCurvature)}°`, 5],
         ] as const
       ).entries()) {
-        const y = -0.04 - index * 0.13;
+        if (preference === 'focusCurvature' && preferences.focusWarpMode === 'inherit') continue;
+        const y = -0.04 - index * 0.115;
         const value = createLabelButton(label, 1.05, 0.1, { inputAction: 'noop' });
         value.position.set(0, y, 0);
         inputRoot.add(value);
@@ -4863,6 +4873,16 @@ export function createWorkspaceScene(
           inputRoot.add(button);
         }
       }
+      const focusWarpModeButton = createLabelButton(
+        preferences.focusWarpMode === 'inherit'
+          ? 'Focus warp: Inherit from terminal'
+          : 'Focus warp: Custom',
+        1.3,
+        0.1,
+        { inputAction: 'focusWarpMode' },
+      );
+      focusWarpModeButton.position.y = -0.5;
+      inputRoot.add(focusWarpModeButton);
       const stripSide = preferences.scrollStripSide;
       const stripSideButton = createLabelButton(
         `Scroll strip: ${stripSide === 'both' ? 'both sides' : stripSide}`,
@@ -4876,7 +4896,7 @@ export function createWorkspaceScene(
             ],
         },
       );
-      stripSideButton.position.set(0, -0.56, 0);
+      stripSideButton.position.set(0, -0.615, 0);
       inputRoot.add(stripSideButton);
       const frameChinButton = createLabelButton(
         `Frame chin: ${preferences.frameChin ? 'on' : 'off'}`,
@@ -4884,7 +4904,7 @@ export function createWorkspaceScene(
         0.1,
         { inputAction: 'frameChin' },
       );
-      frameChinButton.position.set(0, -0.69, 0);
+      frameChinButton.position.set(0, -0.73, 0);
       inputRoot.add(frameChinButton);
     } else if (mode === 'buttons') {
       const map = mutableState.windowPreferences.buttonMap;
@@ -5122,7 +5142,16 @@ export function createWorkspaceScene(
       );
       caption.position.y = 0.3;
       inputRoot.add(caption);
-      for (const [index, value] of [0, 15, 30, 45, 60, 90, 100].entries()) {
+      for (const [index, value] of [
+        0,
+        15,
+        30,
+        45,
+        60,
+        90,
+        100,
+        MAX_TERMINAL_CURVATURE_DEGREES,
+      ].entries()) {
         const button = createLabelButton(value === 0 ? 'Flat' : `${value}°`, 0.35, 0.12, {
           inputAction: 'curvature',
           degrees: value,
@@ -5390,7 +5419,7 @@ export function createWorkspaceScene(
       mode === 'panes'
         ? -0.9
         : mode === 'display'
-          ? -0.84
+          ? -0.855
           : mode === 'settings'
             ? -0.89
             : mode === 'world'
@@ -5437,7 +5466,7 @@ export function createWorkspaceScene(
       back.position.set(
         -0.22,
         mode === 'display'
-          ? -0.84
+          ? -0.855
           : mode === 'world'
             ? -0.51
             : mode === 'weather-zip'
@@ -6075,6 +6104,14 @@ export function createWorkspaceScene(
           ...mutableState.windowPreferences,
           [preference]: mutableState.windowPreferences[preference] + Number(hit.userData.delta),
         });
+      return true;
+    }
+    if (action === 'focusWarpMode') {
+      const preferences = mutableState.windowPreferences;
+      setWindowPreferences({
+        ...preferences,
+        focusWarpMode: preferences.focusWarpMode === 'custom' ? 'inherit' : 'custom',
+      });
       return true;
     }
     if (action === 'scrollStripSide') {
@@ -7400,7 +7437,6 @@ export function createWorkspaceScene(
     const { defaultCurvature, defaultOpacity } = mutableState.windowPreferences;
     panel.opacity = defaultOpacity;
     applyTerminalOpacity(panel);
-    // Focus mode shows focusCurvature on top of the base warp, which resets underneath it.
     setTerminalCurvature(id, defaultCurvature, false);
     // An open Warp panel stays live: Cancel returns to the reset values and Done saves from them.
     if (warpPanelEdit?.id === id) warpPanelEdit = { id, original: panel.curvature, touched: false };
@@ -7690,9 +7726,12 @@ export function createWorkspaceScene(
   const setTerminalCurvature = (id: string, degrees: number, persist = true): void => {
     const panel = panels.get(id);
     if (!panel || !Number.isFinite(degrees)) return;
-    panel.curvature = THREE.MathUtils.clamp(degrees, 0, 100);
+    const previous = panel.curvature;
+    panel.curvature = THREE.MathUtils.clamp(degrees, 0, MAX_TERMINAL_CURVATURE_DEGREES);
     if (warpPanelEdit?.id === id) warpPanelEdit.touched = true;
     syncPanelGrid(panel);
+    if (paneFocus.activeId === id && panel.focusCurvature === null && panel.curvature !== previous)
+      retargetFocusedPanel(panel);
     correctTerminalFloor();
     if (persist && !warpStore.set(warpKey(panel.surface), panel.curvature))
       setNotice('Curvature could not be saved on this device');
@@ -8046,6 +8085,70 @@ export function createWorkspaceScene(
     clearInputCapture();
     notify();
   };
+  const syncFocusQuadLayer = (): void => {
+    focusQuadPending = false;
+    focusQuadLayer?.dispose();
+    focusQuadLayer = null;
+    if (!activeSession || mutableState.xrMode !== 'vr') return;
+    const id = mutableState.focusModeTerminalId;
+    if (!id) return;
+    const panel = panels.get(id);
+    if (!panel) return;
+
+    if (!supportsQuadLayers(activeSession as unknown as { enabledFeatures?: string[] })) return;
+    if (paneFocus.moving) {
+      focusQuadPending = true;
+      return;
+    }
+    // An alpha aperture lets the underlay show through while scene geometry can still cover it.
+    const apertureMaterial = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      opacity: 0,
+      transparent: true,
+      blending: THREE.NoBlending,
+    });
+    const aperture = new THREE.Mesh(panel.screen.geometry, apertureMaterial);
+    aperture.name = 'terminal-quad-aperture';
+    aperture.renderOrder = -10000;
+    aperture.raycast = () => undefined;
+    aperture.visible = false;
+    panel.root.add(aperture);
+    const position = new THREE.Vector3();
+    const quaternion = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    const layer = createFocusQuadLayer({
+      curvature: THREE.MathUtils.degToRad(panel.geometryCurvature),
+      surface: panel.surface,
+      planeSize: () => {
+        panel.screen.getWorldScale(scale);
+        return { width: panel.width * scale.x, height: panel.height * scale.y };
+      },
+      worldTransform: () => {
+        return {
+          position: panel.screen.getWorldPosition(position),
+          quaternion: panel.screen.getWorldQuaternion(quaternion),
+        };
+      },
+      setSurfaceVisible: (visible: boolean): void => {
+        aperture.geometry = panel.screen.geometry;
+        aperture.visible = !visible;
+        panel.screen.material.colorWrite = visible;
+      },
+      session: activeSession as unknown as Parameters<typeof createFocusQuadLayer>[0]['session'],
+      space: renderer?.xr.getReferenceSpace(),
+      gl: renderer?.getContext() as WebGL2RenderingContext,
+    });
+    focusQuadLayer = {
+      ...layer,
+      dispose() {
+        layer.dispose();
+        aperture.removeFromParent();
+        apertureMaterial.dispose();
+      },
+    };
+    focusQuadLayer.activate();
+  };
+
   const startXR = async (mode: XrEntryMode): Promise<void> => {
     if (!renderer) throw new Error('WebGL is unavailable');
     const xr = (
@@ -8061,7 +8164,7 @@ export function createWorkspaceScene(
       sessionMode,
       immersiveMode === 'ar'
         ? { optionalFeatures: ['local-floor', 'dom-overlay', 'hand-tracking'] }
-        : { optionalFeatures: ['local-floor', 'hand-tracking'] },
+        : { optionalFeatures: ['local-floor', 'hand-tracking', 'layers'] },
     );
     if (mode === 'desk' && session.environmentBlendMode !== 'alpha-blend') {
       await session.end().catch(() => undefined);
@@ -8100,6 +8203,8 @@ export function createWorkspaceScene(
     setNotice(null);
     setBackground(mutableState.background);
     session.addEventListener('end', () => {
+      focusQuadLayer?.dispose();
+      focusQuadLayer = null;
       finishWarp(false);
       radialMenu.close();
       mutableState.radialOpen = false;
@@ -8193,6 +8298,7 @@ export function createWorkspaceScene(
     }
     paneFocus.exit(immediate);
     mutableState.focusModeTerminalId = null;
+    syncFocusQuadLayer();
     floorCorrectionPending = true;
     syncBringButtons();
   };
@@ -8259,12 +8365,16 @@ export function createWorkspaceScene(
       refreshInputRoot(inputMode);
     notify();
   };
+  const retargetFocusedPanel = (panel: TerminalPanel): void => {
+    const placement = focusPlacement(panel);
+    paneFocus.retarget(placement.position, placement.rotation);
+    syncFocusQuadLayer();
+  };
   const setWindowPreferences = (preferences: WindowPreferences): void => {
     const next = validateWindowPreferences(preferences);
     if (JSON.stringify(next) === JSON.stringify(mutableState.windowPreferences)) return;
-    const focusChanged =
-      next.focusDistance !== mutableState.windowPreferences.focusDistance ||
-      next.focusCurvature !== mutableState.windowPreferences.focusCurvature;
+    const focusDistanceChanged =
+      next.focusDistance !== mutableState.windowPreferences.focusDistance;
     const stripSideChanged =
       next.scrollStripSide !== mutableState.windowPreferences.scrollStripSide;
     const chinChanged = next.frameChin !== mutableState.windowPreferences.frameChin;
@@ -8275,11 +8385,12 @@ export function createWorkspaceScene(
       for (const panel of panels.values()) showScrollStrips(panel);
     }
     const panel = panels.get(paneFocus.activeId ?? '');
-    if (panel && focusChanged) {
-      panel.focusCurvature = next.focusCurvature;
+    if (panel) {
+      const previousCurvature = panel.geometryCurvature;
+      panel.focusCurvature = next.focusWarpMode === 'inherit' ? null : next.focusCurvature;
       syncPanelGrid(panel);
-      const placement = focusPlacement(panel);
-      paneFocus.retarget(placement.position, placement.rotation);
+      if (focusDistanceChanged || panel.geometryCurvature !== previousCurvature)
+        retargetFocusedPanel(panel);
     }
     if (inputRoot && (inputMode === 'display' || inputMode === 'buttons'))
       refreshInputRoot(inputMode);
@@ -8300,7 +8411,9 @@ export function createWorkspaceScene(
     if (!panel) return;
     correctTerminalFloor();
     selectTerminal(panel.id);
-    panel.focusCurvature = mutableState.windowPreferences.focusCurvature;
+    const preferences = mutableState.windowPreferences;
+    panel.focusCurvature =
+      preferences.focusWarpMode === 'inherit' ? null : preferences.focusCurvature;
     syncPanelGrid(panel);
     const { position, rotation } = focusPlacement(panel);
     paneFocus.enter(
@@ -8311,6 +8424,7 @@ export function createWorkspaceScene(
       rotation,
     );
     mutableState.focusModeTerminalId = panel.id;
+    syncFocusQuadLayer();
     syncBringButtons();
     notify();
   };
@@ -8336,6 +8450,7 @@ export function createWorkspaceScene(
     panel.focusCurvature = null;
     syncPanelGrid(panel);
     mutableState.focusModeTerminalId = null;
+    syncFocusQuadLayer();
     floorCorrectionPending = true;
     correctTerminalFloor();
     syncBringButtons();
@@ -8585,6 +8700,8 @@ export function createWorkspaceScene(
     canvas.removeEventListener('pointercancel', onPointerUp);
     canvas.removeEventListener('lostpointercapture', onPointerUp);
     renderer?.setAnimationLoop(null);
+    focusQuadLayer?.dispose();
+    focusQuadLayer = null;
     labelBatcher.dispose();
     for (const id of [...panels.keys()]) removeTerminal(id);
     radialMenu.dispose();

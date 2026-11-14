@@ -1,14 +1,18 @@
+import { MAX_SURFACE_CURVATURE_RADIANS } from '@par/xr-workspace/internal/curved-surface';
 import { type ButtonMap, DEFAULT_BUTTON_MAP, validateButtonMap } from './controller-buttons';
 
 export type ScrollStripSide = 'right' | 'left' | 'both';
+export type FocusWarpMode = 'custom' | 'inherit';
 
 export const SCROLL_STRIP_SIDES: readonly ScrollStripSide[] = ['right', 'left', 'both'];
+export const MAX_TERMINAL_CURVATURE_DEGREES = (MAX_SURFACE_CURVATURE_RADIANS * 180) / Math.PI;
 
 export interface WindowPreferences {
   defaultOpacity: number;
   /** Curvature in degrees for panes with no saved warp. */
   defaultCurvature: number;
   focusDistance: number;
+  focusWarpMode: FocusWarpMode;
   focusCurvature: number;
   scrollStripSide: ScrollStripSide;
   /** Show the instrument chin under each pane frame. */
@@ -21,6 +25,7 @@ export const DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
   defaultOpacity: 1,
   defaultCurvature: 0,
   focusDistance: 1.5,
+  focusWarpMode: 'custom',
   focusCurvature: 0,
   scrollStripSide: 'right',
   frameChin: false,
@@ -44,7 +49,7 @@ export function validateWindowPreferences(value: unknown): WindowPreferences {
     defaultCurvature: clamp(
       candidate.defaultCurvature ?? NaN,
       0,
-      100,
+      MAX_TERMINAL_CURVATURE_DEGREES,
       DEFAULT_WINDOW_PREFERENCES.defaultCurvature,
     ),
     focusDistance: clamp(
@@ -56,9 +61,11 @@ export function validateWindowPreferences(value: unknown): WindowPreferences {
     focusCurvature: clamp(
       candidate.focusCurvature ?? NaN,
       0,
-      100,
+      MAX_TERMINAL_CURVATURE_DEGREES,
       DEFAULT_WINDOW_PREFERENCES.focusCurvature,
     ),
+    focusWarpMode:
+      candidate.focusWarpMode === 'inherit' ? 'inherit' : DEFAULT_WINDOW_PREFERENCES.focusWarpMode,
     scrollStripSide: SCROLL_STRIP_SIDES.includes(candidate.scrollStripSide as ScrollStripSide)
       ? (candidate.scrollStripSide as ScrollStripSide)
       : DEFAULT_WINDOW_PREFERENCES.scrollStripSide,

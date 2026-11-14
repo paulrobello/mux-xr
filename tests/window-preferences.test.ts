@@ -26,6 +26,7 @@ describe('window preferences', () => {
       defaultCurvature: 0,
       focusDistance: 5,
       focusCurvature: 0,
+      focusWarpMode: 'custom',
       scrollStripSide: 'right',
       frameChin: false,
       buttonMap: DEFAULT_BUTTON_MAP,
@@ -35,17 +36,32 @@ describe('window preferences', () => {
         defaultOpacity: 2,
         defaultCurvature: 120,
         focusDistance: 0,
-        focusCurvature: 120,
+        focusCurvature: 200,
       }),
     ).toEqual({
       defaultOpacity: 1,
-      defaultCurvature: 100,
+      defaultCurvature: 120,
       focusDistance: 0.5,
-      focusCurvature: 100,
+      focusCurvature: 180,
+      focusWarpMode: 'custom',
       scrollStripSide: 'right',
       frameChin: false,
       buttonMap: DEFAULT_BUTTON_MAP,
     });
+  });
+
+  it('preserves the custom angle when inheriting and defaults older settings to Custom', () => {
+    expect(validateWindowPreferences({ focusCurvature: 65 })).toMatchObject({
+      focusWarpMode: 'custom',
+      focusCurvature: 65,
+    });
+    expect(
+      validateWindowPreferences({ focusWarpMode: 'inherit', focusCurvature: 180 }),
+    ).toMatchObject({
+      focusWarpMode: 'inherit',
+      focusCurvature: 180,
+    });
+    expect(validateWindowPreferences({ focusWarpMode: 'invalid' }).focusWarpMode).toBe('custom');
   });
 
   it('keeps a boolean frame chin choice and falls back to hiding it', () => {

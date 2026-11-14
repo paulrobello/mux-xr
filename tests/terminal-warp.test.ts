@@ -70,7 +70,7 @@ describe('curved terminal geometry', () => {
     }
     geometry.dispose();
   });
-  it('clamps curvature to the supported 100 degree maximum', () => {
+  it('clamps curvature to the supported 180 degree maximum', () => {
     expect(clampTerminalCurvatureRadians(-1)).toBe(0);
     expect(clampTerminalCurvatureRadians(10)).toBe(MAX_TERMINAL_CURVATURE_RADIANS);
     expect(clampTerminalCurvatureRadians(Number.NaN)).toBe(0);

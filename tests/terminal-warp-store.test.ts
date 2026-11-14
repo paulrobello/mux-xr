@@ -36,14 +36,15 @@ describe('terminal warp store', () => {
     expect(createTerminalWarpStore(null).get('new', 30)).toBe(30);
   });
   it('stores values by opaque pane identity and clamps them to degrees', () => {
-    const store = createTerminalWarpStore(memoryStorage());
+    const storage = memoryStorage();
+    const store = createTerminalWarpStore(storage);
     expect(store.get('workspace/session/window/pane')).toBe(0);
     expect(store.set('workspace/session/window/pane', 42.5)).toBe(true);
     expect(store.get('workspace/session/window/pane')).toBe(42.5);
     expect(store.set('other', -10)).toBe(true);
-    expect(store.set('high', 101)).toBe(true);
+    expect(store.set('high', 181)).toBe(true);
     expect(store.get('other')).toBe(0);
-    expect(store.get('high')).toBe(100);
+    expect(createTerminalWarpStore(storage).get('high')).toBe(180);
     expect(store.set('nan', Number.NaN)).toBe(true);
     expect(store.get('nan')).toBe(0);
   });

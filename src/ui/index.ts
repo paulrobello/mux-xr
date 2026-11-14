@@ -75,6 +75,7 @@ export { validateHandColor };
 import type { PaneCreationState } from '../workspace/pane-create';
 import {
   DEFAULT_WINDOW_PREFERENCES,
+  MAX_TERMINAL_CURVATURE_DEGREES,
   validateWindowPreferences,
   type WindowPreferences,
 } from '../workspace/window-preferences';
@@ -958,8 +959,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     updateAgentControls();
     const windowControls = document.createElement('div');
     windowControls.dataset.windowPreferences = 'true';
-    windowControls.innerHTML =
-      '<fieldset><legend>Window and focus preferences</legend><label>New window glass opacity <span data-window-opacity-value>100%</span><input data-window-opacity type="range" min="10" max="100" step="1" aria-label="New window glass opacity percentage"><small>Applies to new windows only. Existing panes are unchanged.</small></label><label>New window warp <span data-window-warp-value>0°</span><input data-window-warp type="range" min="0" max="100" step="5" aria-label="New window curvature in degrees"><small>Applies to new windows only. Existing panes are unchanged.</small></label><label>Focus distance <span data-focus-distance-value>1.5 m</span><input data-focus-distance type="range" min="0.5" max="5" step="0.1" aria-label="Focus distance in meters"><small>Distance in front of you when focusing any window.</small></label><label>Focus warp <span data-focus-curvature-value>0°</span><input data-focus-curvature type="range" min="0" max="100" step="5" aria-label="Focus curvature in degrees"><small>Temporary focus curvature. The original curvature restores when focus ends.</small></label><label>Scroll strip <select data-scroll-strip-side aria-label="Scroll strip side"><option value="right">Right</option><option value="left">Left</option><option value="both">Both sides</option></select><small>Pinch and drag the strip beside each pane to scroll it.</small></label><label><input data-frame-chin type="checkbox" aria-label="Show the chin under each pane frame"> Frame chin<small>Adds the instrument strip under each pane frame.</small></label></fieldset>';
+    windowControls.innerHTML = `<fieldset><legend>Window and focus preferences</legend><label>New window glass opacity <span data-window-opacity-value>100%</span><input data-window-opacity type="range" min="10" max="100" step="1" aria-label="New window glass opacity percentage"><small>Applies to new windows only. Existing panes are unchanged.</small></label><label>New window warp <span data-window-warp-value>0°</span><input data-window-warp type="range" min="0" max="${MAX_TERMINAL_CURVATURE_DEGREES}" step="5" aria-label="New window curvature in degrees"><small>Applies to new windows only. Existing panes are unchanged.</small></label><label>Focus distance <span data-focus-distance-value>1.5 m</span><input data-focus-distance type="range" min="0.5" max="5" step="0.1" aria-label="Focus distance in meters"><small>Distance in front of you when focusing any window.</small></label><label>Focus warp <select data-focus-warp-mode><option value="custom">Custom</option><option value="inherit">Inherit from terminal</option></select></label><label>Focus warp angle <span data-focus-curvature-value>0°</span><input data-focus-curvature type="range" min="0" max="${MAX_TERMINAL_CURVATURE_DEGREES}" step="5" aria-label="Focus curvature in degrees"><small>Temporary focus curvature. The original curvature restores when focus ends.</small></label><label>Scroll strip <select data-scroll-strip-side aria-label="Scroll strip side"><option value="right">Right</option><option value="left">Left</option><option value="both">Both sides</option></select><small>Pinch and drag the strip beside each pane to scroll it.</small></label><label><input data-frame-chin type="checkbox" aria-label="Show the chin under each pane frame"> Frame chin<small>Adds the instrument strip under each pane frame.</small></label></fieldset>`;
     settingsPanel.insertBefore(
       windowControls,
       settingsPanel.querySelector('[data-action="passthrough"]'),
@@ -967,6 +967,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     const windowOpacity = windowControls.querySelector<HTMLInputElement>('[data-window-opacity]');
     const windowWarp = windowControls.querySelector<HTMLInputElement>('[data-window-warp]');
     const windowDistance = windowControls.querySelector<HTMLInputElement>('[data-focus-distance]');
+    const focusWarpMode = windowControls.querySelector<HTMLSelectElement>('[data-focus-warp-mode]');
     const windowCurvature =
       windowControls.querySelector<HTMLInputElement>('[data-focus-curvature]');
     const stripSide = windowControls.querySelector<HTMLSelectElement>('[data-scroll-strip-side]');
@@ -987,6 +988,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       !windowWarpValue ||
       !windowDistance ||
       !windowCurvature ||
+      !focusWarpMode ||
       !stripSide ||
       !frameChin ||
       !windowOpacityValue ||
@@ -998,6 +1000,8 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       windowOpacity.value = String(Math.round(settings.windowPreferences.defaultOpacity * 100));
       windowWarp.value = String(settings.windowPreferences.defaultCurvature);
       windowDistance.value = String(settings.windowPreferences.focusDistance);
+      focusWarpMode.value = settings.windowPreferences.focusWarpMode;
+      windowCurvature.disabled = focusWarpMode.value === 'inherit';
       windowCurvature.value = String(settings.windowPreferences.focusCurvature);
       stripSide.value = settings.windowPreferences.scrollStripSide;
       frameChin.checked = settings.windowPreferences.frameChin;
@@ -1013,6 +1017,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
           defaultOpacity: Number(windowOpacity.value) / 100,
           defaultCurvature: Number(windowWarp.value),
           focusDistance: Number(windowDistance.value),
+          focusWarpMode: focusWarpMode.value,
           focusCurvature: Number(windowCurvature.value),
           scrollStripSide: stripSide.value,
           frameChin: frameChin.checked,
@@ -1025,6 +1030,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     windowOpacity.addEventListener('input', changeWindowPreferences);
     windowWarp.addEventListener('input', changeWindowPreferences);
     windowDistance.addEventListener('input', changeWindowPreferences);
+    focusWarpMode.addEventListener('change', changeWindowPreferences);
     windowCurvature.addEventListener('input', changeWindowPreferences);
     stripSide.addEventListener('change', changeWindowPreferences);
     frameChin.addEventListener('change', changeWindowPreferences);
@@ -1079,8 +1085,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     updateButtonControls();
     const grid = document.createElement('div');
     grid.dataset.gridControls = 'true';
-    grid.innerHTML =
-      '<label>Selected terminal grid <span data-grid-caption>None selected</span></label><div class="grid-inputs"><label>Columns<input data-grid-cols type="number" min="2" max="300" step="1" aria-label="Terminal columns"></label><label>Rows<input data-grid-rows type="number" min="2" max="150" step="1" aria-label="Terminal rows"></label></div><button data-action="apply-grid" class="secondary">Apply grid</button><small data-grid-status>Resize changes the process display size and do not restart it.</small><label>Terminal curvature <span data-terminal-curvature-value>0°</span><input data-terminal-curvature type="range" min="0" max="100" step="1" value="0" aria-label="Terminal curvature in degrees"></label><label>Terminal glass opacity <span data-terminal-opacity-value>100%</span><input data-terminal-opacity type="range" min="10" max="100" step="5" value="100" aria-label="Terminal glass opacity"><small>Foreground text remains opaque.</small></label><button data-action="reset-terminal-appearance" class="secondary" title="Forget this pane\'s saved glass opacity and warp so it follows the new-window defaults">Reset to defaults</button>';
+    grid.innerHTML = `<label>Selected terminal grid <span data-grid-caption>None selected</span></label><div class="grid-inputs"><label>Columns<input data-grid-cols type="number" min="2" max="300" step="1" aria-label="Terminal columns"></label><label>Rows<input data-grid-rows type="number" min="2" max="150" step="1" aria-label="Terminal rows"></label></div><button data-action="apply-grid" class="secondary">Apply grid</button><small data-grid-status>Resize changes the process display size and do not restart it.</small><label>Terminal curvature <span data-terminal-curvature-value>0°</span><input data-terminal-curvature type="range" min="0" max="${MAX_TERMINAL_CURVATURE_DEGREES}" step="1" value="0" aria-label="Terminal curvature in degrees"></label><label>Terminal glass opacity <span data-terminal-opacity-value>100%</span><input data-terminal-opacity type="range" min="10" max="100" step="5" value="100" aria-label="Terminal glass opacity"><small>Foreground text remains opaque.</small></label><button data-action="reset-terminal-appearance" class="secondary" title="Forget this pane's saved glass opacity and warp so it follows the new-window defaults">Reset to defaults</button>`;
     settingsPanel.insertBefore(
       grid,
       settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
@@ -1128,7 +1133,10 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         if (!activePaneId) return;
         const degrees = Math.max(
           0,
-          Math.min(100, Number((event.target as HTMLInputElement).value)),
+          Math.min(
+            MAX_TERMINAL_CURVATURE_DEGREES,
+            Number((event.target as HTMLInputElement).value),
+          ),
         );
         terminalCurvature.set(activePaneId, degrees);
         qs<HTMLElement>('[data-terminal-curvature-value]').textContent = `${degrees}°`;
@@ -2135,7 +2143,9 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
           : 'Resize unavailable while disconnected or read-only.';
     },
     setTerminalCurvature(paneId, degrees) {
-      const value = Number.isFinite(degrees) ? Math.max(0, Math.min(100, degrees)) : 0;
+      const value = Number.isFinite(degrees)
+        ? Math.max(0, Math.min(MAX_TERMINAL_CURVATURE_DEGREES, degrees))
+        : 0;
       terminalCurvature.set(paneId, value);
       if (activePaneId === paneId) updateCurvatureControls(paneId);
     },

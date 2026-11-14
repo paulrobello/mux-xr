@@ -1981,7 +1981,7 @@ describe('native XR controller event routing', () => {
             optionalFeatures:
               mode === 'ar'
                 ? ['local-floor', 'dom-overlay', 'hand-tracking']
-                : ['local-floor', 'hand-tracking'],
+                : ['local-floor', 'hand-tracking', 'layers'],
           },
         );
       },
@@ -9088,6 +9088,7 @@ describe('native XR controller event routing', () => {
       defaultCurvature: 45,
       focusDistance: 1.5,
       focusCurvature: 0,
+      focusWarpMode: 'custom',
       scrollStripSide: 'right',
       frameChin: true,
       buttonMap: DEFAULT_BUTTON_MAP,
@@ -9113,6 +9114,7 @@ describe('native XR controller event routing', () => {
       defaultCurvature,
       focusDistance: 1.5,
       focusCurvature,
+      focusWarpMode: 'custom' as const,
       scrollStripSide: 'right' as const,
       frameChin: true,
       buttonMap: DEFAULT_BUTTON_MAP,
@@ -9270,6 +9272,7 @@ describe('native XR controller event routing', () => {
       defaultCurvature: 40,
       focusDistance: 1.5,
       focusCurvature: 0,
+      focusWarpMode: 'custom' as const,
       scrollStripSide: 'right' as const,
       frameChin: true,
       buttonMap: DEFAULT_BUTTON_MAP,
@@ -9360,21 +9363,28 @@ describe('native XR controller event routing', () => {
     };
     checkDistance(1.5);
     workspace.setWindowPreferences({
-      defaultOpacity: 0.4,
-      defaultCurvature: 0,
+      ...workspace.state.windowPreferences,
       focusDistance: 2.2,
       focusCurvature: 40,
-      scrollStripSide: 'right',
-      frameChin: true,
-      buttonMap: DEFAULT_BUTTON_MAP,
     });
     for (let frame = 20; frame < 40; frame++) fakeXR.frame?.(frame * 20);
     checkDistance(2.2);
     expect(root.userData.curvatureDegrees).toBe(40);
     expect(workspace.getTerminalCurvature('pane-a')).toBe(65);
-    expect(localStorage.getItem('mux-xr:terminal-warp:v1')).toBe(stored);
-    workspace.toggleFocusMode();
+    workspace.showInput('display');
+    hit(workspace, { inputAction: 'focusWarpMode' });
+    expect(workspace.state.windowPreferences.focusWarpMode).toBe('inherit');
     expect(root.userData.curvatureDegrees).toBe(65);
+    expect(localStorage.getItem('mux-xr:terminal-warp:v1')).toBe(stored);
+    workspace.setTerminalCurvature('pane-a', 180);
+    expect(root.userData.curvatureDegrees).toBe(180);
+    const inheritedWarp = localStorage.getItem('mux-xr:terminal-warp:v1');
+    hit(workspace, { inputAction: 'focusWarpMode' });
+    expect(workspace.state.windowPreferences.focusWarpMode).toBe('custom');
+    expect(root.userData.curvatureDegrees).toBe(40);
+    expect(localStorage.getItem('mux-xr:terminal-warp:v1')).toBe(inheritedWarp);
+    workspace.toggleFocusMode();
+    expect(root.userData.curvatureDegrees).toBe(180);
     expect(root.position.distanceTo(original.position)).toBeLessThan(1e-6);
     expect(root.quaternion.angleTo(original.quaternion)).toBeLessThan(1e-6);
     expect(root.scale).toEqual(original.scale);

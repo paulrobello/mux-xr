@@ -404,12 +404,19 @@ describe('mux XR local UI state', () => {
     const opacity = query<HTMLInputElement>(root, '[data-window-opacity]');
     const distance = query<HTMLInputElement>(root, '[data-focus-distance]');
     const curvature = query<HTMLInputElement>(root, '[data-focus-curvature]');
+    const warpMode = query<HTMLSelectElement>(root, '[data-focus-warp-mode]');
     const warp = query<HTMLInputElement>(root, '[data-window-warp]');
+    expect(
+      [warp, curvature, query<HTMLInputElement>(root, '[data-terminal-curvature]')].map(
+        (control) => control.max,
+      ),
+    ).toEqual(['180', '180', '180']);
     expect(warp.value).toBe('0');
     expect(warp.getAttribute('aria-label')).toContain('New window');
     expect(opacity.value).toBe('100');
     expect(distance.value).toBe('1.5');
     expect(curvature.value).toBe('0');
+    expect(warpMode.value).toBe('custom');
     expect(root.querySelector('legend')?.textContent).toBe('Window and focus preferences');
     expect(opacity.getAttribute('aria-label')).toContain('New window');
     expect(distance.getAttribute('aria-label')).toBe('Focus distance in meters');
@@ -439,6 +446,7 @@ describe('mux XR local UI state', () => {
       defaultCurvature: 35,
       focusDistance: 2.4,
       focusCurvature: 25,
+      focusWarpMode: 'custom',
       scrollStripSide: 'both',
       frameChin: true,
       buttonMap: DEFAULT_BUTTON_MAP,
@@ -449,7 +457,8 @@ describe('mux XR local UI state', () => {
         defaultOpacity: 0.4,
         defaultCurvature: 60,
         focusDistance: 3,
-        focusCurvature: 50,
+        focusCurvature: 180,
+        focusWarpMode: 'custom',
         scrollStripSide: 'left',
         frameChin: true,
         buttonMap: DEFAULT_BUTTON_MAP,
@@ -460,19 +469,31 @@ describe('mux XR local UI state', () => {
     expect(opacity.value).toBe('40');
     expect(warp.value).toBe('60');
     expect(distance.value).toBe('3');
-    expect(curvature.value).toBe('50');
+    expect(curvature.value).toBe('180');
     expect(stripSide.value).toBe('left');
+    warpMode.value = 'inherit';
+    warpMode.dispatchEvent(new Event('change'));
+    expect(curvature.disabled).toBe(true);
     ui.destroy();
     const restored = mountWorkspaceUI(root, { onConnect: () => undefined });
     expect(restored.getSettings().windowPreferences).toEqual({
       defaultOpacity: 0.4,
       defaultCurvature: 60,
       focusDistance: 3,
-      focusCurvature: 50,
+      focusCurvature: 180,
+      focusWarpMode: 'inherit',
       scrollStripSide: 'left',
       frameChin: true,
       buttonMap: DEFAULT_BUTTON_MAP,
     });
+    const restoredMode = query<HTMLSelectElement>(root, '[data-focus-warp-mode]');
+    const restoredCurvature = query<HTMLInputElement>(root, '[data-focus-curvature]');
+    expect(restoredMode.value).toBe('inherit');
+    expect(restoredCurvature.disabled).toBe(true);
+    restoredMode.value = 'custom';
+    restoredMode.dispatchEvent(new Event('change'));
+    expect(restoredCurvature.disabled).toBe(false);
+    expect(restoredCurvature.value).toBe('180');
     restored.destroy();
     root.remove();
     localStorage.clear();

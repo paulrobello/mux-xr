@@ -76,6 +76,7 @@ function restoreFade(root: THREE.Group, snapshot: FadeSnapshot): void {
 
 export interface PaneFocus {
   readonly activeId: string | null;
+  readonly moving: boolean;
   originalTransform(root: THREE.Group): TransformSnapshot | null;
   enter(
     id: string,
@@ -213,6 +214,9 @@ export function createPaneFocus(): PaneFocus {
   return {
     get activeId() {
       return activeId;
+    },
+    get moving() {
+      return motion !== null;
     },
     originalTransform(root) {
       const value = originals.get(root);

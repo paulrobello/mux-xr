@@ -1,3 +1,5 @@
+import { MAX_TERMINAL_CURVATURE_DEGREES } from '../workspace/window-preferences';
+
 const STORAGE_KEY = 'mux-xr:terminal-warp:v1';
 const VERSION = 1;
 
@@ -9,7 +11,7 @@ interface WarpDocument {
 
 function clampDegrees(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(100, value));
+  return Math.max(0, Math.min(MAX_TERMINAL_CURVATURE_DEGREES, value));
 }
 
 function clampOpacity(value: unknown): number {
