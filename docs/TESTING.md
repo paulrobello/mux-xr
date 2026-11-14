@@ -19,6 +19,7 @@ Browser tests use hardware Chromium headless on supported hosts. Book the host b
 - `MUX_XR_PRIVATE_TEST=1 MUX_XR_BASE_URL=http://127.0.0.1:4241 MUX_XR_TEST_ROOT=/path/to/private/dist make widgets-clarity-check`: native widget, filter and pose checks using a private built fixture.
 - `MUX_XR_PRIVATE_TEST=1 MUX_XR_TEST_ROOT=/path/to/private/dist make hierarchy-check`: private loopback GPU check for both hierarchy styles, browser/native synchronization, navigation, screenshots and reload persistence.
 - `MUX_XR_PRIVATE_TEST=1 MUX_XR_TEST_ROOT=/path/to/private/dist make input-refinement-check`: private loopback Metal-GPU check for hierarchy, keyboard curvature, warped rims and injected fake speech recognition. It does not prove microphone, transcription service or physical Quest voice support.
+- `MUX_XR_PRIVATE_TEST=1 MUX_XR_TEST_ROOT=/path/to/private/dist make focus-mode-check`: private browser check for Focus entry, pane placement and exact restore after exit. The browser cannot create WebXR composition layers, so it proves the scene mechanics only; the compositor path needs a physical headset.
 - `MUX_XR_BASE_URL=http://127.0.0.1:4241 bun run scripts/xr-visual-check.ts`: native GPU rendering of the spatial keyboard using an explicit test XR camera/controller. This requires a Vite development server and does not replace headset testing.
 
 The streamer’s CSP blocks blob workers. Troika typesets native labels on the main thread with bundled fonts. Check actual glyph pixels in the production build when changing that path.
