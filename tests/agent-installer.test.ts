@@ -171,14 +171,16 @@ describe('agent uninstall and the daemon conflict check (F3)', () => {
   });
 
   it('parses --uninstall only together with --agent', () => {
-    expect(parseInstallerArgs(['--uninstall', '--agent'])).toMatchObject({
+    expect(parseInstallerArgs(['--uninstall', '--user', 'localuser', '--agent'])).toMatchObject({
       uninstall: true,
       agent: true,
       print: false,
     });
-    expect(() => parseInstallerArgs(['--uninstall'])).toThrow(/only supported with --agent/);
-    expect(() => parseInstallerArgs(['--uninstall', '--install', '--agent'])).toThrow(
-      /Choose only one/,
+    expect(() => parseInstallerArgs(['--uninstall', '--user', 'localuser'])).toThrow(
+      /only supported with --agent/,
     );
+    expect(() =>
+      parseInstallerArgs(['--uninstall', '--user', 'localuser', '--install', '--agent']),
+    ).toThrow(/Choose only one/);
   });
 });
