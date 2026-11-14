@@ -8,9 +8,7 @@ import type { TerminalTextureSurface } from './terminal-texture';
  * instead. Background panes keep their mesh textures, so gaze-priority LOD,
  * fades, and transforms are untouched.
  *
- * Render path: the painter's 2D canvas uploads into the layer's swapchain
- * texture via texSubImage2D — a full upload when the swapchain hands back a
- * different buffer, dirty-row bands otherwise.
+ * The layer receives the painter's complete canvas for each acquired frame.
  */
 
 export interface XrLayerGl {
@@ -72,7 +70,7 @@ interface XrSessionLayerApi {
 }
 
 export interface FocusQuadLayerHost {
-  /** Terminal surface for the focused pane; its dirtyRows drive partial uploads. */
+  /** Terminal surface for the focused pane. */
   readonly surface: TerminalTextureSurface;
   /** World-space size of the terminal plane in meters. */
   readonly planeSize: () => { width: number; height: number };
@@ -134,8 +132,6 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
   const binding: XrWebGlBindingLike | null = createBinding();
   let layer: XrQuadLayerLike | null = null;
   let active = false;
-  let lastTexture: WebGLTexture | null = null;
-  let lastViewport: LayerViewport | null = null;
 
   function createBinding(): XrWebGlBindingLike | null {
     if (!supported) return null;
@@ -157,8 +153,6 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
   const destroyLayer = (): void => {
     const previous = layer;
     layer = null;
-    lastTexture = null;
-    lastViewport = null;
     if (previous) {
       try {
         host.session.updateRenderState({ layers: baseLayers });
@@ -208,8 +202,6 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
     layerPixelH = canvasHeight();
     lastWidth = width;
     lastHeight = height;
-    lastTexture = null;
-    lastViewport = null;
   };
 
   const rigidTransform = (
@@ -235,29 +227,14 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
 
   let scratch: HTMLCanvasElement | null = null;
 
-  const prepareCanvas = (
-    width: number,
-    height: number,
-    sourceTop: number,
-    sourceHeight: number,
-  ): HTMLCanvasElement => {
+  const prepareCanvas = (width: number, height: number): HTMLCanvasElement => {
     scratch ??= document.createElement('canvas');
     if (scratch.width !== width) scratch.width = width;
     if (scratch.height !== height) scratch.height = height;
     const ctx = scratch.getContext('2d');
     if (!ctx) throw new Error('Cannot stage terminal pixels for the compositor');
     ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(
-      host.surface.canvas,
-      0,
-      sourceTop,
-      canvasWidth(),
-      sourceHeight,
-      0,
-      0,
-      width,
-      height,
-    );
+    ctx.drawImage(host.surface.canvas, 0, 0, width, height);
     return scratch;
   };
 
@@ -271,60 +248,31 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
     host.gl.texSubImage2D(GL_TEXTURE_2D, 0, x, y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, canvas);
   };
 
-  const uploadViewport = (colorTexture: WebGLTexture, viewport: LayerViewport): void => {
-    const { x, y, width, height } = viewport;
-    const viewportChanged =
-      !lastViewport ||
-      x !== lastViewport.x ||
-      y !== lastViewport.y ||
-      width !== lastViewport.width ||
-      height !== lastViewport.height;
-    const dirty = host.surface.dirtyRows;
-    const sameSize = width === canvasWidth() && height === canvasHeight();
-    if (
-      colorTexture !== lastTexture ||
-      viewportChanged ||
-      !dirty?.length ||
-      (!sameSize && dirty.some((flag) => flag !== 0))
-    ) {
-      const canvas = sameSize
-        ? host.surface.canvas
-        : prepareCanvas(width, height, 0, canvasHeight());
-      upload(x, y, width, height, canvas);
-      lastTexture = colorTexture;
-      lastViewport = { x, y, width, height };
-    } else if (sameSize) {
-      let first = -1;
-      for (let row = 0; row <= dirty.length; row += 1) {
-        const isDirty = row < dirty.length && dirty[row] !== 0;
-        if (isDirty && first < 0) first = row;
-        if (!isDirty && first >= 0) {
-          const top = Math.floor((first * height) / dirty.length);
-          const bottom = Math.min(height, Math.ceil((row * height) / dirty.length));
-          if (bottom > top) {
-            const band = prepareCanvas(width, bottom - top, top, bottom - top);
-            upload(x, y + height - bottom, width, bottom - top, band);
-          }
-          first = -1;
-        }
-      }
-    }
-  };
-
   const uploadForFrame = (frame: unknown): void => {
-    if (!binding || !layer || !host.session.renderState.layers.includes(layer)) return;
-    const { colorTexture, viewport } = binding.getSubImage(layer, frame);
+    if (!binding || !layer) return;
+    if (!host.session.renderState.layers.includes(layer)) {
+      host.setSurfaceVisible(true);
+      return;
+    }
+    const {
+      colorTexture,
+      viewport: { x, y, width, height },
+    } = binding.getSubImage(layer, frame);
     if (
-      !Number.isInteger(viewport.x) ||
-      viewport.x < 0 ||
-      !Number.isInteger(viewport.y) ||
-      viewport.y < 0 ||
-      !Number.isInteger(viewport.width) ||
-      viewport.width <= 0 ||
-      !Number.isInteger(viewport.height) ||
-      viewport.height <= 0
+      !Number.isInteger(x) ||
+      x < 0 ||
+      !Number.isInteger(y) ||
+      y < 0 ||
+      !Number.isInteger(width) ||
+      width <= 0 ||
+      !Number.isInteger(height) ||
+      height <= 0
     )
       throw new Error('Invalid terminal compositor viewport');
+    const canvas =
+      width === canvasWidth() && height === canvasHeight()
+        ? host.surface.canvas
+        : prepareCanvas(width, height);
     const gl = host.gl;
     const texture = gl.getParameter(GL_TEXTURE_BINDING_2D) as WebGLTexture | null;
     const flip = gl.getParameter(GL_UNPACK_FLIP_Y_WEBGL) as boolean;
@@ -333,7 +281,8 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
     try {
       gl.bindTexture(GL_TEXTURE_2D, colorTexture);
       applyUnpackState(gl);
-      uploadViewport(colorTexture, viewport);
+      // A reused WebGL texture handle does not guarantee the compositor kept the previous frame.
+      upload(x, y, width, height, canvas);
     } finally {
       gl.bindTexture(GL_TEXTURE_2D, texture);
       gl.pixelStorei(GL_UNPACK_FLIP_Y_WEBGL, flip);

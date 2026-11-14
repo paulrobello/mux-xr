@@ -197,38 +197,33 @@ describe('createFocusQuadLayer', () => {
     });
   });
 
-  it('uploads the full canvas on the first frame and on swapchain switches', () => {
+  it('supplies a full frame even when the texture handle and terminal rows are unchanged', () => {
     const layer = createFocusQuadLayer(makeHost());
     layer.activate();
     layer.update({ frame: 1 });
-    swapBuffers = true;
     layer.update({ frame: 2 });
+    swapBuffers = true;
+    layer.update({ frame: 3 });
+    expect(textures).toHaveLength(2);
     expect(glCalls).toEqual([
+      [0, 0, 512, 256, 'canvas'],
       [0, 0, 512, 256, 'canvas'],
       [0, 0, 512, 256, 'canvas'],
     ]);
   });
 
-  it('uses viewport offsets for full and dirty uploads at matching sizes', () => {
-    const drawImage = vi.fn();
-    const getContext = vi
-      .spyOn(HTMLCanvasElement.prototype, 'getContext')
-      .mockReturnValue({ drawImage, clearRect: vi.fn() } as unknown as CanvasRenderingContext2D);
-    try {
-      const host = makeHost();
-      const layer = createFocusQuadLayer(host);
-      layer.activate();
-      viewport = { x: 16, y: 32, width: 512, height: 256 };
-      layer.update({ frame: 1 });
-      expect(glCalls).toEqual([[16, 32, 512, 256, 'canvas']]);
-      glCalls.length = 0;
-      (host.surface.dirtyRows as Uint8Array).set([0, 1]);
-      layer.update({ frame: 2 });
-      expect(glCalls).toEqual([[16, 32, 512, 128, 'canvas']]);
-      expect(drawImage).toHaveBeenCalledWith(host.surface.canvas, 0, 128, 512, 128, 0, 0, 512, 128);
-    } finally {
-      getContext.mockRestore();
-    }
+  it('uses viewport offsets and submits all rows when only part of the canvas changed', () => {
+    const host = makeHost();
+    const layer = createFocusQuadLayer(host);
+    layer.activate();
+    viewport = { x: 16, y: 32, width: 512, height: 256 };
+    layer.update({ frame: 1 });
+    host.surface.dirtyRows?.set([0, 1]);
+    layer.update({ frame: 2 });
+    expect(glCalls).toEqual([
+      [16, 32, 512, 256, 'canvas'],
+      [16, 32, 512, 256, 'canvas'],
+    ]);
   });
 
   it('scales the entire canvas when the runtime allocates a smaller or moved viewport', () => {
@@ -243,28 +238,32 @@ describe('createFocusQuadLayer', () => {
       viewport = { x: 11, y: 17, width: 384, height: 192 };
       layer.update({ frame: 1 });
       layer.update({ frame: 2 });
-      expect(glCalls).toEqual([[11, 17, 384, 192, 'canvas']]);
-      expect(drawImage).toHaveBeenCalledExactlyOnceWith(
-        host.surface.canvas,
-        0,
-        0,
-        512,
-        256,
-        0,
-        0,
-        384,
-        192,
-      );
+      expect(glCalls).toEqual([
+        [11, 17, 384, 192, 'canvas'],
+        [11, 17, 384, 192, 'canvas'],
+      ]);
+      expect(drawImage).toHaveBeenCalledWith(host.surface.canvas, 0, 0, 384, 192);
       viewport = { x: 19, y: 17, width: 384, height: 192 };
       layer.update({ frame: 3 });
       expect(glCalls.at(-1)).toEqual([19, 17, 384, 192, 'canvas']);
-      expect(drawImage).toHaveBeenCalledTimes(2);
-      host.surface.dirtyRows?.set([0, 1]);
-      layer.update({ frame: 4 });
       expect(drawImage).toHaveBeenCalledTimes(3);
     } finally {
       getContext.mockRestore();
     }
+  });
+
+  it('keeps the pane visible while the compositor layer is absent', () => {
+    const layer = createFocusQuadLayer(makeHost());
+    layer.activate();
+    layer.update({ frame: 1 });
+    const [compositor] = sessionLayers.splice(0, 1);
+    layer.update({ frame: 2 });
+    expect(surfaceVisible).toEqual([false, true]);
+    expect(glCalls).toHaveLength(1);
+    sessionLayers.unshift(compositor);
+    layer.update({ frame: 3 });
+    expect(surfaceVisible.at(-1)).toBe(false);
+    expect(glCalls).toHaveLength(2);
   });
 
   it('restores texture and unpack state when a compositor upload throws', () => {

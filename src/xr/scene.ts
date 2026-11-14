@@ -2843,11 +2843,6 @@ export function createWorkspaceScene(
       },
     });
     paneFocus.update(deltaSeconds);
-    if (frame && focusQuadPending && !paneFocus.moving) syncFocusQuadLayer();
-    if (frame && focusQuadLayer) {
-      focusQuadLayer.notifyCanvasResized();
-      focusQuadLayer.update(frame);
-    }
     radialMenu.update(radialDelta);
     if (poseRestorePending && renderer?.xr.isPresenting) {
       const saved = poseStore.read('hud');
@@ -3463,7 +3458,7 @@ export function createWorkspaceScene(
         let quality: TerminalRenderQuality = 'full';
         if (renderer?.xr.isPresenting) {
           if (!isPanelShown(panel)) quality = 'hidden';
-          else if (!gazeFull) {
+          else if (!gazeFull && panel.id !== mutableState.focusModeTerminalId) {
             panel.root.getWorldPosition(fidelityPosition);
             panel.root.getWorldScale(fidelityScale);
             quality = terminalQualityAtDistance(
@@ -3673,6 +3668,11 @@ export function createWorkspaceScene(
     }
     observatory.rotation.y = time * 0.00001;
     for (const panel of panels.values()) panel.surface.flush?.();
+    if (frame && focusQuadPending && !paneFocus.moving) syncFocusQuadLayer();
+    if (frame && focusQuadLayer) {
+      focusQuadLayer.notifyCanvasResized();
+      focusQuadLayer.update(frame);
+    }
     renderScene();
     if (!renderer && typeof window.requestAnimationFrame === 'function')
       frameHandle = window.requestAnimationFrame(render);
