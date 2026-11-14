@@ -1981,7 +1981,7 @@ describe('native XR controller event routing', () => {
             optionalFeatures:
               mode === 'ar'
                 ? ['local-floor', 'dom-overlay', 'hand-tracking']
-                : ['local-floor', 'hand-tracking'],
+                : ['local-floor', 'hand-tracking', 'layers'],
           },
         );
       },

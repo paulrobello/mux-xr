@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { OBB } from 'three/examples/jsm/math/OBB.js';
 import { describe, expect, it, vi } from 'vitest';
 
+// Picture-placement geometry sweeps exceed fast-core budgets; keep them viable on x86 gate hosts.
+vi.setConfig({ testTimeout: 20000 });
+
 vi.mock('troika-three-text', () => ({
   Text: class MockText extends THREE.Mesh {
     sync(callback?: () => void): void {

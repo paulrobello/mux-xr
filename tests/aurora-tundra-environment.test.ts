@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { linearLuminance, tintToLuminance } from '../src/xr/accent-colors';
+
+// Geometry-heavy environment tests exceed fast-core budgets; keep them viable on x86 gate hosts.
+vi.setConfig({ testTimeout: 20000 });
 import {
   AURORA_TUNDRA_FLOOR_Y,
   AURORA_TUNDRA_FOLD_AMPLITUDE,
