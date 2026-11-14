@@ -1,19 +1,22 @@
+import {
+  clampSurfaceCurvatureRadians as clampTerminalCurvatureRadians,
+  createCurvedSurfaceGeometry as createCurvedTerminalGeometry,
+  MAX_SURFACE_CURVATURE_RADIANS as MAX_TERMINAL_CURVATURE_RADIANS,
+  type CurvedSurfaceOptions as TerminalWarpOptions,
+  type CurvedSurfaceSpan as TerminalWarpSpan,
+  curvedSurfacePoint as terminalWarpPoint,
+  validateSpan,
+} from '@par/xr-workspace/internal/curved-surface';
 import * as THREE from 'three';
 
-/** The largest supported horizontal terminal bend. */
-export const MAX_TERMINAL_CURVATURE_RADIANS = (100 * Math.PI) / 180;
-
-export interface TerminalWarpSpan {
-  width: number;
-  height: number;
-  /** Horizontal bend in radians. Zero is a flat screen. */
-  radians: number;
-}
-
-export interface TerminalWarpOptions extends TerminalWarpSpan {
-  /** Number of horizontal subdivisions used by generated surfaces. */
-  segments?: number;
-}
+export {
+  clampTerminalCurvatureRadians,
+  createCurvedTerminalGeometry,
+  MAX_TERMINAL_CURVATURE_RADIANS,
+  type TerminalWarpOptions,
+  type TerminalWarpSpan,
+  terminalWarpPoint,
+};
 
 export interface TerminalWarpBounds {
   minX: number;
@@ -31,81 +34,6 @@ export interface TerminalSelectionOptions extends TerminalWarpOptions {
   border?: number;
   /** Original screen width when the outline includes outer padding. */
   surfaceWidth?: number;
-}
-
-function validateSpan(span: TerminalWarpSpan): void {
-  if (!Number.isFinite(span.width) || span.width <= 0) {
-    throw new RangeError('Terminal warp width must be a finite positive number');
-  }
-  if (!Number.isFinite(span.height) || span.height <= 0) {
-    throw new RangeError('Terminal warp height must be a finite positive number');
-  }
-}
-
-export function clampTerminalCurvatureRadians(radians: number): number {
-  if (!Number.isFinite(radians)) return 0;
-  return THREE.MathUtils.clamp(radians, 0, MAX_TERMINAL_CURVATURE_RADIANS);
-}
-
-/** Map normalized horizontal coordinates onto a concave cylindrical screen. */
-export function terminalWarpPoint(
-  x: number,
-  span: TerminalWarpSpan,
-): { x: number; z: number; normalX: number; normalZ: number } {
-  validateSpan(span);
-  const radians = clampTerminalCurvatureRadians(span.radians);
-  if (radians === 0) return { x, z: 0, normalX: 0, normalZ: 1 };
-  const radius = span.width / radians;
-  const theta = (x / span.width) * radians;
-  return {
-    x: radius * Math.sin(theta),
-    z: radius * (1 - Math.cos(theta)),
-    normalX: -Math.sin(theta),
-    normalZ: Math.cos(theta),
-  };
-}
-
-/** Create a screen whose logical UV rectangle remains unchanged by curvature. */
-export function createCurvedTerminalGeometry(options: TerminalWarpOptions): THREE.BufferGeometry {
-  validateSpan(options);
-  const segmentCount = Math.max(1, Math.floor(options.segments ?? 32));
-  const radians = clampTerminalCurvatureRadians(options.radians);
-  const positions: number[] = [];
-  const normals: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
-
-  for (let row = 0; row <= 1; row += 1) {
-    const y = (row - 0.5) * options.height;
-    for (let column = 0; column <= segmentCount; column += 1) {
-      const u = column / segmentCount;
-      const point = terminalWarpPoint((u - 0.5) * options.width, {
-        width: options.width,
-        height: options.height,
-        radians,
-      });
-      positions.push(point.x, y, point.z);
-      normals.push(point.normalX, 0, point.normalZ);
-      // Keep x left-to-right and y bottom-to-top for terminal mouse picking.
-      uvs.push(u, row);
-    }
-  }
-
-  for (let column = 0; column < segmentCount; column += 1) {
-    const a = column;
-    const b = column + 1;
-    const c = segmentCount + 1 + column + 1;
-    const d = segmentCount + 1 + column;
-    indices.push(a, b, d, b, c, d);
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geometry.setIndex(indices);
-  geometry.computeBoundingSphere();
-  return geometry;
 }
 
 /** Create a curved outline mesh suitable for a Basic/line-like selection material. */

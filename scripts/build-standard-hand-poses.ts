@@ -1,4 +1,4 @@
-// Writes src/xr/standard-hand-controller-poses.json from the captured Quest fixtures. For each side:
+// Writes packages/xr-workspace/src/standard-hand-controller-poses.json from the captured Quest fixtures. For each side:
 // `open` (relaxed neutral) and `fist` hold every joint relative to its parent joint, so a blend of
 // their rotations keeps bone lengths; `grip` is the WebXR grip space in the captured fist's wrist
 // frame (origin at the curled-finger centroid, -Z along the held rod toward the thumb, +X out of
@@ -76,6 +76,6 @@ const output = Object.fromEntries(
     },
   ]),
 );
-const target = 'src/xr/standard-hand-controller-poses.json';
+const target = 'packages/xr-workspace/src/standard-hand-controller-poses.json';
 writeFileSync(target, `${JSON.stringify(output)}\n`);
 spawnSync('bunx', ['biome', 'format', '--write', target]);

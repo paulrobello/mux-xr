@@ -7,7 +7,7 @@ import {
 
 const backgroundDeltas = vi.hoisted(() => [] as number[]);
 
-vi.mock('../src/xr/space-background', async (importOriginal) => {
+vi.mock('@par/xr-workspace/internal/space-background', async (importOriginal) => {
   const original = await importOriginal<typeof import('../src/xr/space-background')>();
   return {
     ...original,

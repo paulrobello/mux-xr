@@ -1,5 +1,5 @@
-vi.mock('../src/xr/labels', () => import('./helpers/labels'));
-vi.mock('../src/xr/ui-environment', async (importOriginal) => {
+vi.mock('@par/xr-workspace/internal/labels', () => import('./helpers/labels'));
+vi.mock('@par/xr-workspace/internal/ui-environment', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/xr/ui-environment')>();
   return { ...actual, createUIEnvironment: vi.fn(actual.createUIEnvironment) };
 });

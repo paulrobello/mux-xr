@@ -12,5 +12,12 @@
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "tests", "scripts", "vite.config.ts", "vitest.config.ts"]
+  "include": [
+    "src",
+    "packages/xr-workspace/src",
+    "tests",
+    "scripts",
+    "vite.config.ts",
+    "vitest.config.ts"
+  ]
 }

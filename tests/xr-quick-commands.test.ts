@@ -1,4 +1,4 @@
-vi.mock('../src/xr/labels', () => import('./helpers/labels'));
+vi.mock('@par/xr-workspace/internal/labels', () => import('./helpers/labels'));
 vi.mock('../src/xr/standard-hand', async () => ({
   createStandardHand: (await import('../src/xr/cartoon-hand')).createCartoonHand,
 }));

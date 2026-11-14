@@ -1,5 +1,5 @@
 const handPoses = vi.hoisted(() => ({ count: 0, probeReads: 0 }));
-vi.mock('../src/xr/labels', () => import('./helpers/labels'));
+vi.mock('@par/xr-workspace/internal/labels', () => import('./helpers/labels'));
 const focusedDirectories = vi.hoisted(() => ({ git: vi.fn(), kanban: vi.fn() }));
 vi.mock('../src/xr/repo-status-widget', async (original) => {
   const actual = await original<typeof import('../src/xr/repo-status-widget')>();

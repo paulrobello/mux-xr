@@ -130,9 +130,7 @@ import {
 import { createHierarchyTouch, HIERARCHY_NEAR_ENTER, HIERARCHY_NEAR_EXIT } from './hierarchy-touch';
 import { createRaisedButtonWalls, curveKeyboardContent } from './keyboard-surface';
 import {
-  createKeyborbGlyphs,
   createKeyborbKey,
-  createKeyborbShells,
   type KeyborbGlyphs,
   type KeyborbShells,
   setKeyborbPressed,
@@ -166,6 +164,7 @@ import {
 import { PICTURE_LIMITS } from './picture-store';
 import { createRadialMenu, type RadialMenuAction } from './radial-menu';
 import { ON_TOP_LAYER } from './render-layers';
+import { addKeyboardKeys, addKeyborbBatches, KEYBOARD_UNIT } from './spatial-keyboard';
 import { createStandardHand } from './standard-hand';
 import {
   createStickyNoteWidget,
@@ -5342,31 +5341,15 @@ export function createWorkspaceScene(
         }
       }
     } else {
-      const unit = 0.13;
-      for (const [slot, key] of keyboardKeys.entries()) {
-        const label =
-          key.key.length === 1 && key.key !== ' '
-            ? terminalKeyLabel(key.key, Boolean(modifierState.active.shift))
-            : key.label;
-        const button = mutableState.keyborbEnabled
-          ? createKeyborbKey(label, unit - 0.025)
-          : createLabelButton(label, key.width * unit - 0.014, key.height * unit - 0.03, {
-              key: key.key,
-            });
-        if (mutableState.keyborbEnabled) button.userData.keyborbSlot = slot;
-        Object.assign(button.userData, {
-          inputAction: 'key',
-          key: key.key,
-          modifier: key.modifier,
-          helpText: getControlHelp({ inputAction: 'key', key: key.key, modifier: key.modifier }),
-        });
-        button.position.set(
-          (key.x + key.width / 2 - keyboardDimensions.width / 2) * unit,
-          0.48 - (key.y + key.height / 2) * unit,
-          mutableState.keyborbEnabled ? (unit - 0.025) / 2 + 0.003 : 0,
-        );
-        inputRoot.add(button);
-      }
+      const unit = KEYBOARD_UNIT;
+      addKeyboardKeys(
+        inputRoot,
+        mutableState.keyborbEnabled ? 'keyborb' : 'panel',
+        Boolean(modifierState.active.shift),
+        (mesh) => {
+          mesh.userData.helpText = getControlHelp(mesh.userData);
+        },
+      );
       // Keyborb panel buttons sit out of pinch reach, so dictation gets its own orb in the top row.
       const dictation = mutableState.dictation;
       if (mutableState.keyborbEnabled && mode === 'keyboard' && dictation.supported) {
@@ -5396,18 +5379,7 @@ export function createWorkspaceScene(
         );
         inputRoot.add(mic);
       }
-      if (mutableState.keyborbEnabled) {
-        const orbs = inputRoot.children.filter(
-          (child): child is THREE.Mesh => child.userData.keyborb === true,
-        );
-        const shells = createKeyborbShells(orbs);
-        inputRoot.add(shells.mesh);
-        inputRoot.userData.keyborbShells = shells;
-        const glyphs = createKeyborbGlyphs(orbs);
-        glyphs.batch.userData.disposeBatch = () => glyphs.batch.dispose();
-        inputRoot.add(glyphs.batch);
-        inputRoot.userData.keyborbGlyphs = glyphs;
-      }
+      if (mutableState.keyborbEnabled) addKeyborbBatches(inputRoot);
     }
     const terminalHasReset = Boolean(
       mutableState.inputTargetId && panels.has(mutableState.inputTargetId),

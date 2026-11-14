@@ -21,34 +21,7 @@ export type { ClientMessage, ServerMessage } from './vendor/terminal_pb';
 const MAX_DECOMPRESSED_SIZE = 9 * 1024 * 1024;
 const MAX_COMPRESSED_SIZE = MAX_DECOMPRESSED_SIZE;
 
-/** Returns the US-layout printable character represented by a key and Shift state. */
-export function terminalKeyLabel(key: string, shift = false): string {
-  if (key.length !== 1 || !shift) return key.length === 1 ? key.toLowerCase() : key;
-  const shifted: Record<string, string> = {
-    '`': '~',
-    '1': '!',
-    '2': '@',
-    '3': '#',
-    '4': '$',
-    '5': '%',
-    '6': '^',
-    '7': '&',
-    '8': '*',
-    '9': '(',
-    '0': ')',
-    '-': '_',
-    '=': '+',
-    '[': '{',
-    ']': '}',
-    ';': ':',
-    "'": '"',
-    '\\': '|',
-    ',': '<',
-    '.': '>',
-    '/': '?',
-  };
-  return shifted[key] ?? key.toUpperCase();
-}
+export { keyboardKeyLabel as terminalKeyLabel } from '@par/xr-workspace/internal/keyboard';
 
 export function encodeClientMessage(message: ClientMessage): ArrayBuffer {
   const payload = toBinary(ClientMessageSchema, message);

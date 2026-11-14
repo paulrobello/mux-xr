@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../src/xr/labels', () => ({
+vi.mock('@par/xr-workspace/internal/labels', () => ({
   createScalableLabel: (label: string, width: number, height: number) => {
     const root = new THREE.Mesh(
       new THREE.PlaneGeometry(width, height),

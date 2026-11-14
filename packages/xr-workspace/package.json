@@ -1,0 +1,16 @@
+{
+  "name": "@par/xr-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./internal/*": "./src/*.ts"
+  },
+  "peerDependencies": {
+    "three": "0.186.1"
+  },
+  "dependencies": {
+    "troika-three-text": "0.52.5"
+  }
+}

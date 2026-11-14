@@ -21,6 +21,8 @@ flowchart LR
 - [XR entry](../src/xr/entry.ts) coordinates session startup and browser activation. The [Three.js scene](../src/xr/scene.ts) owns native panels, controller and hand input, manipulation, rendering, and session cleanup. VR uses an immersive VR session. Full passthrough and Desk Window use immersive AR. Desk Window requires alpha blending and reveals passthrough within its frame.
 - [Keyboard routing](../src/keyboard-router.ts) and [quick commands](../src/quick-commands.ts) use the same target selection as the UI. [Dictation](../src/speech-input.ts) captures the target when recording starts and requires explicit insertion of the reviewed transcript. Changing the target clears keyboard modifiers and cancels pane-bound dictation. Gaze-based keyboard targeting is opt-in and independent of gaze-based rendering.
 
+The private [XR Workspace package](../packages/xr-workspace/README.md) owns reusable environments, tracked hand visuals, spatial menus, clock and timer widgets, and both 3D keyboard styles. Mux XR adapts these components to its session, input targets, and device settings.
+
 ## Streamer and terminal lifecycle
 
 The [hierarchy client](../src/workspace/hierarchy.ts) opens `/ws?metadata=1`, requests the tree, and receives hierarchy snapshots and agent roster updates. It normalizes workspace → session → window → pane data for both presenters. Metadata browsing is independent of terminal viewer connections.

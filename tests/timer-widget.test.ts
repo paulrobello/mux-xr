@@ -16,7 +16,7 @@ vi.mock('troika-three-text', () => ({
   configureTextBuilder: vi.fn(),
 }));
 
-vi.mock('../src/xr/timer-state', async (importOriginal) => {
+vi.mock('@par/xr-workspace/internal/timer-state', async (importOriginal) => {
   const original = await importOriginal<typeof import('../src/xr/timer-state')>();
   return { ...original, readout: vi.fn(original.readout) };
 });

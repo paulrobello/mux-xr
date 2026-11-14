@@ -1,115 +1,47 @@
+import {
+  ENVIRONMENT_FACTORIES as BUILT_IN_ENVIRONMENTS,
+  createEnvironmentController,
+  type EnvironmentFactory,
+  registerEnvironmentUpdater,
+} from '@par/xr-workspace/internal/environment';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { BackgroundMode } from './contracts';
 import type { WorkspaceScene } from './xr';
 import { accentColorOrNull, resolveEnvironmentAccent, tintToLuminance } from './xr/accent-colors';
 import { DESK_WINDOW_KIND, setEnvironmentWindowMask } from './xr/desk-window';
-import { createAuroraTundraEnvironment } from './xr/environments/aurora-tundra';
-import { createCloudSummitEnvironment } from './xr/environments/cloud-summit';
-import { createDeepWaterEnvironment } from './xr/environments/deep-water';
-import { createDesertNightEnvironment } from './xr/environments/desert-night';
-import { createHangarDeckEnvironment } from './xr/environments/hangar-deck';
-import { createKoiGardenEnvironment } from './xr/environments/koi-garden';
-import { createMinimalStudioEnvironment } from './xr/environments/minimal-studio';
-import { createRainRooftopEnvironment } from './xr/environments/rain-rooftop';
 import { createSpaceBackground } from './xr/space-background';
 
-type EnvironmentUpdater = (deltaSeconds: number) => void;
-
-/** Adds an updater to the scene's single `updateEnvironment` hook; returns its removal. */
-export function registerEnvironmentUpdater(
-  scene: THREE.Scene,
-  updater: EnvironmentUpdater,
-): () => void {
-  const updaters = (scene.userData.environmentUpdaters ??
-    new Set<EnvironmentUpdater>()) as Set<EnvironmentUpdater>;
-  scene.userData.environmentUpdaters = updaters;
-  updaters.add(updater);
-  scene.userData.updateEnvironment = (deltaSeconds: number): void => {
-    for (const each of [...updaters]) each(deltaSeconds);
-  };
-  return () => {
-    updaters.delete(updater);
-    if (updaters.size === 0 && scene.userData.environmentUpdaters === updaters) {
-      delete scene.userData.updateEnvironment;
-      delete scene.userData.environmentUpdaters;
-    }
-  };
-}
-
-export interface EnvironmentInstance {
-  root: THREE.Group;
-  update(deltaSeconds: number): void;
-  dispose(): void;
-  floorY: number;
-}
-
-/** Builds an environment; `accent` retints its accent glows, null keeps the authored cyan. */
-export type EnvironmentFactory = (accent: THREE.Color | null) => EnvironmentInstance;
+export type {
+  EnvironmentFactory,
+  EnvironmentInstance,
+} from '@par/xr-workspace/internal/environment';
+export { registerEnvironmentUpdater };
 export type EnvironmentFactories = Partial<Record<BackgroundMode, EnvironmentFactory>>;
+export const ENVIRONMENT_FACTORIES: EnvironmentFactories = BUILT_IN_ENVIRONMENTS;
 
-export const ENVIRONMENT_FACTORIES: EnvironmentFactories = {
-  hangar: createHangarDeckEnvironment,
-  'deep-water': createDeepWaterEnvironment,
-  studio: createMinimalStudioEnvironment,
-  desert: createDesertNightEnvironment,
-  aurora: createAuroraTundraEnvironment,
-  rooftop: createRainRooftopEnvironment,
-  summit: createCloudSummitEnvironment,
-  koi: createKoiGardenEnvironment,
-};
-
-/**
- * Keeps at most one procedural environment alive while its mode is selected and the world is
- * visible. An accent change rebuilds it because some environments bake glows into vertex colors.
- */
 export function createEnvironmentManager(
   workspace: WorkspaceScene,
   factories: EnvironmentFactories = ENVIRONMENT_FACTORIES,
 ): () => void {
-  let active: { mode: BackgroundMode; accent: string; instance: EnvironmentInstance } | null = null;
-  let failedMode: BackgroundMode | null = null;
-  const release = (): void => {
-    if (!active) return;
-    const { instance } = active;
-    active = null;
-    workspace.scene.remove(instance.root);
-    instance.dispose();
-  };
+  const controller = createEnvironmentController(workspace.scene, factories);
   const sync = (): void => {
-    const { background, xrMode, widgets, fullPassthrough } = workspace.state;
-    const deskWindow = xrMode === 'ar' && widgets.includes(DESK_WINDOW_KIND);
-    if (failedMode !== background) failedMode = null;
-    const wanted = fullPassthrough || failedMode === background ? undefined : factories[background];
-    if (!wanted) {
-      release();
-      return;
-    }
-    const accent = resolveEnvironmentAccent(workspace.state);
-    if (active?.mode === background && active.accent === accent) {
-      setEnvironmentWindowMask(active.instance.root, deskWindow);
-      return;
-    }
-    release();
-    try {
-      const instance = wanted(accentColorOrNull(accent));
-      instance.root.visible = true;
-      setEnvironmentWindowMask(instance.root, deskWindow);
-      workspace.scene.add(instance.root);
-      active = { mode: background, accent, instance };
-    } catch (error) {
-      failedMode = background;
-      console.warn(`Environment ${background} unavailable.`, error);
-    }
+    const state = workspace.state;
+    const deskWindow = state.xrMode === 'ar' && state.widgets.includes(DESK_WINDOW_KIND);
+    const active = controller.select(state.background, {
+      enabled: !state.fullPassthrough,
+      accentColor: state.accentColor,
+      environmentAccentColor: state.environmentAccentColor,
+    });
+    if (active) setEnvironmentWindowMask(active.root, deskWindow);
   };
-  const update: EnvironmentUpdater = (deltaSeconds) => active?.instance.update(deltaSeconds);
   const unsubscribe = workspace.subscribe(sync);
-  const unregister = registerEnvironmentUpdater(workspace.scene, update);
+  const unregister = registerEnvironmentUpdater(workspace.scene, controller.update);
   sync();
   return () => {
     unsubscribe();
     unregister();
-    release();
+    controller.dispose();
   };
 }
 

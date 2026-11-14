@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../src/xr/labels', () => import('./helpers/labels'));
+vi.mock('@par/xr-workspace/internal/labels', () => import('./helpers/labels'));
 
 import type { HandContactProbe } from '../src/xr/hand-contact';
 import { createScalableLabel } from '../src/xr/labels';

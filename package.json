@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@bufbuild/protobuf": "2.16.0",
+    "@par/xr-workspace": "workspace:*",
     "@xterm/xterm": "6.0.0",
     "libheif-js": "1.23.5",
     "onnxruntime-node": "1.31.1",
@@ -36,5 +37,8 @@
     "typescript": "7.0.2",
     "vite": "8.3.5",
     "vitest": "5.0.3"
-  }
+  },
+  "workspaces": [
+    "packages/xr-workspace"
+  ]
 }
