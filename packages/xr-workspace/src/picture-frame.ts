@@ -325,14 +325,14 @@ export function createPictureFrameWidget(
     disparity = measureStereoCanvases(image.source, image.right.source);
   }
 
-  const setControlsOnTop = (onTop: boolean): void => {
-    for (const control of controls)
+  const controlDepths = controls.map((control) => control.position.z);
+  const liftControls = (lift: number): void => {
+    for (const [index, control] of controls.entries()) {
+      control.position.z = controlDepths[index] + lift;
       control.traverse((child) => {
-        const material = (child as THREE.Mesh).material;
-        for (const value of Array.isArray(material) ? material : material ? [material] : [])
-          value.depthTest = !onTop;
-        child.renderOrder = onTop ? POPOUT_CONTROL_ORDER + (child === control ? 0 : 1) : 0;
+        child.renderOrder = lift ? POPOUT_CONTROL_ORDER + (child === control ? 0 : 1) : 0;
       });
+    }
   };
 
   const applyView = (): void => {
@@ -358,7 +358,9 @@ export function createPictureFrameWidget(
       uniforms.depthAnchor.value = view.mode === 'popout' ? 0.5 : 1;
       uniforms.cutThreshold.value = view.edges === 'cut' ? DEPTH_CUT_THRESHOLD : 2;
     }
-    setControlsOnTop(shown && view.mode === 'popout');
+    // The vertex shader displaces bright pixels by at most half the pop-out depth.
+    // Move the controls past that surface so other widgets can still occlude them.
+    liftControls(shown && view.mode === 'popout' ? depthDisplacement(view, longEdge) / 2 : 0);
     const text = (name: string, label: string): void => {
       const mesh = depthLabels.get(name);
       if (mesh && mesh.userData.labelText !== label) updateScalableLabel(mesh, label);

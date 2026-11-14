@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http';
+import { createDirectWeatherFetcher } from '@par/xr-workspace/internal/weather-provider';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import type { HostClipboardSocket } from '../src/host-clipboard';
@@ -195,6 +196,27 @@ describe('weather provider', () => {
     await provider.report('95814');
     // The location stays cached; only the two forecasts are fetched again.
     expect(fetch).toHaveBeenCalledTimes(6);
+  });
+
+  it('fetches a report directly without a companion address or pairing secret', async () => {
+    const fetch = fakeFetch();
+    const direct = createDirectWeatherFetcher({ fetch });
+    expect(await direct('invalid')).toEqual({ ok: true, status: { state: 'unknown-zip' } });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await direct('95814')).toEqual({
+      ok: true,
+      status: expect.objectContaining({
+        state: 'ok',
+        report: expect.objectContaining({ place: 'Sacramento' }),
+      }),
+    });
+    expect(fetch.mock.calls.map(([url]) => new URL(url).hostname)).toEqual([
+      'api.zippopotam.us',
+      'api.weather.gov',
+      'api.weather.gov',
+      'api.weather.gov',
+    ]);
+    expect(fetch.mock.calls[0]?.[1].headers).not.toHaveProperty('User-Agent');
   });
 
   it('reports unknown ZIPs and retries after an outage instead of caching it', async () => {

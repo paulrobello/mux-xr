@@ -52,5 +52,19 @@ export {
 export { createStandardHand, type StandardHand, type StandardHandOptions } from './standard-hand';
 export { createStickyNoteWidget, type StickyNoteOptions, stickyNotePages } from './sticky-note';
 export { createTimerWidget } from './timer-widget';
+export type {
+  WeatherDay,
+  WeatherFetcher,
+  WeatherNow,
+  WeatherReport,
+  WeatherResult,
+  WeatherStatus,
+} from './weather-data';
+export { createDirectWeatherFetcher } from './weather-provider';
+export {
+  createWeatherWidget,
+  type WeatherWidget,
+  type WeatherWidgetOptions,
+} from './weather-widget';
 export type { SpatialWidget } from './widget';
 export { createWristMenuWatch, type WristMenuWatch } from './wrist-menu-watch';

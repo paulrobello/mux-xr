@@ -51,3 +51,5 @@ Serve the Noto files and license notices from [public/fonts](../../public/fonts)
 - Use `createPerfGaugeWidget()` with `setPerfSample({ fps, worstFrameMs, targetHz })` about twice a second. Include `shownPanes` to show the count. Call `resetPerf()` at the start of an XR session.
 
 Mux XR uses the toolkit's environments, hand visual and sampling, radial and wrist UI, clock, timer, note, picture and performance widgets, and keyboard geometry and input primitives. Its scene still owns spatial manipulation, focus, persistence, terminal routing, dictation, and service widgets.
+
+Use `createWeatherWidget()` for US ZIP forecasts and call `setWeatherZip(zip)` after mounting its root. The default fetcher requests `https://api.zippopotam.us` and `https://api.weather.gov` directly. Allow both HTTPS origins in your app's `connect-src` policy. Pass `fetchWeather` to use a different data source. Mux XR supplies its paired companion fetcher while its streamer restricts HTTPS connections to the same origin.

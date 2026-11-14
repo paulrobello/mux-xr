@@ -324,12 +324,16 @@ describe('picture frame 3D', () => {
     press(widget, 'picture-depth-weaker');
     expect(onDepthView).toHaveBeenLastCalledWith(expect.objectContaining({ strength: 0.25 }));
 
+    const close = widget.root.getObjectByName('picture-close') as THREE.Mesh;
+    const originalDepth = close.position.z;
     press(widget, 'picture-depth-mode');
     expect(onDepthView).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'popout' }));
     expect(relief.material.uniforms.depthAnchor.value).toBe(0.5);
-    // Pop out reaches past the controls, so they draw on top of the picture.
-    const close = widget.root.getObjectByName('picture-close') as THREE.Mesh;
-    expect((close.material as THREE.Material).depthTest).toBe(false);
+    expect((close.material as THREE.Material).depthTest).toBe(true);
+    expect(close.position.z).toBeGreaterThan(
+      relief.position.z + Number(relief.material.uniforms.depthScale.value) / 2,
+    );
+    expect(options?.position.z).toBeGreaterThan(0.008);
 
     press(widget, 'picture-depth-edges');
     expect(onDepthView).toHaveBeenLastCalledWith(expect.objectContaining({ edges: 'cut' }));
@@ -339,6 +343,7 @@ describe('picture frame 3D', () => {
     expect(onDepthView).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: false }));
     expect(relief.visible).toBe(false);
     expect(widget.root.getObjectByName('picture-frame-border')?.visible).toBe(true);
+    expect(close.position.z).toBe(originalDepth);
     expect((close.material as THREE.Material).depthTest).toBe(true);
     widget.dispose();
   });
