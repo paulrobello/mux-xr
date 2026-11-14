@@ -4,6 +4,8 @@ Mux XR is a LAN workspace for monitoring par-mux terminals and sending commands 
 
 ![Mux XR workspace](https://raw.githubusercontent.com/paulrobello/mux-xr/main/screenshot.jpg)
 
+[![Watch the Mux XR walkthrough](https://i.ytimg.com/vi/Z58u95-GHLI/hqdefault.jpg)](https://www.youtube.com/watch?v=Z58u95-GHLI)
+
 ## Quick start
 
 Install the dependencies with Bun 1.4.4, then start Vite.
