@@ -35,7 +35,9 @@ The surface rejects input when disconnected and reconnects after transient loss 
 
 ## Terminal rendering
 
-The [canvas painter](../src/terminal/painter.ts) compares visible cells and repaints changed rows, including cursor damage. Desktop shows this canvas directly. XR maps it onto a flat or curved mesh. The [texture updater](../src/xr/terminal-texture.ts) uses changed strips for eligible updates and falls back to a full upload when needed.
+The [canvas painter](../src/terminal/painter.ts) compares visible cells and repaints changed rows, including cursor damage. Desktop shows this canvas directly. The standard spatial renderer maps it onto a flat or curved mesh. The [texture updater](../src/xr/terminal-texture.ts) uses changed strips for eligible updates and falls back to a full upload when needed.
+
+After the pane settles in immersive VR Focus, the [Focus renderer](../src/xr/focus-quad-layer.ts) uses one native WebXR quad or cylinder layer, selected by the effective warp. The projection layer opens a transparent region over the terminal grid while drawing the frame, scroll strips, and foreground scene geometry. Focus keeps the source canvas at full raster quality. The renderer uploads it to an owned GPU texture when its revision or staging dimensions change, then copies the complete image into the compositor's current buffer every XR frame. This handles rotating or reused buffer handles. If the layer is unavailable, the terminal mesh draws the grid. Desktop preview, passthrough, and other panes use mesh rendering.
 
 [Distance-based detail](../src/xr/terminal-lod.ts) reduces raster resolution and paint cadence for distant panes. The looked-at pane returns to full quality. Hidden panes keep parsing output, and desktop views return to full raster quality. The [terminal material](../src/xr/terminal-material.ts) owns sampling and glass treatment. The PTY grid, input target, and native UI labels stay independent of those rendering choices.
 

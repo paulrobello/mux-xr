@@ -34,7 +34,8 @@ Open the HTTPS frontend on Quest Browser using a certificate the headset trusts.
 - Press **A** on the right controller, or touch the right wrist watch with your left hand, to open the radial menu.
 - Point and press the trigger or pinch index finger to thumb to select. Grip or pinch middle finger to thumb to move a surface. Grab with both hands to scale it.
 - Open **Panes** to attach a terminal. Open **Keyboard** or **Commands** to send input. **Gaze input** is optional and defaults off.
-- Press **B** to toggle Focus on the aimed or selected terminal. Use **Layout** for arrangements and recovery. With both grips released, hold both stick clicks for one second to recenter.
+- Press **B** to toggle Focus on the aimed or selected terminal. In supported immersive VR, Focus automatically uses a WebXR compositor layer for sharper terminal text at different distances. Set a custom angle or inherit the pane's warp in **Settings → Display → Focus warp**.
+- Use **Layout** for arrangements and recovery. With both grips released, hold both stick clicks for one second to recenter.
 
 See the [workspace guide](docs/WORKSPACE.md) for hand input, Keyborb, window controls, saved commands, widgets, and pictures. Hand tracking still needs physical Quest acceptance.
 
@@ -42,6 +43,8 @@ See the [workspace guide](docs/WORKSPACE.md) for hand input, Keyborb, window con
 
 | Guide | Covers |
 | --- | --- |
+| [Workspace guide](docs/WORKSPACE.md#focus-warp-and-terminal-settings) | XR controls, sharper Focus text, and terminal warp |
+| [Changelog](CHANGELOG.md) | User-facing changes |
 | [Architecture](docs/ARCHITECTURE.md) | Browser, XR, terminal streaming, persistence, and host-service boundaries |
 | [Host setup](docs/HOST-SETUP.md) | Streamer, HTTPS, local Whisper, clipboard pairing, and optional host routes |
 | [Testing](docs/TESTING.md) | Local gates, browser fixtures, private-streamer tests, and headset acceptance |
