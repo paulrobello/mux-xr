@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 /** The largest supported horizontal bend. */
-export const MAX_SURFACE_CURVATURE_RADIANS = (100 * Math.PI) / 180;
+export const MAX_SURFACE_CURVATURE_RADIANS = Math.PI;
 
 export interface CurvedSurfaceSpan {
   width: number;
