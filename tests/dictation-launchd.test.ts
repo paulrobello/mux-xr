@@ -201,13 +201,13 @@ describe('Whisper LaunchDaemon definition', () => {
 
   it('parses agent print and install modes and never migrates listeners for agents', () => {
     expect(parseInstallerArgs(['--print', '--user', 'localuser', '--agent'])).toMatchObject({ print: true, agent: true });
-    expect(parseInstallerArgs(['--install', '--agent'])).toMatchObject({
+    expect(parseInstallerArgs(['--install', '--user', 'localuser', '--agent'])).toMatchObject({
       install: true,
       agent: true,
     });
-    expect(parseInstallerArgs(['--print']).agent).toBe(false);
+    expect(parseInstallerArgs(['--print', '--user', 'localuser']).agent).toBe(false);
     expect(() =>
-      parseInstallerArgs(['--install', '--agent', '--migrate-running-listener']),
+      parseInstallerArgs(['--install', '--user', 'localuser', '--agent', '--migrate-running-listener']),
     ).toThrow(/never migrate/);
   });
 });
