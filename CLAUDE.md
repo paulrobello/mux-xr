@@ -19,6 +19,8 @@ Mux XR is a TypeScript, Vite and Three.js WebXR client for par-mux. The [README]
 | `bun run test tests/<name>.test.ts` | Run one Vitest file. Unit tests live in `tests/` and run under happy-dom |
 | `make <feature>-check` | Targeted browser or protocol check, e.g. `make hierarchy-check`, `make focus-mode-check`; see [Testing](docs/TESTING.md) for the flags each one requires |
 
+Documentation-only commits (`.md`, `.txt`, `docs/`) skip the fast gate in the pre-commit hook.
+
 Use [Testing](docs/TESTING.md) for fixture setup, exact flags, and evidence requirements. Any automated check that sends input, resizes a pane, creates a pane, or exercises stream lifecycle must use a private daemon and streamer. The live preview uses the shared default mux daemon. Record browser fixture, real-core and physical Quest results separately.
 
 ## Source entry points
