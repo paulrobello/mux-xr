@@ -16,7 +16,6 @@ import {
   DEFAULT_ACCENT,
   DEFAULT_ACCENT_HOVER,
   disposeScalableLabel,
-  HAND_COLOR_PRESETS,
   type HandContact,
   type HandContactSample,
   type HandInputState,
@@ -180,6 +179,9 @@ import {
 } from './panel-ui';
 import { PANELS } from './panels';
 import { accentPanel } from './panels/accent';
+import { backgroundsPanel } from './panels/backgrounds';
+import { buttonsPanel } from './panels/buttons';
+import { weatherZipPanel } from './panels/weather-zip';
 import { createPictureFrameWidget, PICTURE_KIND } from './picture-frame';
 import type { PictureImage } from './picture-image';
 import {
@@ -4544,65 +4546,7 @@ export function createWorkspaceScene(
       setModifierVisual(sounds, mutableState.uiSounds);
       inputRoot.add(sounds);
     } else if (mode === 'backgrounds') {
-      const layout = layoutBackgroundPicker(backgroundRow);
-      backgroundRow = layout.firstRow;
-      for (const { mode: background, x, y } of layout.tiles) {
-        const selected = background === mutableState.background;
-        const label = BACKGROUND_LABELS[background];
-        const thumbnail = backgroundThumbnail(background);
-        const tile = new THREE.Mesh(
-          new THREE.PlaneGeometry(BACKGROUND_TILE_WIDTH, BACKGROUND_TILE_HEIGHT),
-          new THREE.MeshBasicMaterial({
-            map: thumbnail,
-            color: thumbnail ? 0xffffff : 0x16222c,
-            toneMapped: false,
-          }),
-        );
-        tile.name = 'xr-background-thumbnail';
-        // Not 'background': setBackground tints that action's meshes, which would tint the picture.
-        Object.assign(tile.userData, {
-          inputAction: 'backgroundTile',
-          background,
-          helpText: label,
-        });
-        tile.position.set(x, y, 0);
-        inputRoot.add(tile);
-        if (selected) {
-          const frame = new THREE.Mesh(
-            new THREE.PlaneGeometry(BACKGROUND_TILE_WIDTH + 0.024, BACKGROUND_TILE_HEIGHT + 0.024),
-            new THREE.MeshBasicMaterial({ color: accent.hex }),
-          );
-          frame.name = 'xr-background-selected';
-          frame.userData.inputAction = 'noop';
-          frame.position.set(x, y, -0.004);
-          inputRoot.add(frame);
-        }
-        const caption = createLabelButton(label, BACKGROUND_TILE_WIDTH, 0.07, {
-          inputAction: 'background',
-          background,
-        });
-        caption.position.set(x, y - BACKGROUND_TILE_HEIGHT / 2 - 0.05, 0);
-        setModifierVisual(caption, selected);
-        inputRoot.add(caption);
-      }
-      for (const [glyph, delta, y, enabled] of [
-        ['▲', -1, 0.26, layout.canScrollUp],
-        ['▼', 1, -0.14, layout.canScrollDown],
-      ] as const) {
-        const button = createLabelButton(glyph, 0.12, 0.2, {
-          inputAction: enabled ? 'backgroundScroll' : 'noop',
-          delta,
-        });
-        button.name = delta < 0 ? 'xr-background-scroll-up' : 'xr-background-scroll-down';
-        button.userData.helpText = delta < 0 ? 'Scroll up' : 'Scroll down';
-        button.position.set(0.82, y, 0);
-        button.visible = enabled;
-        inputRoot.add(button);
-      }
-      const rows = createLabelButton(layout.caption, 0.26, 0.06, { inputAction: 'noop' });
-      rows.name = 'xr-background-rows';
-      rows.position.set(0.86, 0.06, 0);
-      inputRoot.add(rows);
+      backgroundsPanel.build(inputRoot, buildContext());
     } else if (mode === 'world') {
       const backgroundSelect = createBackgroundSelect(mutableState.background);
       backgroundSelect.position.y = 0.42;
@@ -4646,46 +4590,7 @@ export function createWorkspaceScene(
     } else if (mode === 'accent') {
       accentPanel.build(inputRoot, buildContext());
     } else if (mode === 'weather-zip') {
-      const field = createLabelButton(
-        `ZIP: ${weatherZipDraft}${weatherZipDraft.length < 5 ? '|' : ''}`,
-        0.76,
-        0.12,
-        { inputAction: 'noop' },
-      );
-      field.name = 'xr-weather-zip-field';
-      field.position.y = 0.4;
-      setModifierVisual(field, true);
-      inputRoot.add(field);
-      const keys = [
-        ['1', '2', '3'],
-        ['4', '5', '6'],
-        ['7', '8', '9'],
-        ['Clear', '0', '⌫'],
-      ] as const;
-      for (const [row, labels] of keys.entries())
-        for (const [column, key] of labels.entries()) {
-          const digit = /^\d$/.test(key);
-          const button = createLabelButton(key, 0.22, 0.12, {
-            inputAction: digit ? 'zipDigit' : key === 'Clear' ? 'zipClear' : 'zipDelete',
-            ...(digit ? { zipDigit: key } : {}),
-          });
-          button.name = `xr-weather-zip-key-${digit ? key : key === 'Clear' ? 'clear' : 'delete'}`;
-          button.position.set((column - 1) * 0.25, 0.24 - row * 0.14, 0);
-          inputRoot.add(button);
-        }
-      const save = createLabelButton('Save', 0.36, 0.1, { inputAction: 'zipSave' });
-      save.name = 'xr-weather-zip-save';
-      save.position.set(-0.2, -0.36, 0);
-      const unset = createLabelButton('Remove ZIP', 0.36, 0.1, { inputAction: 'zipUnset' });
-      unset.name = 'xr-weather-zip-unset';
-      unset.position.set(0.2, -0.36, 0);
-      inputRoot.add(save, unset);
-      if (weatherZipMessage) {
-        const message = createLabelButton(weatherZipMessage, 0.76, 0.08, { inputAction: 'noop' });
-        message.name = 'xr-weather-zip-message';
-        message.position.y = -0.48;
-        inputRoot.add(message);
-      }
+      weatherZipPanel.build(inputRoot, buildContext());
     } else if (mode === 'display') {
       (
         [
@@ -4781,30 +4686,7 @@ export function createWorkspaceScene(
       frameChinButton.position.set(0, -0.73, 0);
       inputRoot.add(frameChinButton);
     } else if (mode === 'buttons') {
-      const map = mutableState.windowPreferences.buttonMap;
-      for (const [index, button] of CONTROLLER_BUTTONS.entries()) {
-        const row = createLabelButton(
-          `${CONTROLLER_BUTTON_LABELS[button]}: ${BUTTON_FUNCTION_LABELS[map[button]]}`,
-          1.05,
-          0.11,
-          { inputAction: 'buttonMapNext', controllerButton: button },
-        );
-        row.position.set(0, 0.32 - index * 0.15, 0);
-        inputRoot.add(row);
-      }
-      const reset = createLabelButton('Reset buttons', 0.6, 0.1, { inputAction: 'buttonMapReset' });
-      reset.position.set(0, -0.32, 0);
-      inputRoot.add(reset);
-      const hint = createLabelButton(
-        'While warping, right A saves and right B cancels',
-        1.4,
-        0.07,
-        {
-          inputAction: 'noop',
-        },
-      );
-      hint.position.y = -0.46;
-      inputRoot.add(hint);
+      buttonsPanel.build(inputRoot, buildContext());
     } else if (mode === 'arrange') {
       const status = createLabelButton(
         panels.size
@@ -5709,45 +5591,9 @@ export function createWorkspaceScene(
       setUISounds(!mutableState.uiSounds);
       return true;
     }
-    if (
-      action === 'zipDigit' ||
-      action === 'zipDelete' ||
-      action === 'zipClear' ||
-      action === 'zipSave' ||
-      action === 'zipUnset'
-    ) {
-      weatherZipMessage = '';
-      if (action === 'zipDigit' && weatherZipDraft.length < 5)
-        weatherZipDraft += String(hit.userData.zipDigit ?? '')
-          .replace(/\D/g, '')
-          .slice(0, 1);
-      else if (action === 'zipDelete') weatherZipDraft = weatherZipDraft.slice(0, -1);
-      else if (action === 'zipClear') weatherZipDraft = '';
-      else if (action === 'zipUnset') {
-        setWeatherZip('');
-        showInput('world');
-        return true;
-      } else if (action === 'zipSave') {
-        if (!validateWeatherZip(weatherZipDraft)) weatherZipMessage = 'Enter all five digits';
-        else {
-          setWeatherZip(weatherZipDraft);
-          showInput('world');
-          return true;
-        }
-      }
-      if (inputRoot && inputMode === 'weather-zip') refreshInputRoot('weather-zip');
-      return true;
-    }
     if (action === 'backgroundSelect') {
       backgroundRow = backgroundPickerRowShowing(mutableState.background, 0);
       showInput('backgrounds');
-      return true;
-    }
-    if (action === 'backgroundScroll') {
-      backgroundRow = layoutBackgroundPicker(
-        backgroundRow + (Number(hit.userData.delta) || 0),
-      ).firstRow;
-      if (inputRoot && inputMode === 'backgrounds') refreshInputRoot('backgrounds');
       return true;
     }
     if (!action || action === 'noop') return false;
@@ -5997,23 +5843,6 @@ export function createWorkspaceScene(
       });
       return true;
     }
-    if (action === 'buttonMapNext') {
-      const button = hit.userData.controllerButton as ControllerButton;
-      const map = mutableState.windowPreferences.buttonMap;
-      if (CONTROLLER_BUTTONS.includes(button))
-        setWindowPreferences({
-          ...mutableState.windowPreferences,
-          buttonMap: { ...map, [button]: nextButtonFunction(map[button]) },
-        });
-      return true;
-    }
-    if (action === 'buttonMapReset') {
-      setWindowPreferences({
-        ...mutableState.windowPreferences,
-        buttonMap: { ...DEFAULT_BUTTON_MAP },
-      });
-      return true;
-    }
     if (action === 'frameChin') {
       setWindowPreferences({
         ...mutableState.windowPreferences,
@@ -6075,10 +5904,6 @@ export function createWorkspaceScene(
       hideInput();
       if (activeSession) void activeSession.end();
       else actions.exitPreview?.();
-      return true;
-    }
-    if (action === 'background' || action === 'backgroundTile') {
-      setBackground(hit.userData.background as BackgroundMode);
       return true;
     }
     if (action === 'toggleWidget') {
@@ -8850,6 +8675,8 @@ export function createWorkspaceScene(
       moveLayoutDepth,
       resetLayout,
       toggleWidget,
+      setBackground,
+      backgroundThumbnail,
       submitPictureUrl,
       placeRecentPicture,
       dictationCaption,

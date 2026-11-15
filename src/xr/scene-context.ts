@@ -1,6 +1,7 @@
 import type { ModifierState } from '@par/xr-workspace';
 import type * as THREE from 'three';
 import type {
+  BackgroundMode,
   PaneDescriptor,
   PanelArrangement,
   QuickCommand,
@@ -149,6 +150,8 @@ export interface SceneContext {
   moveLayoutDepth(direction: number): void;
   resetLayout(): void;
   toggleWidget(kind: WidgetKind): void;
+  setBackground(mode: BackgroundMode): void;
+  backgroundThumbnail(mode: BackgroundMode): THREE.Texture | null;
   submitPictureUrl(): void;
   placeRecentPicture(id: string): void;
   dictationCaption(): string;
