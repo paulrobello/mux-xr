@@ -6,6 +6,8 @@ build:
 	bun run build
 test:
 	bun run test
+coverage:
+	bun run test --coverage --testTimeout=120000
 lint:
 	bun run lint
 fmt:
