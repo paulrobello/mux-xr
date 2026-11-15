@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneProcess } from '../src/terminal/lifecycle';
 import {
   ConnectedSchema,
-  OutputSchema,
   PaneProcessStateSchema,
   type ServerMessage,
   ServerMessageSchema,
@@ -123,17 +122,6 @@ function connected(initialScreen?: string): ArrayBuffer {
           rows: 2,
           initialScreen: initialScreen ? new TextEncoder().encode(initialScreen) : undefined,
         }),
-      },
-    }),
-  );
-}
-
-function output(text: string): ArrayBuffer {
-  return frame(
-    create(ServerMessageSchema, {
-      message: {
-        case: 'output',
-        value: create(OutputSchema, { data: new TextEncoder().encode(text) }),
       },
     }),
   );

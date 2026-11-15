@@ -4,7 +4,6 @@ import type { PaneDescriptor, PanelArrangement, TerminalSurface } from '../src/c
 import { createDemoSurface } from '../src/demo';
 import { createWorkspaceScene } from '../src/xr';
 import { workspaceFloorY } from '../src/xr/floor-layout';
-import { measurePanelBounds } from '../src/xr/panel-bounds';
 
 const patterns: readonly PanelArrangement[] = ['row', 'grid', 'arc', 'sphere'];
 const host = document.querySelector<HTMLElement>('#fixture-host');

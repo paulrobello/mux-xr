@@ -419,7 +419,7 @@ describe('native XR controller event routing', () => {
     });
 
     it('keeps a jittered press a click that selects the pane without copying', () => {
-      const { workspace, left, controller, aimCell, start, finish, writeText } = setupSelection();
+      const { workspace, left, aimCell, start, finish, writeText } = setupSelection();
       workspace.selectTerminal('pane-b');
       start();
       expect(workspace.state.selectedTerminalId).toBe('pane-a');

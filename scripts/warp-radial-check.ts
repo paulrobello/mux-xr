@@ -106,10 +106,10 @@ const connected = (id: string): Buffer =>
           rows: 24,
           sessionId: `pane-${id.slice(1)}`,
           initialScreen: new TextEncoder().encode(
-            Array.from(
+            `${Array.from(
               { length: 100 },
               (_, i) => `${id} monitor history ${String(i).padStart(3, '0')} • agent status ready`,
-            ).join('\r\n') + '\r\n',
+            ).join('\r\n')}\r\n`,
           ),
         }),
       },

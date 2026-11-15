@@ -6,7 +6,7 @@ import { fromBinary } from '@bufbuild/protobuf';
 import { chromium } from 'playwright';
 import { decodeServerMessage } from '../src/terminal/protocol';
 import { ClientMessageSchema } from '../src/terminal/vendor/terminal_pb';
-import { assert, waitFor } from './lib/harness';
+import { assert } from './lib/harness';
 
 // Drives the built app's agent roster against a private daemon: it reports agent states with
 // `report-state` and closes a pane, so never point it at the real/default mux daemon.

@@ -10,7 +10,7 @@ import {
 
 /** Compile-time exhaustiveness: a switch ending in the never-typed branch compiles only when
  * every member is handled; the helper throws if a stray member appears at runtime. */
-function exhaustivePrefix(action: PanelAction): string {
+function _exhaustivePrefix(action: PanelAction): string {
   switch (action.type) {
     case 'scrollStrip':
     case 'noop':

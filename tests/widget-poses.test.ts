@@ -23,7 +23,7 @@ const digitalPose = {
 
 const analogPose = {
   position: [-1, 0.5, 2] as [number, number, number],
-  quaternion: [0, 0.70710678, 0, 0.70710678] as [number, number, number, number],
+  quaternion: [0, Math.SQRT1_2, 0, Math.SQRT1_2] as [number, number, number, number],
   scale: 0.75,
 };
 
