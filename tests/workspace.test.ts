@@ -286,4 +286,46 @@ describe('workspace metadata connection', () => {
     expect(MockSocket.instances).toHaveLength(1);
     vi.useRealTimers();
   });
+
+  it('reports a truncated frame as an unsupported message and closes the socket', async () => {
+    vi.useFakeTimers();
+    const onError = vi.fn();
+    const connection = await connectHierarchy('http://localhost:4241/ws', vi.fn(), onError);
+    const socket = MockSocket.instances[0];
+    socket.open();
+    socket.message(new ArrayBuffer(1));
+    expect(onError).toHaveBeenCalledWith(
+      'The streamer sent an unsupported message. Check its protocol version.',
+    );
+    expect(socket.readyState).toBe(3);
+    connection.disconnect();
+    vi.useRealTimers();
+  });
+
+  it('survives a throwing snapshot consumer without closing or reconnecting', async () => {
+    vi.useFakeTimers();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const onError = vi.fn();
+    const connection = await connectHierarchy(
+      'http://localhost:4241/ws',
+      () => {
+        throw new Error('Invalid pane id: bad');
+      },
+      onError,
+    );
+    const socket = MockSocket.instances[0];
+    socket.open();
+    socket.message(serverFrame(create(MuxTreeSnapshotSchema, {})));
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(
+      'The workspace view hit an internal error. Reload the page if panes look wrong.',
+    );
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(socket.readyState).toBe(MockSocket.OPEN);
+    vi.advanceTimersByTime(60000);
+    expect(MockSocket.instances).toHaveLength(1);
+    connection.disconnect();
+    consoleError.mockRestore();
+    vi.useRealTimers();
+  });
 });
