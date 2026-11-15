@@ -1,6 +1,6 @@
 import { createKeyborbKey, keyboardDimensions, keyboardKeys } from '@par/xr-workspace';
 import type * as THREE from 'three';
-import { getControlHelp } from '../../control-help';
+import { getControlHelpFor } from '../../control-help';
 import type { DictationAction } from '../../speech-input';
 import { actionData, setAction } from '../panel-actions';
 import { ARMED_STYLE, createLabelButton, stackAboveControls } from '../panel-ui';
@@ -22,7 +22,7 @@ export function addKeyboardKeysSection(root: THREE.Group, ctx: SceneContext): vo
     state.keyborbEnabled ? 'keyborb' : 'panel',
     Boolean(ctx.modifierState.active.shift),
     (mesh) => {
-      mesh.userData.helpText = getControlHelp(mesh.userData);
+      mesh.userData.helpText = getControlHelpFor(mesh.userData);
     },
   );
   const dictation = state.dictation;
@@ -44,7 +44,7 @@ export function addKeyboardKeysSection(root: THREE.Group, ctx: SceneContext): vo
     mic.userData.dictationAction = listening ? 'stop' : dictation.forNote ? 'startNote' : 'start';
     mic.userData.helpText = transcribing
       ? 'Transcribing your dictation'
-      : getControlHelp(mic.userData);
+      : getControlHelpFor(mic.userData);
     if (listening) {
       mic.userData.restColor = 0xff7373;
       (mic.material as THREE.Material & { color: THREE.Color }).color.setHex(0xff7373);

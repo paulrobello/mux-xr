@@ -1,7 +1,7 @@
 import { createScalableLabel, HAND_COLOR_PRESETS } from '@par/xr-workspace';
 import * as THREE from 'three';
 import type { BackgroundMode } from '../contracts';
-import { getControlHelp } from '../control-help';
+import { getControlHelpFor } from '../control-help';
 import { accent } from './accent-state';
 import { BACKGROUND_LABELS } from './background-picker';
 import { actionData, type PanelAction } from './panel-actions';
@@ -72,7 +72,7 @@ export function createLabelButton(
           ? '#7197a8'
           : undefined,
   });
-  Object.assign(mesh.userData, data, { helpText: getControlHelp(data) });
+  Object.assign(mesh.userData, data, { helpText: getControlHelpFor(data) });
   return mesh;
 }
 
@@ -148,9 +148,12 @@ export function stackAboveControls(root: THREE.Group, rows: THREE.Mesh[][], gap 
 export function createBackgroundSelect(mode: BackgroundMode): THREE.Group {
   const root = new THREE.Group();
   root.name = 'background-select';
-  const trigger = createLabelButton(BACKGROUND_LABELS[mode], 0.48, 0.09, {
-    inputAction: 'backgroundSelect',
-  });
+  const trigger = createLabelButton(
+    BACKGROUND_LABELS[mode],
+    0.48,
+    0.09,
+    actionData({ type: 'backgroundSelect' }),
+  );
   trigger.name = 'background-select-trigger';
   trigger.userData.helpText = 'Choose a background';
   const shape = new THREE.Shape().moveTo(-0.006, 0.009).lineTo(-0.006, -0.009).lineTo(0.006, 0);

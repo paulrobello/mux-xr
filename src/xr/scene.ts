@@ -54,7 +54,7 @@ import type {
   TerminalSurface,
   WorkspaceActions,
 } from '../contracts';
-import { getControlHelp } from '../control-help';
+import { getControlHelp, getControlHelpFor } from '../control-help';
 import {
   copyCommand,
   isSharedCommand,
@@ -831,7 +831,7 @@ export function createWorkspaceScene(
   const radialMenu = createRadialMenu();
   radialMenu.root.scale.setScalar(0.8);
   radialMenu.root.traverse((object) => {
-    object.userData.helpText = getControlHelp(object.userData);
+    object.userData.helpText = getControlHelpFor(object.userData);
   });
   scene.add(radialMenu.root);
   const terminalPoseCache = new Map<string, SavedUIPose>();
@@ -962,7 +962,12 @@ export function createWorkspaceScene(
     THREE.Group,
     { offset: THREE.Vector3; active: { value: boolean } }
   >();
-  const wristMenuButton = createLabelButton('Menu', 0.052, 0.035, { inputAction: 'wristMenu' });
+  const wristMenuButton = createLabelButton(
+    'Menu',
+    0.052,
+    0.035,
+    actionData({ type: 'wristMenu' }),
+  );
   const wristWatch = createWristMenuWatch(wristMenuButton, uiEnvironment.texture);
   let wristMenuLastPressed = Number.NEGATIVE_INFINITY;
   scene.add(wristWatch.root);
@@ -4276,7 +4281,7 @@ export function createWorkspaceScene(
       backing.material.depthWrite = false;
     }
     setAction(backing, { type: 'grabInput' });
-    backing.userData.helpText = getControlHelp({ inputAction: 'grabInput' });
+    backing.userData.helpText = getControlHelp({ type: 'grabInput' });
     inputRoot.add(backing);
     if (keyboardRadians) curveKeyboardContent(inputRoot, size.x + 0.12, keyboardRadians);
     const walls = createRaisedButtonWalls(inputRoot, BUTTON_WALL_COLOR);
@@ -4307,16 +4312,18 @@ export function createWorkspaceScene(
     hudRoot.position.set(0, 0.78, -1.35);
     hudRoot.scale.setScalar(0.62);
     const totalWidth = 1.6;
-    activePaneLabel = createLabelButton('No active pane', 1.1, 0.09, { inputAction: 'noop' });
+    activePaneLabel = createLabelButton('No active pane', 1.1, 0.09, actionData({ type: 'noop' }));
     activePaneLabel.name = 'xr-active-pane';
     activePaneLabel.position.x = -0.2;
-    const exit = createLabelButton('Exit', 0.27, 0.09, { inputAction: 'exit' });
+    const exit = createLabelButton('Exit', 0.27, 0.09, actionData({ type: 'exit' }));
     exit.position.x = 0.57;
     hudRoot.add(activePaneLabel, exit);
-    toastLabel = createLabelButton(mutableState.toast ?? '', 1.4, 0.09, {
-      inputAction: 'noop',
-      wrap: true,
-    });
+    toastLabel = createLabelButton(
+      mutableState.toast ?? '',
+      1.4,
+      0.09,
+      actionData({ type: 'noop' }, { wrap: true }),
+    );
     toastLabel.name = 'xr-clipboard-toast';
     toastLabel.raycast = () => undefined;
     toastLabel.position.set(0, 0.45, 0);
@@ -4349,16 +4356,16 @@ export function createWorkspaceScene(
       new THREE.MeshBasicMaterial({ color: 0x0d1720 }),
     );
     backing.position.z = -0.015;
-    backing.userData.inputAction = 'grabInput';
+    setAction(backing, { type: 'grabInput' });
 
     hudRoot.add(backing);
-    fpsLabel = createLabelButton('FPS --', 0.24, 0.055, { inputAction: 'noop' });
+    fpsLabel = createLabelButton('FPS --', 0.24, 0.055, actionData({ type: 'noop' }));
     (fpsLabel.material as THREE.MeshBasicMaterial).opacity = 0;
     (fpsLabel.material as THREE.MeshBasicMaterial).depthWrite = false;
     fpsLabel.name = 'xr-fps-counter';
     fpsLabel.position.set(0.6, 0.13, 0);
     hudRoot.add(fpsLabel);
-    keyLabel = createLabelButton('', 0.6, 0.075, { inputAction: 'noop' });
+    keyLabel = createLabelButton('', 0.6, 0.075, actionData({ type: 'noop' }));
     keyLabel.name = 'xr-last-key';
     keyLabel.raycast = () => undefined;
     keyLabel.position.set(0, -0.12, 0);
@@ -5386,7 +5393,6 @@ export function createWorkspaceScene(
       createTerminalMaterial(texture),
     );
     screen.name = 'terminal-surface';
-    screen.userData.helpText = getControlHelp({ terminalTitle: true });
     root.add(screen);
     const frame = new THREE.Mesh(
       createTerminalFrameGeometry(
@@ -5445,11 +5451,11 @@ export function createWorkspaceScene(
         }),
       );
       strip.name = name;
+      setAction(strip, { type: 'scrollStrip' });
       Object.assign(strip.userData, {
-        inputAction: 'scrollStrip',
         terminalId: surface.pane.id,
         excludeFromBounds: true,
-        helpText: getControlHelp({ inputAction: 'scrollStrip' }),
+        helpText: getControlHelp({ type: 'scrollStrip' }),
       });
       // The three grip marks share one mesh, one draw instead of three.
       const marks = [-0.025, 0, 0.025].map((offset) =>
@@ -5502,21 +5508,24 @@ export function createWorkspaceScene(
       ['connected', 'connecting'].includes(String(surface.status)) ? 'Disconnect' : 'Reconnect',
       0.46,
       0.08,
-      {
-        inputAction: 'toggleConnection',
+      actionData({
+        type: 'toggleConnection',
         terminalId: surface.pane.id,
         status: surface.status,
-      },
+      }),
     );
-    const closeButton = createLabelButton('Close view', 0.38, 0.08, {
-      inputAction: 'closePane',
-      terminalId: surface.pane.id,
-    });
-    const bringButton = createLabelButton('Bring here', 0.36, 0.08, {
-      inputAction: 'bringHere',
-      terminalId: surface.pane.id,
-      excludeFromBounds: true,
-    });
+    const closeButton = createLabelButton(
+      'Close view',
+      0.38,
+      0.08,
+      actionData({ type: 'closePane', terminalId: surface.pane.id }),
+    );
+    const bringButton = createLabelButton(
+      'Bring here',
+      0.36,
+      0.08,
+      actionData({ type: 'bringHere', terminalId: surface.pane.id }, { excludeFromBounds: true }),
+    );
     root.add(titleLabel, bellLabel, connectionButton, closeButton, bringButton);
     const panel: TerminalPanel = {
       id: surface.pane.id,
@@ -5583,7 +5592,9 @@ export function createWorkspaceScene(
       if (statusChanged) {
         panel.status = status;
         panel.connectionButton.userData.status = status;
-        panel.connectionButton.userData.helpText = getControlHelp(panel.connectionButton.userData);
+        panel.connectionButton.userData.helpText = getControlHelpFor(
+          panel.connectionButton.userData,
+        );
         updateLabel(
           panel.connectionButton,
           ['connected', 'connecting'].includes(status) ? 'Disconnect' : 'Reconnect',
@@ -5600,8 +5611,7 @@ export function createWorkspaceScene(
       }
       if (errorChanged) {
         panel.error = surface.error;
-        panel.titleLabel.userData.helpText =
-          surface.error ?? getControlHelp({ terminalTitle: true });
+        panel.titleLabel.userData.helpText = surface.error;
       }
     });
     panels.set(panel.id, panel);
@@ -5884,7 +5894,7 @@ export function createWorkspaceScene(
     scrollDue.clear();
     stripScrolls.clear();
     warpReadout = createScalableLabel('', 1.4, 0.15, { wrap: true, fontSize: 0.048 });
-    warpReadout.userData.inputAction = 'noop';
+    setAction(warpReadout, { type: 'noop' });
     warpReadout.name = 'xr-warp-readout';
     warpReadout.position.set(0, panel.height / 2 + 0.22, 0.04);
     warpReadout.traverse((object) => {
@@ -6570,8 +6580,8 @@ export function createWorkspaceScene(
       const keep = panel.id === paneFocus.activeId;
       const action = keep ? 'keepHere' : 'bringHere';
       if (panel.bringButton.userData.inputAction === action) continue;
-      panel.bringButton.userData.inputAction = action;
-      panel.bringButton.userData.helpText = getControlHelp(panel.bringButton.userData);
+      setAction(panel.bringButton, { type: action, terminalId: panel.id });
+      panel.bringButton.userData.helpText = getControlHelpFor(panel.bringButton.userData);
       updateLabel(panel.bringButton, keep ? 'Keep here' : 'Bring here');
     }
   };

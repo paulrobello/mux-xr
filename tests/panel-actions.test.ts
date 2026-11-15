@@ -138,4 +138,22 @@ describe('panel actions', () => {
     expect(bag.labelBorder).toBe('#fff');
     expect((bag.action as PanelAction).type).toBe('command');
   });
+
+  it('reads a bag that only sets inputAction, as package widgets and keyboard keys do', () => {
+    const key = new THREE.Mesh();
+    Object.assign(key.userData, { inputAction: 'key', key: 'a', modifier: 'shift' });
+    expect(getAction(key)).toEqual({
+      inputAction: 'key',
+      key: 'a',
+      modifier: 'shift',
+      type: 'key',
+    });
+    const close = new THREE.Mesh();
+    close.userData.inputAction = 'closeWidget';
+    expect(getAction(close)?.type).toBe('closeWidget');
+  });
+
+  it('returns undefined for an object with no action', () => {
+    expect(getAction(new THREE.Mesh())).toBeUndefined();
+  });
 });
