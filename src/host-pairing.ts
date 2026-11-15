@@ -51,8 +51,13 @@ export type PairedSocketOptions<V, F extends string> = {
   onOpenError: () => F | null;
   /** Runs when this session accepts its challenge, so route clients can keep cross-call state. */
   onChallenge?: () => void;
+  /**
+   * Runs right after the auth frame is sent, so request-per-connection clients can send their
+   * payload knowing every earlier frame on this socket was authenticated.
+   */
+  onAuthSent?: () => void;
   /** `{type:'error', code}` frames; return the failure to settle, or null to keep the session. */
-  onServerError: (code: unknown) => F | null;
+  onServerError: (code: unknown, message: unknown) => F | null;
   /** The socket closed; return the failure to settle, or null to leave the promise pending. */
   onClose: (info: PairedCloseInfo) => F | null;
   /** Runs when the timeout expires; only used when timeoutMs is set. */
@@ -140,7 +145,7 @@ export function openPairedSocket<V, F extends string>(
         message = {};
       }
       if (message?.type === 'error') {
-        const code = options.onServerError(message.code);
+        const code = options.onServerError(message.code, message.message);
         if (code !== null) settle({ ok: false, code });
         return;
       }
@@ -176,10 +181,12 @@ export function openPairedSocket<V, F extends string>(
                 `${options.protocol}\n${String(message.nonce)}\n${options.material}`,
               ),
             );
-            if (!settled)
+            if (!settled) {
               socket?.send(
                 JSON.stringify({ type: 'auth', ...options.authFields, mac: base64(mac) }),
               );
+              options.onAuthSent?.();
+            }
           } catch {
             startCryptoFailure();
           }

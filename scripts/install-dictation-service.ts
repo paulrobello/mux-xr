@@ -37,6 +37,7 @@ type InstallerOptions = {
   serviceHealth: boolean;
   meshInbox: boolean;
   toastLan: boolean;
+  dictateAuth: boolean;
 };
 export type ListenerMetadata = {
   uid: number;
@@ -61,6 +62,7 @@ export const parseInstallerArgs = (argv: string[], config: HostConfig = {}): Ins
   let serviceHealth = false;
   let meshInbox = false;
   let toastLan = false;
+  let dictateAuth = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--install') install = true;
@@ -75,6 +77,7 @@ export const parseInstallerArgs = (argv: string[], config: HostConfig = {}): Ins
     else if (argument === '--service-health') serviceHealth = true;
     else if (argument === '--mesh-inbox') meshInbox = true;
     else if (argument === '--toast-lan') toastLan = true;
+    else if (argument === '--dictate-auth') dictateAuth = true;
     else if (argument === '--repo') repository = argv[++index] ?? '';
     else if (argument === '--user') user = argv[++index] ?? '';
     else throw new Error(`Unknown argument: ${argument}`);
@@ -90,6 +93,7 @@ export const parseInstallerArgs = (argv: string[], config: HostConfig = {}): Ins
   if (serviceHealth && !agent) throw new Error('--service-health is only supported with --agent.');
   if (meshInbox && !agent) throw new Error('--mesh-inbox is only supported with --agent.');
   if (toastLan && !agent) throw new Error('--toast-lan is only supported with --agent.');
+  if (dictateAuth && !agent) throw new Error('--dictate-auth is only supported with --agent.');
   if (agent && migrateRunningListener)
     throw new Error('--agent installs never migrate a running listener.');
   return {
@@ -109,6 +113,7 @@ export const parseInstallerArgs = (argv: string[], config: HostConfig = {}): Ins
     serviceHealth,
     meshInbox,
     toastLan,
+    dictateAuth,
   };
 };
 

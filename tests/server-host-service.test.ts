@@ -1,7 +1,20 @@
 import { createServer, type Server } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
-import { attachHostService } from '../src/server/host-service';
+import { feedMac } from '../src/server/feed-route';
+import {
+  attachHostService,
+  DICTATE_PROTOCOL,
+  localTranscriberArgv,
+} from '../src/server/host-service';
+import {
+  ORIGIN,
+  openFeed,
+  PAIRING,
+  startFeedServer,
+  stopFeedServers,
+  upgradeStatus,
+} from './helpers/feed-socket';
 
 const servers: Array<{ server: Server; close: () => Promise<void> }> = [];
 const start = async (
@@ -190,5 +203,73 @@ describe('local dictation server', () => {
     const closed = new Promise<number>((resolve) => socket.once('close', (code) => resolve(code)));
     socket.send(Buffer.alloc(8 * 1024 * 1024 + 1));
     await expect(closed).resolves.toBe(1009);
+  });
+});
+
+describe('dictate authentication (SEC-002)', () => {
+  it('refuses audio without a proof when dictate auth is on', async () => {
+    const { base } = await startFeedServer({
+      dictate: { requireAuth: true },
+    });
+    const session = await openFeed(`${base}/dictate`);
+    const challenge = await session.json();
+    expect(challenge).toMatchObject({ type: 'challenge', protocol: DICTATE_PROTOCOL });
+    // The audit finding: bytes with an allowed Origin and no proof must not reach the transcriber.
+    session.socket.send(Buffer.from('unauthenticated audio'));
+    const error = await session.json();
+    expect(error).toMatchObject({ type: 'error', code: 'protocol' });
+    await expect(session.closed).resolves.toBe(1008);
+  });
+
+  it('transcribes one clip after a signed auth when dictate auth is on', async () => {
+    const { base } = await startFeedServer({
+      dictate: { requireAuth: true },
+    });
+    const session = await openFeed(`${base}/dictate`);
+    const challenge = await session.json();
+    expect(challenge).toMatchObject({ type: 'challenge', protocol: DICTATE_PROTOCOL });
+    const mac = feedMac(
+      Buffer.from(PAIRING),
+      DICTATE_PROTOCOL,
+      String(challenge.nonce),
+      '',
+    ).toString('base64');
+    session.socket.send(JSON.stringify({ type: 'auth', request: '', mac }));
+    session.socket.send(Buffer.from('audio'));
+    const reply = await session.json();
+    expect(reply).toMatchObject({ type: 'transcript' });
+    await expect(session.closed).resolves.toBe(1000);
+  });
+
+  it('keeps dictation open without auth when the flag is off', async () => {
+    const { base } = await startFeedServer({
+      paired: false,
+      dictate: { requireAuth: false },
+    });
+    const session = await openFeed(`${base}/dictate`, ORIGIN);
+    session.socket.send(Buffer.from('audio'));
+    const reply = await session.json();
+    expect(reply).toMatchObject({ type: 'transcript' });
+  });
+
+  it('refuses the third concurrent socket from one client with 503 when dictate auth is on', async () => {
+    const { base } = await startFeedServer({
+      dictate: { requireAuth: true },
+    });
+    const held: Array<ReturnType<typeof openFeed>> = [];
+    for (let index = 0; index < 2; index += 1) held.push(openFeed(`${base}/dictate`));
+    await Promise.all(held);
+    await expect(upgradeStatus(`${base}/dictate`, ORIGIN)).resolves.toBe(503);
+    for (const session of held) await session;
+    await stopFeedServers();
+  });
+
+  it('pins the ffmpeg input format whitelist before -i', () => {
+    const argv = localTranscriberArgv('/tmp/in.webm', '/tmp/out.wav');
+    const input = argv.indexOf('-i');
+    expect(input).toBeGreaterThan(0);
+    expect(argv.slice(0, input)).toContain('-format_whitelist');
+    expect(argv[input + 1]).toBe('/tmp/in.webm');
+    expect(argv).toContain('matroska,webm,mov,mp4');
   });
 });

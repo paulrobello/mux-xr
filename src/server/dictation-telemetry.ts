@@ -7,7 +7,9 @@ export interface DictationTelemetry {
   readonly enabled: boolean;
   connected(): void;
   disconnected(): void;
-  rejected(reason: 'origin' | 'path' | 'invalid_payload' | 'busy'): void;
+  rejected(
+    reason: 'origin' | 'path' | 'invalid_payload' | 'busy' | 'rate_limited' | 'auth' | 'disabled',
+  ): void;
   httpRequest(route: '/health' | '/toast' | 'other', status: number): void;
   beginTranscription(bytes: number): (outcome: TranscriptionOutcome) => void;
   started(): void;

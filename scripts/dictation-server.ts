@@ -69,6 +69,10 @@ const server = createServer(
   },
 );
 const clipboardSecretFile = parsed.get('--clipboard-secret-file');
+const dictateAuthFlag = parsed.get('--dictate-auth') ?? 'off';
+if (dictateAuthFlag !== 'on' && dictateAuthFlag !== 'off')
+  throw new Error('--dictate-auth takes on or off.');
+console.log(`Dictation auth ${dictateAuthFlag === 'on' ? 'enabled' : 'disabled'}.`);
 const repoStatusFlag = parsed.get('--repo-status') ?? 'off';
 if (repoStatusFlag !== 'on' && repoStatusFlag !== 'off')
   throw new Error('--repo-status takes on or off.');
@@ -117,6 +121,8 @@ const attached = attachHostService(server, {
   allowedOrigins: origins,
   model,
   telemetry,
+  // Off keeps today's origin-only gate; on refuses audio that arrives without a pairing proof.
+  dictate: { requireAuth: dictateAuthFlag === 'on' },
   // Runs git and gh on paths a paired client names, so it needs its own explicit opt-in.
   repoStatus: { enabled: repoStatusFlag === 'on' },
   // Fetches URLs a paired client names, so it needs its own explicit opt-in.
