@@ -6,6 +6,10 @@ import { getWidgetEntry, isWidgetKind, WIDGET_REGISTRY } from '../widget-registr
 
 export const widgetsPanel: PanelModule = {
   title: () => 'Widgets',
+  onShow(ctx) {
+    ctx.widgetsPage = 0;
+    return false;
+  },
   closePosition: (ctx) => {
     const { x, y } = layoutWidgetPanel(WIDGET_REGISTRY.length, ctx.widgetsPage).close;
     return { x, y };

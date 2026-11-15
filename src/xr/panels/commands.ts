@@ -13,6 +13,7 @@ import {
 import type { PanelModule, SceneContext } from '../scene-context';
 
 export const commandsPanel: PanelModule = {
+  desktopSwap: 'commands',
   title: (ctx) =>
     `Quick commands · ${
       ctx.mutableState.inputTargetTitle

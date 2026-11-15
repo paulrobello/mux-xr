@@ -7,7 +7,7 @@ import {
 import type * as THREE from 'three';
 import { getControlHelp } from '../../control-help';
 import type { DictationAction } from '../../speech-input';
-import { ARMED_STYLE, createLabelButton, setModifierVisual, stackAboveControls } from '../panel-ui';
+import { ARMED_STYLE, createLabelButton, stackAboveControls } from '../panel-ui';
 import type { PanelModule, SceneContext } from '../scene-context';
 import { addKeyboardKeys, addKeyborbBatches, KEYBOARD_UNIT } from '../spatial-keyboard';
 
@@ -58,6 +58,7 @@ export function addKeyboardKeysSection(root: THREE.Group, ctx: SceneContext): vo
 }
 
 export const keyboardPanel: PanelModule = {
+  desktopSwap: 'keyboard',
   title: (ctx) =>
     `${ctx.mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard'} · ${
       ctx.mutableState.inputTargetTitle

@@ -5,6 +5,25 @@ import type { PanelModule, SceneContext } from '../scene-context';
 
 export const warpPanel: PanelModule = {
   title: () => 'Terminal curvature',
+  onShow(ctx, source) {
+    if (ctx.renderer?.xr.isPresenting && !(source && ctx.activeHand(source))) {
+      ctx.startWarp(ctx.mutableState.selectedTerminalId, null);
+      return true;
+    }
+    if (ctx.mutableState.focusModeTerminalId) ctx.endFocusMode(true);
+    return false;
+  },
+  onPrepare(ctx, targetId) {
+    if (ctx.warpPanelEdit?.id !== targetId) {
+      ctx.settleWarpPanel(false);
+      if (targetId)
+        ctx.setWarpPanelEdit({
+          id: targetId,
+          original: ctx.getTerminalCurvature(targetId),
+          touched: false,
+        });
+    }
+  },
   build(root: THREE.Group, ctx: SceneContext): void {
     const target = ctx.mutableState.inputTargetId;
     const degrees = target ? ctx.getTerminalCurvature(target) : 0;

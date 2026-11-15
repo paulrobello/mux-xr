@@ -5,6 +5,17 @@ import type { PanelModule, SceneContext } from '../scene-context';
 
 export const settingsPanel: PanelModule = {
   title: () => 'Settings',
+  subsumes: [
+    'settings',
+    'display',
+    'world',
+    'backgrounds',
+    'weather-zip',
+    'accent',
+    'terminal',
+    'filtering',
+    'buttons',
+  ] as const,
   closePosition: () => ({ x: 0, y: -0.89 }),
   build(root: THREE.Group, ctx: SceneContext): void {
     for (const [index, [label, destination]] of (

@@ -6,6 +6,7 @@ import type { PanelModule, SceneContext } from '../scene-context';
 import { addKeyboardKeysSection } from './keyboard';
 
 export const commandEditorPanel: PanelModule = {
+  desktopSwap: 'keyboard',
   title: (ctx) =>
     ctx.commandEditorMessage ||
     (ctx.commandDraft?.editing ? 'Edit quick command' : 'New quick command'),

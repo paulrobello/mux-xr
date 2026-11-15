@@ -5,6 +5,20 @@ import { createLabelButton, setModifierVisual } from '../panel-ui';
 import type { PanelModule, SceneContext } from '../scene-context';
 import { addKeyboardKeysSection } from './keyboard';
 
+/**
+ * The shared status line under the two picture panels; each build calls it with its own height.
+ */
+export function addPicturePanelMessage(root: THREE.Group, ctx: SceneContext, y: number): void {
+  if (!ctx.picturePanelMessage) return;
+  const message = createLabelButton(ctx.picturePanelMessage, 1.5, 0.1, {
+    inputAction: 'noop',
+    wrap: true,
+  });
+  message.name = 'xr-picture-message';
+  message.position.y = y;
+  root.add(message);
+}
+
 export const pictureUrlPanel: PanelModule = {
   title: () => 'Picture URL',
   titleY: 0.88,
@@ -38,6 +52,7 @@ export const pictureUrlPanel: PanelModule = {
       root.add(button);
     }
     addKeyboardKeysSection(root, ctx);
+    addPicturePanelMessage(root, ctx, 0.56);
   },
   handleEarly(action, _hit, ctx) {
     if (action === 'pictureUrlLoad') {

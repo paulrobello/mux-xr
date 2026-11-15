@@ -8,6 +8,18 @@ export const panesPanel: PanelModule = {
   titleWidth: 1.8,
   titleY: 1.65,
   closePosition: () => ({ x: -1.2, y: -0.9 }),
+  onPrepare(ctx) {
+    ctx.initializeHierarchy();
+  },
+  finalize(root, ctx) {
+    root.updateMatrixWorld(true);
+    ctx.hierarchyNavigator?.update(
+      0,
+      ctx.renderer?.xr.isPresenting ? ctx.renderer.xr.getCamera() : ctx.camera,
+    );
+    ctx.scene.add(root);
+    return true;
+  },
   build(root: THREE.Group, ctx: SceneContext): void {
     for (const panel of ctx.panels.values()) {
       ctx.hierarchyHiddenPanels.set(panel.root, panel.root.visible);

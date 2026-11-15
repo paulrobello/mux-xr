@@ -1,5 +1,10 @@
 import type { InputMode, PanelModule } from '../scene-context';
 import { accentPanel } from './accent';
+
+/** Modes that show the virtual keyboard and edit text with it. */
+export const isTypingMode = (mode: InputMode): boolean =>
+  mode === 'keyboard' || mode === 'command-editor' || mode === 'picture-url';
+
 import { arrangePanel } from './arrange';
 import { backgroundsPanel } from './backgrounds';
 import { buttonsPanel } from './buttons';

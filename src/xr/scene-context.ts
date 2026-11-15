@@ -140,6 +140,11 @@ export interface SceneContext {
   resetTerminalAppearance(id: string): void;
   setWindowPreferences(preferences: WindowPreferences): void;
   settleWarpPanel(commit: boolean): void;
+  startWarp(id: string | null, owner: THREE.Group | null): void;
+  activeHand(root: THREE.Group): THREE.Group | undefined;
+  endFocusMode(immediate?: boolean): void;
+  setWarpPanelEdit(value: { id: string; original: number; touched: boolean } | null): void;
+  initializeHierarchy(): void;
   setWeatherZip(zip: string): void;
   setKeyborbMode(mode: KeyborbMode): void;
   setUISounds(enabled: boolean): void;
@@ -212,4 +217,23 @@ export interface PanelModule {
   closePosition?(ctx: SceneContext): { x: number; y: number };
   /** When the panel has a Back button, its target mode and position. */
   back?(ctx: SceneContext): { target: InputMode; x: number; y: number };
+  /**
+   * showInput's per-mode side effects, run before the shared show preamble. Return true when
+   * showInput stops here because the panel redirected the request (warp's XR hand-off).
+   */
+  onShow?(ctx: SceneContext, source: THREE.Group | null): boolean | undefined;
+  /**
+   * Desktop-only: opening this panel outside a session swaps to the DOM presenter instead of
+   * mounting in-scene controls. `'commands'` opens the command library, `'keyboard'` the keyboard.
+   */
+  desktopSwap?: 'commands' | 'keyboard';
+  /** Per-mode preparation after the input target is resolved, just before the root is built. */
+  onPrepare?(ctx: SceneContext, targetId: string | null): void;
+  /**
+   * Runs after Close/Back placement. Return true when the panel finished the input root itself
+   * and the shared backing/walls tail must be skipped.
+   */
+  finalize?(root: THREE.Group, ctx: SceneContext): boolean;
+  /** Modes this panel keeps open when toggled, so the radial treats them as one surface. */
+  subsumes?: readonly InputMode[];
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createLabelButton } from '../panel-ui';
 import type { PanelModule, SceneContext } from '../scene-context';
+import { addPicturePanelMessage } from './picture-url';
 
 const RECENT_PAGE_SIZE = 6;
 
@@ -82,5 +83,6 @@ export const pictureGalleryPanel: PanelModule = {
     // Shares the bottom row with Close, keeping the panel short and clear of the HUD bar.
     enterUrl.position.set(-0.3, -0.46, 0);
     root.add(enterUrl);
+    addPicturePanelMessage(root, ctx, -0.6);
   },
 };

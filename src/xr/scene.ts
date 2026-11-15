@@ -148,7 +148,7 @@ import {
   raisePanelButton,
   setModifierVisual,
 } from './panel-ui';
-import { PANELS } from './panels';
+import { isTypingMode, PANELS } from './panels';
 import { createPictureFrameWidget, PICTURE_KIND } from './picture-frame';
 import type { PictureImage } from './picture-image';
 import {
@@ -230,10 +230,6 @@ type InputMode =
   | 'picture-gallery'
   | 'weather-zip'
   | 'accent';
-
-/** Modes that show the virtual keyboard and edit text with it. */
-const isTypingMode = (mode: InputMode): boolean =>
-  mode === 'keyboard' || mode === 'command-editor' || mode === 'picture-url';
 
 export interface PanelTransform {
   position: THREE.Vector3;
@@ -4217,15 +4213,6 @@ export function createWorkspaceScene(
     title.userData.dragHandle = true;
     title.position.y = panel.titleY ?? 0.56;
     inputRoot.add(title);
-    if ((mode === 'picture-url' || mode === 'picture-gallery') && picturePanelMessage) {
-      const message = createLabelButton(picturePanelMessage, 1.5, 0.1, {
-        inputAction: 'noop',
-        wrap: true,
-      });
-      message.name = 'xr-picture-message';
-      message.position.y = mode === 'picture-url' ? 0.56 : -0.6;
-      inputRoot.add(message);
-    }
     PANELS[mode].build(inputRoot, buildContext());
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
     const closePosition = panel.closePosition?.(buildContext()) ?? { x: 0, y: -0.66 };
@@ -4240,12 +4227,7 @@ export function createWorkspaceScene(
       back.position.set(backTarget.x, backTarget.y, 0);
       inputRoot.add(back);
     }
-    if (mode === 'panes') {
-      inputRoot.updateMatrixWorld(true);
-      hierarchyNavigator?.update(0, renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera);
-      scene.add(inputRoot);
-      return;
-    }
+    if (PANELS[mode].finalize?.(inputRoot, buildContext())) return;
     if (isTypingMode(mode))
       for (const child of inputRoot.children) {
         const action = child.userData.inputAction;
@@ -5899,21 +5881,8 @@ export function createWorkspaceScene(
     radialMenu.close();
     mutableState.radialOpen = false;
   };
-  const SETTINGS_MODES: readonly InputMode[] = [
-    'settings',
-    'display',
-    'world',
-    'backgrounds',
-    'weather-zip',
-    'accent',
-    'terminal',
-    'filtering',
-    'buttons',
-  ];
   const toggleInputMode = (mode: InputMode): void => {
-    const open =
-      inputRoot &&
-      (inputMode === mode || (mode === 'settings' && SETTINGS_MODES.includes(inputMode)));
+    const open = inputRoot && (inputMode === mode || PANELS[mode].subsumes?.includes(inputMode));
     if (open) {
       hideInput();
       return;
@@ -6283,25 +6252,14 @@ export function createWorkspaceScene(
     quickCommands = commands.map((command) => ({ ...command }));
   };
   const showInput = (mode: InputMode, source?: THREE.Group | null): void => {
-    if (mode === 'warp' && renderer?.xr.isPresenting && !(source && activeHand(source))) {
-      startWarp(mutableState.selectedTerminalId, null);
-      return;
-    }
+    if (PANELS[mode].onShow?.(buildContext(), source ?? null)) return;
     if (warpEdit) finishWarp(false);
-    if (mode === 'warp' && mutableState.focusModeTerminalId) endFocusMode(true);
     keyboardResume = null;
     templateHint = null;
-    if (mode === 'widgets') widgetsPage = 0;
-    if (mode === 'weather-zip') {
-      weatherZipDraft = mutableState.weatherZip;
-      weatherZipMessage = '';
-    }
-    if (
-      !renderer?.xr.isPresenting &&
-      (mode === 'commands' || mode === 'keyboard' || mode === 'command-editor')
-    ) {
+    const desktopSwap = PANELS[mode].desktopSwap;
+    if (!renderer?.xr.isPresenting && desktopSwap) {
       hideInput();
-      if (mode === 'commands') actions.openCommands();
+      if (desktopSwap === 'commands') actions.openCommands();
       else actions.openKeyboard();
       return;
     }
@@ -6312,16 +6270,7 @@ export function createWorkspaceScene(
     snapshotMenuCommands();
     commandPage = 0;
     clearArmedModifiers();
-    if (mode === 'panes') initializeHierarchy();
-    if (mode === 'warp' && warpPanelEdit?.id !== targetId) {
-      settleWarpPanel(false);
-      if (targetId)
-        warpPanelEdit = {
-          id: targetId,
-          original: getTerminalCurvature(targetId),
-          touched: false,
-        };
-    }
+    PANELS[mode].onPrepare?.(buildContext(), targetId);
     refreshInputRoot(mode);
   };
   const summonKeyboard = (): void => {
@@ -7257,6 +7206,13 @@ export function createWorkspaceScene(
       resetTerminalAppearance,
       setWindowPreferences,
       settleWarpPanel,
+      startWarp,
+      activeHand,
+      endFocusMode,
+      setWarpPanelEdit: (value) => {
+        warpPanelEdit = value;
+      },
+      initializeHierarchy,
       setWeatherZip,
       setKeyborbMode,
       setUISounds,

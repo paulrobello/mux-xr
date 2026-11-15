@@ -5,6 +5,11 @@ import type { PanelModule, SceneContext } from '../scene-context';
 
 export const weatherZipPanel: PanelModule = {
   title: () => 'Weather ZIP code',
+  onShow(ctx) {
+    ctx.weatherZipDraft = ctx.mutableState.weatherZip;
+    ctx.weatherZipMessage = '';
+    return false;
+  },
   closePosition: () => ({ x: 0.22, y: -0.6 }),
   back: () => ({ target: 'world', x: -0.22, y: -0.6 }),
   build(root: THREE.Group, ctx: SceneContext): void {
