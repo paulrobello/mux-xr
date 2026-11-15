@@ -17,6 +17,7 @@ import {
 } from '../src/terminal/vendor/terminal_pb';
 import { layoutWidgetPanel } from '../src/xr/widget-panel-layout';
 import { WIDGET_REGISTRY } from '../src/xr/widget-registry';
+import { assert, waitFor } from './lib/harness';
 
 type Viewport = { name: string; width: number; height: number };
 type Frame = { paneId: string; case: string; data?: string; cols?: number; rows?: number };
@@ -29,10 +30,6 @@ const viewports: readonly Viewport[] = [
   { name: 'tablet', width: 820, height: 900 },
   { name: 'mobile', width: 390, height: 844 },
 ];
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
 
 function serverFrame(message: ServerMessage): Buffer {
   return Buffer.from([0, ...toBinary(ServerMessageSchema, message)]);

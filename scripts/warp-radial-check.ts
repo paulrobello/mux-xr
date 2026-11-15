@@ -14,6 +14,7 @@ import {
   OutputSchema,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import { assert, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
 const baseUrl = process.env.MUX_XR_BASE_URL;
@@ -124,25 +125,9 @@ const output = (text: string): Buffer =>
     }),
   );
 
-function assert(value: unknown, message: string): asserts value {
-  if (!value) throw new Error(message);
-}
-async function waitFor(
-  _page: Page,
-  predicate: () => Promise<boolean>,
-  message: string,
-): Promise<void> {
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
-  }
-  throw new Error(message);
-}
 async function clickXR(page: Page): Promise<void> {
   await page.locator('[data-action="xr"]').click();
   await waitFor(
-    page,
     async () =>
       await page.evaluate(
         () => (window as unknown as BrowserWindow).__muxXR.getState().scene.xrMode === 'vr',
@@ -364,7 +349,6 @@ async function main(): Promise<void> {
       timeout: 15_000,
     });
     await waitFor(
-      page,
       async () =>
         (await page.evaluate(
           () => (window as unknown as BrowserWindow).__muxXR.getState().attached.length,

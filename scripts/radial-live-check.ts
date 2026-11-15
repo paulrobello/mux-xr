@@ -14,12 +14,13 @@ import {
   MuxTreeWorkspaceSchema,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import { assert, requirePrivateTest, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
-const baseUrl = process.env.MUX_XR_BASE_URL;
-const testRoot = process.env.MUX_XR_TEST_ROOT;
-if (!baseUrl || !testRoot || process.env.MUX_XR_PRIVATE_TEST !== '1')
-  throw new Error('radial-live-check requires MUX_XR_PRIVATE_TEST=1, BASE_URL, and TEST_ROOT');
+const { MUX_XR_BASE_URL: baseUrl, MUX_XR_TEST_ROOT: testRoot } = requirePrivateTest([
+  'MUX_XR_BASE_URL',
+  'MUX_XR_TEST_ROOT',
+]);
 const parsedBase = new URL(baseUrl);
 if (!['127.0.0.1', 'localhost', '[::1]'].includes(parsedBase.hostname))
   throw new Error('radial-live-check only accepts a loopback BASE_URL');
@@ -89,21 +90,6 @@ const connected = (id: string): Buffer =>
     }),
   );
 
-function assert(value: unknown, message: string): asserts value {
-  if (!value) throw new Error(message);
-}
-async function waitFor(
-  page: Page,
-  predicate: () => Promise<boolean>,
-  message: string,
-): Promise<void> {
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await page.waitForTimeout(50);
-  }
-  throw new Error(message);
-}
 async function injectSceneHandle(root: string): Promise<void> {
   const source = join(root, 'quest-main.ts');
   const existing = await readFile(source, 'utf8');
@@ -203,7 +189,6 @@ async function main(): Promise<void> {
       { waitUntil: 'domcontentloaded', timeout: 15_000 },
     );
     await waitFor(
-      page,
       async () =>
         (await page.evaluate(
           () => (window as unknown as FixtureWindow).__muxXR.getState().attached.length,
@@ -215,7 +200,6 @@ async function main(): Promise<void> {
     });
     await page.locator('[data-action="xr"]').click();
     await waitFor(
-      page,
       async () =>
         (await page.evaluate(
           () => (window as unknown as FixtureWindow).__muxXR.getState().scene.xrMode,
@@ -279,7 +263,6 @@ async function main(): Promise<void> {
     await page.screenshot({ path: join(root, 'radial-live-open.png') });
     await nativeAction(page, 'radialAction', { radialAction: 'cancel' });
     await waitFor(
-      page,
       async () =>
         (await page.evaluate(
           () => (window as unknown as FixtureWindow).__muxXR.getState().scene.radialOpen,
@@ -322,7 +305,6 @@ async function main(): Promise<void> {
         w.__radialPad.buttons[4].pressed = false;
       });
       await waitFor(
-        page,
         async () =>
           page.evaluate(() => (window as unknown as FixtureWindow).__testRadialMenu.interactive),
         'menu did not open',
@@ -673,7 +655,6 @@ async function main(): Promise<void> {
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
     await waitFor(
-      page,
       async () =>
         page.evaluate(
           () => (window as unknown as FixtureWindow).__muxXR.getState().attached.length === 3,
@@ -701,7 +682,6 @@ async function main(): Promise<void> {
     availablePaneIds = ['%1', '%3'];
     await page.reload({ waitUntil: 'domcontentloaded' });
     await waitFor(
-      page,
       async () =>
         page.evaluate(
           () => (window as unknown as FixtureWindow).__muxXR.getState().attached.length === 2,

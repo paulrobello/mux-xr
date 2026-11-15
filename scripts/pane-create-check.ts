@@ -8,6 +8,7 @@ import {
   type PaneCreateOutcome,
   requestPaneCreate,
 } from '../src/workspace/pane-create';
+import { assert } from './lib/harness';
 
 // Private-daemon check of the real pane-create wire contract. Run only against an isolated
 // streamer and par-mux socket: the `created` case adds a real default-shell window.
@@ -16,10 +17,6 @@ type Expectation = 'created' | 'disabled' | 'read_only' | 'old';
 const PRIVATE_TEST = process.env.MUX_XR_PRIVATE_TEST === '1';
 const STREAMER = process.env.MUX_XR_STREAMER ?? '';
 const EXPECT = process.env.MUX_XR_EXPECT as Expectation | undefined;
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
 
 function tree(base: string): Promise<PaneDescriptor[]> {
   return new Promise((resolve, reject) => {

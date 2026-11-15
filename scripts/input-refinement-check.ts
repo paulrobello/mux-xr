@@ -9,6 +9,7 @@ import type * as THREE from 'three';
 import type { TerminalSurface } from '../src/contracts';
 import type { SpeechInput } from '../src/speech-input';
 import type { WorkspaceScene } from '../src/xr/scene';
+import { waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
 type FixtureWindow = Window & {
@@ -147,14 +148,6 @@ async function clickNative(
     { action, matchSource: match ? match.toString() : undefined },
   );
 }
-const waitFor = async (predicate: () => Promise<boolean>, message: string): Promise<void> => {
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await page.waitForTimeout(100);
-  }
-  throw new Error(message);
-};
 
 try {
   await page.goto('http://127.0.0.1:4241/__quest-controls.html?demo=1', { waitUntil: 'load' });

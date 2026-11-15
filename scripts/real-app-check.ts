@@ -8,6 +8,7 @@ import {
   MuxTreeRequestSchema,
   type MuxTreeSnapshot,
 } from '../src/terminal/vendor/terminal_pb';
+import { assert, waitForMatch } from './lib/harness';
 
 type PaneObservation = {
   id: string;
@@ -49,10 +50,6 @@ const BASE_URL = process.env.MUX_XR_BASE_URL ?? 'http://127.0.0.1:4241';
 const REVIEW_DIR = join(process.cwd(), '.impeccable', 'review');
 const PRIVATE_TEST = process.env.MUX_XR_PRIVATE_TEST === '1';
 
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
-
 function toArrayBuffer(payload: Buffer): ArrayBuffer {
   return payload.buffer.slice(
     payload.byteOffset,
@@ -84,20 +81,6 @@ async function sessionCount(page: Page): Promise<number> {
   if (body && typeof body === 'object' && Array.isArray((body as { sessions?: unknown }).sessions))
     return (body as { sessions: unknown[] }).sessions.length;
   throw new Error('GET /sessions did not return an array or {sessions: []}');
-}
-
-async function waitFor<T>(
-  read: () => T | Promise<T>,
-  predicate: (value: T) => boolean,
-  message: string,
-): Promise<T> {
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    const value = await read();
-    if (predicate(value)) return value;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(message);
 }
 
 async function waitForText(page: Page, selector: string, pattern: RegExp): Promise<void> {
@@ -219,7 +202,7 @@ async function main(): Promise<void> {
       },
       { endpoint: BASE_URL, request: [...new Uint8Array(metadataRequest)] },
     );
-    await waitFor(
+    await waitForMatch(
       () => metadataProbeReady,
       Boolean,
       'metadata-only probe did not receive a tree snapshot',
@@ -227,7 +210,7 @@ async function main(): Promise<void> {
     await page.evaluate(() =>
       (window as unknown as { __muxXRMetadataProbe?: WebSocket }).__muxXRMetadataProbe?.close(),
     );
-    const sessionsAfterProbe = await waitFor(
+    const sessionsAfterProbe = await waitForMatch(
       () => sessionCount(page),
       (count) => count === sessionsBefore,
       'metadata probe session count did not return to its pre-probe value',
@@ -237,7 +220,7 @@ async function main(): Promise<void> {
     await page.locator('#endpoint').fill(BASE_URL);
     await page.locator('[data-action="connect"]').click();
     await page.locator('[data-pane]').nth(1).waitFor({ state: 'visible', timeout: 15_000 });
-    await waitFor(
+    await waitForMatch(
       () => snapshots.length,
       (count) => count >= 2,
       'app did not receive a hierarchy snapshot',
@@ -256,12 +239,12 @@ async function main(): Promise<void> {
     await page.locator(`[data-pane="${paneIds[0]}"]`).click();
     await page.locator(`[data-pane="${paneIds[1]}"]`).click();
     assert((await page.locator('[data-select]').count()) >= 2, 'real app did not attach two panes');
-    await waitFor(
+    await waitForMatch(
       () => paneIds.every((id) => connectedPanes.has(id)),
       Boolean,
       'both pane streams did not complete their handshakes',
     );
-    const sessionsAfterAttach = await waitFor(
+    const sessionsAfterAttach = await waitForMatch(
       () => sessionCount(page),
       (count) => count === 2,
       'pane attach did not create exactly two viewer streams',
@@ -276,7 +259,7 @@ async function main(): Promise<void> {
     await page.locator('[data-action="save-command"]').click();
     await page.locator('[data-command-select]').selectOption({ label: 'Real global marker' });
     await page.locator('[data-action="run-command"]').click();
-    await waitFor(
+    await waitForMatch(
       () => outputs.get(paneIds[0]) ?? '',
       (text) => text.includes(firstMarker),
       'first real command output marker not observed',
@@ -292,7 +275,7 @@ async function main(): Promise<void> {
     await page.locator('[data-compose]').fill(`printf '%s%s\\n' '${runPrefix}' 'B'`);
     await page.locator('[data-action="send-text"]').click();
     await page.locator('[data-key="Enter"]').click();
-    await waitFor(
+    await waitForMatch(
       () => outputs.get(paneIds[1]) ?? '',
       (text) => text.includes(secondMarker),
       'second real command output marker not observed',
@@ -308,14 +291,14 @@ async function main(): Promise<void> {
     await page.locator('[data-grid-cols]').fill('100');
     await page.locator('[data-grid-rows]').fill('30');
     await page.locator('[data-action="apply-grid"]').click();
-    await waitFor(
+    await waitForMatch(
       () => zeroResizeMessages,
       (count) => count >= baselineZeroResizeMessages + 1,
       'selected pane B resize was not sent',
     );
     await waitForText(page, '[data-grid-caption]', /100 × 30/);
     await page.locator('[data-action="refresh"]').click();
-    await waitFor(
+    await waitForMatch(
       () => snapshotPanes(snapshots.at(-1) ?? snapshots[0]),
       (panes) =>
         panes.some((pane) => pane.id === paneIds[1] && pane.cols === 100 && pane.rows === 30),
@@ -331,7 +314,7 @@ async function main(): Promise<void> {
     await page.locator('[data-grid-cols]').fill(String(paneBInitial.cols));
     await page.locator('[data-grid-rows]').fill(String(paneBInitial.rows));
     await page.locator('[data-action="apply-grid"]').click();
-    await waitFor(
+    await waitForMatch(
       () => zeroResizeMessages,
       (count) => count >= baselineZeroResizeMessages + 2,
       'pane B restore resize was not sent',
@@ -342,7 +325,7 @@ async function main(): Promise<void> {
       new RegExp(`${paneBInitial.cols} × ${paneBInitial.rows}`),
     );
     await page.locator('[data-action="refresh"]').click();
-    await waitFor(
+    await waitForMatch(
       () => snapshotPanes(snapshots.at(-1) ?? snapshots[0]),
       (panes) =>
         panes.some(

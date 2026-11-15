@@ -7,6 +7,7 @@ import { chromium } from 'playwright';
 import { decodeServerMessage } from '../src/terminal/protocol';
 import { ClientMessageSchema } from '../src/terminal/vendor/terminal_pb';
 import { normalizeTree } from '../src/workspace/hierarchy';
+import { assert, waitForMatch } from './lib/harness';
 
 // Drives the built app, served by a private streamer, through the browser New terminal control.
 // Run only against an isolated daemon: the `created` and `reconnect` cases add a real
@@ -25,21 +26,8 @@ const OUT = process.env.MUX_XR_EVIDENCE ?? join(process.cwd(), '.local', 'eviden
 
 type Pane = { id: string; sessionId: string; cols?: number; rows?: number };
 
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
 const buffer = (payload: Buffer): ArrayBuffer =>
   payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength) as ArrayBuffer;
-
-async function waitFor<T>(read: () => T | Promise<T>, ok: (value: T) => boolean, message: string) {
-  const deadline = Date.now() + 15_000;
-  for (;;) {
-    const value = await read();
-    if (ok(value)) return value;
-    if (Date.now() > deadline) throw new Error(message);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-}
 
 function startStreamer(argv: string[]): ChildProcess {
   const child = spawn(argv[0], argv.slice(1), { stdio: 'ignore' });
@@ -48,7 +36,7 @@ function startStreamer(argv: string[]): ChildProcess {
 }
 
 async function streamerReady(): Promise<void> {
-  await waitFor(
+  await waitForMatch(
     () =>
       fetch(BASE_URL).then(
         (response) => response.ok,
@@ -132,14 +120,14 @@ async function main(): Promise<void> {
     await page.locator('#endpoint').fill(BASE_URL);
     await page.locator('[data-action="connect"]').click();
     await page.locator('[data-create-session]').first().waitFor({ timeout: 15_000 });
-    const before = await waitFor(
+    const before = await waitForMatch(
       () => latest,
       (panes) => panes.length >= 2,
       'no hierarchy',
     );
     const target = before[0];
     await page.locator(`[data-pane="${target.id}"]`).first().click();
-    await waitFor(
+    await waitForMatch(
       () => connectedStreams.has(`pane-${target.id.slice(1)}`),
       Boolean,
       'existing pane did not attach',
@@ -152,7 +140,7 @@ async function main(): Promise<void> {
     let added: Pane[] = [];
     if (EXPECT === 'disabled') {
       // Core 0.81 streamers advertise the capability at handshake, so nothing is ever sent.
-      await waitFor(
+      await waitForMatch(
         () => button.isDisabled(),
         Boolean,
         'creation stayed enabled after the handshake refused it',
@@ -175,7 +163,7 @@ async function main(): Promise<void> {
       assert(streamer?.pid && process.kill(streamer.pid, 'SIGSTOP'), 'could not freeze streamer');
       const socketsBefore = socketsOpened;
       await button.click();
-      await waitFor(
+      await waitForMatch(
         () => socketsOpened,
         (count) => count > socketsBefore,
         'the create attempt opened no stream',
@@ -188,12 +176,12 @@ async function main(): Promise<void> {
       streamer = startStreamer(argv as string[]);
       await streamerReady();
       await page.locator('[data-action="connect"]').click();
-      await waitFor(
+      await waitForMatch(
         () => connections[targetSession] ?? 0,
         (count) => count > attachedOnce,
         'the existing pane did not reattach after reconnect',
       );
-      await waitFor(
+      await waitForMatch(
         () => button.isDisabled(),
         (disabled) => !disabled,
         'reconnect left the control locked by the lost request',
@@ -212,19 +200,19 @@ async function main(): Promise<void> {
       await button.click();
     }
     if (EXPECT === 'created' || EXPECT === 'reconnect') {
-      added = await waitFor(
+      added = await waitForMatch(
         () => latest.filter((pane) => !before.some((old) => old.id === pane.id)),
         (panes) => panes.length === 1,
         'the new pane never appeared in the hierarchy',
       );
       await page.locator(`[data-select="${added[0].id}"]`).waitFor({ timeout: 15_000 });
-      await waitFor(
+      await waitForMatch(
         () => connectedStreams.has(`pane-${added[0].id.slice(1)}`),
         Boolean,
         'the new pane stream did not connect',
       );
       assert(added[0].sessionId === target.sessionId, 'the new pane is in another session');
-      await waitFor(
+      await waitForMatch(
         () => button.isDisabled(),
         (disabled) => !disabled,
         'control stayed locked',

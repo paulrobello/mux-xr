@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chromium, type Page, type Route } from 'playwright';
 import type { PaneDescriptor } from '../src/contracts';
+import { assert } from './lib/harness';
 
 type VisualThree = typeof import('three');
 
@@ -40,10 +41,6 @@ const BASE_URL = process.env.MUX_XR_BASE_URL ?? 'http://127.0.0.1:4241';
 const REVIEW_DIR = join(process.cwd(), '.impeccable', 'review');
 const KEYBOARD_SCREENSHOT = join(REVIEW_DIR, 'quest-keyboard-native.png');
 const HIGHLIGHT_SCREENSHOT = join(REVIEW_DIR, 'quest-keyboard-native-highlight.png');
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
 
 function fixtureThreeSource(realThreeUrl: string): string {
   return `

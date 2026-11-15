@@ -21,6 +21,7 @@ import {
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
 import type { WorkspaceScene } from '../src/xr/scene';
+import { assert } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
 type FixtureWindow = Window & {
@@ -31,10 +32,6 @@ type FixtureWindow = Window & {
   __questCamera: THREE.PerspectiveCamera;
   __questThree: typeof THREE;
 };
-
-function assert(value: unknown, message: string): asserts value {
-  if (!value) throw new Error(message);
-}
 
 const root = process.env.MUX_XR_TEST_ROOT;
 assert(root && process.env.MUX_XR_PRIVATE_TEST === '1', 'Explicit private fixture root required');

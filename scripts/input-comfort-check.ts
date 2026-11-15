@@ -14,6 +14,7 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import { assert, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
 type Frame = { paneId: string; kind: string; data?: string };
@@ -112,21 +113,6 @@ const output = (text: string): Buffer =>
     }),
   );
 
-function assert(value: unknown, message: string): asserts value {
-  if (!value) throw new Error(message);
-}
-async function waitFor(
-  page: Page,
-  predicate: () => Promise<boolean>,
-  message: string,
-): Promise<void> {
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(message);
-}
 async function target(
   page: Page,
   action: string,
@@ -173,7 +159,6 @@ async function openRadial(page: Page, action: string): Promise<void> {
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   });
   await waitFor(
-    page,
     async () =>
       await page.evaluate(() =>
         Boolean(
@@ -229,7 +214,6 @@ async function main(): Promise<void> {
       timeout: 15_000,
     });
     await waitFor(
-      page,
       async () =>
         (await page.evaluate(
           () => (window as unknown as FixtureWindow).__muxXR.getState().attached.length,
@@ -238,7 +222,6 @@ async function main(): Promise<void> {
     );
     await page.locator('[data-action="xr"]').click();
     await waitFor(
-      page,
       async () =>
         await page.evaluate(
           () => (window as unknown as FixtureWindow).__muxXR.getState().scene.xrMode === 'vr',
@@ -332,7 +315,6 @@ async function main(): Promise<void> {
     await target(page, 'key', { key: 'Control' });
     await target(page, 'key', { key: 'd' });
     await waitFor(
-      page,
       async () => frames.filter((f) => f.kind === 'input').length >= 6,
       'Input frames missing',
     );
@@ -459,7 +441,6 @@ async function main(): Promise<void> {
     await domShift.click();
     await page.locator('[data-key="c"]').click();
     await waitFor(
-      page,
       async () => frames.filter((f) => f.kind === 'input').length >= domStart + 3,
       'DOM input missing',
     );

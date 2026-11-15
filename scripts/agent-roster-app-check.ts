@@ -6,6 +6,7 @@ import { fromBinary } from '@bufbuild/protobuf';
 import { chromium } from 'playwright';
 import { decodeServerMessage } from '../src/terminal/protocol';
 import { ClientMessageSchema } from '../src/terminal/vendor/terminal_pb';
+import { assert, waitFor } from './lib/harness';
 
 // Drives the built app's agent roster against a private daemon: it reports agent states with
 // `report-state` and closes a pane, so never point it at the real/default mux daemon.
@@ -15,9 +16,6 @@ const SOCKET = process.env.MUX_XR_MUX_SOCKET ?? '';
 const OUT =
   process.env.MUX_XR_EVIDENCE ?? join(process.cwd(), '.local', 'evidence', 'agent-roster');
 
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
 const buffer = (payload: Buffer): ArrayBuffer =>
   payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength) as ArrayBuffer;
 

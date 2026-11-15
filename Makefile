@@ -99,7 +99,7 @@ dev-restart: dev-stop dev
 pre-commit:
 	pre-commit run --all-files
 
-.PHONY: whisper-service-plist install-whisper-service whisper-agent-plist install-whisper-agent uninstall-whisper-agent explorer-controls-check
+.PHONY: whisper-service-plist install-whisper-service whisper-agent-plist install-whisper-agent uninstall-whisper-agent explorer-controls-check keyborb-check local-dictation-check pane-bell-check pane-lifecycle-check quest-controls-check radial-live-check stream-lifecycle-check terminal-opacity-check terminal-texture-check warp-radial-check xr-visual-check
 whisper-service-plist:
 	bun run scripts/install-dictation-service.ts --print
 install-whisper-service:
@@ -112,3 +112,25 @@ uninstall-whisper-agent:
 	bun run scripts/install-dictation-service.ts --uninstall --agent
 explorer-controls-check:
 	bun run scripts/explorer-controls-check.ts
+keyborb-check:
+	bun run scripts/keyborb-check.ts
+local-dictation-check:
+	bun run scripts/local-dictation-check.ts
+pane-bell-check:
+	bun run scripts/pane-bell-check.ts
+pane-lifecycle-check:
+	bun run scripts/pane-lifecycle-check.ts
+quest-controls-check:
+	bun run scripts/quest-controls-check.ts
+radial-live-check:
+	bun run scripts/radial-live-check.ts
+stream-lifecycle-check:
+	bun run scripts/stream-lifecycle-check.ts
+terminal-opacity-check:
+	bun run scripts/terminal-opacity-check.ts
+terminal-texture-check:
+	bun run scripts/terminal-texture-check.ts
+warp-radial-check:
+	bun run scripts/warp-radial-check.ts
+xr-visual-check:
+	bun run scripts/xr-visual-check.ts

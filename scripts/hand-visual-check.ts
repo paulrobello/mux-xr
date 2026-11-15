@@ -13,12 +13,13 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import { requirePrivateTest } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
-const BASE_URL = process.env.MUX_XR_BASE_URL;
-const TEST_ROOT = process.env.MUX_XR_TEST_ROOT;
-if (!BASE_URL || !TEST_ROOT || process.env.MUX_XR_PRIVATE_TEST !== '1')
-  throw new Error('Set MUX_XR_PRIVATE_TEST=1, MUX_XR_BASE_URL, and MUX_XR_TEST_ROOT');
+const { MUX_XR_BASE_URL: BASE_URL, MUX_XR_TEST_ROOT: TEST_ROOT } = requirePrivateTest([
+  'MUX_XR_BASE_URL',
+  'MUX_XR_TEST_ROOT',
+]);
 const baseUrl = BASE_URL as string;
 const testRoot = TEST_ROOT as string;
 const xrMode = process.env.MUX_XR_MODE === 'ar' ? 'ar' : 'vr';

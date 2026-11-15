@@ -1,6 +1,7 @@
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type Browser, chromium, type Page } from 'playwright';
+import { assert, waitForMatch } from './lib/harness';
 
 type Arrangement = 'row' | 'grid' | 'arc' | 'sphere';
 type Viewport = { name: string; width: number; height: number };
@@ -22,24 +23,6 @@ const viewports: readonly Viewport[] = [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'mobile', width: 390, height: 844 },
 ];
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
-
-async function waitFor<T>(
-  read: () => Promise<T>,
-  predicate: (value: T) => boolean,
-  message: string,
-): Promise<T> {
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    const value = await read();
-    if (predicate(value)) return value;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(message);
-}
 
 async function appState(page: Page): Promise<AppState> {
   return page.evaluate(() =>
@@ -87,7 +70,7 @@ async function runAppViewport(
   });
   try {
     await page.goto(`${BASE_URL}?demo=1`, { waitUntil: 'domcontentloaded', timeout: 15_000 });
-    await waitFor(
+    await waitForMatch(
       () => appState(page),
       (state) => state.demo && state.panels.length >= 2,
       'demo scene did not attach two panels',
@@ -116,7 +99,7 @@ async function runAppViewport(
     for (const pattern of patterns) {
       await page.locator('[data-arrangement]').selectOption(pattern);
       await page.locator('[data-action="apply-arrangement"]').click();
-      const state = await waitFor(
+      const state = await waitForMatch(
         () => appState(page),
         (value) => value.scene.arrangement === pattern,
         `desktop arrangement did not apply ${pattern}`,
