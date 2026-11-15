@@ -3,6 +3,7 @@ import type { KeyModifiers } from '../../contracts';
 import { commandFromDraft, editCommandDraft } from '../command-editor';
 import { createLabelButton, setModifierVisual } from '../panel-ui';
 import type { PanelModule, SceneContext } from '../scene-context';
+import { addKeyboardKeysSection } from './keyboard';
 
 export const commandEditorPanel: PanelModule = {
   title: (ctx) =>
@@ -52,6 +53,7 @@ export const commandEditorPanel: PanelModule = {
     );
     confirm.position.set(0, 1.18, 0);
     root.add(scope, enter, save, clear, cancel, confirm);
+    addKeyboardKeysSection(root, ctx);
   },
   handleEarly(action, hit, ctx) {
     if (action === 'commandCancel') {

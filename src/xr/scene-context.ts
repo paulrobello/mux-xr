@@ -15,6 +15,7 @@ import type { HierarchyStyle } from '../workspace/hierarchy-style';
 import type { KeyborbMode } from '../workspace/keyborb';
 import type { PaneCreationState } from '../workspace/pane-create';
 import type { WindowPreferences } from '../workspace/window-preferences';
+import type { BellFeedStore } from './bell-feed';
 import type { CommandDraft } from './command-editor';
 import type { HierarchyNavigation, HierarchyNavigator } from './hierarchy-navigator';
 import type { CommandTool, ConfirmAction } from './panel-ui';
@@ -169,6 +170,10 @@ export interface SceneContext {
   dictationReview(): boolean;
   editDictationKey(key: string): void;
   pinNote(): void;
+  copyQuestToHost(): Promise<boolean>;
+  syncModifierVisuals(): void;
+  get hierarchyHiddenPanels(): Map<THREE.Object3D, boolean>;
+  get bellFeed(): BellFeedStore;
   isArmed(id: string, action: string): boolean;
   armedPreview(action: string): string | null;
   consumeArmedModifiers(): void;

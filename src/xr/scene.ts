@@ -4,7 +4,6 @@ import {
   countsAsFrame,
   createHandContact,
   createKeyborbInput,
-  createKeyborbKey,
   createModifierState,
   createRaisedButtonWalls,
   createScalableLabel,
@@ -24,12 +23,9 @@ import {
   type KeyboardModifier,
   type KeyborbGlyphs,
   type KeyborbShells,
-  keyboardDimensions,
-  keyboardKeys,
   liveScalableLabels,
   ON_TOP_LAYER,
   resolveAccent,
-  resolveAccentCss,
   resolveAccentHover,
   retintAccentMaterials,
   STICKY_NOTE_KIND,
@@ -67,7 +63,7 @@ import {
   quickStripCommands,
   splitTemplate,
 } from '../quick-commands';
-import type { DictationAction, DictationState } from '../speech-input';
+import type { DictationState } from '../speech-input';
 import {
   DEFAULT_TERMINAL_FILTERING,
   type TerminalFiltering,
@@ -96,8 +92,6 @@ import { rosterProjectDirectory } from '../workspace/project-directory';
 import {
   DEFAULT_WINDOW_PREFERENCES,
   MAX_TERMINAL_CURVATURE_DEGREES,
-  SCROLL_STRIP_SIDES,
-  type ScrollStripSide,
   validateWindowPreferences,
   type WindowPreferences,
 } from '../workspace/window-preferences';
@@ -113,7 +107,6 @@ import { createBellFeedStore } from './bell-feed';
 import { clusteredRaycast } from './clustered-raycast';
 import {
   type CommandDraft,
-  commandFromDraft,
   createCommandDraft,
   draftFromCommand,
   editCommandDraft,
@@ -137,11 +130,7 @@ import {
 import { createFocusQuadLayer, type FocusQuadLayer, supportsQuadLayers } from './focus-quad-layer';
 import { createFrameCounter } from './fps';
 import { type HandReel, rebaseHandReel, reelOffset, startHandReel } from './hand-reel';
-import {
-  createHierarchyNavigator,
-  type HierarchyNavigation,
-  type HierarchyNavigator,
-} from './hierarchy-navigator';
+import type { HierarchyNavigation, HierarchyNavigator } from './hierarchy-navigator';
 import { createHierarchyTouch, HIERARCHY_NEAR_ENTER, HIERARCHY_NEAR_EXIT } from './hierarchy-touch';
 import {
   createLabelBatcher,
@@ -152,27 +141,14 @@ import { createMessageToastLayer } from './message-toasts';
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
 import {
-  ARMED_STYLE,
-  COMMAND_TOOL_HINTS,
-  COMMAND_TOOLS,
   CONFIRM_LABELS,
   type CommandTool,
   type ConfirmAction,
-  createBackgroundSelect,
   createLabelButton,
-  PINNED_BORDER,
   raisePanelButton,
   setModifierVisual,
-  stackAboveControls,
 } from './panel-ui';
 import { PANELS } from './panels';
-import { accentPanel } from './panels/accent';
-import { backgroundsPanel } from './panels/backgrounds';
-import { buttonsPanel } from './panels/buttons';
-import { filteringPanel } from './panels/filtering';
-import { settingsPanel } from './panels/settings';
-import { weatherZipPanel } from './panels/weather-zip';
-import { worldPanel } from './panels/world';
 import { createPictureFrameWidget, PICTURE_KIND } from './picture-frame';
 import type { PictureImage } from './picture-image';
 import {
@@ -185,7 +161,6 @@ import {
 import { PICTURE_LIMITS } from './picture-store';
 import { createRadialMenu, type RadialMenuAction } from './radial-menu';
 import type { SceneContext } from './scene-context';
-import { addKeyboardKeys, addKeyborbBatches, KEYBOARD_UNIT } from './spatial-keyboard';
 import { STICKY_NOTE_PIN_OFFSET, stickyNoteSpawnOffset } from './sticky-note';
 import {
   createStickyNoteStore,
@@ -220,13 +195,11 @@ import {
 } from './ui-poses';
 import { updateVisibleMatrixWorld } from './visible-matrix-world';
 import { intersectVisible } from './visible-raycast';
-import { layoutWidgetPanel } from './widget-panel-layout';
 import { createWidgetPoseStore, type WidgetPose } from './widget-poses';
 import {
   findWidgetEntry,
   getWidgetEntry,
   isWidgetKind,
-  WIDGET_REGISTRY,
   type WidgetKey,
   type WidgetKind,
   widgetKey,
@@ -505,7 +478,7 @@ export function routeInput(
 
 const PANEL_WIDTH = 1.42;
 const PANEL_HEIGHT = 0.8;
-const KEYBORB_DICTATION_COLUMN = 9;
+const _KEYBORB_DICTATION_COLUMN = 9;
 const SCROLL_STRIP_WIDTH = 0.05;
 const SCROLL_STRIP_OPACITY = 0.14;
 const SCROLL_STRIP_ACTIVE_OPACITY = 0.38;
@@ -752,7 +725,7 @@ const PICTURE_URL_EDIT_KEYS = new Set([
   'End',
 ]);
 /** Recent gallery thumbnails per page: a 3 x 2 grid. */
-const RECENT_PAGE_SIZE = 6;
+const _RECENT_PAGE_SIZE = 6;
 
 /** The in-XR picture picker: URL entry and the Recent gallery, served by the picture controller. */
 export interface ScenePicturePicker {
@@ -2685,6 +2658,66 @@ export function createWorkspaceScene(
   };
   let focusQuadLayer: FocusQuadLayer | null = null;
   let focusQuadPending = false;
+  /** One-shot widget restore; the frame callback calls it when a restore is pending. */
+  const restoreWidgetsOnce = (): void => {
+    const savedNotes = stickyNoteStore.read();
+    for (const [kind, pose] of Object.entries(widgetPoseStore.read())) {
+      // Multi-instance widgets (pictures) restore from their own records, not from a pose.
+      if (!pose || touchedWidgets.has(kind)) continue;
+      if (isPlaceholderKey(kind) && !widgets.has(kind)) {
+        const widget = createPictureFrameWidget(uiEnvironment.texture, {
+          id: kind.slice(PICTURE_KIND.length + 1),
+        });
+        mountWidget(PICTURE_KIND, widget, false);
+        // A pose the store cannot apply falls back to the placeholder spot, never the origin.
+        if (!validPose(pose)) placeWidget(kind, widget);
+        else {
+          applyUIPose(widget.root, pose, [0.25, 2]);
+          if (pose.placed) widget.root.userData.picturePlaced = true;
+        }
+        continue;
+      }
+      if (widgetKeyKind(kind) === STICKY_NOTE_KIND && !widgets.has(kind)) {
+        const id = kind.slice(STICKY_NOTE_KIND.length + 1);
+        const text = savedNotes[id];
+        if (!text) {
+          widgetPoseStore.remove(kind);
+          continue;
+        }
+        const widget = createStickyNoteWidget(uiEnvironment.texture, {
+          id,
+          text,
+          onRead: readStickyNote,
+        });
+        mountWidget(STICKY_NOTE_KIND, widget, false);
+        if (!validPose(pose)) placeWidget(kind, widget);
+        else {
+          applyUIPose(widget.root, pose, [0.25, 2]);
+          if (pose.placed) widget.root.userData.picturePlaced = true;
+        }
+        continue;
+      }
+      if (kind === DESK_WINDOW_KIND || !isWidgetKind(kind) || widgetKeyKind(kind) !== kind)
+        continue;
+      const widget = widgets.get(kind) ?? addWidget(kind);
+      applyUIPose(widget.root, pose, [0.25, 2]);
+    }
+    // A note whose pose never saved still comes back, at its spawn spot.
+    for (const [id, text] of Object.entries(savedNotes)) {
+      const key = widgetKey(STICKY_NOTE_KIND, id);
+      if (widgets.has(key) || touchedWidgets.has(key)) continue;
+      const widget = createStickyNoteWidget(uiEnvironment.texture, {
+        id,
+        text,
+        onRead: readStickyNote,
+      });
+      saveWidgetPose(mountWidget(STICKY_NOTE_KIND, widget), widget);
+    }
+    widgetRestorePending = false;
+    mutableState.widgets = [...widgets.keys()];
+    notify();
+  };
+
   const render = (time = 0, frame?: XRFrame): void => {
     if (disposed) return;
     if (renderer?.xr.isPresenting) {
@@ -2753,64 +2786,8 @@ export function createWorkspaceScene(
       poseRestorePending = false;
       floorCorrectionPending = true;
     }
-    if (widgetRestorePending) {
-      const savedNotes = stickyNoteStore.read();
-      for (const [kind, pose] of Object.entries(widgetPoseStore.read())) {
-        // Multi-instance widgets (pictures) restore from their own records, not from a pose.
-        if (!pose || touchedWidgets.has(kind)) continue;
-        if (isPlaceholderKey(kind) && !widgets.has(kind)) {
-          const widget = createPictureFrameWidget(uiEnvironment.texture, {
-            id: kind.slice(PICTURE_KIND.length + 1),
-          });
-          mountWidget(PICTURE_KIND, widget, false);
-          // A pose the store cannot apply falls back to the placeholder spot, never the origin.
-          if (!validPose(pose)) placeWidget(kind, widget);
-          else {
-            applyUIPose(widget.root, pose, [0.25, 2]);
-            if (pose.placed) widget.root.userData.picturePlaced = true;
-          }
-          continue;
-        }
-        if (widgetKeyKind(kind) === STICKY_NOTE_KIND && !widgets.has(kind)) {
-          const id = kind.slice(STICKY_NOTE_KIND.length + 1);
-          const text = savedNotes[id];
-          if (!text) {
-            widgetPoseStore.remove(kind);
-            continue;
-          }
-          const widget = createStickyNoteWidget(uiEnvironment.texture, {
-            id,
-            text,
-            onRead: readStickyNote,
-          });
-          mountWidget(STICKY_NOTE_KIND, widget, false);
-          if (!validPose(pose)) placeWidget(kind, widget);
-          else {
-            applyUIPose(widget.root, pose, [0.25, 2]);
-            if (pose.placed) widget.root.userData.picturePlaced = true;
-          }
-          continue;
-        }
-        if (kind === DESK_WINDOW_KIND || !isWidgetKind(kind) || widgetKeyKind(kind) !== kind)
-          continue;
-        const widget = widgets.get(kind) ?? addWidget(kind);
-        applyUIPose(widget.root, pose, [0.25, 2]);
-      }
-      // A note whose pose never saved still comes back, at its spawn spot.
-      for (const [id, text] of Object.entries(savedNotes)) {
-        const key = widgetKey(STICKY_NOTE_KIND, id);
-        if (widgets.has(key) || touchedWidgets.has(key)) continue;
-        const widget = createStickyNoteWidget(uiEnvironment.texture, {
-          id,
-          text,
-          onRead: readStickyNote,
-        });
-        saveWidgetPose(mountWidget(STICKY_NOTE_KIND, widget), widget);
-      }
-      widgetRestorePending = false;
-      mutableState.widgets = [...widgets.keys()];
-      notify();
-    }
+    if (widgetRestorePending) restoreWidgetsOnce();
+
     const nowMs = Date.now();
     const focusedPanel = panels.get(mutableState.focusedTerminalId ?? '');
     const focusedCwd = focusedPanel
@@ -4233,256 +4210,13 @@ export function createWorkspaceScene(
       captureGrab(controller, inputRoot);
     }
     if (previousPair) beginPairGrab(inputRoot, ...previousPair.controllers);
-    if (mode === 'commands') {
-      const add = createLabelButton('New command', 0.5, 0.09, { inputAction: 'newCommand' });
-      add.position.set(0, 0.7, 0);
-      inputRoot.add(add);
-    }
-    if (mode === 'keyboard') {
-      const backdropToggle = createLabelButton(
-        `Backing: ${mutableState.keyboardBackgroundEnabled ? 'on' : 'off'}`,
-        0.34,
-        0.09,
-        { inputAction: 'keyboardBackground' },
-      );
-      // Flanks the 0.9-wide target label (x -0.45..0.45) at its own height.
-      backdropToggle.position.set(0.45 + 0.04 + 0.34 / 2, 0.56, 0);
-      inputRoot.add(backdropToggle);
-      const gazeToggle = createLabelButton(
-        `Gaze input: ${mutableState.gazeInputEnabled ? 'on' : 'off'}`,
-        0.5,
-        0.09,
-        { inputAction: 'gazeInput' },
-      );
-      gazeToggle.position.set(-(0.45 + 0.04 + 0.5 / 2), 0.56, 0);
-      inputRoot.add(gazeToggle);
-      const curvature = createLabelButton(
-        `Keyboard curve: ${Math.round(mutableState.keyboardCurvature)}°`,
-        0.8,
-        0.09,
-        { inputAction: 'noop' },
-      );
-      curvature.position.set(0, 0.7, 0);
-      inputRoot.add(curvature);
-      for (const direction of [-1, 1]) {
-        const step = createLabelButton(direction < 0 ? '−' : '+', 0.16, 0.09, {
-          inputAction: 'keyboardCurvature',
-          delta: direction * 10,
-        });
-        step.position.set(direction * 0.52, 0.7, 0);
-        inputRoot.add(step);
-      }
-      const dictation = mutableState.dictation;
-      const canReview =
-        ['review', 'error'].includes(dictation.status) && dictation.transcript.trim();
-      // The Keyborb Mic orb starts and stops dictation, so its panel keeps only the review buttons.
-      if (!mutableState.keyborbEnabled || !dictation.supported) {
-        const dictate = createLabelButton(
-          dictation.status === 'transcribing'
-            ? 'Transcribing…'
-            : dictation.status === 'listening'
-              ? 'Stop dictation'
-              : dictation.supported
-                ? 'Dictation'
-                : 'Speech unavailable',
-          0.7,
-          0.1,
-          {
-            inputAction:
-              dictation.supported && dictation.status !== 'transcribing' ? 'dictation' : 'noop',
-            dictationAction:
-              dictation.status === 'listening' ? 'stop' : dictation.forNote ? 'startNote' : 'start',
-          },
-        );
-        dictate.name = 'xr-dictate-button';
-        dictate.position.set(-0.42, 0.87, 0);
-        inputRoot.add(dictate);
-      }
-      const paste = createLabelButton('Paste', 0.44, 0.1, { inputAction: 'pasteClipboard' });
-      paste.position.set(-1, 0.87, 0);
-      inputRoot.add(paste);
-      // Flank the curvature row (its − and + end at x ±0.6) with the host clipboard actions.
-      const hostPaste = createLabelButton('Paste host', 0.4, 0.09, {
-        inputAction: 'pasteHostClipboard',
-      });
-      hostPaste.position.set(-0.85, 0.7, 0);
-      const toHost = createLabelButton('Copy to host', 0.4, 0.09, { inputAction: 'copyToHost' });
-      toHost.position.set(0.85, 0.7, 0);
-      inputRoot.add(hostPaste, toHost);
-      if (canReview) {
-        const confirm = dictation.forNote
-          ? createLabelButton('Create note', 0.5, 0.1, { inputAction: 'pinNote' })
-          : createLabelButton('Insert text', 0.5, 0.1, {
-              inputAction: 'dictation',
-              dictationAction: 'insert',
-            });
-        if (dictation.forNote) confirm.name = 'xr-dictation-pin-note';
-        confirm.position.set(0.25, 0.87, 0);
-        inputRoot.add(confirm);
-
-        const clear = createLabelButton('Clear', 0.38, 0.1, {
-          inputAction: 'dictation',
-          dictationAction: 'clear',
-        });
-        clear.position.set(1.17, 0.87, 0);
-        inputRoot.add(clear);
-      }
-      if (dictation.status !== 'idle') {
-        const cancel = createLabelButton('Cancel', 0.35, 0.1, {
-          inputAction: 'dictation',
-          dictationAction: 'cancel',
-        });
-        cancel.position.set(0.73, 0.87, 0);
-        inputRoot.add(cancel);
-        const transcript = createLabelButton(dictationCaption(), 1.85, 0.34, {
-          inputAction: 'noop',
-          wrap: true,
-        });
-        transcript.name = 'xr-dictation-transcript';
-        transcript.position.set(0, 1.17, 0);
-        inputRoot.add(transcript);
-        // Sits over the transcript box's left edge, the box being 1.85 wide and 0.34 tall.
-        const heading = createLabelButton(
-          dictation.forNote ? 'Sticky note' : 'Transcript',
-          0.5,
-          0.1,
-          { inputAction: 'noop' },
-        );
-        heading.name = 'xr-dictation-transcript-heading';
-        heading.position.set(-0.925 + 0.25, 1.17 + 0.17 + 0.06, 0);
-        inputRoot.add(heading);
-        if (canReview && !dictation.forNote) {
-          // Mirrors the heading at the transcript box's right edge.
-          const pin = createLabelButton('Pin as note', 0.5, 0.1, { inputAction: 'pinNote' });
-          pin.name = 'xr-dictation-pin-note';
-          pin.position.set(0.925 - 0.25, 1.17 + 0.17 + 0.06, 0);
-          inputRoot.add(pin);
-        }
-      }
-    }
-    const targetTitle = mutableState.inputTargetTitle
-      ? `Target: ${mutableState.inputTargetTitle}`
-      : 'No target selected';
-    const title = createLabelButton(
-      mode === 'picture-url'
-        ? 'Picture URL'
-        : mode === 'picture-gallery'
-          ? 'Recent pictures'
-          : mode === 'command-editor'
-            ? commandEditorMessage ||
-              (commandDraft?.editing ? 'Edit quick command' : 'New quick command')
-            : mode === 'sticky-note-reader'
-              ? `Sticky note  ${notePage + 1} / ${notePages.length}`
-              : mode === 'widgets'
-                ? 'Widgets'
-                : mode === 'settings'
-                  ? 'Settings'
-                  : mode === 'buttons'
-                    ? 'Controller buttons'
-                    : mode === 'display'
-                      ? 'Display settings'
-                      : mode === 'world'
-                        ? 'World settings'
-                        : mode === 'backgrounds'
-                          ? 'Backgrounds'
-                          : mode === 'weather-zip'
-                            ? 'Weather ZIP code'
-                            : mode === 'accent'
-                              ? 'Accent colors'
-                              : mode === 'filtering'
-                                ? 'Terminal filtering'
-                                : mode === 'warp'
-                                  ? 'Terminal curvature'
-                                  : mode === 'arrange'
-                                    ? 'Arrange terminals'
-                                    : mode === 'panes'
-                                      ? `Mux tree · ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`
-                                      : `${mode === 'commands' ? 'Quick commands' : mode === 'keyboard' ? (mutableState.keyborbEnabled ? 'Keyborb' : 'Keyboard') : 'Terminal settings'} · ${targetTitle}`,
-      mode === 'panes' ? 1.8 : 0.9,
-      0.12,
-      { inputAction: 'grabInput' },
-    );
+    const panel = PANELS[mode];
+    const title = createLabelButton(panel.title(buildContext()), panel.titleWidth ?? 0.9, 0.12, {
+      inputAction: 'grabInput',
+    });
     title.userData.dragHandle = true;
-    title.position.y =
-      mode === 'panes' ? 1.65 : mode === 'command-editor' || mode === 'picture-url' ? 0.88 : 0.56;
+    title.position.y = panel.titleY ?? 0.56;
     inputRoot.add(title);
-    if (mode === 'command-editor' && commandDraft) {
-      for (const [field, y] of [
-        ['label', 0.7],
-        ['text', 0.56],
-      ] as const) {
-        const value = Array.from(commandDraft[field]);
-        const active = commandDraft.field === field;
-        if (active) value.splice(commandDraft.cursor, 0, '|');
-        const start = active ? Math.max(0, commandDraft.cursor - 28) : 0;
-        const button = createLabelButton(
-          `${field === 'label' ? 'Name' : 'Command'}: ${start ? '…' : ''}${value.slice(start, start + 56).join('')}`,
-          1.5,
-          0.1,
-          { inputAction: 'commandField', field, wrap: true },
-        );
-        button.position.y = y;
-        setModifierVisual(button, active);
-        inputRoot.add(button);
-      }
-      const scope = createLabelButton(
-        commandDraft.scope === 'global' ? 'Global' : 'Workspace',
-        0.5,
-        0.09,
-        { inputAction: 'commandScope' },
-      );
-      scope.position.set(-0.55, 1.04, 0);
-      const enter = createLabelButton(
-        `Enter: ${commandDraft.sendNewline ? 'on' : 'off'}`,
-        0.5,
-        0.09,
-        { inputAction: 'commandNewline' },
-      );
-      enter.position.set(0, 1.04, 0);
-      const save = createLabelButton('Save', 0.4, 0.09, { inputAction: 'commandSave' });
-      save.position.set(0.55, 1.04, 0);
-      const clear = createLabelButton('Clear field', 0.45, 0.09, { inputAction: 'commandClear' });
-      clear.position.set(-0.28, -0.53, 0);
-      const cancel = createLabelButton('Cancel', 0.4, 0.09, { inputAction: 'commandCancel' });
-      cancel.position.set(0.28, -0.53, 0);
-      const confirm = createLabelButton(
-        `Confirm before running: ${commandDraft.confirm ? 'on' : 'off'}`,
-        0.9,
-        0.09,
-        { inputAction: 'commandConfirm' },
-      );
-      confirm.position.set(0, 1.18, 0);
-      inputRoot.add(scope, enter, save, clear, cancel, confirm);
-    }
-    if (mode === 'picture-url') {
-      const value = Array.from(pictureUrl.text);
-      const cursor = Math.min(pictureUrl.cursor, value.length);
-      value.splice(cursor, 0, '|');
-      const start = Math.max(0, cursor - 40);
-      const field = createLabelButton(
-        `URL: ${start ? '…' : ''}${value.slice(start, start + 64).join('')}`,
-        1.5,
-        0.12,
-        { inputAction: 'noop', wrap: true },
-      );
-      field.name = 'xr-picture-url-field';
-      field.position.y = 0.7;
-      setModifierVisual(field, true);
-      inputRoot.add(field);
-      // Every action sits in one row above the field, so the panel ends at the keyboard's last
-      // row and never reaches down over the HUD bar.
-      for (const [label, inputAction, x] of [
-        ['Paste', 'pasteClipboard', -1],
-        ['Paste host', 'pasteHostClipboard', -0.6],
-        [pictureBusy ? 'Loading…' : 'Load', pictureBusy ? 'noop' : 'pictureUrlLoad', -0.2],
-        ['Clear', 'pictureUrlClear', 0.2],
-        ['Recent', 'pictureRecent', 0.6],
-      ] as const) {
-        const button = createLabelButton(label, 0.36, 0.12, { inputAction });
-        button.position.set(x, 1.04, 0);
-        inputRoot.add(button);
-      }
-    }
     if ((mode === 'picture-url' || mode === 'picture-gallery') && picturePanelMessage) {
       const message = createLabelButton(picturePanelMessage, 1.5, 0.1, {
         inputAction: 'noop',
@@ -4492,599 +4226,18 @@ export function createWorkspaceScene(
       message.position.y = mode === 'picture-url' ? 0.56 : -0.6;
       inputRoot.add(message);
     }
-    if (mode === 'settings') {
-      settingsPanel.build(inputRoot, buildContext());
-    } else if (mode === 'backgrounds') {
-      backgroundsPanel.build(inputRoot, buildContext());
-    } else if (mode === 'world') {
-      worldPanel.build(inputRoot, buildContext());
-    } else if (mode === 'accent') {
-      accentPanel.build(inputRoot, buildContext());
-    } else if (mode === 'weather-zip') {
-      weatherZipPanel.build(inputRoot, buildContext());
-    } else if (mode === 'display') {
-      (
-        [
-          ['Comfort', 'comfort'],
-          ['Original', 'original'],
-          ['Mono', 'monochrome'],
-        ] as const
-      ).forEach(([label, colorMode], index) => {
-        const button = createLabelButton(label, 0.4, 0.12, {
-          inputAction: 'terminalColors',
-          colorMode,
-        });
-        button.position.set((index - 1) * 0.46, 0.4, 0);
-        setModifierVisual(button, mutableState.terminalColorMode === colorMode);
-        inputRoot?.add(button);
-      });
-      const filteringButton = createLabelButton('Filtering and gaze clarity', 1.3, 0.12, {
-        inputAction: 'openInput',
-        mode: 'filtering',
-      });
-      filteringButton.position.y = 0.25;
-      inputRoot.add(filteringButton);
-      const hierarchyStyle = createLabelButton(
-        `Mux tree: ${mutableState.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`,
-        1.45,
-        0.11,
-        {
-          inputAction: 'hierarchyStyle',
-          hierarchyStyle: mutableState.hierarchyStyle === 'helix' ? 'spatial-docks' : 'helix',
-        },
-      );
-      hierarchyStyle.position.y = 0.1;
-      inputRoot.add(hierarchyStyle);
-      const preferences = mutableState.windowPreferences;
-      for (const [index, [preference, label, step]] of (
-        [
-          [
-            'defaultOpacity',
-            `New window glass: ${Math.round(preferences.defaultOpacity * 100)}%`,
-            0.1,
-          ],
-          ['defaultCurvature', `New window warp: ${Math.round(preferences.defaultCurvature)}°`, 5],
-          ['focusDistance', `Focus distance: ${preferences.focusDistance.toFixed(1)} m`, 0.1],
-          ['focusCurvature', `Focus warp angle: ${Math.round(preferences.focusCurvature)}°`, 5],
-        ] as const
-      ).entries()) {
-        if (preference === 'focusCurvature' && preferences.focusWarpMode === 'inherit') continue;
-        const y = -0.04 - index * 0.115;
-        const value = createLabelButton(label, 1.05, 0.1, { inputAction: 'noop' });
-        value.position.set(0, y, 0);
-        inputRoot.add(value);
-        for (const direction of [-1, 1]) {
-          const button = createLabelButton(direction < 0 ? '−' : '+', 0.12, 0.1, {
-            inputAction: 'windowPreference',
-            preference,
-            delta: direction * step,
-          });
-          button.position.set(direction * 0.65, y, 0);
-          inputRoot.add(button);
-        }
-      }
-      const focusWarpModeButton = createLabelButton(
-        preferences.focusWarpMode === 'inherit'
-          ? 'Focus warp: Inherit from terminal'
-          : 'Focus warp: Custom',
-        1.3,
-        0.1,
-        { inputAction: 'focusWarpMode' },
-      );
-      focusWarpModeButton.position.y = -0.5;
-      inputRoot.add(focusWarpModeButton);
-      const stripSide = preferences.scrollStripSide;
-      const stripSideButton = createLabelButton(
-        `Scroll strip: ${stripSide === 'both' ? 'both sides' : stripSide}`,
-        1.05,
-        0.1,
-        {
-          inputAction: 'scrollStripSide',
-          scrollStripSide:
-            SCROLL_STRIP_SIDES[
-              (SCROLL_STRIP_SIDES.indexOf(stripSide) + 1) % SCROLL_STRIP_SIDES.length
-            ],
-        },
-      );
-      stripSideButton.position.set(0, -0.615, 0);
-      inputRoot.add(stripSideButton);
-      const frameChinButton = createLabelButton(
-        `Frame chin: ${preferences.frameChin ? 'on' : 'off'}`,
-        1.05,
-        0.1,
-        { inputAction: 'frameChin' },
-      );
-      frameChinButton.position.set(0, -0.73, 0);
-      inputRoot.add(frameChinButton);
-    } else if (mode === 'buttons') {
-      buttonsPanel.build(inputRoot, buildContext());
-    } else if (mode === 'arrange') {
-      const status = createLabelButton(
-        panels.size
-          ? `${panels.size} terminals · keep sizes and input target`
-          : 'Open terminals first',
-        1.5,
-        0.1,
-        { inputAction: 'noop' },
-      );
-      status.position.y = 0.36;
-      inputRoot.add(status);
-      if (panels.size) {
-        const patterns: Array<[string, PanelArrangement]> = [
-          ['Row', 'row'],
-          ['Grid', 'grid'],
-          ['Arc', 'arc'],
-          ['Sphere', 'sphere'],
-        ];
-        patterns.forEach(([label, pattern], index) => {
-          const button = createLabelButton(label, 0.65, 0.14, {
-            inputAction: 'arrange',
-            pattern,
-          });
-          button.position.set(index % 2 ? 0.38 : -0.38, 0.16 - Math.floor(index / 2) * 0.2, 0);
-          setModifierVisual(button, mutableState.arrangement === pattern);
-          inputRoot?.add(button);
-        });
-        for (const [label, direction] of [
-          ['Closer', -1],
-          ['Farther', 1],
-        ] as const) {
-          const button = createLabelButton(label, 0.65, 0.11, {
-            inputAction: 'layoutDepth',
-            direction,
-          });
-          button.position.set(direction < 0 ? -0.38 : 0.38, -0.28, 0);
-          inputRoot.add(button);
-        }
-      }
-      const resetArmed = armedControl?.action === 'resetLayout';
-      const reset = createLabelButton(CONFIRM_LABELS.resetLayout[resetArmed ? 1 : 0], 0.65, 0.1, {
-        inputAction: 'resetLayout',
-        ...(resetArmed ? ARMED_STYLE : {}),
-      });
-      reset.position.y = -0.45;
-      inputRoot.add(reset);
-    } else if (mode === 'panes') {
-      for (const panel of panels.values()) {
-        hierarchyHiddenPanels.set(panel.root, panel.root.visible);
-        panel.root.visible = false;
-      }
-      hierarchyNavigator = createHierarchyNavigator(
-        availablePanes,
-        mutableState.hierarchyStyle,
-        hierarchyNavigation,
-        new Set(panels.keys()),
-        uiEnvironment.texture,
-        () => paneCreation,
-        () => agentRoster,
-        () => agentRosterRows,
-      );
-      hierarchyNavigation = {
-        path: hierarchyNavigator.root.userData.hierarchyPath as string[],
-        page: hierarchyNavigator.root.userData.hierarchyPage as number,
-      };
-      inputRoot.add(hierarchyNavigator.root);
-      hierarchyNavigator.root.userData.transitioning = hierarchyNavigator.transitioning;
-    } else if (mode === 'commands') {
-      const commandStart = commandPage * 8;
-      menuCommands.slice(commandStart, commandStart + 8).forEach((command, index) => {
-        const button = createLabelButton(commandButtonLabel(command, 'command'), 0.7, 0.11, {
-          inputAction: 'command',
-          commandId: command.id,
-          ...(command.pinned
-            ? {
-                pinned: true,
-                labelBorder: resolveAccentCss(mutableState.accentColor, PINNED_BORDER),
-              }
-            : {}),
-          ...(isArmed(command.id, 'command') ? ARMED_STYLE : {}),
-        });
-        const row = Math.floor(index / 2);
-        button.position.set(index % 2 ? 0.4 : -0.4, 0.4 - row * 0.14, 0);
-        inputRoot?.add(button);
-      });
-      if (menuCommands.length > 8) {
-        const page = createLabelButton(
-          `Commands ${commandStart + 1}-${Math.min(commandStart + 8, menuCommands.length)} · Next`,
-          0.7,
-          0.1,
-          { inputAction: 'commandPage' },
-        );
-        page.position.set(0, -0.45, 0);
-        inputRoot.add(page);
-      }
-      COMMAND_TOOLS.forEach(([tool, label], index) => {
-        const button = createLabelButton(label, 0.36, 0.09, { inputAction: 'commandTool', tool });
-        button.position.set((index - (COMMAND_TOOLS.length - 1) / 2) * 0.4, -0.22, 0);
-        setModifierVisual(button, commandTool === tool);
-        inputRoot?.add(button);
-      });
-      const preview = armedPreview('command');
-      const message = preview ?? (commandsMessage || COMMAND_TOOL_HINTS[commandTool]);
-      if (message) {
-        const status = createLabelButton(message, 1.1, 0.08, { inputAction: 'noop' });
-        status.name = preview ? 'xr-command-preview' : 'xr-commands-message';
-        status.position.set(0, -0.33, 0);
-        inputRoot.add(status);
-      }
-    } else if (mode === 'terminal') {
-      const target = mutableState.inputTargetId;
-      const surface = target ? panels.get(target)?.surface : undefined;
-      if (surface && target) {
-        if (gridDraft?.target !== target)
-          gridDraft = { target, cols: surface.cols, rows: surface.rows };
-        const status = createLabelButton(`${surface.cols} × ${surface.rows}`, 0.9, 0.1, {
-          inputAction: 'noop',
-        });
-        status.name = 'terminal-grid-status';
-        status.position.y = 0.4;
-        inputRoot.add(status);
-        [
-          [80, 24],
-          [100, 30],
-          [120, 36],
-          [160, 48],
-        ].forEach(([cols, rows], index) => {
-          const button = createLabelButton(`${cols}×${rows}`, 0.34, 0.09, {
-            inputAction: 'gridPreset',
-            cols,
-            rows,
-          });
-          button.position.set((index - 1.5) * 0.39, 0.25, 0);
-          inputRoot?.add(button);
-        });
-        for (const [axis, y] of [
-          ['cols', 0.1],
-          ['rows', -0.04],
-        ] as const) {
-          const caption = createLabelButton(
-            `${axis === 'cols' ? 'Cols' : 'Rows'}: ${gridDraft[axis]}`,
-            0.35,
-            0.09,
-            { inputAction: 'noop' },
-          );
-          caption.position.set(0, y, 0);
-          inputRoot.add(caption);
-          [-10, -1, 1, 10].forEach((delta, index) => {
-            const button = createLabelButton(delta > 0 ? `+${delta}` : String(delta), 0.25, 0.09, {
-              inputAction: 'gridStep',
-              axis,
-              delta,
-            });
-            button.position.set([-0.72, -0.4, 0.4, 0.72][index], y, 0);
-            inputRoot?.add(button);
-          });
-        }
-        const apply = createLabelButton(gridRequestStatus || 'Apply grid', 0.9, 0.09, {
-          inputAction: 'gridApply',
-        });
-        apply.position.y = -0.2;
-        inputRoot.add(apply);
-      }
-      if (target && surface) {
-        const panel = panels.get(target);
-        const zoom = Number(panel?.root.userData.fontZoom ?? 1);
-        const textSize = createLabelButton(`Text zoom: ${Math.round(zoom * 100)}%`, 1.05, 0.08, {
-          inputAction: 'noop',
-        });
-        textSize.position.y = -0.34;
-        inputRoot.add(textSize);
-        for (const direction of [-1, 1]) {
-          const button = createLabelButton(direction < 0 ? '−' : '+', 0.15, 0.09, {
-            inputAction: 'fontZoom',
-            terminalId: target,
-            direction,
-          });
-          button.position.set(direction * 0.7, -0.34, 0);
-          inputRoot.add(button);
-        }
-        const opacity = getTerminalOpacity(target);
-        const glass = createLabelButton(`Glass opacity: ${Math.round(opacity * 100)}%`, 1.1, 0.08, {
-          inputAction: 'noop',
-        });
-        glass.position.y = -0.48;
-        inputRoot.add(glass);
-        for (const [index, delta] of [-0.1, 0.1].entries()) {
-          const button = createLabelButton(delta < 0 ? '−' : '+', 0.15, 0.09, {
-            inputAction: 'glassOpacity',
-            delta,
-          });
-          button.position.set(index ? 0.7 : -0.7, -0.48, 0);
-          inputRoot.add(button);
-        }
-        const reset = createLabelButton('Reset to defaults', 1.1, 0.09, {
-          inputAction: 'resetTerminalAppearance',
-        });
-        reset.position.y = -0.62;
-        inputRoot.add(reset);
-      }
-    } else if (mode === 'warp') {
-      const target = mutableState.inputTargetId;
-      const degrees = target ? getTerminalCurvature(target) : 0;
-      const caption = createLabelButton(
-        target ? `Curvature: ${degrees}°` : 'Select a terminal',
-        1.4,
-        0.14,
-        { inputAction: 'noop' },
-      );
-      caption.position.y = 0.3;
-      inputRoot.add(caption);
-      for (const [index, value] of [
-        0,
-        15,
-        30,
-        45,
-        60,
-        90,
-        100,
-        MAX_TERMINAL_CURVATURE_DEGREES,
-      ].entries()) {
-        const button = createLabelButton(value === 0 ? 'Flat' : `${value}°`, 0.35, 0.12, {
-          inputAction: 'curvature',
-          degrees: value,
-        });
-        button.position.set(((index % 4) - 1.5) * 0.4, 0.08 - Math.floor(index / 4) * 0.18, 0);
-        setModifierVisual(button, degrees === value);
-        inputRoot.add(button);
-      }
-      for (const [index, delta] of [-5, 5].entries()) {
-        const button = createLabelButton(delta < 0 ? 'Curve less' : 'Curve more', 0.7, 0.12, {
-          inputAction: 'curvatureStep',
-          delta,
-        });
-        button.position.set(index ? 0.4 : -0.4, -0.36, 0);
-        inputRoot.add(button);
-      }
-      for (const [index, action] of (['warpCancel', 'warpDone'] as const).entries()) {
-        const button = createLabelButton(index ? 'Done' : 'Cancel', 0.7, 0.12, {
-          inputAction: action,
-        });
-        button.position.set(index ? 0.4 : -0.4, -0.54, 0);
-        inputRoot.add(button);
-      }
-    } else if (mode === 'picture-gallery') {
-      const entries = recentPictures;
-      if (!Array.isArray(entries) || entries.length === 0) {
-        const status = createLabelButton(
-          entries === 'loading'
-            ? 'Loading…'
-            : entries === null
-              ? 'Recent pictures need browser storage'
-              : 'No recent pictures yet',
-          1.3,
-          0.1,
-          { inputAction: 'noop' },
-        );
-        status.name = 'xr-recent-status';
-        status.position.y = 0.1;
-        inputRoot.add(status);
-      } else {
-        const pages = Math.ceil(entries.length / RECENT_PAGE_SIZE);
-        recentPage = Math.max(0, Math.min(pages - 1, recentPage));
-        const first = recentPage * RECENT_PAGE_SIZE;
-        entries.slice(first, first + RECENT_PAGE_SIZE).forEach((entry, index) => {
-          // Tiles are 0.4 x 0.28 panel units (15 x 11 cm at the 0.38 spawn scale), 0.07 and 0.06 apart.
-          const x = ((index % 3) - 1) * 0.47;
-          const y = 0.28 - Math.floor(index / 3) * 0.36;
-          const { width, height, source } = entry.thumbnail;
-          const fit = Math.min(0.4 / width, 0.28 / height);
-          const texture = new THREE.CanvasTexture(source);
-          texture.colorSpace = THREE.SRGBColorSpace;
-          const tile = new THREE.Mesh(
-            new THREE.PlaneGeometry(width * fit, height * fit),
-            new THREE.MeshBasicMaterial({ map: texture, toneMapped: false }),
-          );
-          tile.name = 'xr-recent-thumbnail';
-          Object.assign(tile.userData, {
-            inputAction: 'pictureRecentPlace',
-            recentId: entry.id,
-            helpText: `Put ${entry.name} in the frame`,
-          });
-          tile.position.set(x, y, 0);
-          const remove = createLabelButton('×', 0.12, 0.12, {
-            inputAction: 'pictureRecentRemove',
-            recentId: entry.id,
-          });
-          remove.name = 'xr-recent-remove';
-          remove.userData.helpText = `Remove ${entry.name} from Recent`;
-          // Centred on the thumbnail's top-right corner: pinch-sized (0.12 is 46 mm) while covering
-          // only 0.06 of the thumbnail's width, under a third of a 3:4 portrait.
-          remove.position.set(x + (width * fit) / 2, y + (height * fit) / 2, 0.01);
-          inputRoot?.add(tile, remove);
-        });
-        if (pages > 1) {
-          const caption = createLabelButton(`${recentPage + 1} / ${pages}`, 0.3, 0.09, {
-            inputAction: 'noop',
-          });
-          caption.position.y = -0.3;
-          inputRoot.add(caption);
-          for (const [label, delta, x] of [
-            ['Prev', -1, -0.5],
-            ['Next', 1, 0.5],
-          ] as const) {
-            const page = createLabelButton(label, 0.34, 0.12, {
-              inputAction: (delta < 0 ? recentPage > 0 : recentPage < pages - 1)
-                ? 'pictureRecentPage'
-                : 'noop',
-              delta,
-            });
-            page.position.set(x, -0.3, 0);
-            inputRoot.add(page);
-          }
-        }
-      }
-      const enterUrl = createLabelButton('Enter URL', 0.5, 0.12, { inputAction: 'pictureUrl' });
-      // Shares the bottom row with Close, keeping the panel short and clear of the HUD bar.
-      enterUrl.position.set(-0.3, -0.46, 0);
-      inputRoot.add(enterUrl);
-    } else if (mode === 'sticky-note-reader') {
-      const text = createScalableLabel(notePages[notePage] ?? '', 1.72, 0.79, {
-        background: '#17212d',
-        align: 'left',
-        fontSize: 0.048,
-      });
-      text.name = 'sticky-note-page';
-      text.position.y = 0.05;
-      inputRoot.add(text);
-      for (const direction of [-1, 1]) {
-        if (notePage + direction < 0 || notePage + direction >= notePages.length) continue;
-        const button = createLabelButton(direction < 0 ? 'Previous' : 'Next', 0.36, 0.1, {
-          inputAction: 'stickyNotePage',
-          delta: direction,
-        });
-        button.position.set(direction * 0.4, -0.52, 0);
-        inputRoot.add(button);
-      }
-    } else if (mode === 'widgets') {
-      const layout = layoutWidgetPanel(WIDGET_REGISTRY.length, widgetsPage);
-      widgetsPage = layout.page;
-      layout.buttons.forEach((rect, index) => {
-        const { kind, displayName } = WIDGET_REGISTRY[layout.first + index];
-        const button = createLabelButton(
-          (widgets.has(kind) && !getWidgetEntry(kind).multiInstance ? 'Hide ' : 'Add ') +
-            displayName,
-          rect.width,
-          rect.height,
-          { inputAction: 'toggleWidget', widgetKind: kind },
-        );
-        button.position.set(rect.x, rect.y, 0);
-        inputRoot?.add(button);
-      });
-      if (layout.pager) {
-        const { prev, caption, next } = layout.pager;
-        const pageLabel = createLabelButton(
-          `${layout.page + 1} / ${layout.pages}`,
-          caption.width,
-          caption.height,
-          { inputAction: 'noop' },
-        );
-        pageLabel.position.set(caption.x, caption.y, 0);
-        inputRoot.add(pageLabel);
-        for (const [label, delta, rect] of [
-          ['Prev', -1, prev],
-          ['Next', 1, next],
-        ] as const) {
-          const enabled = delta < 0 ? layout.page > 0 : layout.page < layout.pages - 1;
-          const button = createLabelButton(label, rect.width, rect.height, {
-            inputAction: enabled ? 'widgetsPage' : 'noop',
-            delta,
-          });
-          button.position.set(rect.x, rect.y, 0);
-          button.visible = enabled;
-          inputRoot.add(button);
-        }
-      }
-    } else if (mode === 'filtering') {
-      filteringPanel.build(inputRoot, buildContext());
-    } else {
-      const unit = KEYBOARD_UNIT;
-      addKeyboardKeys(
-        inputRoot,
-        mutableState.keyborbEnabled ? 'keyborb' : 'panel',
-        Boolean(modifierState.active.shift),
-        (mesh) => {
-          mesh.userData.helpText = getControlHelp(mesh.userData);
-        },
-      );
-      // Keyborb panel buttons sit out of pinch reach, so dictation gets its own orb in the top row.
-      const dictation = mutableState.dictation;
-      if (mutableState.keyborbEnabled && mode === 'keyboard' && dictation.supported) {
-        const listening = dictation.status === 'listening';
-        const transcribing = dictation.status === 'transcribing';
-        const mic = createKeyborbKey(
-          transcribing ? '...' : listening ? 'Stop' : 'Mic',
-          unit - 0.025,
-        );
-        mic.name = 'keyborb-dictation';
-        Object.assign(mic.userData, {
-          keyborbSlot: keyboardKeys.length,
-          inputAction: transcribing ? 'noop' : 'dictation',
-          dictationAction: listening ? 'stop' : dictation.forNote ? 'startNote' : 'start',
-        });
-        mic.userData.helpText = transcribing
-          ? 'Transcribing your dictation'
-          : getControlHelp(mic.userData);
-        if (listening) {
-          mic.userData.restColor = 0xff7373;
-          (mic.material as THREE.Material & { color: THREE.Color }).color.setHex(0xff7373);
-        }
-        mic.position.set(
-          (KEYBORB_DICTATION_COLUMN + 0.5 - keyboardDimensions.width / 2) * unit,
-          0.48 - 0.5 * unit,
-          (unit - 0.025) / 2 + 0.003,
-        );
-        inputRoot.add(mic);
-      }
-      if (mutableState.keyborbEnabled) addKeyborbBatches(inputRoot);
-    }
-    const terminalHasReset = Boolean(
-      mutableState.inputTargetId && panels.has(mutableState.inputTargetId),
-    );
+    PANELS[mode].build(inputRoot, buildContext());
     const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
-    close.position.set(
-      mode === 'panes' ? -1.2 : 0,
-      mode === 'panes'
-        ? -0.9
-        : mode === 'display'
-          ? -0.855
-          : mode === 'settings'
-            ? -0.89
-            : mode === 'world'
-              ? -0.51
-              : mode === 'weather-zip'
-                ? -0.6
-                : mode === 'accent'
-                  ? -0.2
-                  : mode === 'terminal' && terminalHasReset
-                    ? -0.78
-                    : -0.66,
-      0,
-    );
-    if (mode === 'picture-gallery' || mode === 'backgrounds') close.position.set(0.3, -0.46, 0);
-    if (mode === 'picture-url') close.position.set(1, 1.04, 0);
-    if (mode === 'widgets') {
-      const { x, y } = layoutWidgetPanel(WIDGET_REGISTRY.length, widgetsPage).close;
-      close.position.set(x, y, 0);
-    }
+    const closePosition = panel.closePosition?.(buildContext()) ?? { x: 0, y: -0.66 };
+    close.position.set(closePosition.x, closePosition.y, 0);
     inputRoot.add(close);
-    if (mode === 'backgrounds') {
+    const backTarget = panel.back?.(buildContext());
+    if (backTarget) {
       const back = createLabelButton('Back', 0.3, 0.09, {
         inputAction: 'openInput',
-        mode: 'world',
+        mode: backTarget.target,
       });
-      back.position.set(-0.3, -0.46, 0);
-      inputRoot.add(back);
-    }
-    if (
-      ['terminal', 'display', 'world', 'filtering', 'buttons', 'weather-zip', 'accent'].includes(
-        mode,
-      )
-    ) {
-      close.position.x = 0.22;
-      const back = createLabelButton('Back', 0.3, 0.09, {
-        inputAction: 'openInput',
-        mode:
-          mode === 'filtering'
-            ? 'display'
-            : mode === 'weather-zip' || mode === 'accent'
-              ? 'world'
-              : 'settings',
-      });
-      back.position.set(
-        -0.22,
-        mode === 'display'
-          ? -0.855
-          : mode === 'world'
-            ? -0.51
-            : mode === 'weather-zip'
-              ? -0.6
-              : mode === 'accent'
-                ? -0.2
-                : mode === 'terminal' && terminalHasReset
-                  ? -0.78
-                  : -0.66,
-        0,
-      );
+      back.position.set(backTarget.x, backTarget.y, 0);
       inputRoot.add(back);
     }
     if (mode === 'panes') {
@@ -5092,33 +4245,6 @@ export function createWorkspaceScene(
       hierarchyNavigator?.update(0, renderer?.xr.isPresenting ? renderer.xr.getCamera() : camera);
       scene.add(inputRoot);
       return;
-    }
-    if (mode === 'keyboard') {
-      const stacked: THREE.Mesh[][] = [];
-      if (stripCommands.length)
-        stacked.push(
-          stripCommands.map((command) =>
-            createLabelButton(commandButtonLabel(command, 'stripCommand'), 0.44, 0.09, {
-              inputAction: 'stripCommand',
-              commandId: command.id,
-              ...(isArmed(command.id, 'stripCommand') ? ARMED_STYLE : {}),
-            }),
-          ),
-        );
-      if (templateHint) {
-        const hint = createLabelButton(`Then type: ${templateHint}`, 1.4, 0.09, {
-          inputAction: 'noop',
-        });
-        hint.name = 'xr-template-hint';
-        stacked.push([hint]);
-      }
-      const preview = armedPreview('stripCommand');
-      if (preview) {
-        const line = createLabelButton(preview, 1.4, 0.09, { inputAction: 'noop' });
-        line.name = 'xr-command-preview';
-        stacked.push([line]);
-      }
-      stackAboveControls(inputRoot, stacked);
     }
     if (isTypingMode(mode))
       for (const child of inputRoot.children) {
@@ -5476,21 +4602,6 @@ export function createWorkspaceScene(
       if (choices) choices.visible = !choices.visible;
       return true;
     }
-    if (action === 'pictureUrlLoad') {
-      submitPictureUrl();
-      return true;
-    }
-    if (action === 'pictureUrlClear') {
-      pictureUrl = { text: '', cursor: 0 };
-      picturePanelMessage = '';
-      refreshInputRoot('picture-url');
-      return true;
-    }
-    if (action === 'widgetsPage') {
-      widgetsPage += Number(hit.userData.delta) || 0;
-      refreshInputRoot('widgets');
-      return true;
-    }
     if (action === 'pictureRecentPage') {
       recentPage += Number(hit.userData.delta) || 0;
       refreshInputRoot('picture-gallery');
@@ -5516,69 +4627,6 @@ export function createWorkspaceScene(
       });
       return true;
     }
-    if (action === 'newCommand') {
-      commandDraft = createCommandDraft(crypto.randomUUID());
-      commandWorkspaceId = availablePanes.find(
-        (pane) => pane.id === mutableState.inputTargetId,
-      )?.workspaceId;
-      commandEditorMessage = '';
-      clearArmedModifiers();
-      refreshInputRoot('command-editor');
-      return true;
-    }
-    if (action === 'commandCancel') {
-      commandDraft = null;
-      commandEditorMessage = '';
-      refreshInputRoot('commands');
-      return true;
-    }
-    if (
-      commandDraft &&
-      [
-        'commandField',
-        'commandScope',
-        'commandNewline',
-        'commandConfirm',
-        'commandClear',
-        'commandSave',
-      ].includes(action)
-    ) {
-      commandEditorMessage = '';
-      if (action === 'commandField') {
-        commandDraft.field = hit.userData.field as 'label' | 'text';
-        commandDraft.cursor = Array.from(commandDraft[commandDraft.field]).length;
-      } else if (action === 'commandScope') {
-        if (commandWorkspaceId)
-          commandDraft.scope = commandDraft.scope === 'global' ? 'workspace' : 'global';
-        else commandEditorMessage = 'Select a pane for workspace scope';
-      } else if (action === 'commandNewline') commandDraft.sendNewline = !commandDraft.sendNewline;
-      else if (action === 'commandConfirm') commandDraft.confirm = !commandDraft.confirm;
-      else if (action === 'commandClear') {
-        commandDraft[commandDraft.field] = '';
-        commandDraft.cursor = 0;
-      } else {
-        const command = commandFromDraft(commandDraft, commandWorkspaceId);
-        if (!command) commandEditorMessage = 'Enter a name and command';
-        else if (!actions.saveCommand?.(command))
-          commandEditorMessage = 'Could not save on this device';
-        else {
-          commandDraft = null;
-          snapshotMenuCommands();
-          clearArmedModifiers();
-          refreshInputRoot('commands');
-          return true;
-        }
-      }
-      clearArmedModifiers();
-      refreshInputRoot('command-editor');
-      return true;
-    }
-    if (action === 'mode') {
-      const mode = hit.userData.mode as 'commands' | 'keyboard';
-      if (renderer?.xr.isPresenting) refreshInputRoot(mode);
-      else showInput(mode);
-      return true;
-    }
     if (action === 'hierarchyNode') {
       if (hierarchyNavigator?.transitioning) return true;
       hierarchyNavigation = {
@@ -5595,33 +4643,18 @@ export function createWorkspaceScene(
       } else refreshInputRoot('panes');
       return true;
     }
+    if (action === 'mode') {
+      const mode = hit.userData.mode as 'commands' | 'keyboard';
+      if (renderer?.xr.isPresenting) refreshInputRoot(mode);
+      else showInput(mode);
+      return true;
+    }
     if (action === 'pasteClipboard') {
       if (!renderer?.xr.isPresenting) void pasteClipboard();
       return true;
     }
     if (action === 'pasteHostClipboard') {
       void pasteHostClipboard();
-      return true;
-    }
-    if (action === 'copyToHost') {
-      // In a session the native select event, which carries user activation, runs this instead.
-      if (!renderer?.xr.isPresenting) void copyQuestToHost();
-      return true;
-    }
-    if (action === 'hierarchyStyle') {
-      setHierarchyStyle(validateHierarchyStyle(hit.userData.hierarchyStyle));
-      return true;
-    }
-    if (action === 'keyboardCurvature') {
-      setKeyboardCurvature(mutableState.keyboardCurvature + Number(hit.userData.delta));
-      return true;
-    }
-    if (action === 'dictation') {
-      actions.dictationAction?.(hit.userData.dictationAction as DictationAction);
-      return true;
-    }
-    if (action === 'pinNote') {
-      pinNote();
       return true;
     }
     if (radialMenu.root.visible && !radialMenu.interactive) return true;
@@ -5639,55 +4672,6 @@ export function createWorkspaceScene(
       notify();
       return true;
     }
-    if (action === 'resetTerminalAppearance') {
-      const id = mutableState.inputTargetId;
-      if (id) resetTerminalAppearance(id);
-      return true;
-    }
-    if (action === 'glassOpacity') {
-      const id = mutableState.inputTargetId;
-      if (id) setTerminalOpacity(id, getTerminalOpacity(id) + Number(hit.userData.delta));
-      return true;
-    }
-    if (action === 'windowPreference') {
-      const preference = hit.userData.preference as
-        | 'defaultOpacity'
-        | 'defaultCurvature'
-        | 'focusDistance'
-        | 'focusCurvature';
-      if (
-        ['defaultOpacity', 'defaultCurvature', 'focusDistance', 'focusCurvature'].includes(
-          preference,
-        )
-      )
-        setWindowPreferences({
-          ...mutableState.windowPreferences,
-          [preference]: mutableState.windowPreferences[preference] + Number(hit.userData.delta),
-        });
-      return true;
-    }
-    if (action === 'focusWarpMode') {
-      const preferences = mutableState.windowPreferences;
-      setWindowPreferences({
-        ...preferences,
-        focusWarpMode: preferences.focusWarpMode === 'custom' ? 'inherit' : 'custom',
-      });
-      return true;
-    }
-    if (action === 'scrollStripSide') {
-      setWindowPreferences({
-        ...mutableState.windowPreferences,
-        scrollStripSide: hit.userData.scrollStripSide as ScrollStripSide,
-      });
-      return true;
-    }
-    if (action === 'frameChin') {
-      setWindowPreferences({
-        ...mutableState.windowPreferences,
-        frameChin: !mutableState.windowPreferences.frameChin,
-      });
-      return true;
-    }
     if (action === 'dismissNotice') {
       setNotice(null);
       return true;
@@ -5701,30 +4685,11 @@ export function createWorkspaceScene(
       showInput(hit.userData.mode as InputMode);
       return true;
     }
-    if (action === 'resetLayout') {
-      if (!confirmControl('resetLayout')) return true;
-      resetLayout();
-      cue('recenter', lastSelectSource);
-      return true;
-    }
     if (action === 'exit') {
       if (!confirmControl('exit')) return true;
       hideInput();
       if (activeSession) void activeSession.end();
       else actions.exitPreview?.();
-      return true;
-    }
-    if (action === 'toggleWidget') {
-      if (isWidgetKind(hit.userData.widgetKind)) toggleWidget(hit.userData.widgetKind);
-      return true;
-    }
-    if (action === 'stickyNotePage') {
-      notePage = THREE.MathUtils.clamp(
-        notePage + Number(hit.userData.delta),
-        0,
-        notePages.length - 1,
-      );
-      refreshInputRoot('sticky-note-reader');
       return true;
     }
     if (action === 'closeWidget') {
@@ -5737,99 +4702,12 @@ export function createWorkspaceScene(
       return true;
     }
     if (action === 'grabWidget') return true;
-    if (action === 'curvature' || action === 'curvatureStep') {
-      const id = mutableState.inputTargetId;
-      if (id)
-        setTerminalCurvature(
-          id,
-          action === 'curvature'
-            ? Number(hit.userData.degrees)
-            : getTerminalCurvature(id) + Number(hit.userData.delta),
-          warpPanelEdit?.id !== id,
-        );
-      return true;
-    }
-    if (action === 'warpDone' || action === 'warpCancel') {
-      settleWarpPanel(action === 'warpDone');
-      hideInput();
-      return true;
-    }
-    if (action === 'layoutDepth') {
-      moveLayoutDepth(Number(hit.userData.direction));
-      return true;
-    }
-    if (action === 'arrange') {
-      arrangeTerminals(hit.userData.pattern as PanelArrangement);
-      return true;
-    }
-    if (action === 'keyboardBackground') {
-      const enabled = !mutableState.keyboardBackgroundEnabled;
-      actions.setKeyboardBackground?.(enabled);
-      setKeyboardBackgroundEnabled(enabled);
-      return true;
-    }
-    if (action === 'terminalColors') {
-      const mode = hit.userData.colorMode as TerminalColorMode;
-      actions.setTerminalColorMode?.(mode);
-      setTerminalColorMode(mode);
-      return true;
-    }
-    if (action === 'gridPreset' || action === 'gridStep') {
-      if (!gridDraft) return true;
-      if (action === 'gridPreset') {
-        gridDraft.cols = Number(hit.userData.cols);
-        gridDraft.rows = Number(hit.userData.rows);
-      } else {
-        const axis = hit.userData.axis as 'cols' | 'rows';
-        gridDraft[axis] = THREE.MathUtils.clamp(
-          gridDraft[axis] + Number(hit.userData.delta),
-          2,
-          axis === 'cols' ? 300 : 150,
-        );
-      }
-      gridRequestStatus = '';
-      refreshInputRoot('terminal');
-      return true;
-    }
-    if (action === 'gridApply') {
-      if (gridDraft)
-        gridRequestStatus = actions.resizeGrid?.(gridDraft.target, gridDraft.cols, gridDraft.rows)
-          ? 'Grid requested'
-          : 'Grid unavailable';
-      refreshInputRoot('terminal');
-      return true;
-    }
-    if (action === 'gazeInput') {
-      setGazeInputEnabled(!mutableState.gazeInputEnabled);
-      return true;
-    }
     if (action === 'reloadUpdate') {
       if (radialMenu.root.visible) {
         radialMenu.close();
         mutableState.radialOpen = false;
       }
       actions.reloadApp?.();
-      return true;
-    }
-    if (action === 'fontZoom') {
-      const panel = panels.get(String(hit.userData.terminalId ?? mutableState.inputTargetId ?? ''));
-      if (panel) {
-        const next = Math.max(
-          1,
-          Math.min(
-            1.8,
-            ((panel.root.userData.fontZoom as number) ?? 1) +
-              (hit.userData.direction as number) * 0.1,
-          ),
-        );
-        panel.root.userData.fontZoom = next;
-        panel.texture.wrapS = THREE.ClampToEdgeWrapping;
-        panel.texture.wrapT = THREE.ClampToEdgeWrapping;
-        panel.texture.repeat.set(1 / next, 1 / next);
-        panel.texture.offset.set(0, 0);
-        panel.texture.needsUpdate = true;
-        if (inputRoot && inputMode === 'terminal') refreshInputRoot('terminal');
-      }
       return true;
     }
     if (action === 'createPane') {
@@ -5867,79 +4745,6 @@ export function createWorkspaceScene(
         actions.selectPane(paneId);
         hideInput();
       }
-      return true;
-    }
-    if (action === 'commandPage') {
-      commandPage = (commandPage + 1) % Math.max(1, Math.ceil(menuCommands.length / 8));
-      refreshInputRoot(inputMode);
-      return true;
-    }
-    if (action === 'key' && inputMode === 'picture-url') {
-      const key = String(hit.userData.key);
-      const modifier = hit.userData.modifier as KeyboardModifier | undefined;
-      if (modifier) modifierState.tap(modifier);
-      else if (key === 'Enter') {
-        submitPictureUrl();
-        return true;
-      } else if (key === 'Escape') {
-        hideInput();
-        return true;
-      } else {
-        const draft = editCommandDraft(
-          {
-            ...createCommandDraft('picture-url'),
-            label: pictureUrl.text,
-            cursor: pictureUrl.cursor,
-          },
-          key,
-          modifierState.active,
-        );
-        pictureUrl = { text: draft.label, cursor: draft.cursor };
-        consumeArmedModifiers();
-      }
-      picturePanelMessage = '';
-      refreshInputRoot('picture-url');
-      return true;
-    }
-    if (action === 'key' && inputMode === 'command-editor' && commandDraft) {
-      const modifier = hit.userData.modifier as keyof KeyModifiers | undefined;
-      if (modifier) modifierState.tap(modifier);
-      else {
-        commandDraft = editCommandDraft(
-          commandDraft,
-          hit.userData.key as string,
-          modifierState.active,
-        );
-        consumeArmedModifiers();
-      }
-      commandEditorMessage = '';
-      refreshInputRoot('command-editor');
-      return true;
-    }
-    if (action === 'key' && inputMode === 'keyboard' && dictationReview()) {
-      const modifier = hit.userData.modifier as KeyboardModifier | undefined;
-      if (modifier) {
-        modifierState.tap(modifier);
-        syncModifierVisuals();
-      } else editDictationKey(String(hit.userData.key));
-      return true;
-    }
-    if (
-      action === 'key' &&
-      inputMode === 'keyboard' &&
-      ['listening', 'transcribing'].includes(mutableState.dictation.status)
-    )
-      return true;
-    if (action === 'commandTool') {
-      const tool = hit.userData.tool as CommandTool;
-      commandTool = commandTool === tool ? 'run' : tool;
-      commandsMessage = '';
-      refreshInputRoot('commands');
-      return true;
-    }
-    if (action === 'command' && commandTool !== 'run') {
-      const command = menuCommands.find((item) => item.id === hit.userData.commandId);
-      if (command) manageCommand(command, action);
       return true;
     }
     const paneId = mutableState.inputTargetId;
@@ -8487,6 +7292,14 @@ export function createWorkspaceScene(
       },
       get lastSelectSource() {
         return lastSelectSource;
+      },
+      copyQuestToHost,
+      syncModifierVisuals,
+      get hierarchyHiddenPanels() {
+        return hierarchyHiddenPanels;
+      },
+      get bellFeed() {
+        return bellFeed;
       },
       dictationCaption,
       editDictationKey,

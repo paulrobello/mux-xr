@@ -3,6 +3,7 @@ import type * as THREE from 'three';
 import { createCommandDraft, editCommandDraft } from '../command-editor';
 import { createLabelButton, setModifierVisual } from '../panel-ui';
 import type { PanelModule, SceneContext } from '../scene-context';
+import { addKeyboardKeysSection } from './keyboard';
 
 export const pictureUrlPanel: PanelModule = {
   title: () => 'Picture URL',
@@ -36,6 +37,7 @@ export const pictureUrlPanel: PanelModule = {
       button.position.set(x, 1.04, 0);
       root.add(button);
     }
+    addKeyboardKeysSection(root, ctx);
   },
   handleEarly(action, _hit, ctx) {
     if (action === 'pictureUrlLoad') {

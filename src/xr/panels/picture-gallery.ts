@@ -83,32 +83,4 @@ export const pictureGalleryPanel: PanelModule = {
     enterUrl.position.set(-0.3, -0.46, 0);
     root.add(enterUrl);
   },
-  handleEarly(action, hit, ctx) {
-    if (action === 'pictureRecentPage') {
-      ctx.recentPage += Number(hit.userData.delta) || 0;
-      ctx.refreshInputRoot('picture-gallery');
-      return true;
-    }
-    if (action === 'pictureRecentPlace') {
-      ctx.placeRecentPicture(String(hit.userData.recentId));
-      return true;
-    }
-    if (action === 'pictureRecentRemove') {
-      const id = String(hit.userData.recentId);
-      const picker = ctx.picturePicker;
-      if (!picker) return true;
-      void picker.removeRecent(id).then((removed) => {
-        if (ctx.disposed || !ctx.inputRoot || ctx.inputMode !== 'picture-gallery') return;
-        const entries = ctx.recentPictures;
-        if (removed && Array.isArray(entries)) {
-          for (const entry of entries) if (entry.id === id) ctx.releaseThumbnail(entry.thumbnail);
-          ctx.setRecentPictures(entries.filter((entry) => entry.id !== id));
-          ctx.showToast('Removed from Recent.');
-        } else if (!removed) ctx.picturePanelMessage = 'Could not remove that picture from Recent';
-        ctx.refreshInputRoot('picture-gallery');
-      });
-      return true;
-    }
-    return false;
-  },
 };
