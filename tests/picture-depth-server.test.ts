@@ -194,9 +194,10 @@ describe('/picture-depth', () => {
     expect(await raw(url, { size: image.length, sha256: sha(other), upload: image })).toMatchObject(
       { type: 'error' },
     );
+    // A binary frame before auth is a protocol failure under the shared paired-route rules.
     expect(await raw(url, { size: 1, sha256: sha(image), binaryFirst: true })).toEqual({
       type: 'error',
-      code: 'auth',
+      code: 'protocol',
     });
     expect(estimator.estimate).not.toHaveBeenCalled();
   });

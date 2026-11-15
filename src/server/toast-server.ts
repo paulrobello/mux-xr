@@ -1,7 +1,7 @@
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { type RawData, WebSocket, WebSocketServer } from 'ws';
+import { type RawData, WebSocket } from 'ws';
 import {
   parseToastEnvelope,
   parseToastRequest,
@@ -10,11 +10,13 @@ import {
 } from '../toast-contract';
 import {
   type ClipboardSecret,
-  clientKey,
   createFailureLimiter,
   type FailureLimiter,
 } from './clipboard-server';
 import { createRequestLimiter, type RequestLimiter } from './host-stats-server';
+import { bearerMatches, clientKey, createPairedRoute, pairedHmac } from './paired-route';
+
+export { bearerMatches } from './paired-route';
 
 /** Senders POST one toast here. */
 export const TOAST_PATH = '/toast';
@@ -75,19 +77,10 @@ export type ToastHub = {
 };
 
 export const toastsMac = (key: Buffer, nonce: string): Buffer =>
-  createHmac('sha256', key).update(`${TOASTS_PROTOCOL}\n${nonce}\nsubscribe`).digest();
+  pairedHmac(key, TOASTS_PROTOCOL, nonce, 'subscribe');
 
 export const isLoopbackAddress = (address: string | undefined): boolean =>
   !!address && (address === '::1' || /^127\./.test(address) || /^::ffff:127\./i.test(address));
-
-const digest = (value: Buffer): Buffer => createHash('sha256').update(value).digest();
-
-/** Constant-time check of an `Authorization: Bearer <secret>` header. */
-export const bearerMatches = (header: string | undefined, key: Buffer): boolean => {
-  const match = /^Bearer\s+(.+)$/i.exec(header?.trim() ?? '');
-  if (!match) return false;
-  return timingSafeEqual(digest(Buffer.from(match[1].trim(), 'utf8')), digest(key));
-};
 
 const rawText = (data: RawData): string =>
   (Buffer.isBuffer(data)
@@ -102,12 +95,8 @@ export const createToastHub = (options: ToastHubOptions): ToastHub => {
   const makeId = options.makeId ?? (() => randomUUID());
   const maxSubscribers = options.maxSubscribers ?? MAX_SUBSCRIBERS;
   const subscribers = new Set<WebSocket>();
-  const sockets = new Set<WebSocket>();
-  const perClient = new Map<string, number>();
-  let upgrading = 0;
   // Newest last; an expired timed toast is dropped before replay.
   const recent: Array<{ toast: Toast; expires: number }> = [];
-  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
 
   const emit = (event: ToastEvent): void => {
     try {
@@ -271,146 +260,25 @@ export const createToastHub = (options: ToastHubOptions): ToastHub => {
     return true;
   };
 
-  const refuseUpgrade = (socket: Duplex, status: string): void => {
-    socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
-    socket.destroy();
-  };
-
-  const handleUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
-    const origin = request.headers.origin;
-    if (typeof origin !== 'string' || !options.allowedOrigins.includes(origin)) {
-      emit({ kind: 'refused', code: 'origin' });
-      refuseUpgrade(socket, '403 Forbidden');
-      return;
-    }
-    const ip = clientKey(request.socket.remoteAddress);
-    if (limiter.saturated(ip)) {
-      emit({ kind: 'refused', code: 'rate_limited' });
-      refuseUpgrade(socket, '429 Too Many Requests');
-      return;
-    }
-    if (
-      sockets.size + upgrading >= maxSubscribers ||
-      (perClient.get(ip) ?? 0) >= MAX_SUBSCRIBERS_PER_CLIENT
-    ) {
-      emit({ kind: 'refused', code: 'busy' });
-      refuseUpgrade(socket, '503 Service Unavailable');
-      return;
-    }
-    perClient.set(ip, (perClient.get(ip) ?? 0) + 1);
-    let held = true;
-    const releaseClient = (): void => {
-      if (!held) return;
-      held = false;
-      const left = (perClient.get(ip) ?? 1) - 1;
-      if (left > 0) perClient.set(ip, left);
-      else perClient.delete(ip);
-    };
-    const attempt = limiter.begin(ip);
-    let reserved = true;
-    upgrading += 1;
-    const release = (): void => {
-      if (!reserved) return;
-      reserved = false;
-      upgrading -= 1;
-    };
-    socket.once('close', () => {
-      release();
-      releaseClient();
-      attempt();
-    });
-    wss.handleUpgrade(request, socket, head, (client) => {
-      release();
-      client.once('close', releaseClient);
-      serve(client, ip, attempt);
-    });
-  };
-
-  const serve = (socket: WebSocket, ip: string, attempt: () => void): void => {
-    sockets.add(socket);
-    let phase: 'auth' | 'checking' | 'subscribed' = 'auth';
-    let finished = false;
-    let alive = true;
-    let pinger: ReturnType<typeof setInterval> | undefined;
-    const authTimer = setTimeout(() => {
-      if (phase !== 'subscribed') fail('auth');
-    }, options.authTimeoutMs ?? AUTH_TIMEOUT_MS);
-    const finish = (code: number, reason: string): void => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(authTimer);
-      if (pinger) clearInterval(pinger);
-      socket.close(code, reason);
-    };
-    const fail = (code: 'auth' | 'disabled' | 'protocol'): void => {
-      if (code === 'auth') limiter.fail(ip);
-      if (code !== 'protocol') emit({ kind: 'refused', code });
-      attempt();
-      if (socket.readyState === WebSocket.OPEN)
-        socket.send(JSON.stringify({ type: 'error', code }));
-      finish(1008, code);
-    };
-    socket.on('close', () => {
-      attempt();
-      finished = true;
-      clearTimeout(authTimer);
-      if (pinger) clearInterval(pinger);
-      sockets.delete(socket);
-      subscribers.delete(socket);
-    });
-    socket.on('error', () => undefined);
-    socket.on('pong', () => {
-      alive = true;
-    });
-
-    const secret = options.loadSecret();
-    if (!secret.enabled) {
-      fail('disabled');
-      return;
-    }
-    const nonce = randomBytes(32).toString('base64');
-    socket.send(JSON.stringify({ type: 'challenge', nonce, protocol: TOASTS_PROTOCOL }));
-    socket.on('message', (data, isBinary) => {
-      if (finished) return;
-      if (isBinary || phase === 'checking') {
-        fail('protocol');
-        return;
-      }
-      // A subscribed headset may only clear a toast, which clears it on every headset.
-      if (phase === 'subscribed') {
-        let envelope: ToastEnvelope | null = null;
-        try {
-          envelope = parseToastEnvelope(JSON.parse(rawText(data)));
-        } catch {
-          envelope = null;
-        }
-        if (envelope?.type !== 'dismiss') {
-          fail('protocol');
-          return;
-        }
-        emit({ kind: 'dismiss', delivered: broadcast(envelope) });
-        return;
-      }
-      phase = 'checking';
-      let message: { type?: unknown; mac?: unknown };
-      try {
-        message = JSON.parse(rawText(data));
-      } catch {
-        message = {};
-      }
-      if (message?.type !== 'auth' || typeof message.mac !== 'string' || limiter.blocked(ip)) {
-        fail('auth');
-        return;
-      }
-      const provided = Buffer.from(message.mac, 'base64');
-      const expected = toastsMac(secret.key, nonce);
-      if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-        fail('auth');
-        return;
-      }
-      attempt();
-      clearTimeout(authTimer);
-      phase = 'subscribed';
+  const paired = createPairedRoute({
+    protocol: TOASTS_PROTOCOL,
+    allowedOrigins: options.allowedOrigins,
+    loadSecret: options.loadSecret,
+    limiter,
+    maxPayloadBytes: MAX_MESSAGE_BYTES,
+    maxConnections: maxSubscribers,
+    perClient: { cap: MAX_SUBSCRIBERS_PER_CLIENT, gate: 'busy', release: 'close' },
+    reportGates: true,
+    reportFailures: 'except-protocol',
+    emit: (event) =>
+      emit({
+        kind: 'refused',
+        code: event.code as Extract<ToastEvent, { kind: 'refused' }>['code'],
+      }),
+    authTimeoutMs: options.authTimeoutMs ?? AUTH_TIMEOUT_MS,
+    macMaterial: () => 'subscribe',
+    onAuthenticated: (connection) => {
+      const socket = connection.socket;
       subscribers.add(socket);
       socket.send(JSON.stringify({ type: 'ready' }));
       pruneRecent();
@@ -429,23 +297,45 @@ export const createToastHub = (options: ToastHubOptions): ToastHub => {
             },
           }),
         );
-      pinger = setInterval(() => {
-        if (!alive) {
-          socket.terminate();
+      let alive = true;
+      socket.on('pong', () => {
+        alive = true;
+      });
+      connection.addTimer(
+        setInterval(() => {
+          if (!alive) {
+            socket.terminate();
+            return;
+          }
+          alive = false;
+          socket.ping();
+        }, options.pingIntervalMs ?? PING_INTERVAL_MS),
+      );
+      return (data, isBinary) => {
+        if (isBinary) {
+          connection.fail('protocol');
           return;
         }
-        alive = false;
-        socket.ping();
-      }, options.pingIntervalMs ?? PING_INTERVAL_MS);
-    });
-  };
+        // A subscribed headset may only clear a toast, which clears it on every headset.
+        let envelope: ToastEnvelope | null = null;
+        try {
+          envelope = parseToastEnvelope(JSON.parse(rawText(data)));
+        } catch {
+          envelope = null;
+        }
+        if (envelope?.type !== 'dismiss') {
+          connection.fail('protocol');
+          return;
+        }
+        emit({ kind: 'dismiss', delivered: broadcast(envelope) });
+      };
+    },
+    onConnectionClose: (socket) => subscribers.delete(socket),
+  });
 
   return {
     handleRequest,
-    handleUpgrade,
-    close: async () => {
-      for (const socket of sockets) socket.terminate();
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
-    },
+    handleUpgrade: paired.handleUpgrade,
+    close: paired.close,
   };
 };

@@ -1,10 +1,10 @@
 /** One authenticated git and CI status query per connection to the dictation server's `/repo-status`. */
 
 import { createHostClipboardSecretStore, type HostClipboardSocket } from './host-clipboard';
+import { openPairedSocket } from './host-pairing';
 
 const PROTOCOL = 'mux-xr-repo-status-v1';
 const DEFAULT_TIMEOUT_MS = 15_000;
-const NONCE_FORMAT = /^[A-Za-z0-9+/]{43}=$/;
 
 /** Newlines would split the signed text; the server refuses any control character too. */
 const CONTROL_CHARS = /\p{Cc}/u;
@@ -65,12 +65,6 @@ const SERVER_CODES: Record<string, RepoStatusFailure> = {
   rate_limited: 'rate-limited',
 };
 
-const base64 = (bytes: ArrayBuffer): string => {
-  let binary = '';
-  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
-  return btoa(binary);
-};
-
 const count = (value: unknown): number =>
   typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : 0;
 const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
@@ -110,9 +104,6 @@ export function parseRepoStatusReport(value: unknown): RepoStatusReport | null {
 
 export function createRepoStatusClient(options: RepoStatusClientOptions): RepoStatusFetcher {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const factory =
-    options.socketFactory ??
-    ((url: string) => new WebSocket(url) as unknown as HostClipboardSocket);
   return (cwd, host) => {
     if (CONTROL_CHARS.test(cwd) || (host !== null && CONTROL_CHARS.test(host)))
       return Promise.resolve({ ok: false, code: 'unavailable' });
@@ -120,84 +111,26 @@ export function createRepoStatusClient(options: RepoStatusClientOptions): RepoSt
     if (!secret) return Promise.resolve({ ok: false, code: 'no-secret' });
     const crypto = options.subtle ?? globalThis.crypto?.subtle;
     if (!crypto) return Promise.resolve({ ok: false, code: 'unavailable' });
-    return new Promise((resolve) => {
-      let settled = false;
-      let challenged = false;
-      let socket: HostClipboardSocket | undefined;
-      const finish = (result: RepoStatusResult): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        try {
-          socket?.close(1000, 'done');
-        } catch {
-          /* Already closed. */
-        }
-        resolve(result);
-      };
-      const failure = (code: RepoStatusFailure): void => finish({ ok: false, code });
-      const timer = setTimeout(() => failure('timeout'), timeoutMs);
-      try {
-        socket = factory(options.url());
-      } catch {
-        failure('unavailable');
-        return;
-      }
-      const active = socket;
-      active.onerror = () => undefined;
-      active.onclose = () => failure('unavailable');
-      active.onmessage = (event) => {
-        if (typeof event.data !== 'string') {
-          failure('unavailable');
-          return;
-        }
-        let message: { type?: unknown; code?: unknown; nonce?: unknown; status?: unknown };
-        try {
-          message = JSON.parse(event.data);
-        } catch {
-          failure('unavailable');
-          return;
-        }
-        if (message.type === 'error') {
-          failure(SERVER_CODES[String(message.code)] ?? 'unavailable');
-        } else if (message.type === 'challenge') {
-          if (
-            challenged ||
-            typeof message.nonce !== 'string' ||
-            !NONCE_FORMAT.test(message.nonce)
-          ) {
-            failure('unavailable');
-            return;
-          }
-          challenged = true;
-          const nonce = message.nonce;
-          void (async () => {
-            try {
-              const key = await crypto.importKey(
-                'raw',
-                new TextEncoder().encode(secret),
-                { name: 'HMAC', hash: 'SHA-256' },
-                false,
-                ['sign'],
-              );
-              const mac = await crypto.sign(
-                'HMAC',
-                key,
-                new TextEncoder().encode(`${PROTOCOL}\n${nonce}\n${host ?? ''}\n${cwd}`),
-              );
-              if (!settled)
-                active.send(JSON.stringify({ type: 'auth', cwd, host, mac: base64(mac) }));
-            } catch {
-              failure('unavailable');
-            }
-          })();
-        } else if (message.type === 'status') {
-          const report = parseRepoStatusReport(message.status);
-          if (report) finish({ ok: true, report });
-          else failure('unavailable');
-        } else failure('unavailable');
-      };
-    });
+    return openPairedSocket<RepoStatusReport, RepoStatusFailure>({
+      url: options.url(),
+      secret,
+      protocol: PROTOCOL,
+      material: `${host ?? ''}\n${cwd}`,
+      authFields: { cwd, host },
+      timeoutMs,
+      onTimeout: () => 'timeout',
+      socketFactory: options.socketFactory,
+      subtle: crypto,
+      onOpenError: () => 'unavailable',
+      onServerError: (code) => SERVER_CODES[String(code)] ?? 'unavailable',
+      onClose: () => 'unavailable',
+      onMessage: (message) => {
+        const frame = message as { type?: unknown; status?: unknown };
+        if (frame.type !== 'status') return { ok: false, code: 'unavailable' };
+        const report = parseRepoStatusReport(frame.status);
+        return report ? { ok: true, value: report } : { ok: false, code: 'unavailable' };
+      },
+    }).then((outcome) => (outcome.ok ? { ok: true, report: outcome.value } : outcome));
   };
 }
 

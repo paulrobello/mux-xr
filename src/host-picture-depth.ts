@@ -1,11 +1,11 @@
 /** One authenticated depth estimate per connection to the dictation server's `/picture-depth`. */
 
 import { createHostClipboardSecretStore, type HostClipboardSocket } from './host-clipboard';
+import { openPairedSocket } from './host-pairing';
 
 const PROTOCOL = 'mux-xr-picture-depth-v1';
 /** Covers the upload and an inference queued behind another frame's. */
 const DEFAULT_TIMEOUT_MS = 30_000;
-const NONCE_FORMAT = /^[A-Za-z0-9+/]{43}=$/;
 /** The server's depth map is the model's output, well under this edge. */
 const MAX_DEPTH_EDGE = 2048;
 
@@ -58,9 +58,6 @@ export function createPictureDepthClient(
   options: PictureDepthClientOptions,
 ): PictureDepthEstimator {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const factory =
-    options.socketFactory ??
-    ((url: string) => new WebSocket(url) as unknown as HostClipboardSocket);
   return async (image) => {
     const secret = options.secret();
     if (!secret) return { ok: false, code: 'no-secret' };
@@ -74,127 +71,74 @@ export function createPictureDepthClient(
     } catch {
       return { ok: false, code: 'unavailable' };
     }
-    return new Promise((resolve) => {
-      let settled = false;
-      let challenged = false;
-      let header: { width: number; height: number; size: number } | null = null;
-      let socket: HostClipboardSocket | undefined;
-      const finish = (result: PictureDepthResult): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        try {
-          socket?.close(1000, 'done');
-        } catch {
-          /* Already closed. */
-        }
-        resolve(result);
-      };
-      const failure = (code: PictureDepthFailure): void => finish({ ok: false, code });
-      const timer = setTimeout(() => failure('timeout'), timeoutMs);
-      try {
-        socket = factory(options.url());
-      } catch {
-        failure('unavailable');
-        return;
-      }
-      const active = socket;
-      active.binaryType = 'arraybuffer';
-      active.onerror = () => undefined;
-      active.onclose = () => failure('unavailable');
-      active.onmessage = (event) => {
+    let header: { width: number; height: number; size: number } | null = null;
+    return openPairedSocket<{ depth: Blob; width: number; height: number }, PictureDepthFailure>({
+      url: options.url(),
+      secret,
+      protocol: PROTOCOL,
+      material: `${bytes.byteLength}\n${digest}`,
+      authFields: { size: bytes.byteLength, sha256: digest },
+      binaryType: 'arraybuffer',
+      timeoutMs,
+      onTimeout: () => 'timeout',
+      socketFactory: options.socketFactory,
+      subtle: crypto,
+      onOpenError: () => 'unavailable',
+      onServerError: (code) => SERVER_CODES[String(code)] ?? 'unavailable',
+      onClose: () => 'unavailable',
+      onMessage: (message, socket, challenged) => {
         if (header) {
-          const data = event.data;
-          if (!(data instanceof ArrayBuffer) || data.byteLength !== header.size) {
-            failure('unavailable');
-            return;
+          if (!(message instanceof ArrayBuffer) || message.byteLength !== header.size) {
+            return { ok: false, code: 'unavailable' };
           }
-          finish({
+          return {
             ok: true,
-            depth: new Blob([data], { type: 'image/png' }),
-            width: header.width,
-            height: header.height,
-          });
-          return;
+            value: {
+              depth: new Blob([message], { type: 'image/png' }),
+              width: header.width,
+              height: header.height,
+            },
+          };
         }
-        if (typeof event.data !== 'string') {
-          failure('unavailable');
-          return;
-        }
-        let message: {
+        const frame = message as {
           type?: unknown;
-          code?: unknown;
-          nonce?: unknown;
           width?: unknown;
           height?: unknown;
           size?: unknown;
         };
-        try {
-          message = JSON.parse(event.data);
-        } catch {
-          failure('unavailable');
-          return;
+        if (frame.type === 'ready' && challenged) {
+          socket.send(bytes);
+          return null;
         }
         const dimension = (value: unknown): value is number =>
           typeof value === 'number' &&
           Number.isInteger(value) &&
           value > 0 &&
           value <= MAX_DEPTH_EDGE;
-        if (message.type === 'error') {
-          failure(SERVER_CODES[String(message.code)] ?? 'unavailable');
-        } else if (message.type === 'challenge') {
-          if (
-            challenged ||
-            typeof message.nonce !== 'string' ||
-            !NONCE_FORMAT.test(message.nonce)
-          ) {
-            failure('unavailable');
-            return;
-          }
-          challenged = true;
-          const nonce = message.nonce;
-          void (async () => {
-            try {
-              const key = await crypto.importKey(
-                'raw',
-                new TextEncoder().encode(secret),
-                { name: 'HMAC', hash: 'SHA-256' },
-                false,
-                ['sign'],
-              );
-              const mac = await crypto.sign(
-                'HMAC',
-                key,
-                new TextEncoder().encode(`${PROTOCOL}\n${nonce}\n${bytes.byteLength}\n${digest}`),
-              );
-              if (!settled)
-                active.send(
-                  JSON.stringify({
-                    type: 'auth',
-                    size: bytes.byteLength,
-                    sha256: digest,
-                    mac: base64(mac),
-                  }),
-                );
-            } catch {
-              failure('unavailable');
-            }
-          })();
-        } else if (message.type === 'ready' && challenged) {
-          active.send(bytes);
-        } else if (
-          message.type === 'depth' &&
-          dimension(message.width) &&
-          dimension(message.height) &&
-          typeof message.size === 'number' &&
-          Number.isInteger(message.size) &&
-          message.size > 0 &&
-          message.size <= MAX_DEPTH_REPLY_BYTES
+        if (
+          frame.type === 'depth' &&
+          dimension(frame.width) &&
+          dimension(frame.height) &&
+          typeof frame.size === 'number' &&
+          Number.isInteger(frame.size) &&
+          frame.size > 0 &&
+          frame.size <= MAX_DEPTH_REPLY_BYTES
         ) {
-          header = { width: message.width, height: message.height, size: message.size };
-        } else failure('unavailable');
-      };
-    });
+          header = { width: frame.width, height: frame.height, size: frame.size };
+          return null;
+        }
+        return { ok: false, code: 'unavailable' };
+      },
+    }).then((outcome) =>
+      outcome.ok
+        ? {
+            ok: true,
+            depth: outcome.value.depth,
+            width: outcome.value.width,
+            height: outcome.value.height,
+          }
+        : outcome,
+    );
   };
 }
 

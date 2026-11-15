@@ -1,9 +1,9 @@
 /** One authenticated read-only JSON feed per connection to a dictation server feed route. */
 import { createHostClipboardSecretStore, type HostClipboardSocket } from './host-clipboard';
+import { openPairedSocket } from './host-pairing';
 import { dictationServiceUrl } from './host-stats';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
-const NONCE_FORMAT = /^[A-Za-z0-9+/]{43}=$/;
 const CONTROL_CHARS = /\p{Cc}/u;
 
 export type HostFeedFailure =
@@ -40,17 +40,8 @@ const SERVER_CODES: Record<string, HostFeedFailure> = {
   rate_limited: 'rate-limited',
 };
 
-const base64 = (bytes: ArrayBuffer): string => {
-  let binary = '';
-  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
-  return btoa(binary);
-};
-
 export function createHostFeedClient<T>(options: HostFeedClientOptions<T>): HostFeedSource<T> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const factory =
-    options.socketFactory ??
-    ((url: string) => new WebSocket(url) as unknown as HostClipboardSocket);
   // A browser cannot read the 429 status, so once this server has answered before, a close before
   // its challenge is most likely a rate-limit refusal rather than a server that went away.
   let answeredBefore = false;
@@ -60,79 +51,30 @@ export function createHostFeedClient<T>(options: HostFeedClientOptions<T>): Host
     if (!secret) return Promise.resolve({ ok: false, code: 'no-secret' });
     const crypto = options.subtle ?? globalThis.crypto?.subtle;
     if (!crypto) return Promise.resolve({ ok: false, code: 'unavailable' });
-    return new Promise((resolve) => {
-      let settled = false;
-      let challenged = false;
-      let socket: HostClipboardSocket | undefined;
-      const finish = (result: HostFeedResult<T>): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        try {
-          socket?.close(1000, 'done');
-        } catch {
-          /* Already closed. */
+    return openPairedSocket<T, HostFeedFailure>({
+      url: options.url(),
+      secret,
+      protocol: options.protocol,
+      material: request,
+      authFields: { request },
+      timeoutMs,
+      onTimeout: () => 'timeout',
+      socketFactory: options.socketFactory,
+      subtle: crypto,
+      onChallenge: () => {
+        answeredBefore = true;
+      },
+      onOpenError: () => 'unavailable',
+      onServerError: (code) => SERVER_CODES[String(code)] ?? 'unavailable',
+      onClose: (info) => (!info.challenged && answeredBefore ? 'rate-limited' : 'unavailable'),
+      onMessage: (message, _socket, challenged) => {
+        const frame = message as { type?: unknown; data?: unknown };
+        if (frame.type === 'feed' && challenged) {
+          const value = options.parse(frame.data);
+          return value === null ? { ok: false, code: 'unavailable' } : { ok: true, value };
         }
-        resolve(result);
-      };
-      const fail = (code: HostFeedFailure): void => finish({ ok: false, code });
-      const timer = setTimeout(() => fail('timeout'), timeoutMs);
-      try {
-        socket = factory(options.url());
-      } catch {
-        fail('unavailable');
-        return;
-      }
-      const active = socket;
-      active.onerror = () => undefined;
-      active.onclose = () => fail(!challenged && answeredBefore ? 'rate-limited' : 'unavailable');
-      active.onmessage = (event) => {
-        let message: { type?: unknown; code?: unknown; nonce?: unknown; data?: unknown };
-        try {
-          message = typeof event.data === 'string' ? JSON.parse(event.data) : {};
-        } catch {
-          message = {};
-        }
-        if (message.type === 'error') {
-          fail(SERVER_CODES[String(message.code)] ?? 'unavailable');
-        } else if (message.type === 'challenge') {
-          if (
-            challenged ||
-            typeof message.nonce !== 'string' ||
-            !NONCE_FORMAT.test(message.nonce)
-          ) {
-            fail('unavailable');
-            return;
-          }
-          challenged = true;
-          answeredBefore = true;
-          const nonce = message.nonce;
-          void (async () => {
-            try {
-              const key = await crypto.importKey(
-                'raw',
-                new TextEncoder().encode(secret),
-                { name: 'HMAC', hash: 'SHA-256' },
-                false,
-                ['sign'],
-              );
-              const mac = await crypto.sign(
-                'HMAC',
-                key,
-                new TextEncoder().encode(`${options.protocol}\n${nonce}\n${request}`),
-              );
-              if (!settled)
-                active.send(JSON.stringify({ type: 'auth', request, mac: base64(mac) }));
-            } catch {
-              fail('unavailable');
-            }
-          })();
-        } else if (message.type === 'feed' && challenged) {
-          const value = options.parse(message.data);
-          if (value === null) fail('unavailable');
-          else finish({ ok: true, value });
-        } else fail('unavailable');
-      };
+        return { ok: false, code: 'unavailable' };
+      },
     });
   };
 }

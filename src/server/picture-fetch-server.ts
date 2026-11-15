@@ -1,18 +1,15 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { promises as dns } from 'node:dns';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 import { type NetworkInterfaceInfo, networkInterfaces as osNetworkInterfaces } from 'node:os';
-import type { Duplex } from 'node:stream';
-import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import { isHeif } from '../image-format';
 import {
   type ClipboardSecret,
-  clientKey,
   createFailureLimiter,
   type FailureLimiter,
 } from './clipboard-server';
+import { createPairedRoute, type PairedRoute, pairedHmac } from './paired-route';
 
 export const PICTURE_FETCH_PATH = '/picture-fetch';
 export const PICTURE_FETCH_PROTOCOL = 'mux-xr-picture-fetch-v1';
@@ -443,7 +440,7 @@ export const fetchPicture = async (
 };
 
 export const pictureFetchMac = (key: Buffer, nonce: string, url: string): Buffer =>
-  createHmac('sha256', key).update(`${PICTURE_FETCH_PROTOCOL}\n${nonce}\n${url}`).digest();
+  pairedHmac(key, PICTURE_FETCH_PROTOCOL, nonce, url);
 
 export type PictureFetchEvent =
   | { kind: 'transfer'; bytes: number }
@@ -465,191 +462,63 @@ export interface PictureFetchRouteOptions extends PictureFetchDeps {
   onEvent?: (event: PictureFetchEvent) => void;
 }
 
-export type PictureFetchRoute = {
-  handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void;
-  close(): Promise<void>;
-};
-
-const rawText = (data: RawData): string =>
-  (Buffer.isBuffer(data)
-    ? data
-    : Buffer.concat(Array.isArray(data) ? data : [Buffer.from(data as ArrayBuffer)])
-  ).toString('utf8');
+export type PictureFetchRoute = PairedRoute;
 
 export const createPictureFetchRoute = (options: PictureFetchRouteOptions): PictureFetchRoute => {
   const limiter = options.limiter ?? createFailureLimiter(options.now);
   const requests =
     options.requestLimiter ?? createFailureLimiter(options.now, REQUEST_LIMIT, REQUEST_WINDOW_MS);
-  const authTimeoutMs = options.authTimeoutMs ?? AUTH_TIMEOUT_MS;
-  const maxConnections = options.maxConnections ?? MAX_CONNECTIONS;
-  const maxPerClient = options.maxConnectionsPerClient ?? MAX_PER_CLIENT;
-  const sockets = new Set<WebSocket>();
-  const perClient = new Map<string, number>();
-  let upgrading = 0;
-  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
-  const emit = (event: PictureFetchEvent): void => {
+  const emitEvent = (event: PictureFetchEvent): void => {
     try {
       options.onEvent?.(event);
     } catch {
       /* Logging must not break a transfer. */
     }
   };
-  const refuseHttp = (socket: Duplex, status: string): void => {
-    socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
-    socket.destroy();
-  };
-  const hold = (ip: string): (() => void) => {
-    perClient.set(ip, (perClient.get(ip) ?? 0) + 1);
-    let held = true;
-    return () => {
-      if (!held) return;
-      held = false;
-      const left = (perClient.get(ip) ?? 1) - 1;
-      if (left > 0) perClient.set(ip, left);
-      else perClient.delete(ip);
-    };
-  };
-
-  const handleUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
-    const origin = request.headers.origin;
-    if (typeof origin !== 'string' || !options.allowedOrigins.includes(origin)) {
-      refuseHttp(socket, '403 Forbidden');
-      return;
-    }
-    const ip = clientKey(request.socket.remoteAddress);
-    if (limiter.saturated(ip) || requests.blocked(ip) || (perClient.get(ip) ?? 0) >= maxPerClient) {
-      refuseHttp(socket, '429 Too Many Requests');
-      return;
-    }
-    if (sockets.size + upgrading >= maxConnections) {
-      refuseHttp(socket, '503 Service Unavailable');
-      return;
-    }
-    const attempt = limiter.begin(ip);
-    const release = hold(ip);
-    let reserved = true;
-    const unreserve = (): void => {
-      if (!reserved) return;
-      reserved = false;
-      upgrading -= 1;
-    };
-    upgrading += 1;
-    socket.once('close', () => {
-      unreserve();
-      attempt();
-      release();
-    });
-    wss.handleUpgrade(request, socket, head, (client) => {
-      unreserve();
-      serve(client, ip, attempt, release);
-    });
-  };
-
-  const serve = (socket: WebSocket, ip: string, attempt: () => void, release: () => void): void => {
-    sockets.add(socket);
-    // A closed socket aborts its in-flight fetch, so the per-client cap bounds real outbound work.
-    const abort = new AbortController();
-    let finished = false;
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    const finish = (code: number, reason: string): void => {
-      if (finished) return;
-      finished = true;
-      for (const timer of timers) clearTimeout(timer);
-      socket.close(code, reason);
-    };
-    const fail = (code: PictureFetchErrorCode): void => {
-      if (code === 'auth') limiter.fail(ip);
-      attempt();
-      emit({ kind: 'refused', code });
-      if (socket.readyState === WebSocket.OPEN)
-        socket.send(JSON.stringify({ type: 'error', code }));
-      finish(1008, code);
-    };
-    socket.on('close', () => {
-      abort.abort();
-      attempt();
-      release();
-      finished = true;
-      for (const timer of timers) clearTimeout(timer);
-      sockets.delete(socket);
-    });
-    socket.on('error', () => undefined);
-
-    const secret = options.loadSecret();
-    if (!secret.enabled) {
-      fail('disabled');
-      return;
-    }
-    const nonce = randomBytes(32).toString('base64');
-    let phase: 'auth' | 'busy' = 'auth';
-    timers.push(
-      setTimeout(() => {
-        if (phase === 'auth') fail('auth');
-      }, authTimeoutMs),
-      setTimeout(() => finish(1000, 'session timeout'), SESSION_TIMEOUT_MS),
-    );
-    socket.send(JSON.stringify({ type: 'challenge', nonce, protocol: PICTURE_FETCH_PROTOCOL }));
-
-    socket.on('message', async (data, isBinary) => {
-      if (finished) return;
-      if (phase !== 'auth' || isBinary) {
-        fail(phase === 'auth' ? 'auth' : 'protocol');
-        return;
-      }
-      phase = 'busy';
-      let message: { type?: unknown; url?: unknown; mac?: unknown };
-      try {
-        message = JSON.parse(rawText(data));
-      } catch {
-        fail('auth');
-        return;
-      }
-      if (
-        message?.type !== 'auth' ||
-        typeof message.mac !== 'string' ||
-        typeof message.url !== 'string' ||
-        message.url.length > PICTURE_MAX_URL_CHARS ||
-        CONTROL_CHARS.test(message.url) ||
-        limiter.blocked(ip)
-      ) {
-        fail('auth');
-        return;
-      }
-      const provided = Buffer.from(message.mac, 'base64');
-      const expected = pictureFetchMac(secret.key, nonce, message.url);
-      if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-        fail('auth');
-        return;
-      }
-      attempt();
-      if (requests.blocked(ip)) {
-        fail('rate_limited');
-        return;
-      }
-      requests.fail(ip);
-      const result = await fetchPicture(message.url, { ...options, signal: abort.signal });
-      if (finished) return;
-      if (!result.ok) {
-        fail(result.code);
-        return;
-      }
-      emit({ kind: 'transfer', bytes: result.bytes.length });
-      socket.send(
-        JSON.stringify({
+  return createPairedRoute({
+    protocol: PICTURE_FETCH_PROTOCOL,
+    allowedOrigins: options.allowedOrigins,
+    loadSecret: options.loadSecret,
+    limiter,
+    requestLimiter: { blocked: requests.blocked, charge: requests.fail },
+    maxPayloadBytes: MAX_MESSAGE_BYTES,
+    maxConnections: options.maxConnections ?? MAX_CONNECTIONS,
+    perClient: {
+      cap: options.maxConnectionsPerClient ?? MAX_PER_CLIENT,
+      gate: 'rate',
+      release: 'close',
+    },
+    reportGates: false,
+    reportFailures: 'all',
+    emit: (event) => emitEvent({ kind: 'refused', code: event.code as PictureFetchErrorCode }),
+    authTimeoutMs: options.authTimeoutMs ?? AUTH_TIMEOUT_MS,
+    sessionTimeoutMs: SESSION_TIMEOUT_MS,
+    validateAuth: (message) =>
+      typeof message.url === 'string' &&
+      message.url.length <= PICTURE_MAX_URL_CHARS &&
+      !CONTROL_CHARS.test(message.url),
+    macMaterial: (message) => String(message.url),
+    onAuthenticated: (connection, message) => {
+      void (async () => {
+        const result = await fetchPicture(String(message.url), {
+          ...options,
+          signal: connection.signal,
+        });
+        if (connection.finished()) return;
+        if (!result.ok) {
+          connection.fail(result.code);
+          return;
+        }
+        emitEvent({ kind: 'transfer', bytes: result.bytes.length });
+        connection.sendJson({
           type: 'image',
           contentType: result.contentType,
           size: result.bytes.length,
-        }),
-      );
-      socket.send(result.bytes, { binary: true }, () => finish(1000, 'complete'));
-    });
-  };
-
-  return {
-    handleUpgrade,
-    close: async () => {
-      for (const socket of sockets) socket.terminate();
-      await new Promise<void>((done) => wss.close(() => done()));
+        });
+        connection.socket.send(result.bytes, { binary: true }, () =>
+          connection.finish(1000, 'complete'),
+        );
+      })();
     },
-  };
+  });
 };

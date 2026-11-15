@@ -1,9 +1,16 @@
 import { execFile as nodeExecFile } from 'node:child_process';
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
-import type { IncomingMessage } from 'node:http';
-import type { Duplex } from 'node:stream';
-import { type RawData, WebSocket, WebSocketServer } from 'ws';
+import type { RawData } from 'ws';
+import {
+  createPairedRoute,
+  type PairedAuthMessage,
+  type PairedConnection,
+  type PairedMessageHandler,
+  type PairedRoute,
+  pairedHmac,
+} from './paired-route';
+
+export { clientKey } from './paired-route';
 
 export const CLIPBOARD_PATH = '/clipboard';
 export const CLIPBOARD_MAX_BYTES = 256 * 1024;
@@ -137,7 +144,7 @@ export const decodeClipboardText = (
 };
 
 export const clipboardMac = (key: Buffer, nonce: string, op: ClipboardOperation): Buffer =>
-  createHmac('sha256', key).update(`${CLIPBOARD_PROTOCOL}\n${nonce}\n${op}`).digest();
+  pairedHmac(key, CLIPBOARD_PROTOCOL, nonce, op);
 
 type ExecFileLike = (
   file: string,
@@ -212,30 +219,6 @@ export const createMacClipboardHost = (options: MacClipboardHostOptions = {}): C
   };
 };
 
-const expandIPv6 = (address: string): string[] | null => {
-  const [head, tail, extra] = address.split('::');
-  if (extra !== undefined) return null;
-  const left = head ? head.split(':') : [];
-  const right = tail ? tail.split(':') : [];
-  const missing = 8 - left.length - right.length;
-  if (tail === undefined ? left.length !== 8 : missing < 1) return null;
-  return [...left, ...Array(tail === undefined ? 0 : missing).fill('0'), ...right];
-};
-
-/** Rate-limit key: IPv4 (including IPv4-mapped IPv6) as is, other IPv6 grouped by its /64. */
-export const clientKey = (address: string | undefined): string => {
-  if (!address) return 'unknown';
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
-  if (mapped) return mapped[1];
-  if (!address.includes(':')) return address;
-  const groups = expandIPv6(address.split('%')[0].toLowerCase());
-  if (!groups) return address;
-  return `${groups
-    .slice(0, 4)
-    .map((group) => Number.parseInt(group || '0', 16).toString(16))
-    .join(':')}::/64`;
-};
-
 export type FailureLimiter = {
   /** Failures inside the window reach the limit. */
   blocked(key: string): boolean;
@@ -307,10 +290,7 @@ export type ClipboardServerOptions = {
   onEvent?: (event: ClipboardEvent) => void;
 };
 
-export type ClipboardRoute = {
-  handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void;
-  close(): Promise<void>;
-};
+export type ClipboardRoute = PairedRoute;
 
 const rawBytes = (data: RawData): Buffer =>
   Buffer.isBuffer(data)
@@ -329,191 +309,84 @@ const ERROR_MESSAGES: Record<ClipboardErrorCode, string> = {
 export const createClipboardRoute = (options: ClipboardServerOptions): ClipboardRoute => {
   const host = options.host ?? createMacClipboardHost();
   const limiter = options.limiter ?? createFailureLimiter(options.now);
-  const authTimeoutMs = options.authTimeoutMs ?? AUTH_TIMEOUT_MS;
-  const maxConnections = options.maxConnections ?? MAX_CONNECTIONS;
-  const sockets = new Set<WebSocket>();
-  let upgrading = 0;
-  let hostQueue: Promise<unknown> = Promise.resolve();
   // One pbcopy or pbpaste at a time, so concurrent transfers cannot interleave on the pasteboard.
+  let hostQueue: Promise<unknown> = Promise.resolve();
   const serialized = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = hostQueue.then(operation, operation);
     hostQueue = result.catch(() => undefined);
     return result;
   };
-  const wss = new WebSocketServer({ noServer: true, maxPayload: CLIPBOARD_MAX_BYTES });
-  const emit = (event: ClipboardEvent): void => {
+  const emitEvent = (event: ClipboardEvent): void => {
     try {
       options.onEvent?.(event);
     } catch {
       /* Observability must not interrupt clipboard transfers. */
     }
   };
-  const refuseHttp = (socket: Duplex, status: string): void => {
-    socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
-    socket.destroy();
+  const hostFailure = (error: unknown, connection: PairedConnection): void => {
+    connection.fail(error instanceof ClipboardHostError ? error.code : 'host_failed', 1011);
   };
 
-  const handleUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
-    const origin = request.headers.origin;
-    if (typeof origin !== 'string' || !options.allowedOrigins.includes(origin)) {
-      emit({ kind: 'refused', code: 'origin' });
-      refuseHttp(socket, '403 Forbidden');
-      return;
-    }
-    const ip = clientKey(request.socket.remoteAddress);
-    if (limiter.saturated(ip)) {
-      emit({ kind: 'refused', code: 'rate_limited' });
-      refuseHttp(socket, '429 Too Many Requests');
-      return;
-    }
-    if (sockets.size + upgrading >= maxConnections) {
-      emit({ kind: 'refused', code: 'busy' });
-      refuseHttp(socket, '503 Service Unavailable');
-      return;
-    }
-    const attempt = limiter.begin(ip);
-    let reserved = true;
-    const release = (): void => {
-      if (!reserved) return;
-      reserved = false;
-      upgrading -= 1;
-    };
-    upgrading += 1;
-    // A failed handshake never reaches the callback, so the raw socket's close releases both.
-    socket.once('close', () => {
-      release();
-      attempt();
-    });
-    wss.handleUpgrade(request, socket, head, (client) => {
-      release();
-      serve(client, ip, attempt);
-    });
-  };
-
-  const serve = (socket: WebSocket, ip: string, attempt: () => void): void => {
-    sockets.add(socket);
-    let finished = false;
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    const finish = (code: number, reason: string): void => {
-      if (finished) return;
-      finished = true;
-      for (const timer of timers) clearTimeout(timer);
-      socket.close(code, reason);
-    };
-    const fail = (code: ClipboardErrorCode, closeCode = 1008): void => {
-      emit({ kind: 'refused', code });
-      if (code === 'auth') limiter.fail(ip);
-      attempt();
-      if (socket.readyState === WebSocket.OPEN)
-        socket.send(JSON.stringify({ type: 'error', code, message: ERROR_MESSAGES[code] }));
-      finish(closeCode, code);
-    };
-    socket.on('close', () => {
-      attempt();
-      finished = true;
-      for (const timer of timers) clearTimeout(timer);
-      sockets.delete(socket);
-    });
-    socket.on('error', () => undefined);
-
-    const secret = options.loadSecret();
-    if (!secret.enabled) {
-      fail('disabled');
-      return;
-    }
-    const nonce = randomBytes(32).toString('base64');
-    let phase: 'auth' | 'write' | 'busy' = 'auth';
-    timers.push(
-      setTimeout(() => {
-        if (phase === 'auth') fail('auth');
-      }, authTimeoutMs),
-      setTimeout(() => finish(1000, 'session timeout'), SESSION_TIMEOUT_MS),
-    );
-    socket.send(JSON.stringify({ type: 'challenge', nonce, protocol: CLIPBOARD_PROTOCOL }));
-
-    socket.on('message', async (data, isBinary) => {
-      if (finished) return;
-      if (phase === 'auth') {
-        if (isBinary) {
-          fail('auth');
-          return;
-        }
-        let message: { type?: unknown; op?: unknown; mac?: unknown };
-        try {
-          message = JSON.parse(rawBytes(data).toString('utf8'));
-        } catch {
-          fail('auth');
-          return;
-        }
-        const op = message?.op;
-        if (
-          message?.type !== 'auth' ||
-          (op !== 'read' && op !== 'write') ||
-          typeof message.mac !== 'string'
-        ) {
-          fail('auth');
-          return;
-        }
-        if (limiter.blocked(ip)) {
-          fail('auth');
-          return;
-        }
-        const provided = Buffer.from(message.mac, 'base64');
-        const expected = clipboardMac(secret.key, nonce, op);
-        if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-          fail('auth');
-          return;
-        }
-        attempt();
-        if (op === 'write') {
-          phase = 'write';
-          socket.send(JSON.stringify({ type: 'ready' }));
-          return;
-        }
-        phase = 'busy';
+  return createPairedRoute({
+    protocol: CLIPBOARD_PROTOCOL,
+    allowedOrigins: options.allowedOrigins,
+    loadSecret: options.loadSecret,
+    limiter,
+    maxPayloadBytes: CLIPBOARD_MAX_BYTES,
+    maxConnections: options.maxConnections ?? MAX_CONNECTIONS,
+    reportGates: true,
+    reportFailures: 'all',
+    emit: (event) => emitEvent({ kind: 'refused', code: event.code as ClipboardErrorCode }),
+    authTimeoutMs: options.authTimeoutMs ?? AUTH_TIMEOUT_MS,
+    sessionTimeoutMs: SESSION_TIMEOUT_MS,
+    validateAuth: (message: PairedAuthMessage) => message.op === 'read' || message.op === 'write',
+    macMaterial: (message) => String(message.op),
+    errorMessage: (code) => ERROR_MESSAGES[code as ClipboardErrorCode],
+    onAuthenticated: (connection, message): PairedMessageHandler | undefined => {
+      if (message.op === 'write') {
+        connection.sendJson({ type: 'ready' });
+        let phase: 'write' | 'busy' = 'write';
+        return (data, isBinary) => {
+          if (connection.finished()) return;
+          if (phase !== 'write') {
+            connection.fail('protocol');
+            return;
+          }
+          phase = 'busy';
+          if (!isBinary) {
+            connection.fail('invalid_text', 1003);
+            return;
+          }
+          const decoded = decodeClipboardText(rawBytes(data));
+          if (!decoded.ok) {
+            connection.fail(decoded.code, decoded.code === 'too_large' ? 1009 : 1007);
+            return;
+          }
+          void (async () => {
+            try {
+              await serialized(() => host.write(decoded.text));
+              if (connection.finished()) return;
+              const bytes = Buffer.byteLength(decoded.text, 'utf8');
+              connection.sendJson({ type: 'ok', bytes });
+              emitEvent({ kind: 'transfer', direction: 'quest-to-host', bytes });
+              connection.finish(1000, 'complete');
+            } catch (error) {
+              hostFailure(error, connection);
+            }
+          })();
+        };
+      }
+      void (async () => {
         try {
           const bytes = Buffer.from(await serialized(() => host.read()), 'utf8');
-          if (finished) return;
-          socket.send(bytes, { binary: true });
-          emit({ kind: 'transfer', direction: 'host-to-quest', bytes: bytes.length });
-          finish(1000, 'complete');
+          if (connection.finished()) return;
+          connection.socket.send(bytes, { binary: true });
+          emitEvent({ kind: 'transfer', direction: 'host-to-quest', bytes: bytes.length });
+          connection.finish(1000, 'complete');
         } catch (error) {
-          fail(error instanceof ClipboardHostError ? error.code : 'host_failed', 1011);
+          hostFailure(error, connection);
         }
-        return;
-      }
-      if (phase !== 'write') {
-        fail('protocol');
-        return;
-      }
-      phase = 'busy';
-      if (!isBinary) {
-        fail('invalid_text', 1003);
-        return;
-      }
-      const decoded = decodeClipboardText(rawBytes(data));
-      if (!decoded.ok) {
-        fail(decoded.code, decoded.code === 'too_large' ? 1009 : 1007);
-        return;
-      }
-      try {
-        await serialized(() => host.write(decoded.text));
-        if (finished) return;
-        const bytes = Buffer.byteLength(decoded.text, 'utf8');
-        socket.send(JSON.stringify({ type: 'ok', bytes }));
-        emit({ kind: 'transfer', direction: 'quest-to-host', bytes });
-        finish(1000, 'complete');
-      } catch (error) {
-        fail(error instanceof ClipboardHostError ? error.code : 'host_failed', 1011);
-      }
-    });
-  };
-
-  return {
-    handleUpgrade,
-    close: async () => {
-      for (const socket of sockets) socket.terminate();
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      })();
     },
-  };
+  });
 };

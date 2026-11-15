@@ -1,19 +1,15 @@
 import { spawn as nodeSpawn } from 'node:child_process';
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import { access, realpath as fsRealpath } from 'node:fs/promises';
-import type { IncomingMessage } from 'node:http';
 import { homedir, hostname as osHostname } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
-import type { Duplex } from 'node:stream';
-import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import { rosterDirectoryProject } from '../workspace/project-directory';
 import {
   type ClipboardSecret,
-  clientKey,
   createFailureLimiter,
   type FailureLimiter,
 } from './clipboard-server';
+import { createPairedRoute, type PairedRoute, pairedHmac } from './paired-route';
 
 export const REPO_STATUS_PATH = '/repo-status';
 export const REPO_STATUS_PROTOCOL = 'mux-xr-repo-status-v1';
@@ -519,10 +515,7 @@ export const repoStatusMac = (
   nonce: string,
   host: string | null,
   cwd: string,
-): Buffer =>
-  createHmac('sha256', key)
-    .update(`${REPO_STATUS_PROTOCOL}\n${nonce}\n${host ?? ''}\n${cwd}`)
-    .digest();
+): Buffer => pairedHmac(key, REPO_STATUS_PROTOCOL, nonce, `${host ?? ''}\n${cwd}`);
 
 export interface RepoStatusRouteOptions {
   homeDir?: () => string;
@@ -540,16 +533,7 @@ export interface RepoStatusRouteOptions {
   requestLimiter?: FailureLimiter;
 }
 
-export type RepoStatusRoute = {
-  handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void;
-  close(): Promise<void>;
-};
-
-const rawText = (data: RawData): string =>
-  (Buffer.isBuffer(data)
-    ? data
-    : Buffer.concat(Array.isArray(data) ? data : [Buffer.from(data as ArrayBuffer)])
-  ).toString('utf8');
+export type RepoStatusRoute = PairedRoute;
 
 export const createRepoStatusRoute = (options: RepoStatusRouteOptions): RepoStatusRoute => {
   const homeDir = options.homeDir ?? homedir;
@@ -558,11 +542,6 @@ export const createRepoStatusRoute = (options: RepoStatusRouteOptions): RepoStat
   const limiter = options.limiter ?? createFailureLimiter(options.now);
   const requests =
     options.requestLimiter ?? createFailureLimiter(options.now, REQUEST_LIMIT, REQUEST_WINDOW_MS);
-  const authTimeoutMs = options.authTimeoutMs ?? AUTH_TIMEOUT_MS;
-  const maxConnections = options.maxConnections ?? MAX_CONNECTIONS;
-  const sockets = new Set<WebSocket>();
-  const preAuth = new Map<string, number>();
-  let upgrading = 0;
   // Local git probes run one at a time; a request whose socket closed while queued is skipped.
   let gitQueue: Promise<unknown> = Promise.resolve();
   const queuedGit = (cwd: string, alive: () => boolean): Promise<GitProbeResult | null> => {
@@ -571,172 +550,55 @@ export const createRepoStatusRoute = (options: RepoStatusRouteOptions): RepoStat
     gitQueue = result.catch(() => undefined);
     return result.catch((): GitProbeResult => ({ status: { state: 'unavailable' } }));
   };
-  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
-  const refuseHttp = (socket: Duplex, status: string): void => {
-    socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
-    socket.destroy();
-  };
-  const holdPreAuth = (ip: string): (() => void) => {
-    preAuth.set(ip, (preAuth.get(ip) ?? 0) + 1);
-    let held = true;
-    return () => {
-      if (!held) return;
-      held = false;
-      const left = (preAuth.get(ip) ?? 1) - 1;
-      if (left > 0) preAuth.set(ip, left);
-      else preAuth.delete(ip);
-    };
-  };
-
-  const handleUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
-    const origin = request.headers.origin;
-    if (typeof origin !== 'string' || !options.allowedOrigins.includes(origin)) {
-      refuseHttp(socket, '403 Forbidden');
-      return;
-    }
-    const ip = clientKey(request.socket.remoteAddress);
-    if (
-      limiter.saturated(ip) ||
-      requests.blocked(ip) ||
-      (preAuth.get(ip) ?? 0) >= MAX_PRE_AUTH_PER_CLIENT
-    ) {
-      refuseHttp(socket, '429 Too Many Requests');
-      return;
-    }
-    if (sockets.size + upgrading >= maxConnections) {
-      refuseHttp(socket, '503 Service Unavailable');
-      return;
-    }
-    const attempt = limiter.begin(ip);
-    const authed = holdPreAuth(ip);
-    let reserved = true;
-    const release = (): void => {
-      if (!reserved) return;
-      reserved = false;
-      upgrading -= 1;
-    };
-    upgrading += 1;
-    socket.once('close', () => {
-      release();
-      attempt();
-      authed();
-    });
-    wss.handleUpgrade(request, socket, head, (client) => {
-      release();
-      serve(client, ip, attempt, authed);
-    });
-  };
-
-  const serve = (socket: WebSocket, ip: string, attempt: () => void, authed: () => void): void => {
-    sockets.add(socket);
-    let finished = false;
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    const finish = (code: number, reason: string): void => {
-      if (finished) return;
-      finished = true;
-      for (const timer of timers) clearTimeout(timer);
-      socket.close(code, reason);
-    };
-    const fail = (code: RepoStatusErrorCode): void => {
-      if (code === 'auth') limiter.fail(ip);
-      attempt();
-      authed();
-      if (socket.readyState === WebSocket.OPEN)
-        socket.send(JSON.stringify({ type: 'error', code }));
-      finish(1008, code);
-    };
-    socket.on('close', () => {
-      attempt();
-      authed();
-      finished = true;
-      for (const timer of timers) clearTimeout(timer);
-      sockets.delete(socket);
-    });
-    socket.on('error', () => undefined);
-
-    const secret = options.loadSecret();
-    if (!secret.enabled) {
-      fail('disabled');
-      return;
-    }
-    const nonce = randomBytes(32).toString('base64');
-    let phase: 'auth' | 'busy' = 'auth';
-    timers.push(
-      setTimeout(() => {
-        if (phase === 'auth') fail('auth');
-      }, authTimeoutMs),
-      setTimeout(() => finish(1000, 'session timeout'), SESSION_TIMEOUT_MS),
-    );
-    socket.send(JSON.stringify({ type: 'challenge', nonce, protocol: REPO_STATUS_PROTOCOL }));
-
-    socket.on('message', async (data, isBinary) => {
-      if (finished) return;
-      if (phase !== 'auth' || isBinary) {
-        fail(phase === 'auth' ? 'auth' : 'protocol');
-        return;
-      }
-      phase = 'busy';
-      let message: { type?: unknown; cwd?: unknown; host?: unknown; mac?: unknown };
-      try {
-        message = JSON.parse(rawText(data));
-      } catch {
-        fail('auth');
-        return;
-      }
-      const host = message?.host ?? null;
-      if (
-        message?.type !== 'auth' ||
-        typeof message.mac !== 'string' ||
-        typeof message.cwd !== 'string' ||
-        CONTROL_CHARS.test(message.cwd) ||
-        (host !== null &&
-          (typeof host !== 'string' || host.length > MAX_HOST_CHARS || CONTROL_CHARS.test(host))) ||
-        limiter.blocked(ip)
-      ) {
-        fail('auth');
-        return;
-      }
-      const provided = Buffer.from(message.mac, 'base64');
-      const expected = repoStatusMac(secret.key, nonce, host, message.cwd);
-      if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-        fail('auth');
-        return;
-      }
-      attempt();
-      authed();
-      if (requests.blocked(ip)) {
-        fail('rate_limited');
-        return;
-      }
-      requests.fail(ip);
-      const local = isLocalHost(host, localHostname());
-      const cwd = local ? await resolveWidgetDirectory(message.cwd, homeDir()) : null;
-      let status: RepoStatus;
-      if (!local) status = { state: 'remote' };
-      else if (!cwd) status = { state: 'not-a-repo' };
-      else {
-        const result = await queuedGit(cwd, () => !finished);
-        if (!result || finished) return;
-        status = result.status;
-        if (status.state === 'ok' && 'ci' in result && result.ci) {
-          const target = result.ci;
-          const ci = target.slug
-            ? await probe.ci(target.slug, target.branch).catch(() => null)
-            : { ...UNKNOWN_CI };
-          status = { ...status, ci };
-        }
-      }
-      if (finished) return;
-      socket.send(JSON.stringify({ type: 'status', status }));
-      finish(1000, 'complete');
-    });
-  };
-
-  return {
-    handleUpgrade,
-    close: async () => {
-      for (const socket of sockets) socket.terminate();
-      await new Promise<void>((done) => wss.close(() => done()));
+  return createPairedRoute({
+    protocol: REPO_STATUS_PROTOCOL,
+    allowedOrigins: options.allowedOrigins,
+    loadSecret: options.loadSecret,
+    limiter,
+    requestLimiter: { blocked: requests.blocked, charge: requests.fail },
+    maxPayloadBytes: MAX_MESSAGE_BYTES,
+    maxConnections: options.maxConnections ?? MAX_CONNECTIONS,
+    perClient: { cap: MAX_PRE_AUTH_PER_CLIENT, gate: 'rate', release: 'auth' },
+    reportGates: false,
+    reportFailures: 'none',
+    emit: () => undefined,
+    authTimeoutMs: options.authTimeoutMs ?? AUTH_TIMEOUT_MS,
+    sessionTimeoutMs: SESSION_TIMEOUT_MS,
+    validateAuth: (message) => {
+      const host = message.host ?? null;
+      return (
+        typeof message.cwd === 'string' &&
+        !CONTROL_CHARS.test(message.cwd) &&
+        (host === null ||
+          (typeof host === 'string' && host.length <= MAX_HOST_CHARS && !CONTROL_CHARS.test(host)))
+      );
     },
-  };
+    macMaterial: (message) => `${message.host ?? ''}\n${message.cwd}`,
+    onAuthenticated: (connection, message) => {
+      void (async () => {
+        const host = (message.host as string | null) ?? null;
+        const cwdText = String(message.cwd);
+        const local = isLocalHost(host, localHostname());
+        const cwd = local ? await resolveWidgetDirectory(cwdText, homeDir()) : null;
+        let status: RepoStatus;
+        if (!local) status = { state: 'remote' };
+        else if (!cwd) status = { state: 'not-a-repo' };
+        else {
+          const result = await queuedGit(cwd, () => !connection.finished());
+          if (!result || connection.finished()) return;
+          status = result.status;
+          if (status.state === 'ok' && 'ci' in result && result.ci) {
+            const target = result.ci;
+            const ci = target.slug
+              ? await probe.ci(target.slug, target.branch).catch(() => null)
+              : { ...UNKNOWN_CI };
+            status = { ...status, ci };
+          }
+        }
+        if (connection.finished()) return;
+        connection.sendJson({ type: 'status', status });
+        connection.finish(1000, 'complete');
+      })();
+    },
+  });
 };
