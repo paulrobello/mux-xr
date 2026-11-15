@@ -7,6 +7,7 @@ import {
   BACKGROUND_TILE_WIDTH,
   layoutBackgroundPicker,
 } from '../background-picker';
+import { actionData, setAction } from '../panel-actions';
 import { createLabelButton, setModifierVisual } from '../panel-ui';
 import type { PanelModule, SceneContext } from '../scene-context';
 
@@ -31,11 +32,8 @@ export const backgroundsPanel: PanelModule = {
       );
       tile.name = 'xr-background-thumbnail';
       // Not 'background': setBackground tints that action's meshes, which would tint the picture.
-      Object.assign(tile.userData, {
-        inputAction: 'backgroundTile',
-        background,
-        helpText: label,
-      });
+      setAction(tile, { type: 'backgroundTile', background });
+      tile.userData.helpText = label;
       tile.position.set(x, y, 0);
       root.add(tile);
       if (selected) {
@@ -44,14 +42,16 @@ export const backgroundsPanel: PanelModule = {
           new THREE.MeshBasicMaterial({ color: accent.hex }),
         );
         frame.name = 'xr-background-selected';
-        frame.userData.inputAction = 'noop';
+        setAction(frame, { type: 'noop' });
         frame.position.set(x, y, -0.004);
         root.add(frame);
       }
-      const caption = createLabelButton(label, BACKGROUND_TILE_WIDTH, 0.07, {
-        inputAction: 'background',
-        background,
-      });
+      const caption = createLabelButton(
+        label,
+        BACKGROUND_TILE_WIDTH,
+        0.07,
+        actionData({ type: 'background', background }),
+      );
       caption.position.set(x, y - BACKGROUND_TILE_HEIGHT / 2 - 0.05, 0);
       setModifierVisual(caption, selected);
       root.add(caption);
@@ -60,36 +60,43 @@ export const backgroundsPanel: PanelModule = {
       ['▲', -1, 0.26, layout.canScrollUp],
       ['▼', 1, -0.14, layout.canScrollDown],
     ] as const) {
-      const button = createLabelButton(glyph, 0.12, 0.2, {
-        inputAction: enabled ? 'backgroundScroll' : 'noop',
-        delta,
-      });
+      const button = createLabelButton(
+        glyph,
+        0.12,
+        0.2,
+        actionData(enabled ? { type: 'backgroundScroll', delta } : { type: 'noop' }, { delta }),
+      );
       button.name = delta < 0 ? 'xr-background-scroll-up' : 'xr-background-scroll-down';
       button.userData.helpText = delta < 0 ? 'Scroll up' : 'Scroll down';
       button.position.set(0.82, y, 0);
       button.visible = enabled;
       root.add(button);
     }
-    const rows = createLabelButton(layout.caption, 0.26, 0.06, { inputAction: 'noop' });
+    const rows = createLabelButton(layout.caption, 0.26, 0.06, actionData({ type: 'noop' }));
     rows.name = 'xr-background-rows';
     rows.position.set(0.86, 0.06, 0);
     root.add(rows);
   },
-  handleEarly(action, hit, ctx) {
-    if (action === 'backgroundScroll') {
-      ctx.backgroundRow = layoutBackgroundPicker(
-        ctx.backgroundRow + (Number(hit.userData.delta) || 0),
-      ).firstRow;
-      if (ctx.inputRoot && ctx.inputMode === 'backgrounds') ctx.refreshInputRoot('backgrounds');
-      return true;
+  handleActionEarly(action, _hit, ctx) {
+    switch (action.type) {
+      case 'backgroundScroll':
+        ctx.backgroundRow = layoutBackgroundPicker(
+          ctx.backgroundRow + (Number(action.delta) || 0),
+        ).firstRow;
+        if (ctx.inputRoot && ctx.inputMode === 'backgrounds') ctx.refreshInputRoot('backgrounds');
+        return true;
+      default:
+        return false;
     }
-    return false;
   },
-  handle(action, hit, ctx) {
-    if (action === 'background' || action === 'backgroundTile') {
-      ctx.setBackground(hit.userData.background as BackgroundMode);
-      return true;
+  handleAction(action, _hit, ctx) {
+    switch (action.type) {
+      case 'background':
+      case 'backgroundTile':
+        ctx.setBackground(action.background as BackgroundMode);
+        return true;
+      default:
+        return false;
     }
-    return false;
   },
 };

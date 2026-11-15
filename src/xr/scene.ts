@@ -4519,8 +4519,7 @@ export function createWorkspaceScene(
     if (panel) resizePanel(panel, direction);
   };
   const handleInputTarget = (hit: THREE.Object3D): boolean => {
-    console.log('[hit-entry]', hit.userData.inputAction, hit.userData.action?.type);
-    const action = hit.userData.inputAction as string | undefined;
+    const action = getAction(hit)?.type;
     const keepArmed =
       !action ||
       action === 'noop' ||
@@ -4535,7 +4534,7 @@ export function createWorkspaceScene(
   };
   function sharedEarlyAction(
     action: PanelAction,
-    _hit: THREE.Object3D,
+    hit: THREE.Object3D,
     _ctx: SceneContext,
   ): boolean {
     switch (action.type) {
@@ -4553,6 +4552,10 @@ export function createWorkspaceScene(
       case 'environmentAccentColor':
         setEnvironmentAccentColor(String(action.environmentAccentColor ?? '') || null);
         return true;
+      case 'close':
+        commandDraft = null;
+        hideInput();
+        return true;
       case 'closePane':
         if (action.terminalId) actions.closePane(action.terminalId);
         return true;
@@ -4567,16 +4570,86 @@ export function createWorkspaceScene(
         return true;
       case 'grabInput':
         return true;
+      case 'pictureUrl':
+      case 'pictureRecent': {
+        const owner = widgetOwning(hit)?.[1].root;
+        const choices = owner?.getObjectByName('picture-change-choices');
+        if (choices) choices.visible = false;
+        const id = owner?.userData.pictureId;
+        openPicturePanel(
+          action.type === 'pictureUrl' ? 'picture-url' : 'picture-gallery',
+          typeof id === 'string' ? id : pictureTarget,
+        );
+        return true;
+      }
+      case 'pictureChange': {
+        const choices = widgetOwning(hit)?.[1].root.getObjectByName('picture-change-choices');
+        if (choices) choices.visible = !choices.visible;
+        return true;
+      }
+      case 'pictureRecentPage':
+        recentPage += Number(action.delta) || 0;
+        refreshInputRoot('picture-gallery');
+        return true;
+      case 'pictureRecentPlace':
+        placeRecentPicture(String(action.recentId));
+        return true;
+      case 'pictureRecentRemove': {
+        const id = String(action.recentId);
+        const picker = options.pictures;
+        if (!picker) return true;
+        void picker.removeRecent(id).then((removed) => {
+          if (disposed || !inputRoot || inputMode !== 'picture-gallery') return;
+          if (removed && Array.isArray(recentPictures)) {
+            for (const entry of recentPictures)
+              if (entry.id === id) releaseThumbnail(entry.thumbnail);
+            recentPictures = recentPictures.filter((entry) => entry.id !== id);
+            showToast('Removed from Recent.');
+          } else if (!removed) picturePanelMessage = 'Could not remove that picture from Recent';
+          refreshInputRoot('picture-gallery');
+        });
+        return true;
+      }
+      case 'hierarchyNode':
+        if (hierarchyNavigator?.transitioning) return true;
+        hierarchyNavigation = {
+          path: Array.isArray(action.hierarchyPath)
+            ? action.hierarchyPath.filter(
+                (part: unknown): part is string => typeof part === 'string',
+              )
+            : [],
+          page: Number(action.hierarchyPage) || 0,
+        };
+        if (hierarchyNavigator) {
+          hierarchyNavigator.navigate(hierarchyNavigation);
+          hierarchyNavigator.root.userData.transitioning = hierarchyNavigator.transitioning;
+        } else refreshInputRoot('panes');
+        return true;
+      case 'pasteClipboard':
+        if (!renderer?.xr.isPresenting) void pasteClipboard();
+        return true;
+      case 'pasteHostClipboard':
+        void pasteHostClipboard();
+        return true;
       default:
         return false;
     }
   }
-  function sharedLateAction(
-    action: PanelAction,
-    _hit: THREE.Object3D,
-    _ctx: SceneContext,
-  ): boolean {
+  function sharedLateAction(action: PanelAction, hit: THREE.Object3D, _ctx: SceneContext): boolean {
     switch (action.type) {
+      case 'radialAction': {
+        const choice = action.radialAction as RadialMenuAction;
+        radialMenu.close();
+        mutableState.radialOpen = false;
+        if (choice === 'keyboard') toggleKeyboard();
+        else if (choice === 'focus') toggleFocusMode(radialTargetId ?? undefined);
+        else if (choice === 'warp') {
+          if (radialController && activeHand(radialController)) showInput('warp', radialController);
+          else startWarp(radialTargetId, radialController);
+        } else if (choice !== 'cancel') showInput(choice === 'layout' ? 'arrange' : choice);
+        notify();
+        return true;
+      }
       case 'dismissNotice':
         setNotice(null);
         return true;
@@ -4585,6 +4658,9 @@ export function createWorkspaceScene(
         if (typeof id === 'string' && messageToasts.dismiss(id)) options.onToastDismissed?.(id);
         return true;
       }
+      case 'openInput':
+        showInput(action.mode as InputMode);
+        return true;
       case 'reloadUpdate': {
         if (radialMenu.root.visible) {
           radialMenu.close();
@@ -4600,252 +4676,101 @@ export function createWorkspaceScene(
         else actions.exitPreview?.();
         return true;
       }
+      case 'closeWidget': {
+        const kind = widgetOwning(hit)?.[0];
+        if (kind) removeWidget(kind);
+        return true;
+      }
+      case 'widgetControl':
+      case 'readStickyNote':
+        widgetOwning(hit)?.[1].activate?.(hit);
+        return true;
+      case 'grabWidget':
+        return true;
+      case 'createPane':
+        if (hierarchyNavigator?.transitioning) return true;
+        if (!action.createAvailable) {
+          setNotice(
+            typeof action.helpText === 'string'
+              ? action.helpText
+              : 'Terminal creation is unavailable.',
+          );
+          return true;
+        }
+        if (typeof action.sessionId === 'string') actions.createPane?.(action.sessionId);
+        return true;
+      case 'selectAgentPane': {
+        const paneId = action.agentPaneId;
+        if (typeof paneId === 'string' && availablePanes.some((pane) => pane.id === paneId))
+          actions.selectPane(paneId);
+        else setNotice('That agent pane is no longer open');
+        return true;
+      }
+      case 'selectBellPane': {
+        const paneId = action.bellPaneId;
+        if (typeof paneId !== 'string') return true;
+        bellFeed.clearPane(paneId);
+        if (availablePanes.some((pane) => pane.id === paneId)) actions.selectPane(paneId);
+        else setNotice('That bell pane is no longer open');
+        return true;
+      }
+      case 'pane': {
+        if (hierarchyNavigator?.transitioning) return true;
+        const paneId = action.paneId as string;
+        if (availablePanes.some((pane) => pane.id === paneId)) {
+          actions.selectPane(paneId);
+          hideInput();
+        }
+        return true;
+      }
       default:
         return false;
     }
   }
+  /** Package widgets and keys that only set `inputAction` reach here through getAction's adapter. */
   const handleInputTargetAction = (hit: THREE.Object3D): boolean => {
-    const typed = getAction(hit);
-    if (typed) {
-      console.log('[typed-stage]', typed.type, 'inputMode=', inputMode);
-      if (typed.type === 'noop') return false;
-      const ctx = buildContext();
-      if (PANELS[inputMode].handleActionEarly?.(typed, hit, ctx)) return true;
-      if (sharedEarlyAction(typed, hit, ctx)) return true;
-      if (radialMenu.root.visible && !radialMenu.interactive) return true;
-      if (PANELS[inputMode].handleAction?.(typed, hit, ctx)) return true;
-      if (sharedLateAction(typed, hit, ctx)) return true;
-    }
-    const action = typed?.type ?? (hit.userData.inputAction as string | undefined);
-    if (action === 'scrollStrip') return true;
-    if (PANELS[inputMode]?.handleEarly?.(action, hit, buildContext())) return true;
-    if (action === 'handColor') {
-      setHandColor(String(hit.userData.handColor ?? '') || null);
-      return true;
-    }
-    if (action === 'armColor') {
-      setArmColor(String(hit.userData.armColor ?? '') || null);
-      return true;
-    }
-    if (action === 'accentColor') {
-      setAccentColor(String(hit.userData.accentColor ?? '') || null);
-      return true;
-    }
-    if (action === 'environmentAccentColor') {
-      setEnvironmentAccentColor(String(hit.userData.environmentAccentColor ?? '') || null);
-      return true;
-    }
-    if (!action || action === 'noop') return false;
-    if (action === 'close') {
-      commandDraft = null;
-      hideInput();
-      return true;
-    }
-    if (action === 'closePane') {
-      const paneId = hit.userData.terminalId as string | undefined;
-      if (paneId) actions.closePane(paneId);
-      return true;
-    }
-    if (action === 'toggleConnection') {
-      const paneId = hit.userData.terminalId as string | undefined;
-      if (paneId) actions.togglePaneConnection?.(paneId);
-      return true;
-    }
-    if (action === 'bringHere') {
-      const paneId = hit.userData.terminalId as string | undefined;
-      if (paneId) bringTerminalHere(paneId);
-      return true;
-    }
-    if (action === 'keepHere') {
-      keepFocusPlacement();
-      return true;
-    }
-    if (action === 'grabInput') return true;
-    if (action === 'pictureUrl' || action === 'pictureRecent') {
-      const owner = widgetOwning(hit)?.[1].root;
-      const choices = owner?.getObjectByName('picture-change-choices');
-      if (choices) choices.visible = false;
-      const id = owner?.userData.pictureId;
-      openPicturePanel(
-        action === 'pictureUrl' ? 'picture-url' : 'picture-gallery',
-        typeof id === 'string' ? id : pictureTarget,
-      );
-      return true;
-    }
-    if (action === 'pictureChange') {
-      const choices = widgetOwning(hit)?.[1].root.getObjectByName('picture-change-choices');
-      if (choices) choices.visible = !choices.visible;
-      return true;
-    }
-    if (action === 'pictureRecentPage') {
-      recentPage += Number(hit.userData.delta) || 0;
-      refreshInputRoot('picture-gallery');
-      return true;
-    }
-    if (action === 'pictureRecentPlace') {
-      placeRecentPicture(String(hit.userData.recentId));
-      return true;
-    }
-    if (action === 'pictureRecentRemove') {
-      const id = String(hit.userData.recentId);
-      const picker = options.pictures;
-      if (!picker) return true;
-      void picker.removeRecent(id).then((removed) => {
-        if (disposed || !inputRoot || inputMode !== 'picture-gallery') return;
-        if (removed && Array.isArray(recentPictures)) {
-          for (const entry of recentPictures)
-            if (entry.id === id) releaseThumbnail(entry.thumbnail);
-          recentPictures = recentPictures.filter((entry) => entry.id !== id);
-          showToast('Removed from Recent.');
-        } else if (!removed) picturePanelMessage = 'Could not remove that picture from Recent';
-        refreshInputRoot('picture-gallery');
-      });
-      return true;
-    }
-    if (action === 'hierarchyNode') {
-      if (hierarchyNavigator?.transitioning) return true;
-      hierarchyNavigation = {
-        path: Array.isArray(hit.userData.hierarchyPath)
-          ? hit.userData.hierarchyPath.filter(
-              (part: unknown): part is string => typeof part === 'string',
-            )
-          : [],
-        page: Number(hit.userData.hierarchyPage) || 0,
-      };
-      if (hierarchyNavigator) {
-        hierarchyNavigator.navigate(hierarchyNavigation);
-        hierarchyNavigator.root.userData.transitioning = hierarchyNavigator.transitioning;
-      } else refreshInputRoot('panes');
-      return true;
-    }
-    if (action === 'mode') {
-      const mode = hit.userData.mode as 'commands' | 'keyboard';
-      if (renderer?.xr.isPresenting) refreshInputRoot(mode);
-      else showInput(mode);
-      return true;
-    }
-    if (action === 'pasteClipboard') {
-      if (!renderer?.xr.isPresenting) void pasteClipboard();
-      return true;
-    }
-    if (action === 'pasteHostClipboard') {
-      void pasteHostClipboard();
-      return true;
-    }
+    const action = getAction(hit);
+    if (!action || action.type === 'noop') return false;
+    const ctx = buildContext();
+    const panel = PANELS[inputMode];
+    if (panel.handleActionEarly?.(action, hit, ctx)) return true;
+    if (sharedEarlyAction(action, hit, ctx)) return true;
     if (radialMenu.root.visible && !radialMenu.interactive) return true;
-    if (PANELS[inputMode]?.handle?.(action, hit, buildContext())) return true;
-    if (action === 'radialAction') {
-      const choice = hit.userData.radialAction as RadialMenuAction;
-      radialMenu.close();
-      mutableState.radialOpen = false;
-      if (choice === 'keyboard') toggleKeyboard();
-      else if (choice === 'focus') toggleFocusMode(radialTargetId ?? undefined);
-      else if (choice === 'warp') {
-        if (radialController && activeHand(radialController)) showInput('warp', radialController);
-        else startWarp(radialTargetId, radialController);
-      } else if (choice !== 'cancel') showInput(choice === 'layout' ? 'arrange' : choice);
-      notify();
-      return true;
-    }
-    if (action === 'dismissNotice') {
-      setNotice(null);
-      return true;
-    }
-    if (action === 'dismissToast') {
-      const id = hit.userData.toastId;
-      if (typeof id === 'string' && messageToasts.dismiss(id)) options.onToastDismissed?.(id);
-      return true;
-    }
-    if (action === 'openInput') {
-      showInput(hit.userData.mode as InputMode);
-      return true;
-    }
-    if (action === 'exit') {
-      if (!confirmControl('exit')) return true;
-      hideInput();
-      if (activeSession) void activeSession.end();
-      else actions.exitPreview?.();
-      return true;
-    }
-    if (action === 'closeWidget') {
-      const kind = widgetOwning(hit)?.[0];
-      if (kind) removeWidget(kind);
-      return true;
-    }
-    if (action === 'widgetControl' || action === 'readStickyNote') {
-      widgetOwning(hit)?.[1].activate?.(hit);
-      return true;
-    }
-    if (action === 'grabWidget') return true;
-    if (action === 'reloadUpdate') {
-      if (radialMenu.root.visible) {
-        radialMenu.close();
-        mutableState.radialOpen = false;
-      }
-      actions.reloadApp?.();
-      return true;
-    }
-    if (action === 'createPane') {
-      if (hierarchyNavigator?.transitioning) return true;
-      if (!hit.userData.createAvailable) {
-        setNotice(
-          typeof hit.userData.helpText === 'string'
-            ? hit.userData.helpText
-            : 'Terminal creation is unavailable.',
-        );
-        return true;
-      }
-      if (typeof hit.userData.sessionId === 'string') actions.createPane?.(hit.userData.sessionId);
-      return true;
-    }
-    if (action === 'selectAgentPane') {
-      const paneId = hit.userData.agentPaneId;
-      if (typeof paneId === 'string' && availablePanes.some((pane) => pane.id === paneId))
-        actions.selectPane(paneId);
-      else setNotice('That agent pane is no longer open');
-      return true;
-    }
-    if (action === 'selectBellPane') {
-      const paneId = hit.userData.bellPaneId;
-      if (typeof paneId !== 'string') return true;
-      bellFeed.clearPane(paneId);
-      if (availablePanes.some((pane) => pane.id === paneId)) actions.selectPane(paneId);
-      else setNotice('That bell pane is no longer open');
-      return true;
-    }
-    if (action === 'pane') {
-      if (hierarchyNavigator?.transitioning) return true;
-      const paneId = hit.userData.paneId as string;
-      if (availablePanes.some((pane) => pane.id === paneId)) {
-        actions.selectPane(paneId);
-        hideInput();
-      }
-      return true;
-    }
+    if (panel.handleAction?.(action, hit, ctx)) return true;
+    if (sharedLateAction(action, hit, ctx)) return true;
     const paneId = mutableState.inputTargetId;
     if (!paneId) return true;
-    if (action === 'key') {
-      actions.selectPane(paneId);
-      const modifier = hit.userData.modifier as keyof KeyModifiers | undefined;
-      if (modifier) {
-        modifierState.tap(modifier);
-        syncModifierVisuals();
-        setModifierVisual(hit, Boolean(modifierState.active[modifier]));
-        if (modifier === 'shift') refreshInputRoot(inputMode);
-        return true;
+    switch (action.type) {
+      case 'key': {
+        actions.selectPane(paneId);
+        const modifier = action.modifier;
+        if (modifier) {
+          modifierState.tap(modifier);
+          syncModifierVisuals();
+          setModifierVisual(hit, Boolean(modifierState.active[modifier]));
+          if (modifier === 'shift') refreshInputRoot(inputMode);
+          return true;
+        }
+        const modifiers = Object.keys(modifierState.active).length
+          ? { ...modifierState.active }
+          : undefined;
+        actions.sendKey(action.key as string, modifiers);
+        consumeArmedModifiers();
+        if (inputMode === 'keyboard') refreshInputRoot(inputMode);
+        break;
       }
-      const modifiers = Object.keys(modifierState.active).length
-        ? { ...modifierState.active }
-        : undefined;
-      actions.sendKey(hit.userData.key as string, modifiers);
-      consumeArmedModifiers();
-      if (inputMode === 'keyboard') refreshInputRoot(inputMode);
-    } else if (action === 'command') {
-      const command = menuCommands.find((item) => item.id === hit.userData.commandId);
-      if (command) activateCommand(command, paneId, action);
-    } else if (action === 'stripCommand') {
-      const command = stripCommands.find((item) => item.id === hit.userData.commandId);
-      if (command) activateCommand(command, paneId, action);
+      case 'command': {
+        const command = menuCommands.find((item) => item.id === action.commandId);
+        if (command) activateCommand(command, paneId, action.type);
+        break;
+      }
+      case 'stripCommand': {
+        const command = stripCommands.find((item) => item.id === action.commandId);
+        if (command) activateCommand(command, paneId, action.type);
+        break;
+      }
+      default:
+        break;
     }
     return true;
   };

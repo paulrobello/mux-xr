@@ -13,6 +13,7 @@ import {
 } from '../workspace/agent-roster';
 import type { HierarchyStyle } from '../workspace/hierarchy-style';
 import type { PaneCreationState } from '../workspace/pane-create';
+import { type PanelAction, setAction } from './panel-actions';
 
 const PAGE_SIZE = 6;
 const AMBER = '#e4a84a';
@@ -210,7 +211,8 @@ function normalizeNavigation(tree: Node[], navigation: HierarchyNavigation): Hie
   return { path, page };
 }
 
-function setAction(object: THREE.Object3D, data: Record<string, unknown>): void {
+/** Copies a label's whole data bag, typed action included, onto each of its text children. */
+function copyAction(object: THREE.Object3D, data: Record<string, unknown>): void {
   Object.assign(object.userData, data);
 }
 
@@ -406,17 +408,17 @@ export function createHierarchyNavigator(
             ? sharedGeometry('node-session', () => new THREE.DodecahedronGeometry(0.15, 0))
             : sharedGeometry('node-window', () => new THREE.TetrahedronGeometry(0.14, 0));
     const mesh = new THREE.Mesh(geometry, nodeMaterial);
-    const action = node.kind === 'pane' ? 'pane' : 'hierarchyNode';
-    setAction(mesh, {
-      inputAction: action,
+    const nodeAction: PanelAction = {
+      type: node.kind === 'pane' ? 'pane' : 'hierarchyNode',
       hierarchyPath: nextPath,
-      hierarchyPage: action === 'pane' ? undefined : 0,
+      hierarchyPage: node.kind === 'pane' ? undefined : 0,
       helpText:
         node.helpText ??
         `${node.title} · ${node.kind === 'pane' ? 'Open pane' : `Open ${node.kind}`}`,
       originalTitle: node.title,
       ...(node.pane ? { paneId: node.pane.id } : {}),
-    });
+    };
+    setAction(mesh, nodeAction);
     object.add(mesh);
     if (nextPath.length === normalized.path.length + 1) rotatingBodies.push(mesh);
     const label = createScalableLabel(
@@ -439,17 +441,8 @@ export function createHierarchyNavigator(
       }
       child.renderOrder = 30;
     });
-    setAction(label, {
-      inputAction: action,
-      hierarchyPath: nextPath,
-      hierarchyPage: action === 'pane' ? undefined : 0,
-      helpText:
-        node.helpText ??
-        `${node.title} · ${node.kind === 'pane' ? 'Open pane' : `Open ${node.kind}`}`,
-      originalTitle: node.title,
-      ...(node.pane ? { paneId: node.pane.id } : {}),
-    });
-    label.traverse((child) => setAction(child, label.userData));
+    setAction(label, nodeAction);
+    label.traverse((child) => copyAction(child, label.userData));
     object.add(label);
     labels.push(label);
     object.position.copy(position);
@@ -476,7 +469,7 @@ export function createHierarchyNavigator(
     }
     object.userData.hierarchyNode = node.key;
     object.userData.hierarchyPath = nextPath;
-    object.userData.hierarchyPage = action === 'pane' ? undefined : 0;
+    object.userData.hierarchyPage = node.kind === 'pane' ? undefined : 0;
     object.userData.attached = node.pane ? attachedPaneIds.has(node.pane.id) : false;
     root.add(object);
     drawn.push({ node, path, page, object });
@@ -499,35 +492,24 @@ export function createHierarchyNavigator(
         navigationHitMaterial(),
       );
       hitDisc.position.z = -0.001;
-      setAction(hitDisc, {
-        inputAction: 'hierarchyNode',
+      const pageAction: PanelAction = {
+        type: 'hierarchyNode',
         hierarchyPath: path.slice(),
         hierarchyPage: nextPage,
         helpText: 'Change page',
         originalTitle: title,
-      });
+      };
+      setAction(hitDisc, pageAction);
       object.add(hitDisc);
       const mesh = new THREE.Mesh(
         addGeometry(new THREE.TorusGeometry(0.13, 0.025, 8, 20)),
         addMaterial(material(AMBER, 0.92)),
       );
-      setAction(mesh, {
-        inputAction: 'hierarchyNode',
-        hierarchyPath: path.slice(),
-        hierarchyPage: nextPage,
-        helpText: 'Change page',
-        originalTitle: title,
-      });
+      setAction(mesh, pageAction);
       object.add(mesh);
       const label = createScalableLabel(title, 0.4, 0.09, { background: DARK, backplate: false });
-      setAction(label, {
-        inputAction: 'hierarchyNode',
-        hierarchyPath: path.slice(),
-        hierarchyPage: nextPage,
-        helpText: 'Change page',
-        originalTitle: title,
-      });
-      label.traverse((child) => setAction(child, label.userData));
+      setAction(label, pageAction);
+      label.traverse((child) => copyAction(child, label.userData));
       object.add(label);
       labels.push(label);
       object.position.set(
@@ -582,11 +564,11 @@ export function createHierarchyNavigator(
     title: string,
     path: string[],
     position: THREE.Vector3,
-    actionData?: Record<string, unknown>,
+    controlAction?: PanelAction,
     color = AMBER,
   ): void => {
-    const data = actionData ?? {
-      inputAction: 'hierarchyNode',
+    const data: PanelAction = controlAction ?? {
+      type: 'hierarchyNode',
       hierarchyPath: path.slice(),
       hierarchyPage: 0,
       helpText: title,
@@ -599,17 +581,17 @@ export function createHierarchyNavigator(
       navigationHitMaterial(),
     );
     hitDisc.position.z = -0.001;
-    setAction(hitDisc, { ...data });
+    setAction(hitDisc, data);
     control.add(hitDisc);
     const mesh = new THREE.Mesh(
       sharedGeometry('navigation-control', () => new THREE.TorusGeometry(0.1, 0.018, 8, 20)),
       sharedMaterial(color, 0.9),
     );
-    setAction(mesh, { ...data });
+    setAction(mesh, data);
     control.add(mesh);
     const label = createScalableLabel(title, 0.32, 0.08, { background: DARK, backplate: false });
-    setAction(label, { ...data });
-    label.traverse((child) => setAction(child, label.userData));
+    setAction(label, data);
+    label.traverse((child) => copyAction(child, label.userData));
     control.add(label);
     labels.push(label);
     control.position.copy(position);
@@ -687,7 +669,7 @@ export function createHierarchyNavigator(
       normalized.path,
       new THREE.Vector3(1.25, 0.6, 0.12),
       {
-        inputAction: 'createPane',
+        type: 'createPane',
         sessionId: sessionPane.sessionId,
         createAvailable: ready,
         helpText: creation.reason ?? `Create a new default-shell terminal in ${sessionNode.title}`,
@@ -704,7 +686,7 @@ export function createHierarchyNavigator(
       [AGENTS_KEY],
       new THREE.Vector3(1.25, 0.9, 0.12),
       {
-        inputAction: 'hierarchyNode',
+        type: 'hierarchyNode',
         hierarchyPath: [AGENTS_KEY],
         hierarchyPage: 0,
         helpText: attention ? 'An agent needs attention · Open agents' : 'Open agents',

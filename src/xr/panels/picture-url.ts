@@ -1,6 +1,6 @@
-import type { KeyboardModifier } from '@par/xr-workspace';
 import type * as THREE from 'three';
 import { createCommandDraft, editCommandDraft } from '../command-editor';
+import { actionData, type PanelAction } from '../panel-actions';
 import { createLabelButton, setModifierVisual } from '../panel-ui';
 import type { PanelModule, SceneContext } from '../scene-context';
 import { addKeyboardKeysSection } from './keyboard';
@@ -10,10 +10,12 @@ import { addKeyboardKeysSection } from './keyboard';
  */
 export function addPicturePanelMessage(root: THREE.Group, ctx: SceneContext, y: number): void {
   if (!ctx.picturePanelMessage) return;
-  const message = createLabelButton(ctx.picturePanelMessage, 1.5, 0.1, {
-    inputAction: 'noop',
-    wrap: true,
-  });
+  const message = createLabelButton(
+    ctx.picturePanelMessage,
+    1.5,
+    0.1,
+    actionData({ type: 'noop' }, { wrap: true }),
+  );
   message.name = 'xr-picture-message';
   message.position.y = y;
   root.add(message);
@@ -32,7 +34,7 @@ export const pictureUrlPanel: PanelModule = {
       `URL: ${start ? '…' : ''}${value.slice(start, start + 64).join('')}`,
       1.5,
       0.12,
-      { inputAction: 'noop', wrap: true },
+      actionData({ type: 'noop' }, { wrap: true }),
     );
     field.name = 'xr-picture-url-field';
     field.position.y = 0.7;
@@ -40,37 +42,38 @@ export const pictureUrlPanel: PanelModule = {
     root.add(field);
     // Every action sits in one row above the field, so the panel ends at the keyboard's last
     // row and never reaches down over the HUD bar.
-    for (const [label, inputAction, x] of [
+    for (const [label, type, x] of [
       ['Paste', 'pasteClipboard', -1],
       ['Paste host', 'pasteHostClipboard', -0.6],
       [ctx.pictureBusy ? 'Loading…' : 'Load', ctx.pictureBusy ? 'noop' : 'pictureUrlLoad', -0.2],
       ['Clear', 'pictureUrlClear', 0.2],
       ['Recent', 'pictureRecent', 0.6],
     ] as const) {
-      const button = createLabelButton(label, 0.36, 0.12, { inputAction });
+      const button = createLabelButton(label, 0.36, 0.12, actionData({ type } as PanelAction));
       button.position.set(x, 1.04, 0);
       root.add(button);
     }
     addKeyboardKeysSection(root, ctx);
     addPicturePanelMessage(root, ctx, 0.56);
   },
-  handleEarly(action, _hit, ctx) {
-    if (action === 'pictureUrlLoad') {
-      ctx.submitPictureUrl();
-      return true;
+  handleActionEarly(action, _hit, ctx) {
+    switch (action.type) {
+      case 'pictureUrlLoad':
+        ctx.submitPictureUrl();
+        return true;
+      case 'pictureUrlClear':
+        ctx.pictureUrl = { text: '', cursor: 0 };
+        ctx.picturePanelMessage = '';
+        ctx.refreshInputRoot('picture-url');
+        return true;
+      default:
+        return false;
     }
-    if (action === 'pictureUrlClear') {
-      ctx.pictureUrl = { text: '', cursor: 0 };
-      ctx.picturePanelMessage = '';
-      ctx.refreshInputRoot('picture-url');
-      return true;
-    }
-    return false;
   },
-  handle(action, hit, ctx) {
-    if (action !== 'key') return false;
-    const key = String(hit.userData.key);
-    const modifier = hit.userData.modifier as KeyboardModifier | undefined;
+  handleAction(action, _hit, ctx) {
+    if (action.type !== 'key') return false;
+    const key = String(action.key);
+    const modifier = action.modifier;
     if (modifier) ctx.modifierState.tap(modifier);
     else if (key === 'Enter') {
       ctx.submitPictureUrl();

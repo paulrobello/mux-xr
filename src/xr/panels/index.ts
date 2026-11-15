@@ -26,7 +26,7 @@ import { worldPanel } from './world';
 
 /**
  * One XR panel module per `InputMode`. Each module owns its controls (build), the actions only
- * its buttons emit (handleEarly/handle), and its drag-handle title and Close/Back placement.
+ * its buttons emit (handleActionEarly/handleAction), and its drag-handle title and Close/Back placement.
  */
 export const PANELS: Record<InputMode, PanelModule> = {
   accent: accentPanel,

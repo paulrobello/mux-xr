@@ -2,6 +2,7 @@ import type * as THREE from 'three';
 import type { TerminalColorMode } from '../../contracts';
 import { validateHierarchyStyle } from '../../workspace/hierarchy-style';
 import { SCROLL_STRIP_SIDES, type ScrollStripSide } from '../../workspace/window-preferences';
+import { actionData } from '../panel-actions';
 import { createLabelButton, setModifierVisual } from '../panel-ui';
 import type { PanelModule, SceneContext } from '../scene-context';
 
@@ -18,28 +19,32 @@ export const displayPanel: PanelModule = {
         ['Mono', 'monochrome'],
       ] as const
     ).forEach(([label, colorMode], index) => {
-      const button = createLabelButton(label, 0.4, 0.12, {
-        inputAction: 'terminalColors',
-        colorMode,
-      });
+      const button = createLabelButton(
+        label,
+        0.4,
+        0.12,
+        actionData({ type: 'terminalColors', colorMode }),
+      );
       button.position.set((index - 1) * 0.46, 0.4, 0);
       setModifierVisual(button, state.terminalColorMode === colorMode);
       root.add(button);
     });
-    const filteringButton = createLabelButton('Filtering and gaze clarity', 1.3, 0.12, {
-      inputAction: 'openInput',
-      mode: 'filtering',
-    });
+    const filteringButton = createLabelButton(
+      'Filtering and gaze clarity',
+      1.3,
+      0.12,
+      actionData({ type: 'openInput', mode: 'filtering' }),
+    );
     filteringButton.position.y = 0.25;
     root.add(filteringButton);
     const hierarchyStyle = createLabelButton(
       `Mux tree: ${state.hierarchyStyle === 'helix' ? 'Helix Navigator' : 'Spatial Docks'}`,
       1.45,
       0.11,
-      {
-        inputAction: 'hierarchyStyle',
+      actionData({
+        type: 'hierarchyStyle',
         hierarchyStyle: state.hierarchyStyle === 'helix' ? 'spatial-docks' : 'helix',
-      },
+      }),
     );
     hierarchyStyle.position.y = 0.1;
     root.add(hierarchyStyle);
@@ -58,15 +63,16 @@ export const displayPanel: PanelModule = {
     ).entries()) {
       if (preference === 'focusCurvature' && preferences.focusWarpMode === 'inherit') continue;
       const y = -0.04 - index * 0.115;
-      const value = createLabelButton(label, 1.05, 0.1, { inputAction: 'noop' });
+      const value = createLabelButton(label, 1.05, 0.1, actionData({ type: 'noop' }));
       value.position.set(0, y, 0);
       root.add(value);
       for (const direction of [-1, 1]) {
-        const button = createLabelButton(direction < 0 ? '−' : '+', 0.12, 0.1, {
-          inputAction: 'windowPreference',
-          preference,
-          delta: direction * step,
-        });
+        const button = createLabelButton(
+          direction < 0 ? '−' : '+',
+          0.12,
+          0.1,
+          actionData({ type: 'windowPreference', preference, delta: direction * step }),
+        );
         button.position.set(direction * 0.65, y, 0);
         root.add(button);
       }
@@ -77,7 +83,7 @@ export const displayPanel: PanelModule = {
         : 'Focus warp: Custom',
       1.3,
       0.1,
-      { inputAction: 'focusWarpMode' },
+      actionData({ type: 'focusWarpMode' }),
     );
     focusWarpModeButton.position.y = -0.5;
     root.add(focusWarpModeButton);
@@ -86,13 +92,13 @@ export const displayPanel: PanelModule = {
       `Scroll strip: ${stripSide === 'both' ? 'both sides' : stripSide}`,
       1.05,
       0.1,
-      {
-        inputAction: 'scrollStripSide',
+      actionData({
+        type: 'scrollStripSide',
         scrollStripSide:
           SCROLL_STRIP_SIDES[
             (SCROLL_STRIP_SIDES.indexOf(stripSide) + 1) % SCROLL_STRIP_SIDES.length
           ],
-      },
+      }),
     );
     stripSideButton.position.set(0, -0.615, 0);
     root.add(stripSideButton);
@@ -100,64 +106,67 @@ export const displayPanel: PanelModule = {
       `Frame chin: ${preferences.frameChin ? 'on' : 'off'}`,
       1.05,
       0.1,
-      { inputAction: 'frameChin' },
+      actionData({ type: 'frameChin' }),
     );
     frameChinButton.position.set(0, -0.73, 0);
     root.add(frameChinButton);
   },
-  handleEarly(action, hit, ctx) {
-    if (action === 'hierarchyStyle') {
-      ctx.setHierarchyStyle(validateHierarchyStyle(hit.userData.hierarchyStyle));
-      return true;
+  handleActionEarly(action, _hit, ctx) {
+    switch (action.type) {
+      case 'hierarchyStyle':
+        ctx.setHierarchyStyle(validateHierarchyStyle(action.hierarchyStyle));
+        return true;
+      default:
+        return false;
     }
-    return false;
   },
-  handle(action, hit, ctx) {
-    if (action === 'windowPreference') {
-      const preference = hit.userData.preference as
-        | 'defaultOpacity'
-        | 'defaultCurvature'
-        | 'focusDistance'
-        | 'focusCurvature';
-      if (
-        ['defaultOpacity', 'defaultCurvature', 'focusDistance', 'focusCurvature'].includes(
-          preference,
+  handleAction(action, _hit, ctx) {
+    switch (action.type) {
+      case 'windowPreference': {
+        const preference = action.preference as
+          | 'defaultOpacity'
+          | 'defaultCurvature'
+          | 'focusDistance'
+          | 'focusCurvature';
+        if (
+          ['defaultOpacity', 'defaultCurvature', 'focusDistance', 'focusCurvature'].includes(
+            preference,
+          )
         )
-      )
+          ctx.setWindowPreferences({
+            ...ctx.mutableState.windowPreferences,
+            [preference]: ctx.mutableState.windowPreferences[preference] + Number(action.delta),
+          });
+        return true;
+      }
+      case 'focusWarpMode': {
+        const preferences = ctx.mutableState.windowPreferences;
+        ctx.setWindowPreferences({
+          ...preferences,
+          focusWarpMode: preferences.focusWarpMode === 'custom' ? 'inherit' : 'custom',
+        });
+        return true;
+      }
+      case 'scrollStripSide':
         ctx.setWindowPreferences({
           ...ctx.mutableState.windowPreferences,
-          [preference]: ctx.mutableState.windowPreferences[preference] + Number(hit.userData.delta),
+          scrollStripSide: action.scrollStripSide as ScrollStripSide,
         });
-      return true;
+        return true;
+      case 'frameChin':
+        ctx.setWindowPreferences({
+          ...ctx.mutableState.windowPreferences,
+          frameChin: !ctx.mutableState.windowPreferences.frameChin,
+        });
+        return true;
+      case 'terminalColors': {
+        const mode = action.colorMode as TerminalColorMode;
+        ctx.actions.setTerminalColorMode?.(mode);
+        ctx.setTerminalColorMode(mode);
+        return true;
+      }
+      default:
+        return false;
     }
-    if (action === 'focusWarpMode') {
-      const preferences = ctx.mutableState.windowPreferences;
-      ctx.setWindowPreferences({
-        ...preferences,
-        focusWarpMode: preferences.focusWarpMode === 'custom' ? 'inherit' : 'custom',
-      });
-      return true;
-    }
-    if (action === 'scrollStripSide') {
-      ctx.setWindowPreferences({
-        ...ctx.mutableState.windowPreferences,
-        scrollStripSide: hit.userData.scrollStripSide as ScrollStripSide,
-      });
-      return true;
-    }
-    if (action === 'frameChin') {
-      ctx.setWindowPreferences({
-        ...ctx.mutableState.windowPreferences,
-        frameChin: !ctx.mutableState.windowPreferences.frameChin,
-      });
-      return true;
-    }
-    if (action === 'terminalColors') {
-      const mode = hit.userData.colorMode as TerminalColorMode;
-      ctx.actions.setTerminalColorMode?.(mode);
-      ctx.setTerminalColorMode(mode);
-      return true;
-    }
-    return false;
   },
 };

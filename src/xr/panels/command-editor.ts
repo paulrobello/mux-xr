@@ -1,6 +1,6 @@
 import type * as THREE from 'three';
-import type { KeyModifiers } from '../../contracts';
 import { commandFromDraft, editCommandDraft } from '../command-editor';
+import { actionData } from '../panel-actions';
 import { createLabelButton, setModifierVisual } from '../panel-ui';
 import type { PanelModule, SceneContext } from '../scene-context';
 import { addKeyboardKeysSection } from './keyboard';
@@ -26,68 +26,82 @@ export const commandEditorPanel: PanelModule = {
         `${field === 'label' ? 'Name' : 'Command'}: ${start ? '…' : ''}${value.slice(start, start + 56).join('')}`,
         1.5,
         0.1,
-        { inputAction: 'commandField', field, wrap: true },
+        actionData({ type: 'commandField', field }, { wrap: true }),
       );
       button.position.y = y;
       setModifierVisual(button, active);
       root.add(button);
     }
-    const scope = createLabelButton(draft.scope === 'global' ? 'Global' : 'Workspace', 0.5, 0.09, {
-      inputAction: 'commandScope',
-    });
+    const scope = createLabelButton(
+      draft.scope === 'global' ? 'Global' : 'Workspace',
+      0.5,
+      0.09,
+      actionData({ type: 'commandScope' }),
+    );
     scope.position.set(-0.55, 1.04, 0);
-    const enter = createLabelButton(`Enter: ${draft.sendNewline ? 'on' : 'off'}`, 0.5, 0.09, {
-      inputAction: 'commandNewline',
-    });
+    const enter = createLabelButton(
+      `Enter: ${draft.sendNewline ? 'on' : 'off'}`,
+      0.5,
+      0.09,
+      actionData({ type: 'commandNewline' }),
+    );
     enter.position.set(0, 1.04, 0);
-    const save = createLabelButton('Save', 0.4, 0.09, { inputAction: 'commandSave' });
+    const save = createLabelButton('Save', 0.4, 0.09, actionData({ type: 'commandSave' }));
     save.position.set(0.55, 1.04, 0);
-    const clear = createLabelButton('Clear field', 0.45, 0.09, { inputAction: 'commandClear' });
+    const clear = createLabelButton(
+      'Clear field',
+      0.45,
+      0.09,
+      actionData({ type: 'commandClear' }),
+    );
     clear.position.set(-0.28, -0.53, 0);
-    const cancel = createLabelButton('Cancel', 0.4, 0.09, { inputAction: 'commandCancel' });
+    const cancel = createLabelButton('Cancel', 0.4, 0.09, actionData({ type: 'commandCancel' }));
     cancel.position.set(0.28, -0.53, 0);
     const confirm = createLabelButton(
       `Confirm before running: ${draft.confirm ? 'on' : 'off'}`,
       0.9,
       0.09,
-      { inputAction: 'commandConfirm' },
+      actionData({ type: 'commandConfirm' }),
     );
     confirm.position.set(0, 1.18, 0);
     root.add(scope, enter, save, clear, cancel, confirm);
     addKeyboardKeysSection(root, ctx);
   },
-  handleEarly(action, hit, ctx) {
-    if (action === 'commandCancel') {
+  handleActionEarly(action, _hit, ctx) {
+    if (action.type === 'commandCancel') {
       ctx.commandDraft = null;
       ctx.commandEditorMessage = '';
       ctx.refreshInputRoot('commands');
       return true;
     }
     const draft = ctx.commandDraft;
-    if (
-      draft &&
-      [
-        'commandField',
-        'commandScope',
-        'commandNewline',
-        'commandConfirm',
-        'commandClear',
-        'commandSave',
-      ].includes(action ?? '')
-    ) {
-      ctx.commandEditorMessage = '';
-      if (action === 'commandField') {
-        draft.field = hit.userData.field as 'label' | 'text';
+    if (!draft) return false;
+    switch (action.type) {
+      case 'commandField':
+        ctx.commandEditorMessage = '';
+        draft.field = action.field as 'label' | 'text';
         draft.cursor = Array.from(draft[draft.field]).length;
-      } else if (action === 'commandScope') {
+        break;
+      case 'commandScope':
+        ctx.commandEditorMessage = '';
         if (ctx.commandWorkspaceId) draft.scope = draft.scope === 'global' ? 'workspace' : 'global';
         else ctx.commandEditorMessage = 'Select a pane for workspace scope';
-      } else if (action === 'commandNewline') draft.sendNewline = !draft.sendNewline;
-      else if (action === 'commandConfirm') draft.confirm = !draft.confirm;
-      else if (action === 'commandClear') {
+        break;
+      case 'commandNewline':
+        ctx.commandEditorMessage = '';
+        draft.sendNewline = !draft.sendNewline;
+        break;
+      case 'commandConfirm':
+        ctx.commandEditorMessage = '';
+        draft.confirm = !draft.confirm;
+        break;
+      case 'commandClear':
+        ctx.commandEditorMessage = '';
         draft[draft.field] = '';
         draft.cursor = 0;
-      } else {
+        break;
+      case 'commandSave': {
+        ctx.commandEditorMessage = '';
         const command = commandFromDraft(draft, ctx.commandWorkspaceId);
         if (!command) ctx.commandEditorMessage = 'Enter a name and command';
         else if (!ctx.actions.saveCommand?.(command))
@@ -99,21 +113,22 @@ export const commandEditorPanel: PanelModule = {
           ctx.refreshInputRoot('commands');
           return true;
         }
+        break;
       }
-      ctx.clearArmedModifiers();
-      ctx.refreshInputRoot('command-editor');
-      return true;
+      default:
+        return false;
     }
-    return false;
+    ctx.clearArmedModifiers();
+    ctx.refreshInputRoot('command-editor');
+    return true;
   },
-  handle(action, hit, ctx) {
-    if (action !== 'key' || !ctx.commandDraft) return false;
-    const modifier = hit.userData.modifier as keyof KeyModifiers | undefined;
-    if (modifier) ctx.modifierState.tap(modifier);
+  handleAction(action, _hit, ctx) {
+    if (action.type !== 'key' || !ctx.commandDraft) return false;
+    if (action.modifier) ctx.modifierState.tap(action.modifier);
     else {
       ctx.commandDraft = editCommandDraft(
         ctx.commandDraft,
-        hit.userData.key as string,
+        action.key as string,
         ctx.modifierState.active,
       );
       ctx.consumeArmedModifiers();
