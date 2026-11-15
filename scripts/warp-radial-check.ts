@@ -137,11 +137,11 @@ async function clickXR(page: Page): Promise<void> {
 }
 async function injectRadialFactory(root: string): Promise<void> {
   const source = join(root, 'quest-main.ts');
-  const radial = resolve('src/xr/radial-prototype.ts');
+  const radial = resolve('scripts/lib/radial-prototype.ts');
   const existing = await readFile(source, 'utf8');
   await writeFile(
     source,
-    `${existing}\nimport { createRadialPrototype } from ${JSON.stringify(radial)};\nimport {waitForLabelSync} from ${JSON.stringify(resolve('src/xr/labels.ts'))};\nObject.assign(window, { __radialFactory: createRadialPrototype, __radialSync:waitForLabelSync, __designScene: scene, __designSurfaces: surfaces });\n`,
+    `${existing}\nimport { createRadialPrototype } from ${JSON.stringify(radial)};\nimport {waitForLabelSync} from ${JSON.stringify(resolve('packages/xr-workspace/src/labels.ts'))};\nObject.assign(window, { __radialFactory: createRadialPrototype, __radialSync:waitForLabelSync, __designScene: scene, __designSurfaces: surfaces });\n`,
   );
   execFileSync('bun', ['build', source, '--target', 'browser', '--outdir', root], {
     stdio: 'inherit',
