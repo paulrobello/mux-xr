@@ -1,8 +1,8 @@
 # Radial menu prototype notes
 
 These notes record the initial visual comparison. The tinted ring was selected
-and implemented. The current runtime has seven direct items: Keyboard, Commands,
-Panes, Layout, Warp, Widgets and Settings. See [current controls](../README.md#spatial-controls).
+and implemented. The current runtime has eight direct items: Keyboard, Commands,
+Panes, Layout, Warp, Widgets, Settings and Focus. See [current controls](../README.md#spatial-controls).
 
 ## Actions
 

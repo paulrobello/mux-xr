@@ -17,6 +17,6 @@ Run `make checkall`, `make checkall-ci`, `make e2e` and the isolated `make hand-
 
 - Index-to-thumb pinch uses the runtime's select events for ray selection, commands and virtual keys.
 - Middle-to-thumb pinch grabs the aimed surface using the tracked wrist pose. Two hands share the existing scale/rotation/translation behavior.
-- The HUD Menu control provides radial access without controller buttons.
+- The HUD Menu control provides radial access without controller buttons. (The shipped radial has eight items, and the Menu button now sits on the wrist watch.)
 - Missing hand or required joint poses cancel in-flight actions. Reacquisition requires neutral pinches before accepting new input.
 - Controller input remains the fallback. Physical Quest hand comfort, occlusion recovery and keyboard precision remain separate acceptance checks.
