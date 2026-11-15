@@ -1,5 +1,6 @@
 import { webcrypto } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import {
   createServer,
   request as httpRequest,
@@ -7,7 +8,9 @@ import {
   type Server,
   type ServerResponse,
 } from 'node:http';
-import { afterEach, describe, expect, it } from 'vitest';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import type { HostClipboardSocket } from '../src/host-clipboard';
 import { createToastSubscription, type ToastSubscriptionState } from '../src/host-toasts';
@@ -28,11 +31,13 @@ const ORIGIN = 'https://allowed.test';
 const enabled = (): ClipboardSecret => ({ enabled: true, key: Buffer.from(PAIRING) });
 
 const servers: Array<{ server: Server; close: () => Promise<void> }> = [];
-const start = async (options: { loadSecret?: () => ClipboardSecret } = {}) => {
+const start = async (
+  options: { loadSecret?: () => ClipboardSecret; toastTokenPath?: string } = {},
+) => {
   const events: ToastEvent[] = [];
   let attached: ReturnType<typeof attachHostService> | undefined;
   const server = createServer((request, response) => {
-    if (attached?.handleRequest(request, response)) return;
+    if (attached?.handleRequest(request, response) ?? false) return;
     response.writeHead(404);
     response.end();
   });
@@ -41,7 +46,11 @@ const start = async (options: { loadSecret?: () => ClipboardSecret } = {}) => {
     allowedOrigins: [ORIGIN],
     transcribe: async () => 'unused',
     clipboard: { loadSecret: options.loadSecret ?? enabled },
-    toasts: { onEvent: (event) => events.push(event), makeId: () => `t${++next}` },
+    toasts: {
+      onEvent: (event) => events.push(event),
+      makeId: () => `t${++next}`,
+      toastTokenPath: options.toastTokenPath,
+    },
   });
   servers.push({ server, close: attached.close });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -321,5 +330,64 @@ describe('toast sender checks', () => {
     const hub = createToastHub({ allowedOrigins: [ORIGIN], loadSecret: enabled });
     const other = Object.assign(fakeRequest('127.0.0.1'), { url: '/health' });
     expect(hub.handleRequest(other, fakeResponse().response)).toBe(false);
+  });
+});
+
+describe('toast sender token (SEC-004)', () => {
+  let directory = '';
+  let tokenPath = '';
+  let weakPath = '';
+
+  const writeToken = async (path: string, mode: number): Promise<void> => {
+    await writeFile(path, 'a-real-test-toast-token-value-0000000000001\n', { mode });
+  };
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), 'mux-xr-toast-token-'));
+    tokenPath = join(directory, 'toast-token');
+    weakPath = join(directory, 'weak-token');
+    await writeToken(tokenPath, 0o600);
+    await writeToken(weakPath, 0o640);
+  });
+
+  afterAll(async () => {
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('accepts only the toast token once one is configured', async () => {
+    const { port } = await start({ toastTokenPath: tokenPath });
+    const withToken = await post(port, JSON.stringify({ message: 'hello' }), {
+      authorization: `Bearer a-real-test-toast-token-value-0000000000001`,
+      'content-type': 'application/json',
+    });
+    expect(withToken.status).toBe(202);
+    const withPairing = await post(port, JSON.stringify({ message: 'hello' }), {
+      authorization: `Bearer ${PAIRING}`,
+      'content-type': 'application/json',
+    });
+    expect(withPairing.status).toBe(401);
+  });
+
+  it('falls back to the pairing secret when the token file fails its checks', async () => {
+    const { port } = await start({ toastTokenPath: weakPath });
+    const withPairing = await post(port, JSON.stringify({ message: 'hello' }), {
+      authorization: `Bearer ${PAIRING}`,
+      'content-type': 'application/json',
+    });
+    expect(withPairing.status).toBe(202);
+    const withToken = await post(port, JSON.stringify({ message: 'hello' }), {
+      authorization: `Bearer a-real-test-toast-token-value-0000000000001`,
+      'content-type': 'application/json',
+    });
+    expect(withToken.status).toBe(401);
+  });
+
+  it('rejects an empty bearer before any comparison', async () => {
+    const { port } = await start({ toastTokenPath: tokenPath });
+    const empty = await post(port, JSON.stringify({ message: 'hello' }), {
+      authorization: 'Bearer ',
+      'content-type': 'application/json',
+    });
+    expect(empty.status).toBe(401);
   });
 });

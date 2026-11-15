@@ -7,6 +7,7 @@ import { createOnnxDepthEstimator } from '../src/server/depth-estimator';
 import { readHostConfig } from '../src/server/dictation-launchd';
 import { createDictationTelemetry } from '../src/server/dictation-telemetry';
 import { attachHostService } from '../src/server/host-service';
+import { loadToastToken } from '../src/server/toast-server';
 
 const required = (args: Map<string, string>, name: string): string => {
   const value = args.get(name);
@@ -111,6 +112,15 @@ const toastLanFlag = parsed.get('--toast-lan') ?? 'off';
 if (toastLanFlag !== 'on' && toastLanFlag !== 'off')
   throw new Error('--toast-lan takes on or off.');
 console.log(`Toast senders: ${toastLanFlag === 'on' ? 'this Mac and the LAN' : 'this Mac only'}.`);
+const toastTokenFile = parsed.get('--toast-token-file');
+const toastTokenAtStart = loadToastToken(toastTokenFile);
+console.log(
+  toastTokenFile
+    ? toastTokenAtStart
+      ? 'Toast senders use the dedicated toast token.'
+      : 'Toast token file failed its checks; senders fall back to the pairing secret.'
+    : 'Toast senders use the pairing secret.',
+);
 const clipboardAtStart = loadClipboardSecret(clipboardSecretFile);
 console.log(
   clipboardAtStart.enabled
@@ -181,6 +191,7 @@ const attached = attachHostService(server, {
   // Levels, counts and refusal codes only: toast text never reaches the log.
   toasts: {
     allowRemoteSenders: toastLanFlag === 'on',
+    toastTokenPath: toastTokenFile,
     onEvent: (event) =>
       console.log(
         event.kind === 'toast'

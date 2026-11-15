@@ -167,7 +167,10 @@ export type DictationServerOptions = {
    * Toasts: senders POST `/toast` with the pairing secret as a bearer token, and paired headsets
    * receive them on `/toasts`. Only this Mac may send unless `allowRemoteSenders`.
    */
-  toasts?: Pick<ToastHubOptions, 'allowRemoteSenders' | 'onEvent' | 'pingIntervalMs' | 'makeId'>;
+  toasts?: Pick<
+    ToastHubOptions,
+    'allowRemoteSenders' | 'onEvent' | 'pingIntervalMs' | 'makeId' | 'toastTokenPath'
+  >;
   telemetry?: Pick<
     DictationTelemetry,
     'connected' | 'disconnected' | 'rejected' | 'beginTranscription'

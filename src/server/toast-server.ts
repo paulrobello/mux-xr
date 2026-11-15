@@ -12,6 +12,8 @@ import {
   type ClipboardSecret,
   createFailureLimiter,
   type FailureLimiter,
+  openSecretFile,
+  type SecretFile,
 } from './clipboard-server';
 import { createRequestLimiter, type RequestLimiter } from './host-stats-server';
 import { bearerMatches, clientKey, createPairedRoute, pairedHmac } from './paired-route';
@@ -34,6 +36,34 @@ const MAX_SUBSCRIBERS_PER_CLIENT = 4;
 const MAX_MESSAGE_BYTES = 1024;
 /** Toasts kept for headsets that connect later, such as after a reload. */
 const REPLAY_LIMIT = 16;
+const MAX_TOKEN_FILE_BYTES = 4096;
+const MIN_TOKEN_CHARS = 32;
+
+export type LoadedToastToken = { enabled: true; key: Buffer } | undefined;
+
+/**
+ * Loads the optional toast-sender token from a file the user created; never creates one. The same
+ * checks as the pairing secret (no final symlink, regular file, mode 600, owner uid, size cap,
+ * minimum length); any failure degrades to not configured, so senders fall back to the pairing
+ * secret exactly as they do when the flag is absent.
+ */
+export const loadToastToken = (path: string | undefined): LoadedToastToken => {
+  if (!path) return undefined;
+  let file: SecretFile;
+  try {
+    file = openSecretFile(path, MAX_TOKEN_FILE_BYTES);
+  } catch {
+    return undefined;
+  }
+  if (!file.isFile) return undefined;
+  if ((file.mode & 0o077) !== 0) return undefined;
+  const uid = process.getuid?.();
+  if (uid !== undefined && file.uid !== uid) return undefined;
+  if (file.truncated) return undefined;
+  const token = file.data.toString('utf8').trim();
+  if ([...token].length < MIN_TOKEN_CHARS) return undefined;
+  return { enabled: true, key: Buffer.from(token, 'utf8') };
+};
 
 export type ToastEvent =
   | { kind: 'toast'; level: Toast['level']; delivered: number }
@@ -55,6 +85,12 @@ export type ToastHubOptions = {
   allowedOrigins: string[];
   /** The clipboard pairing secret, reread per request and per subscription. */
   loadSecret: () => ClipboardSecret;
+  /**
+   * Path to the optional toast-sender token file, reread per request so a fix applies without a
+   * restart. When a valid token is configured it is the only accepted bearer; otherwise senders
+   * keep using the pairing secret.
+   */
+  toastTokenPath?: string;
   /** Accept senders from other LAN hosts, not only this Mac. They still need the secret. */
   allowRemoteSenders?: boolean;
   limiter?: FailureLimiter;
@@ -176,13 +212,23 @@ export const createToastHub = (options: ToastHubOptions): ToastHub => {
       return true;
     }
     const secret = options.loadSecret();
-    if (!secret.enabled) {
-      refuse(response, 503, 'disabled', `Toasts need the pairing secret: ${secret.reason}.`);
+    const token = loadToastToken(options.toastTokenPath);
+    // A valid toast token is the only accepted bearer; the pairing secret is the fallback.
+    const credential: ClipboardSecret = token?.enabled ? token : secret;
+    if (!credential.enabled) {
+      refuse(response, 503, 'disabled', `Toasts need the pairing secret: ${credential.reason}.`);
       return true;
     }
-    if (!bearerMatches(request.headers.authorization, secret.key)) {
+    if (!bearerMatches(request.headers.authorization, credential.key)) {
       limiter.fail(ip);
-      refuse(response, 401, 'auth', 'Send Authorization: Bearer <pairing secret>.');
+      refuse(
+        response,
+        401,
+        'auth',
+        token?.enabled
+          ? 'Send Authorization: Bearer <toast token>.'
+          : 'Send Authorization: Bearer <pairing secret>.',
+      );
       return true;
     }
     if (!/^application\/json\b/i.test(request.headers['content-type'] ?? '')) {
