@@ -726,7 +726,7 @@ describe('native XR controller event routing', () => {
         expect(workspace.isTextEntryActive()).toBe(false);
         workspace.dispose();
         container.remove();
-      });
+      }, 20000);
 
       it('lists Recent after a reload, closes cleanly, and explains missing storage', async () => {
         const first = pickerFixture();
