@@ -2,6 +2,30 @@
 
 Use this guide for real par-mux panes and the optional macOS companion service. The [README](../README.md) has a streamer-free demo quick start.
 
+## Table of contents
+
+- [Serve the built app](#serve-the-built-app)
+- [Quest and LAN HTTPS](#quest-and-lan-https)
+- [Local host configuration](#local-host-configuration)
+- [Local Whisper dictation](#local-whisper-dictation)
+  - [Telemetry](#telemetry)
+- [Host clipboard sync](#host-clipboard-sync)
+  - [Pairing and request limits](#pairing-and-request-limits)
+- [Configuration reference](#configuration-reference)
+  - [Host service flags](#host-service-flags)
+  - [Installer flags](#installer-flags)
+  - [Local host configuration keys](#local-host-configuration-keys)
+  - [Page and tooling settings](#page-and-tooling-settings)
+- [Optional host routes](#optional-host-routes)
+  - [Git and CI route](#git-and-ci-route)
+  - [Toasts from other programs](#toasts-from-other-programs)
+  - [Picture proxy](#picture-proxy)
+- [Route reference](#route-reference)
+  - [Paired WebSocket handshake](#paired-websocket-handshake)
+  - [Routes](#routes)
+  - [Plain HTTP routes](#plain-http-routes)
+- [Troubleshooting](#troubleshooting)
+
 ## Serve the built app
 
 Use a mux-enabled par-term-streamer and an existing par-mux daemon. Full hierarchy browsing needs the metadata WebSocket at `/ws?metadata=1` and the core tree request and snapshot messages. The plain streamer binary lacks mux support. [core-release.json](../core-release.json) pins core 0.81.0. The official macOS ARM64 streamer at that pin was qualified against a private par-mux 0.80.0 daemon. See the [core 0.81 review](core-0.81-review.md) for artifact hashes, compatibility, and verification.
@@ -56,7 +80,9 @@ Whisper OpenTelemetry loads optional `.local/whisper-otel.env` (mode 600), or st
 
 ## Host clipboard sync
 
-**Host → Quest** and **Quest → Host** (browser keyboard drawer, beside **Paste**) copy text between the Mac clipboard and the Quest browser clipboard. In XR, the keyboard panel adds **Paste host**, which types the Mac clipboard into the selected connected terminal through the same bracketed paste path and guards as **Paste**, and **Copy to host**, which sends the Quest clipboard, or text highlighted in Mux XR, to the Mac. Every transfer is one explicit request. Nothing polls or syncs in the background, and terminal OSC 52 copies are not forwarded to the host. If the Quest browser refuses a clipboard write (it needs focus, and often fails in an immersive session), the host text stays available to the very next **Paste** for up to 60 seconds and a toast says so. After that, Paste reads the Quest clipboard again. **Copy to host** never sends that kept host text back. A second **Paste host** press while one is still loading is ignored.
+**Host → Quest** and **Quest → Host** (browser keyboard drawer, beside **Paste**) copy text between the Mac clipboard and the Quest browser clipboard. In XR, the keyboard panel adds **Paste host**, which types the Mac clipboard into the selected connected terminal through the same bracketed paste path and guards as **Paste**, and **Copy to host**, which sends the Quest clipboard, or text highlighted in Mux XR, to the Mac.
+
+Every transfer is one explicit request. Nothing polls or syncs in the background, and terminal OSC 52 copies are not forwarded to the host. If the Quest browser refuses a clipboard write (it needs focus, and often fails in an immersive session), the host text stays available to the very next **Paste** for up to 60 seconds and a toast says so. After that, Paste reads the Quest clipboard again. **Copy to host** never sends that kept host text back. A second **Paste host** press while one is still loading is ignored.
 
 Transfers use the dictation server on port 4242 at `/clipboard` and are off until you pair them:
 
@@ -167,9 +193,13 @@ For picture depth, `bun run scripts/fetch-depth-model.ts` installs the pinned De
 
 ### Git and CI route
 
-The pairing secret gates `/repo-status`, the route behind the Git & CI widget, but only when the dictation server also runs with `--repo-status on` (the LaunchAgent installer adds it for `--agent --repo-status`). The route is off by default, so pairing the host clipboard alone never lets a client run commands on the Mac. The client proves the secret with an HMAC-SHA256 over a separate protocol label, the nonce, the pane's OSC 7 host name and the requested directory, so a proof is bound to one host and directory and cannot be replayed against `/clipboard`. An absent host, `localhost` and this Mac's full or short host name in any case count as local. Any other host answers `remote` without running anything. The server resolves the directory with `realpath` and answers only when the directory, the repo root, its git directory and its common git directory all resolve inside the home directory of the user it runs as. Missing paths, paths outside home and non-repos all answer `not-a-repo`, so the answer does not say whether a path exists (response timing still can, to a client holding the secret). It never runs `git status`.
+The pairing secret gates `/repo-status`, the route behind the Git & CI widget, but only when the dictation server also runs with `--repo-status on` (the LaunchAgent installer adds it for `--agent --repo-status`). The route is off by default, so pairing the host clipboard alone never lets a client run commands on the Mac. The client proves the secret with an HMAC-SHA256 over a separate protocol label, the nonce, the pane's OSC 7 host name and the requested directory, so a proof is bound to one host and directory and cannot be replayed against `/clipboard`.
 
-Every git command starts with `git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c safe.bareRepository=explicit -c protocol.allow=never --no-optional-locks -C <dir>`, with the same four settings repeated through `GIT_CONFIG_COUNT` and `GIT_CEILING_DIRECTORIES` set to the parent of home. The git commands are `rev-parse --show-toplevel --absolute-git-dir --git-common-dir`, `symbolic-ref -q --short HEAD`, `for-each-ref --format=%(upstream:short)%00%(upstream:track) refs/heads/<branch>`, `diff-index --cached --quiet HEAD --`, `ls-files --others --exclude-standard --directory` (output capped at one byte) and `config --get remote.origin.url`. None of them reads tracked file content, so the repo's own filter drivers never run. When origin is a GitHub URL with a valid `owner/repo`, the server also runs `gh run list -R <owner/repo> --limit 1 --json conclusion,status,headBranch,workflowName,createdAt --branch=<branch>` from `/`. Otherwise CI reads unknown and `gh` does not run. Each command runs without a shell, with a fixed environment, an output cap and a timeout (3 seconds for git, 4 for `gh`), in its own process group, which is killed on timeout. The requested directory is only ever the `-C` argument.
+An absent host, `localhost` and this Mac's full or short host name in any case count as local. Any other host answers `remote` without running anything. The server resolves the directory with `realpath` and answers only when the directory, the repo root, its git directory and its common git directory all resolve inside the home directory of the user it runs as. Missing paths, paths outside home and non-repos all answer `not-a-repo`, so the answer does not say whether a path exists (response timing still can, to a client holding the secret). It never runs `git status`.
+
+Every git command starts with `git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c safe.bareRepository=explicit -c protocol.allow=never --no-optional-locks -C <dir>`, with the same four settings repeated through `GIT_CONFIG_COUNT` and `GIT_CEILING_DIRECTORIES` set to the parent of home. The git commands are `rev-parse --show-toplevel --absolute-git-dir --git-common-dir`, `symbolic-ref -q --short HEAD`, `for-each-ref --format=%(upstream:short)%00%(upstream:track) refs/heads/<branch>`, `diff-index --cached --quiet HEAD --`, `ls-files --others --exclude-standard --directory` (output capped at one byte) and `config --get remote.origin.url`. None of them reads tracked file content, so the repo's own filter drivers never run.
+
+When origin is a GitHub URL with a valid `owner/repo`, the server also runs `gh run list -R <owner/repo> --limit 1 --json conclusion,status,headBranch,workflowName,createdAt --branch=<branch>` from `/`. Otherwise CI reads unknown and `gh` does not run. Each command runs without a shell, with a fixed environment, an output cap and a timeout (3 seconds for git, 4 for `gh`), in its own process group, which is killed on timeout. The requested directory is only ever the `-C` argument.
 
 Answers carry the repo folder name, the branch, the ahead/behind counts, the dirty flag and the CI conclusion, status, workflow name and start time, never file names, remote URLs or the full path. Each client may make 30 authenticated requests a minute and hold 2 unauthenticated connections. Failed proofs on either route count toward one shared five-per-minute block, and at most 8 connections are open at once. Git probes run one at a time and a queued probe whose connection has closed is skipped, while `gh` runs outside that queue.
 
@@ -212,7 +242,11 @@ The JSON body takes these fields:
 
 The reply is `202 {"id": "...", "delivered": N}`, where `N` is the number of subscribed headsets. Refusals carry `{"error": "..."}`: 400 for an invalid field (the message names it), 401 for a missing or wrong bearer token, 403 for a browser request (any `Origin` header) or a LAN sender without `--toast-lan on`, 405 for anything but POST, 413 over 4 KiB, 415 without `Content-Type: application/json`, 429 after five failed tokens a minute (shared with the other routes) or 120 toasts a minute from one client, and 503 while no pairing secret is set.
 
-Security: senders present the host clipboard pairing secret as `Authorization: Bearer <secret>`. The comparison is constant-time. By default only this Mac may send (loopback addresses). Installing the LaunchAgent with `--toast-lan` (`bun run scripts/install-dictation-service.ts --install --agent --toast-lan`) also accepts LAN senders that present the secret over HTTPS. Browser pages are refused outright, so a web page cannot post toasts. To stop a toast-only sender from holding the clipboard-capable pairing secret, start the server with `--toast-token-file <path>` (create the file yourself, mode 600, at least 32 characters — the server never creates it): a valid token is then the only accepted bearer and the pairing secret is rejected. Without the flag, or while the token file is missing or fails its checks, senders fall back to the pairing secret exactly as before, and `scripts/send-toast.ts --token-file <path>` sends the token instead of the pairing secret. Headsets subscribe with the same HMAC challenge-response as the other routes under their own protocol string (`mux-xr-toasts-v1`), so a proof for one route never passes another. At most 8 subscriptions are open, 4 per client, with a ping every 25 seconds. Control and bidi-override characters are stripped from all text. The server log records levels, delivery counts and refusal codes, never message text or the secret. `bun run scripts/toast-shots.ts` renders every level and placement to `/tmp/xr-toast-shots`.
+Security: senders present the host clipboard pairing secret as `Authorization: Bearer <secret>`. The comparison is constant-time. By default only this Mac may send (loopback addresses). Installing the LaunchAgent with `--toast-lan` (`bun run scripts/install-dictation-service.ts --install --agent --toast-lan`) also accepts LAN senders that present the secret over HTTPS.
+
+Browser pages are refused outright, so a web page cannot post toasts. To stop a toast-only sender from holding the clipboard-capable pairing secret, start the server with `--toast-token-file <path>` (create the file yourself, mode 600, at least 32 characters — the server never creates it): a valid token is then the only accepted bearer and the pairing secret is rejected. Without the flag, or while the token file is missing or fails its checks, senders fall back to the pairing secret exactly as before, and `scripts/send-toast.ts --token-file <path>` sends the token instead of the pairing secret.
+
+Headsets subscribe with the same HMAC challenge-response as the other routes under their own protocol string (`mux-xr-toasts-v1`), so a proof for one route never passes another. At most 8 subscriptions are open, 4 per client, with a ping every 25 seconds. Control and bidi-override characters are stripped from all text. The server log records levels, delivery counts and refusal codes, never message text or the secret. `bun run scripts/toast-shots.ts` renders every level and placement to `/tmp/xr-toast-shots`.
 
 ### Picture proxy
 

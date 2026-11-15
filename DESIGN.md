@@ -81,6 +81,48 @@ components:
 
 # Design System: Mux XR
 
+## Table of contents
+
+- [Overview](#overview)
+- [Colors](#colors)
+  - [Primary](#primary)
+  - [Secondary](#secondary)
+  - [Tertiary](#tertiary)
+  - [Neutral](#neutral)
+  - [Named Rules](#named-rules)
+- [Typography](#typography)
+  - [Hierarchy](#hierarchy)
+  - [Named Rules](#named-rules-1)
+- [Layout](#layout)
+  - [Moving and resizing surfaces](#moving-and-resizing-surfaces)
+  - [Hand reach and far grabs](#hand-reach-and-far-grabs)
+  - [Scroll strip and text selection](#scroll-strip-and-text-selection)
+  - [Spawn poses](#spawn-poses)
+  - [Recovery](#recovery)
+  - [Saved poses and placement](#saved-poses-and-placement)
+- [Elevation & Depth](#elevation--depth)
+  - [Named Rules](#named-rules-2)
+- [Shapes](#shapes)
+  - [Keyborb spheres](#keyborb-spheres)
+  - [Raised panel buttons](#raised-panel-buttons)
+- [Components](#components)
+  - [UI sounds and haptics](#ui-sounds-and-haptics)
+  - [Buttons](#buttons)
+  - [Inputs / Fields](#inputs--fields)
+  - [Navigation](#navigation)
+  - [XR mux hierarchy](#xr-mux-hierarchy)
+  - [Cards / Containers](#cards--containers)
+  - [Host clipboard](#host-clipboard)
+  - [Hover Help](#hover-help)
+  - [XR Terminal Panel](#xr-terminal-panel)
+- [Do's and Don'ts](#dos-and-donts)
+  - [Do:](#do)
+  - [Don't:](#dont)
+  - [Update notices](#update-notices)
+  - [Spatial arrangements](#spatial-arrangements)
+  - [Widgets, placement and filtering](#widgets-placement-and-filtering)
+- [XR panel ownership and direct Warp](#xr-panel-ownership-and-direct-warp)
+
 ## Overview
 
 **Creative North Star: "The Quiet Orbital Observatory"**
