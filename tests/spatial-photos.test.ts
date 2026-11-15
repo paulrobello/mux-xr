@@ -1,18 +1,23 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('troika-three-text', () => ({
-  Text: class MockText extends THREE.Mesh {
-    sync(callback?: () => void): void {
-      callback?.();
-    }
-    dispose(): void {
-      /* test double */
-    }
-  },
-  configureTextBuilder: vi.fn(),
-}));
+vi.mock('troika-three-text', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('troika-three-text')>();
+  return {
+    ...actual,
+    Text: class MockText extends THREE.Mesh {
+      sync(callback?: () => void): void {
+        callback?.();
+      }
+      dispose(): void {
+        /* test double */
+      }
+    },
+    configureTextBuilder: vi.fn(),
+  };
+});
 
+import { DEFAULT_DEPTH_VIEW, estimateDisparity, usesDepthMap } from '@par/xr-workspace';
 import type { PictureDepthResult } from '../src/host-picture-depth';
 import { createPictureController } from '../src/workspace/pictures';
 import {
@@ -21,7 +26,6 @@ import {
   type HeifLibrary,
   readStereoPair,
 } from '../src/xr/heif-core';
-import { DEFAULT_DEPTH_VIEW, usesDepthMap } from '../src/xr/picture-depth';
 import { createPictureFrameWidget } from '../src/xr/picture-frame';
 import type { PictureImage, PreparedPicture } from '../src/xr/picture-image';
 import { preparePicture } from '../src/xr/picture-image';
@@ -32,7 +36,6 @@ import {
   createRecentPictureLibrary,
   planEviction,
 } from '../src/xr/picture-store';
-import { estimateDisparity } from '../src/xr/stereo-disparity';
 
 /** An ISO-BMFF box; `full` prepends the FullBox version and flags. */
 function box(type: string, payload: Uint8Array, full = false): Uint8Array {

@@ -2,7 +2,7 @@
 
 `@par/xr-workspace` is a private TypeScript package for apps that render with Three.js and WebXR. The app owns the renderer, session, reference space, frame loop, hit testing, and input routing. Mount the pieces you need in your Three.js scene.
 
-For a sibling app, add `"@par/xr-workspace": "file:../mux-xr/packages/xr-workspace"` to its dependencies and run `bun install`. Adjust the path to match your checkout. Use the Three.js version declared by the package and a bundler that reads TypeScript exports. Import from `@par/xr-workspace`. The `/internal/` imports support the Mux XR migration.
+For a sibling app, add `"@par/xr-workspace": "file:../mux-xr/packages/xr-workspace"` to its dependencies and run `bun install`. Adjust the path to match your checkout. Use the Three.js version declared by the package and a bundler that reads TypeScript exports. Import from `@par/xr-workspace`.
 
 | Component | Integration |
 | --- | --- |

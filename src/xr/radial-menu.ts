@@ -1,7 +1,7 @@
 import {
   createRadialMenu as createMenu,
   type RadialMenu as ToolkitRadialMenu,
-} from '@par/xr-workspace/internal/radial-menu';
+} from '@par/xr-workspace';
 
 export type RadialMenuAction =
   | 'keyboard'

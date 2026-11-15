@@ -1,5 +1,5 @@
+import { createScalableLabel, disposeScalableLabel } from '@par/xr-workspace';
 import * as THREE from 'three';
-import { createScalableLabel, disposeScalableLabel } from './labels';
 
 export type RadialAction = 'keyboard' | 'commands' | 'layout' | 'warp' | 'widgets' | 'cancel';
 export type RadialVariant = 'ring' | 'satellites';

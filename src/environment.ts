@@ -1,21 +1,23 @@
 import {
+  accentColorOrNull,
   ENVIRONMENT_FACTORIES as BUILT_IN_ENVIRONMENTS,
   createEnvironmentController,
+  createSpaceBackground,
   type EnvironmentFactory,
   registerEnvironmentUpdater,
-} from '@par/xr-workspace/internal/environment';
+  resolveEnvironmentAccent,
+  tintToLuminance,
+} from '@par/xr-workspace';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { BackgroundMode } from './contracts';
 import type { WorkspaceScene } from './xr';
-import { accentColorOrNull, resolveEnvironmentAccent, tintToLuminance } from './xr/accent-colors';
 import { DESK_WINDOW_KIND, setEnvironmentWindowMask } from './xr/desk-window';
-import { createSpaceBackground } from './xr/space-background';
 
 export type {
   EnvironmentFactory,
   EnvironmentInstance,
-} from '@par/xr-workspace/internal/environment';
+} from '@par/xr-workspace';
 export { registerEnvironmentUpdater };
 export type EnvironmentFactories = Partial<Record<BackgroundMode, EnvironmentFactory>>;
 export const ENVIRONMENT_FACTORIES: EnvironmentFactories = BUILT_IN_ENVIRONMENTS;

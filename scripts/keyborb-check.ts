@@ -13,13 +13,14 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import { requirePrivateTest, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 import { pressWristMenu } from './wrist-menu-fixture';
 
-const baseUrl = process.env.MUX_XR_BASE_URL;
-const testRoot = process.env.MUX_XR_TEST_ROOT;
-if (!baseUrl || !testRoot || process.env.MUX_XR_PRIVATE_TEST !== '1')
-  throw new Error('Keyborb verification requires MUX_XR_PRIVATE_TEST=1, BASE_URL, and TEST_ROOT');
+const { MUX_XR_BASE_URL: baseUrl, MUX_XR_TEST_ROOT: testRoot } = requirePrivateTest([
+  'MUX_XR_BASE_URL',
+  'MUX_XR_TEST_ROOT',
+]);
 if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(baseUrl).hostname))
   throw new Error('Loopback only');
 const checkedBaseUrl = baseUrl;
@@ -91,18 +92,6 @@ const connected = (id: string): Buffer =>
     }),
   );
 
-async function waitFor(
-  page: Page,
-  predicate: () => Promise<boolean>,
-  message: string,
-): Promise<void> {
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await page.waitForTimeout(50);
-  }
-  throw new Error(message);
-}
 async function frames(page: Page, count = 3): Promise<void> {
   await page.evaluate(async (n) => {
     for (let i = 0; i < n; i++)
@@ -165,7 +154,6 @@ async function targetSelectHold(
 async function openKeyboard(page: Page, leftConnected: boolean): Promise<void> {
   await pressWristMenu(page, { leftConnected });
   await waitFor(
-    page,
     async () =>
       page.evaluate(() =>
         (() => {
@@ -179,7 +167,6 @@ async function openKeyboard(page: Page, leftConnected: boolean): Promise<void> {
   );
   await targetSelect(page, { inputAction: 'radialAction', radialAction: 'keyboard' });
   await waitFor(
-    page,
     async () =>
       page.evaluate(
         () =>
@@ -189,7 +176,6 @@ async function openKeyboard(page: Page, leftConnected: boolean): Promise<void> {
     'XR keyboard did not open',
   );
   await waitFor(
-    page,
     async () =>
       page.evaluate(
         () =>
@@ -251,7 +237,6 @@ async function main(): Promise<void> {
     await page.evaluate(() => localStorage.removeItem('mux-xr:settings:v1'));
     await page.reload({ waitUntil: 'domcontentloaded' });
     await waitFor(
-      page,
       async () =>
         page.evaluate(
           () => (window as unknown as FixtureWindow).__muxXR?.getState().attached.length === 2,
@@ -265,7 +250,6 @@ async function main(): Promise<void> {
       await select.selectOption(mode);
       await page.reload({ waitUntil: 'domcontentloaded' });
       await waitFor(
-        page,
         async () => (await page.locator('[data-keyborb-mode]').count()) === 1,
         'Settings did not mount',
       );
@@ -276,7 +260,6 @@ async function main(): Promise<void> {
     await page.locator('[data-action="close-settings"]').click();
     await page.locator('[data-action="xr"]').click();
     await waitFor(
-      page,
       async () =>
         page.evaluate(
           () => (window as unknown as FixtureWindow).__muxXR.getState().scene.xrMode === 'vr',
@@ -284,7 +267,6 @@ async function main(): Promise<void> {
       'XR did not start',
     );
     await waitFor(
-      page,
       async () =>
         page.evaluate(() => {
           const hands = (window as unknown as FixtureWindow).__questScene.children.filter(
@@ -595,7 +577,6 @@ async function main(): Promise<void> {
     (report.screenshots as string[]).push('controller-hands-trigger.png');
     await pressWristMenu(page, { leftConnected: true });
     await waitFor(
-      page,
       async () =>
         page.evaluate(
           () =>
@@ -606,7 +587,6 @@ async function main(): Promise<void> {
     );
     await targetSelect(page, { inputAction: 'radialAction', radialAction: 'settings' });
     await waitFor(
-      page,
       async () =>
         page.evaluate(
           () =>

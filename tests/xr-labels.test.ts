@@ -19,35 +19,39 @@ interface MockTextLike extends THREE.Mesh {
 
 const configuration = vi.hoisted(() => ({ current: null as unknown }));
 
-vi.mock('troika-three-text', () => ({
-  Text: class MockText extends THREE.Mesh {
-    text = '';
-    font: string | null = null;
-    fontSize = 0;
-    maxWidth = 0;
-    anchorX: number | string = 0;
-    anchorY: number | string = 0;
-    textAlign = '';
-    whiteSpace = '';
-    lineHeight: number | string = 'normal';
-    overflowWrap = '';
-    color: number | string | THREE.Color = 0;
-    depthOffset = 0;
-    disposed = false;
-    constructor() {
-      super(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
-    }
-    sync(callback?: () => void): void {
-      queueMicrotask(() => callback?.());
-    }
-    dispose(): void {
-      this.disposed = true;
-    }
-  },
-  configureTextBuilder: vi.fn((value: unknown) => {
-    configuration.current = value;
-  }),
-}));
+vi.mock('troika-three-text', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('troika-three-text')>();
+  return {
+    ...actual,
+    Text: class MockText extends THREE.Mesh {
+      text = '';
+      font: string | null = null;
+      fontSize = 0;
+      maxWidth = 0;
+      anchorX: number | string = 0;
+      anchorY: number | string = 0;
+      textAlign = '';
+      whiteSpace = '';
+      lineHeight: number | string = 'normal';
+      overflowWrap = '';
+      color: number | string | THREE.Color = 0;
+      depthOffset = 0;
+      disposed = false;
+      constructor() {
+        super(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
+      }
+      sync(callback?: () => void): void {
+        queueMicrotask(() => callback?.());
+      }
+      dispose(): void {
+        this.disposed = true;
+      }
+    },
+    configureTextBuilder: vi.fn((value: unknown) => {
+      configuration.current = value;
+    }),
+  };
+});
 
 import {
   createScalableLabel,
@@ -59,7 +63,7 @@ import {
   LABEL_SYMBOL_FONT_URL,
   updateScalableLabel,
   waitForLabelSync,
-} from '../src/xr/labels';
+} from '@par/xr-workspace';
 
 describe('scalable XR labels', () => {
   beforeEach(() => vi.restoreAllMocks());

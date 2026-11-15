@@ -1,4 +1,4 @@
-import type { PictureFrameImage } from '@par/xr-workspace/internal/picture-frame';
+import type { PictureFrameImage } from '@par/xr-workspace';
 import {
   createDefaultPictureProxy,
   type PictureProxyFailure,

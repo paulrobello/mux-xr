@@ -1,6 +1,6 @@
+import { createSpaceBackground } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
-import { createSpaceBackground } from '../src/xr/space-background';
 
 function positions(root: THREE.Object3D): number[] {
   const values: number[] = [];

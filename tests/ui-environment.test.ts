@@ -1,11 +1,11 @@
-import * as THREE from 'three';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   applyUIEnvironment,
   createUIEnvironment,
   isSharedUIEnvironment,
   UI_ENV_MAP_INTENSITY,
-} from '../src/xr/ui-environment';
+} from '@par/xr-workspace';
+import * as THREE from 'three';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 interface FakeRenderer {
   xr: { enabled: boolean };

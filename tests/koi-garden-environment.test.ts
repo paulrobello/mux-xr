@@ -1,6 +1,3 @@
-import * as THREE from 'three';
-import { describe, expect, it, vi } from 'vitest';
-import { linearLuminance } from '../src/xr/accent-colors';
 import {
   createKoiGardenEnvironment,
   KOI_GARDEN_AMBIENT_PERIOD,
@@ -9,7 +6,10 @@ import {
   KOI_GARDEN_LANTERNS,
   KOI_GARDEN_LEAF_INTERVAL,
   KOI_GARDEN_WATER_Y,
-} from '../src/xr/environments/koi-garden';
+  linearLuminance,
+} from '@par/xr-workspace';
+import * as THREE from 'three';
+import { describe, expect, it, vi } from 'vitest';
 
 type Environment = ReturnType<typeof createKoiGardenEnvironment>;
 type Drawable = THREE.Mesh | THREE.Points;

@@ -2,12 +2,13 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { chromium, type Page, type WebSocketRoute } from 'playwright';
+import { assert, requirePrivateTest, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
-const BASE_URL = process.env.MUX_XR_BASE_URL;
-const TEST_ROOT = process.env.MUX_XR_TEST_ROOT;
-if (!BASE_URL || !TEST_ROOT || process.env.MUX_XR_PRIVATE_TEST !== '1')
-  throw new Error('auto-entry-check requires MUX_XR_PRIVATE_TEST=1, BASE_URL, and TEST_ROOT');
+const { MUX_XR_BASE_URL: BASE_URL, MUX_XR_TEST_ROOT: TEST_ROOT } = requirePrivateTest([
+  'MUX_XR_BASE_URL',
+  'MUX_XR_TEST_ROOT',
+]);
 if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(BASE_URL).hostname))
   throw new Error('auto-entry-check only accepts a loopback BASE_URL');
 
@@ -16,23 +17,6 @@ type FixtureWindow = Window & {
   __muxXR: { getState(): { scene: { xrMode: string; notice: string | null } } };
   __autoXR: { calls: number; activationAtRequest: boolean[] };
 };
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
-
-async function waitFor(
-  page: Page,
-  predicate: () => Promise<boolean>,
-  message: string,
-): Promise<void> {
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await page.waitForTimeout(50);
-  }
-  throw new Error(message);
-}
 
 async function buildVariant(root: string, variant: Variant): Promise<void> {
   const shimPath = join(root, 'quest-three-shim.js');
@@ -94,13 +78,11 @@ async function runVariant(
       timeout: 15_000,
     });
     await waitFor(
-      page,
       async () =>
         Boolean(await page.evaluate(() => Boolean((window as unknown as FixtureWindow).__muxXR))),
       'Fixture did not initialize',
     );
     await waitFor(
-      page,
       () =>
         page.evaluate((variant) => {
           const w = window as unknown as FixtureWindow;
@@ -144,7 +126,6 @@ async function runVariant(
       );
       await page.reload({ waitUntil: 'domcontentloaded' });
       await waitFor(
-        page,
         async () =>
           (await page.evaluate(
             () => (window as unknown as FixtureWindow).__muxXR.getState().scene.xrMode,
@@ -171,7 +152,6 @@ async function runVariant(
     );
     await page.locator('[data-action="xr"]').click();
     await waitFor(
-      page,
       async () =>
         (await page.evaluate(
           () => (window as unknown as FixtureWindow).__muxXR.getState().scene.xrMode,

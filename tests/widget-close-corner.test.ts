@@ -1,33 +1,43 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('troika-three-text', () => ({
-  Text: class MockText extends THREE.Mesh {
-    text = '';
-    anchorX: number | string = 0;
-    textAlign = '';
-    sync(callback?: () => void): void {
-      callback?.();
-    }
-    dispose(): void {
-      /* test double */
-    }
-  },
-  configureTextBuilder: vi.fn(),
-}));
+vi.mock('troika-three-text', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('troika-three-text')>();
+  return {
+    ...actual,
+    Text: class MockText extends THREE.Mesh {
+      text = '';
+      anchorX: number | string = 0;
+      textAlign = '';
+      sync(callback?: () => void): void {
+        callback?.();
+      }
+      dispose(): void {
+        /* test double */
+      }
+    },
+    configureTextBuilder: vi.fn(),
+  };
+});
 
+import {
+  createPerfGaugeWidget,
+  createTimerWidget,
+  PERF_GAUGE_HEIGHT,
+  PERF_GAUGE_WIDTH,
+  TIMER_HEIGHT,
+  TIMER_WIDTH,
+} from '@par/xr-workspace';
 import {
   AGENT_BOARD_HEIGHT,
   AGENT_BOARD_WIDTH,
   createAgentBoardWidget,
 } from '../src/xr/agent-board';
-import { createPerfGaugeWidget, PERF_GAUGE_HEIGHT, PERF_GAUGE_WIDTH } from '../src/xr/perf-gauge';
 import {
   createRepoStatusWidget,
   REPO_STATUS_HEIGHT,
   REPO_STATUS_WIDTH,
 } from '../src/xr/repo-status-widget';
-import { createTimerWidget, TIMER_HEIGHT, TIMER_WIDTH } from '../src/xr/timer-widget';
 import { createClockWidget } from '../src/xr/widgets';
 
 const CASES = [

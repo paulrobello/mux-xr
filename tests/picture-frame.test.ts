@@ -1,18 +1,23 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('troika-three-text', () => ({
-  Text: class MockText extends THREE.Mesh {
-    sync(callback?: () => void): void {
-      callback?.();
-    }
-    dispose(): void {
-      /* test double */
-    }
-  },
-  configureTextBuilder: vi.fn(),
-}));
+vi.mock('troika-three-text', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('troika-three-text')>();
+  return {
+    ...actual,
+    Text: class MockText extends THREE.Mesh {
+      sync(callback?: () => void): void {
+        callback?.();
+      }
+      dispose(): void {
+        /* test double */
+      }
+    },
+    configureTextBuilder: vi.fn(),
+  };
+});
 
+import { frameSize } from '@par/xr-workspace';
 import { mountPicturePicker } from '../src/ui/pictures';
 import { createPictureController, type PictureLoaders } from '../src/workspace/pictures';
 import { createPictureFrameWidget, PICTURE_PLACEHOLDER_TEXT } from '../src/xr/picture-frame';
@@ -26,9 +31,7 @@ import {
 } from '../src/xr/picture-image';
 import {
   fitWithin,
-  frameSize,
   freePictureSlot,
-  MAX_PICTURE_EDGE,
   MAX_PICTURE_SOURCE_BYTES,
   MAX_UNPROBED_PICTURE_BYTES,
   PictureLoadError,

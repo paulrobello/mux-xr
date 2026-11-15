@@ -1,9 +1,13 @@
+import {
+  applyUIEnvironment,
+  createScalableLabel,
+  PERF_TONE_COLORS,
+  type PerfTone,
+  updateScalableLabel,
+} from '@par/xr-workspace';
 import * as THREE from 'three';
 import type { TerminalStatus } from '../contracts';
 import type { TerminalLinkStats } from '../terminal/link-stats';
-import { createScalableLabel, updateScalableLabel } from './labels';
-import { PERF_TONE_COLORS, type PerfTone } from './perf-gauge';
-import { applyUIEnvironment } from './ui-environment';
 import { disposeOwned, type Widget } from './widgets';
 
 /** One pane's stream as the scene reports it each sample. */

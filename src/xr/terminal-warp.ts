@@ -6,7 +6,7 @@ import {
   type CurvedSurfaceSpan as TerminalWarpSpan,
   curvedSurfacePoint as terminalWarpPoint,
   validateSpan,
-} from '@par/xr-workspace/internal/curved-surface';
+} from '@par/xr-workspace';
 import * as THREE from 'three';
 
 export {

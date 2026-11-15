@@ -1,7 +1,7 @@
 /** One authenticated read-only JSON feed per connection to a dictation server feed route. */
 import { createHostClipboardSecretStore, type HostClipboardSocket } from './host-clipboard';
 import { openPairedSocket } from './host-pairing';
-import { dictationServiceUrl } from './host-stats';
+import { hostServiceUrl } from './host-service';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const CONTROL_CHARS = /\p{Cc}/u;
@@ -90,7 +90,7 @@ export function defaultHostFeedSource<T>(
     client ??= createHostFeedClient({
       protocol,
       parse,
-      url: () => dictationServiceUrl(path, window.location),
+      url: () => hostServiceUrl(path, window.location),
       secret: createHostClipboardSecretStore().get,
     });
     return client(request);

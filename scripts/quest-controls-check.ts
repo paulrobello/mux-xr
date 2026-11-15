@@ -11,6 +11,7 @@ import { fromBinary } from '@bufbuild/protobuf';
 import { chromium, type Page } from 'playwright';
 import { decodeServerMessage } from '../src/terminal/protocol';
 import { ClientMessageSchema } from '../src/terminal/vendor/terminal_pb';
+import { assert, waitForMatch } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
 type AppState = {
@@ -25,28 +26,10 @@ const BASE_URL = process.env.MUX_XR_BASE_URL;
 const TEST_ROOT = process.env.MUX_XR_TEST_ROOT;
 const PRIVATE_TEST = process.env.MUX_XR_PRIVATE_TEST === '1';
 
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
-
 async function state(page: Page): Promise<AppState> {
   return page.evaluate(() =>
     (window as unknown as { __muxXR: { getState: () => AppState } }).__muxXR.getState(),
   );
-}
-
-async function waitFor<T>(
-  read: () => Promise<T>,
-  ok: (value: T) => boolean,
-  message: string,
-): Promise<T> {
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    const value = await read();
-    if (ok(value)) return value;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(message);
 }
 
 type ControlExpectation = {
@@ -147,7 +130,7 @@ async function radial(page: Page, action: string): Promise<void> {
     pad.buttons[4].pressed = false;
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   });
-  await waitFor(
+  await waitForMatch(
     () =>
       page.evaluate(() =>
         Boolean(
@@ -284,13 +267,13 @@ async function main(): Promise<void> {
       waitUntil: 'domcontentloaded',
       timeout: 15_000,
     });
-    const initial = await waitFor(
+    const initial = await waitForMatch(
       () => state(page),
       (value) => value.attached.length >= 2,
       'real app did not attach two panes',
     );
     const paneIds = initial.attached.slice(0, 2);
-    await waitFor(
+    await waitForMatch(
       () => state(page),
       (value) =>
         value.streams.length >= 2 &&
@@ -298,7 +281,7 @@ async function main(): Promise<void> {
       'Private streams did not become writable',
     );
     await page.locator('[data-action="xr"]').click();
-    await waitFor(
+    await waitForMatch(
       () => state(page),
       (value) => value.scene.xrMode === 'vr',
       'XR shim did not enter VR mode',
@@ -343,12 +326,12 @@ async function main(): Promise<void> {
       if (!keyboardOpen) await radial(page, 'keyboard');
       await typeNative(page, `echo native${paneId.slice(1)}`);
       await key(page, 'Enter');
-      await waitFor(
+      await waitForMatch(
         () => Promise.resolve(output.get(paneId) ?? ''),
         (text) => text.includes(`native${paneId.slice(1)}`),
         `native output missing for ${paneId}`,
       );
-      await waitFor(
+      await waitForMatch(
         () => panelMetrics(page, paneId),
         (value) => value.hash !== beforePixels.hash,
         `Native typing did not change visible pixels for ${paneId}`,
@@ -407,13 +390,13 @@ async function main(): Promise<void> {
     await clickControl(page, 'openInput', { mode: 'terminal' });
     await clickControl(page, 'gridPreset', { cols: 100, rows: 30 });
     await clickControl(page, 'gridApply');
-    await waitFor(
+    await waitForMatch(
       () => Promise.resolve(frames.length),
       (count) => count > 0,
       'grid resize frame missing',
     );
     assert(Number(resizeMessages) === 1, `expected one grid resize request, got ${resizeMessages}`);
-    await waitFor(
+    await waitForMatch(
       () => state(page),
       (value) =>
         value.panes.some((pane) => pane.id === paneIds[0] && pane.cols === 100 && pane.rows === 30),
@@ -439,7 +422,7 @@ async function main(): Promise<void> {
       Number(resizeMessages) === 2,
       `expected grid restore resize request, got ${resizeMessages}`,
     );
-    await waitFor(
+    await waitForMatch(
       () => state(page),
       (value) =>
         value.streams.some(
@@ -460,27 +443,27 @@ async function main(): Promise<void> {
     await clickControl(page, 'commandSave');
     assert(frames.length === beforeSaveInputs, 'saving native command executed input');
     await clickControl(page, 'command', { label: 'native command' });
-    await waitFor(
+    await waitForMatch(
       () => Promise.resolve(output.get(paneIds[0]) ?? ''),
       (text) => text.includes('nativecommand'),
       'saved native command did not execute',
     );
     await clickControl(page, 'close');
     await clickControl(page, 'toggleConnection', { terminalId: paneIds[0] });
-    await waitFor(
+    await waitForMatch(
       () => state(page),
       (value) =>
         value.streams.some((stream) => stream.id === paneIds[0] && stream.status === 'paused'),
       'Native Disconnect did not pause the stream',
     );
     await clickControl(page, 'toggleConnection', { terminalId: paneIds[0] });
-    await waitFor(
+    await waitForMatch(
       () => state(page),
       (value) => value.streams.every((stream) => stream.status === 'connected'),
       'Native Reconnect did not resume the stream',
     );
     await clickControl(page, 'closePane', { terminalId: paneIds[0] });
-    await waitFor(
+    await waitForMatch(
       () => state(page),
       (value) =>
         !value.attached.includes(paneIds[0]) && value.panes.some((pane) => pane.id === paneIds[0]),
@@ -491,7 +474,7 @@ async function main(): Promise<void> {
         (window as unknown as { __muxXR: { selectPane(id: string): void } }).__muxXR.selectPane(id),
       paneIds[0],
     );
-    await waitFor(
+    await waitForMatch(
       () => state(page),
       (value) =>
         value.streams.length === 2 &&
@@ -505,12 +488,12 @@ async function main(): Promise<void> {
       for (const socket of sockets)
         if (ids.some((id) => socket.url.includes(`session=pane-${id.slice(1)}`))) socket.close();
     }, paneIds);
-    await waitFor(
+    await waitForMatch(
       () => Promise.resolve(viewerConnections),
       (count) => count > connectionsBeforeReconnect,
       'viewer sockets did not reconnect',
     );
-    await waitFor(
+    await waitForMatch(
       () => state(page),
       (value) => value.streams.every((stream) => stream.status === 'connected'),
       'Viewer did not finish reconnecting',

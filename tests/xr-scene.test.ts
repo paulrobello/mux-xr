@@ -1,9 +1,11 @@
-vi.mock('@par/xr-workspace/internal/labels', () => import('./helpers/labels'));
-vi.mock('@par/xr-workspace/internal/ui-environment', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/xr/ui-environment')>();
+vi.mock('../packages/xr-workspace/src/labels', () => import('./helpers/labels'));
+vi.mock('../packages/xr-workspace/src/ui-environment', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../packages/xr-workspace/src/ui-environment')>();
   return { ...actual, createUIEnvironment: vi.fn(actual.createUIEnvironment) };
 });
 
+import { createUIEnvironment, UI_ENV_MAP_INTENSITY } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import type { TerminalStatus, TerminalSurface, WorkspaceActions } from '../src/contracts';
@@ -17,7 +19,6 @@ import {
   routeInput,
   updateGaze,
 } from '../src/xr/scene';
-import { createUIEnvironment, UI_ENV_MAP_INTENSITY } from '../src/xr/ui-environment';
 
 describe('XR scene interaction helpers', () => {
   it('clamps physical panel scale without touching terminal grid dimensions', () => {

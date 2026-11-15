@@ -1,7 +1,11 @@
-vi.mock('@par/xr-workspace/internal/labels', () => import('./helpers/labels'));
-vi.mock('../src/xr/standard-hand', async () => ({
-  createStandardHand: (await import('../src/xr/cartoon-hand')).createCartoonHand,
-}));
+vi.mock('@par/xr-workspace', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@par/xr-workspace')>();
+  return {
+    ...actual,
+    ...(await import('./helpers/labels')),
+    createStandardHand: actual.createCartoonHand,
+  };
+});
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 

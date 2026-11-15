@@ -1,8 +1,6 @@
-import * as THREE from 'three';
-import { describe, expect, it, vi } from 'vitest';
-import { linearLuminance } from '../src/xr/accent-colors';
 import {
   createRainRooftopEnvironment,
+  linearLuminance,
   RAIN_ROOFTOP_BEACON_COUNT,
   RAIN_ROOFTOP_BEACON_PERIOD,
   RAIN_ROOFTOP_CANOPY_HALF,
@@ -18,7 +16,9 @@ import {
   RAIN_ROOFTOP_WINDOW_COLUMN,
   RAIN_ROOFTOP_WINDOW_FLOOR,
   rainRooftopTowers,
-} from '../src/xr/environments/rain-rooftop';
+} from '@par/xr-workspace';
+import * as THREE from 'three';
+import { describe, expect, it, vi } from 'vitest';
 
 const CAMERA_FAR = 100;
 const EYE_HEIGHT = 1.6;

@@ -1,29 +1,33 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('troika-three-text', () => ({
-  Text: class MockText extends THREE.Mesh {
-    text = '';
-    font = '';
-    fontSize = 0;
-    maxWidth = 0;
-    anchorX: number | string = 0;
-    anchorY: number | string = 0;
-    textAlign = '';
-    whiteSpace = '';
-    lineHeight: number | string = 'normal';
-    overflowWrap = '';
-    color: number | string | THREE.Color = 0;
-    depthOffset = 0;
-    sync(callback?: () => void): void {
-      callback?.();
-    }
-    dispose(): void {
-      /* test double */
-    }
-  },
-  configureTextBuilder: vi.fn(),
-}));
+vi.mock('troika-three-text', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('troika-three-text')>();
+  return {
+    ...actual,
+    Text: class MockText extends THREE.Mesh {
+      text = '';
+      font = '';
+      fontSize = 0;
+      maxWidth = 0;
+      anchorX: number | string = 0;
+      anchorY: number | string = 0;
+      textAlign = '';
+      whiteSpace = '';
+      lineHeight: number | string = 'normal';
+      overflowWrap = '';
+      color: number | string | THREE.Color = 0;
+      depthOffset = 0;
+      sync(callback?: () => void): void {
+        callback?.();
+      }
+      dispose(): void {
+        /* test double */
+      }
+    },
+    configureTextBuilder: vi.fn(),
+  };
+});
 
 import { createRadialMenu, type RadialMenuAction } from '../src/xr/radial-menu';
 

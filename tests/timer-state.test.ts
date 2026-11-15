@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import {
   createTimerState,
   DEFAULT_COUNTDOWN_MS,
@@ -16,7 +15,8 @@ import {
   tick,
   toggleMode,
   toggleRun,
-} from '../src/xr/timer-state';
+} from '@par/xr-workspace';
+import { describe, expect, it } from 'vitest';
 
 const T0 = 1_000_000;
 

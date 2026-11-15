@@ -74,7 +74,7 @@ const state = (hand: THREE.XRHandSpace) =>
   });
 
 describe('batched hand poses', async () => {
-  const { installBatchedHandPoses } = await import('../src/xr/batched-hand-poses');
+  const { installBatchedHandPoses } = await import('@par/xr-workspace');
   installBatchedHandPoses();
 
   it('leaves joints, hand visibility and the target ray as three does', () => {

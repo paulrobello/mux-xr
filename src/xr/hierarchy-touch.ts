@@ -1,10 +1,10 @@
-import * as THREE from 'three';
 import {
   NEAR_ENTER as HIERARCHY_NEAR_ENTER,
   NEAR_EXIT as HIERARCHY_NEAR_EXIT,
   PINCH_CLOSE,
   PINCH_OPEN,
-} from './keyborb-input';
+} from '@par/xr-workspace';
+import * as THREE from 'three';
 
 export { HIERARCHY_NEAR_ENTER, HIERARCHY_NEAR_EXIT };
 

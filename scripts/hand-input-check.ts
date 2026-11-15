@@ -14,6 +14,7 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import { assert, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 import { pressWristMenu } from './wrist-menu-fixture';
 
@@ -115,22 +116,6 @@ const output = (text: string): Buffer =>
     }),
   );
 
-function assert(value: unknown, message: string): asserts value {
-  if (!value) throw new Error(message);
-}
-async function waitFor(
-  _page: Page,
-  predicate: () => Promise<boolean>,
-  message: string,
-): Promise<void> {
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(message);
-}
-
 async function handAction(page: Page, data: Record<string, unknown>, hold = 0): Promise<void> {
   await page.evaluate(
     async ({ data, hold }) => {
@@ -210,7 +195,6 @@ async function main(): Promise<void> {
       timeout: 15000,
     });
     await waitFor(
-      page,
       async () =>
         await page.evaluate(
           () => (window as unknown as FixtureWindow).__muxXR.getState().attached.length >= 2,
@@ -230,7 +214,6 @@ async function main(): Promise<void> {
     await page.locator('[data-action="close-settings"]').click();
     await page.locator('[data-action="xr"]').click();
     await waitFor(
-      page,
       async () =>
         await page.evaluate(
           () => (window as unknown as FixtureWindow).__muxXR.getState().scene.xrMode === 'vr',
@@ -280,7 +263,6 @@ async function main(): Promise<void> {
     });
     await pressWristMenu(page, { leftConnected: true });
     await waitFor(
-      page,
       async () =>
         await page.evaluate(() =>
           Boolean(
@@ -292,7 +274,6 @@ async function main(): Promise<void> {
     );
     await handAction(page, { inputAction: 'radialAction', radialAction: 'keyboard' });
     await waitFor(
-      page,
       async () =>
         await page.evaluate(
           () =>
@@ -309,7 +290,6 @@ async function main(): Promise<void> {
     await page.screenshot({ path: join(testRoot, 'hands-keyboard.png') });
     await pressWristMenu(page, { leftConnected: true });
     await waitFor(
-      page,
       async () =>
         await page.evaluate(() =>
           Boolean(
@@ -321,7 +301,6 @@ async function main(): Promise<void> {
     );
     await handAction(page, { inputAction: 'radialAction', radialAction: 'commands' });
     await waitFor(
-      page,
       async () =>
         await page.evaluate(
           () =>
@@ -332,7 +311,6 @@ async function main(): Promise<void> {
     );
     await handAction(page, { inputAction: 'command' });
     await waitFor(
-      page,
       async () => frames.filter((entry) => entry.kind === 'input').length >= 4,
       `Hand keyboard did not send input: ${JSON.stringify(frames)}`,
     );

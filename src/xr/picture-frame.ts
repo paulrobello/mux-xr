@@ -2,10 +2,10 @@ import {
   createPictureFrameWidget as createFrame,
   type PictureFrameOptions,
   type PictureFrameWidget,
-} from '@par/xr-workspace/internal/picture-frame';
+} from '@par/xr-workspace';
 import type * as THREE from 'three';
 
-export { PICTURE_KIND, PICTURE_PLACEHOLDER_TEXT } from '@par/xr-workspace/internal/picture-frame';
+export { PICTURE_KIND, PICTURE_PLACEHOLDER_TEXT } from '@par/xr-workspace';
 
 const PICKER: NonNullable<PictureFrameOptions['picker']> = {
   hint: 'or pick one on the page',

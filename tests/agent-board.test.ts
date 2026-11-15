@@ -1,20 +1,24 @@
 import * as THREE from 'three';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('troika-three-text', () => ({
-  Text: class MockText extends THREE.Mesh {
-    text = '';
-    anchorX: number | string = 0;
-    textAlign = '';
-    sync(callback?: () => void): void {
-      callback?.();
-    }
-    dispose(): void {
-      /* test double */
-    }
-  },
-  configureTextBuilder: vi.fn(),
-}));
+vi.mock('troika-three-text', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('troika-three-text')>();
+  return {
+    ...actual,
+    Text: class MockText extends THREE.Mesh {
+      text = '';
+      anchorX: number | string = 0;
+      textAlign = '';
+      sync(callback?: () => void): void {
+        callback?.();
+      }
+      dispose(): void {
+        /* test double */
+      }
+    },
+    configureTextBuilder: vi.fn(),
+  };
+});
 
 import type { AgentRosterRow } from '../src/workspace/agent-roster';
 import {

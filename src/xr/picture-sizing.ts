@@ -1,6 +1,4 @@
-import type { Size } from '@par/xr-workspace/internal/picture-sizing';
-
-export * from '@par/xr-workspace/internal/picture-sizing';
+import type { Size } from '@par/xr-workspace';
 
 /** Longest texture edge a picture frame uploads; larger images are downscaled to fit. */
 export const MAX_PICTURE_EDGE = 2048;

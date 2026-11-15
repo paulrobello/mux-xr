@@ -1,3 +1,47 @@
+import type { CartoonHand, PictureDepthView } from '@par/xr-workspace';
+import {
+  applyUIEnvironment,
+  countsAsFrame,
+  createHandContact,
+  createKeyborbInput,
+  createKeyborbKey,
+  createModifierState,
+  createRaisedButtonWalls,
+  createScalableLabel,
+  createStandardHand,
+  createStickyNoteWidget,
+  createUIEnvironment,
+  createWristMenuWatch,
+  curveKeyboardContent,
+  DEFAULT_ACCENT,
+  DEFAULT_ACCENT_HOVER,
+  disposeScalableLabel,
+  HAND_COLOR_PRESETS,
+  type HandContact,
+  type HandContactSample,
+  type HandInputState,
+  installBatchedHandPoses,
+  isSharedUIEnvironment,
+  type KeyboardModifier,
+  type KeyborbGlyphs,
+  type KeyborbShells,
+  keyboardDimensions,
+  keyboardKeys,
+  liveScalableLabels,
+  ON_TOP_LAYER,
+  resolveAccent,
+  resolveAccentCss,
+  resolveAccentHover,
+  retintAccentMaterials,
+  STICKY_NOTE_KIND,
+  setKeyborbPressed,
+  stickyNotePages,
+  updateHandInput,
+  updateScalableLabel,
+  validateHandColor,
+  validateWeatherZip,
+  WRIST_WATCH_PROBE_REACH,
+} from '@par/xr-workspace';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createClipboardBridge } from '../clipboard';
@@ -16,13 +60,6 @@ import type {
   WorkspaceActions,
 } from '../contracts';
 import { getControlHelp } from '../control-help';
-import { validateWeatherZip } from '../host-weather';
-import {
-  createModifierState,
-  type KeyboardModifier,
-  keyboardDimensions,
-  keyboardKeys,
-} from '../keyboard';
 import {
   copyCommand,
   isSharedCommand,
@@ -74,14 +111,6 @@ import {
   validateWindowPreferences,
   type WindowPreferences,
 } from '../workspace/window-preferences';
-import {
-  DEFAULT_ACCENT,
-  DEFAULT_ACCENT_HOVER,
-  resolveAccent,
-  resolveAccentCss,
-  resolveAccentHover,
-  retintAccentMaterials,
-} from './accent-colors';
 import { calculateArrangement } from './arrangements';
 import {
   BACKGROUND_LABELS,
@@ -91,9 +120,7 @@ import {
   backgroundThumbnailUrl,
   layoutBackgroundPicker,
 } from './background-picker';
-import { installBatchedHandPoses } from './batched-hand-poses';
 import { createBellFeedStore } from './bell-feed';
-import type { CartoonHand } from './cartoon-hand';
 import { clusteredRaycast } from './clustered-raycast';
 import {
   type CommandDraft,
@@ -120,9 +147,6 @@ import {
 } from './floor-layout';
 import { createFocusQuadLayer, type FocusQuadLayer, supportsQuadLayers } from './focus-quad-layer';
 import { createFrameCounter } from './fps';
-import { HAND_COLOR_PRESETS, validateHandColor } from './hand-colors';
-import { createHandContact, type HandContact, type HandContactSample } from './hand-contact';
-import { type HandInputState, updateHandInput } from './hand-input';
 import { type HandReel, rebaseHandReel, reelOffset, startHandReel } from './hand-reel';
 import {
   createHierarchyNavigator,
@@ -130,30 +154,14 @@ import {
   type HierarchyNavigator,
 } from './hierarchy-navigator';
 import { createHierarchyTouch, HIERARCHY_NEAR_ENTER, HIERARCHY_NEAR_EXIT } from './hierarchy-touch';
-import { createRaisedButtonWalls, curveKeyboardContent } from './keyboard-surface';
-import {
-  createKeyborbKey,
-  type KeyborbGlyphs,
-  type KeyborbShells,
-  setKeyborbPressed,
-} from './keyborb';
-import { createKeyborbInput } from './keyborb-input';
 import {
   createLabelBatcher,
   LABEL_BATCH_HIDDEN_LAYER,
   labelBatchTransparentSort,
 } from './label-batches';
-import {
-  createScalableLabel,
-  disposeScalableLabel,
-  liveScalableLabels,
-  updateScalableLabel,
-} from './labels';
 import { createMessageToastLayer } from './message-toasts';
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
-import { countsAsFrame } from './perf-gauge';
-import type { PictureDepthView } from './picture-depth';
 import { createPictureFrameWidget, PICTURE_KIND } from './picture-frame';
 import type { PictureImage } from './picture-image';
 import {
@@ -165,16 +173,8 @@ import {
 } from './picture-sizing';
 import { PICTURE_LIMITS } from './picture-store';
 import { createRadialMenu, type RadialMenuAction } from './radial-menu';
-import { ON_TOP_LAYER } from './render-layers';
 import { addKeyboardKeys, addKeyborbBatches, KEYBOARD_UNIT } from './spatial-keyboard';
-import { createStandardHand } from './standard-hand';
-import {
-  createStickyNoteWidget,
-  STICKY_NOTE_KIND,
-  STICKY_NOTE_PIN_OFFSET,
-  stickyNotePages,
-  stickyNoteSpawnOffset,
-} from './sticky-note';
+import { STICKY_NOTE_PIN_OFFSET, stickyNoteSpawnOffset } from './sticky-note';
 import {
   createStickyNoteStore,
   newStickyNoteId,
@@ -196,7 +196,6 @@ import {
   terminalWarpPoint,
 } from './terminal-warp';
 import { createTerminalWarpStore } from './terminal-warp-store';
-import { applyUIEnvironment, createUIEnvironment, isSharedUIEnvironment } from './ui-environment';
 import { createUIFeedback, type UICue, type UIFeedback } from './ui-feedback';
 import {
   applyUIPose,
@@ -224,7 +223,6 @@ import {
 } from './widget-registry';
 import { keepWidgetSpawnInView } from './widget-spawn';
 import type { Widget } from './widgets';
-import { createWristMenuWatch, WRIST_WATCH_PROBE_REACH } from './wrist-menu-watch';
 
 type InputKind = 'hand' | 'controller';
 type InputMode =

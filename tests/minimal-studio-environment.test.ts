@@ -1,10 +1,10 @@
-import * as THREE from 'three';
-import { describe, expect, it, vi } from 'vitest';
 import {
   createMinimalStudioEnvironment,
   MINIMAL_STUDIO_FLOOR_Y,
   minimalStudioGridStrength,
-} from '../src/xr/environments/minimal-studio';
+} from '@par/xr-workspace';
+import * as THREE from 'three';
+import { describe, expect, it, vi } from 'vitest';
 
 const CAMERA_FAR = 100;
 

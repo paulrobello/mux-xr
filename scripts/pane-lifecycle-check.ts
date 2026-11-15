@@ -6,15 +6,12 @@ import { join } from 'node:path';
 import { type PaneProcess, parsePaneProcess, samePaneId } from '../src/terminal/lifecycle';
 import { decodeServerMessage } from '../src/terminal/protocol';
 import { paneWebSocketURL } from '../src/terminal/surface';
+import { assert } from './lib/harness';
 
 // Held-pane exit and respawn through a real streamer, against a private par-mux daemon and
 // socket only. It never touches the shared default daemon.
 const STREAMER_BIN = process.env.MUX_XR_STREAMER_BIN ?? 'par-term-streamer';
 const PAR_MUX_BIN = process.env.MUX_XR_PAR_MUX_BIN ?? 'par-mux';
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

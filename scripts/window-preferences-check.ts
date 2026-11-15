@@ -6,6 +6,7 @@ import { chromium } from 'playwright';
 import type * as THREE from 'three';
 import type { PaneDescriptor, TerminalSurface } from '../src/contracts';
 import type { WorkspaceScene } from '../src/xr/scene';
+import { requirePrivateTest } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
 type FixtureWindow = Window & {
@@ -17,10 +18,10 @@ type FixtureWindow = Window & {
   __originalPose: string;
 };
 
-const base = process.env.MUX_XR_BASE_URL;
-const root = process.env.MUX_XR_TEST_ROOT;
-if (!base || !root || process.env.MUX_XR_PRIVATE_TEST !== '1')
-  throw new Error('Window preferences check requires an explicit private URL and root');
+const { MUX_XR_BASE_URL: base, MUX_XR_TEST_ROOT: root } = requirePrivateTest([
+  'MUX_XR_BASE_URL',
+  'MUX_XR_TEST_ROOT',
+]);
 if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(base).hostname))
   throw new Error('Window preferences check only accepts loopback');
 const loadBefore = loadavg()[0];

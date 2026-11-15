@@ -16,6 +16,7 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import { assert, waitFor } from './lib/harness';
 
 const BASE_URL = process.env.MUX_XR_BASE_URL;
 const PRIVATE_TEST = process.env.MUX_XR_PRIVATE_TEST === '1';
@@ -44,10 +45,6 @@ type BrowserMetrics = {
   paintDurationMs: number;
   renderer: string;
 };
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
 
 function frame(message: ServerMessage, compress = false): Buffer {
   const payload = Buffer.from(toBinary(ServerMessageSchema, message));
@@ -161,19 +158,6 @@ async function installFixture(page: Page, state: HarnessState): Promise<void> {
   });
 }
 
-async function waitFor(
-  _page: Page,
-  predicate: () => Promise<boolean>,
-  message: string,
-): Promise<void> {
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(message);
-}
-
 async function metrics(page: Page): Promise<BrowserMetrics> {
   return page.evaluate(() => {
     const value = (window as unknown as { __muxXRMetrics: BrowserMetrics }).__muxXRMetrics;
@@ -281,40 +265,31 @@ async function main(): Promise<void> {
     await page.locator('#endpoint').fill(`${BASE_URL}/stream`);
     await page.locator('[data-action="connect"]').click();
     await waitFor(
-      page,
       async () => (await page.locator('[data-pane]').count()) === 4,
       'hierarchy did not expose four panes',
     );
-    await waitFor(
-      page,
-      async () => {
-        const attached = await page.evaluate(
-          () =>
-            (
-              window as unknown as { __muxXR: { getState: () => { attached: string[] } } }
-            ).__muxXR.getState().attached,
-        );
-        return attached.length === 2;
-      },
-      'autoattach did not attach two panes',
-    );
+    await waitFor(async () => {
+      const attached = await page.evaluate(
+        () =>
+          (
+            window as unknown as { __muxXR: { getState: () => { attached: string[] } } }
+          ).__muxXR.getState().attached,
+      );
+      return attached.length === 2;
+    }, 'autoattach did not attach two panes');
     await page.locator('[data-pane="%3"]').click();
     await page.locator('[data-pane="%4"]').click();
-    await waitFor(
-      page,
-      async () => {
-        const streams = await page.evaluate(
-          () =>
-            (
-              window as unknown as {
-                __muxXR: { getState: () => { streams: Array<{ status: string }> } };
-              }
-            ).__muxXR.getState().streams,
-        );
-        return streams.length === 4 && streams.every((stream) => stream.status === 'connected');
-      },
-      'four streams did not connect',
-    );
+    await waitFor(async () => {
+      const streams = await page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __muxXR: { getState: () => { streams: Array<{ status: string }> } };
+            }
+          ).__muxXR.getState().streams,
+      );
+      return streams.length === 4 && streams.every((stream) => stream.status === 'connected');
+    }, 'four streams did not connect');
     if (!SKIP_LIFECYCLE) {
       const before = await page.evaluate(() =>
         (
@@ -332,7 +307,6 @@ async function main(): Promise<void> {
       const inputBefore = state.inputs.length;
       await page.locator('[data-toggle-connection="%4"]').click();
       await waitFor(
-        page,
         async () =>
           (await page.locator('[data-toggle-connection="%4"]').textContent()) === 'Reconnect',
         'manual disconnect did not pause',
@@ -344,7 +318,6 @@ async function main(): Promise<void> {
       assert(state.inputs.length === inputBefore, 'disconnected input was sent');
       await page.locator('[data-toggle-connection="%4"]').click();
       await waitFor(
-        page,
         async () =>
           (await page.locator('[data-toggle-connection="%4"]').textContent()) === 'Disconnect',
         'reconnect did not complete',
@@ -366,7 +339,6 @@ async function main(): Promise<void> {
       assert(JSON.stringify(before) === JSON.stringify(after), 'disconnect changed panel pose');
       await page.locator('[data-close="%4"]').click();
       await waitFor(
-        page,
         async () => !(await page.locator('[data-select="%4"]').count()),
         'closing view did not remove pane',
       );
@@ -376,7 +348,6 @@ async function main(): Promise<void> {
       );
       await page.locator('[data-pane="%4"]').click();
       await waitFor(
-        page,
         async () => (await page.locator('[data-select="%4"]').count()) === 1,
         'closed pane did not reopen',
       );

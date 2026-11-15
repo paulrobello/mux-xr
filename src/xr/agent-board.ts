@@ -1,3 +1,4 @@
+import { applyUIEnvironment, createScalableLabel, updateScalableLabel } from '@par/xr-workspace';
 import * as THREE from 'three';
 import {
   type AgentRosterRow,
@@ -6,8 +7,6 @@ import {
   sortAgentRows,
 } from '../workspace/agent-roster';
 import { AGENT_TONE_COLORS } from './hierarchy-navigator';
-import { createScalableLabel, updateScalableLabel } from './labels';
-import { applyUIEnvironment } from './ui-environment';
 import { disposeOwned, type Widget } from './widgets';
 
 /** Rows shown before the "+N more" line; sized so text stays legible at spawn distance. */

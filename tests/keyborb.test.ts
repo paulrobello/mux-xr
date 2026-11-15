@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('@par/xr-workspace/internal/labels', () => ({
+vi.mock('../packages/xr-workspace/src/labels', () => ({
   createScalableLabel: (label: string, width: number, height: number) => {
     const root = new THREE.Mesh(
       new THREE.PlaneGeometry(width, height),
@@ -18,9 +18,13 @@ vi.mock('@par/xr-workspace/internal/labels', () => ({
   },
 }));
 
-const { createKeyborbGlyphs, createKeyborbKey, createKeyborbShells, setKeyborbPressed } =
-  await import('../src/xr/keyborb');
-const { curveKeyboardContent } = await import('../src/xr/keyboard-surface');
+const {
+  createKeyborbGlyphs,
+  createKeyborbKey,
+  createKeyborbShells,
+  setKeyborbPressed,
+  curveKeyboardContent,
+} = await import('@par/xr-workspace');
 
 function keyboard(): { root: THREE.Group; orbs: THREE.Mesh[] } {
   const root = new THREE.Group();

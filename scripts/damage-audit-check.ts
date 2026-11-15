@@ -4,6 +4,7 @@ import { loadavg } from 'node:os';
 import { join } from 'node:path';
 import { chromium, type Page } from 'playwright';
 import { decodeServerMessage } from '../src/terminal/protocol';
+import { assert, waitForMatch } from './lib/harness';
 
 // Drives real programs through a PRIVATE par-mux daemon and a core 0.77+ mux streamer that serves
 // the built app, with the painter's audit mode on: after every damage-hinted paint the painter
@@ -27,10 +28,6 @@ const TEST_ROOT = process.env.MUX_XR_TEST_ROOT;
 const SOCKET = process.env.MUX_XR_MUX_SOCKET;
 const PAR_MUX = process.env.MUX_XR_PAR_MUX ?? 'par-mux';
 const PRIVATE_TEST = process.env.MUX_XR_PRIVATE_TEST === '1';
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
 
 function mux(command: string): string {
   return execFileSync(PAR_MUX, ['--socket', SOCKET as string, '--cmd', command], {
@@ -56,16 +53,6 @@ async function sleep(ms: number): Promise<void> {
 
 async function streams(page: Page): Promise<StreamState[]> {
   return await page.evaluate(() => (window as unknown as FixtureWindow).__muxXR.getState().streams);
-}
-
-async function waitFor<T>(read: () => Promise<T>, done: (value: T) => boolean, message: string) {
-  const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline) {
-    const value = await read();
-    if (done(value)) return value;
-    await sleep(100);
-  }
-  throw new Error(message);
 }
 
 async function main(): Promise<void> {
@@ -130,7 +117,7 @@ async function main(): Promise<void> {
       await page.locator(`[data-pane="${pane}"]`).waitFor({ state: 'visible', timeout: 15_000 });
       await page.locator(`[data-pane="${pane}"]`).click();
     }
-    await waitFor(
+    await waitForMatch(
       () => streams(page),
       (list) => list.filter((stream) => stream.status === 'connected').length >= 2,
       'Two pane streams did not connect',

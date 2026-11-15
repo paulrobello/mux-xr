@@ -90,16 +90,3 @@ export function createHostStatsClient(options: HostStatsClientOptions): HostStat
     });
   };
 }
-
-/** The dictation server's URL for `path`, as main.ts builds it for `/clipboard` and `/dictate`. */
-export function dictationServiceUrl(
-  path: string,
-  location: { href: string; protocol: string },
-): string {
-  const url = new URL(path, location.href);
-  url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.port = '4242';
-  url.search = '';
-  url.hash = '';
-  return url.href;
-}

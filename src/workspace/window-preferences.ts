@@ -1,4 +1,4 @@
-import { MAX_SURFACE_CURVATURE_RADIANS } from '@par/xr-workspace/internal/curved-surface';
+import { MAX_SURFACE_CURVATURE_RADIANS } from '@par/xr-workspace';
 import { type ButtonMap, DEFAULT_BUTTON_MAP, validateButtonMap } from './controller-buttons';
 
 export type ScrollStripSide = 'right' | 'left' | 'both';

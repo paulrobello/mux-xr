@@ -1,4 +1,4 @@
-import type { PictureDepthView } from './picture-depth';
+import type { PictureDepthView } from '@par/xr-workspace';
 
 /** A stored picture: the downscaled re-encoded blob, keyed by its frame id. */
 export interface PictureRecord {

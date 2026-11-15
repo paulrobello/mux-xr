@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import type * as THREE from 'three';
+import { requirePrivateTest } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
 type FixtureWindow = Window & {
@@ -20,10 +21,10 @@ type FixtureWindow = Window & {
   __focusOriginal: { position: number[]; quaternion: number[]; scale: number[] };
 };
 
-const base = process.env.MUX_XR_BASE_URL;
-const root = process.env.MUX_XR_TEST_ROOT;
-if (!base || !root || process.env.MUX_XR_PRIVATE_TEST !== '1')
-  throw new Error('Focus verification requires an explicit private test URL and root');
+const { MUX_XR_BASE_URL: base, MUX_XR_TEST_ROOT: root } = requirePrivateTest([
+  'MUX_XR_BASE_URL',
+  'MUX_XR_TEST_ROOT',
+]);
 await mkdir(root, { recursive: true });
 prepareQuestFixture(root);
 const browser = await chromium.launch({

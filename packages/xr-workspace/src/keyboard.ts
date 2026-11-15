@@ -1,10 +1,6 @@
-export interface KeyModifiers {
-  ctrl?: boolean;
-  alt?: boolean;
-  shift?: boolean;
-}
+import { type KeyboardModifier, type KeyModifiers, keyboardKeyLabel } from './keyboard-types';
 
-export type KeyboardModifier = keyof KeyModifiers;
+export { type KeyboardModifier, type KeyModifiers, keyboardKeyLabel };
 
 export interface SemanticKey {
   readonly label: string;
@@ -145,33 +141,4 @@ export function createModifierState(): ModifierState {
     },
   };
   return state;
-}
-
-/** Returns the US-layout printable character represented by a key and Shift state. */
-export function keyboardKeyLabel(key: string, shift = false): string {
-  if (key.length !== 1 || !shift) return key.length === 1 ? key.toLowerCase() : key;
-  const shifted: Record<string, string> = {
-    '`': '~',
-    '1': '!',
-    '2': '@',
-    '3': '#',
-    '4': '$',
-    '5': '%',
-    '6': '^',
-    '7': '&',
-    '8': '*',
-    '9': '(',
-    '0': ')',
-    '-': '_',
-    '=': '+',
-    '[': '{',
-    ']': '}',
-    ';': ':',
-    "'": '"',
-    '\\': '|',
-    ',': '<',
-    '.': '>',
-    '/': '?',
-  };
-  return shifted[key] ?? key.toUpperCase();
 }

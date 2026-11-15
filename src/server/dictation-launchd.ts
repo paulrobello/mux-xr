@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
+import { HOST_SERVICE_PORT } from '../host-service';
 
 export const DICTATION_LABEL = 'org.mux-xr.whisper';
 export const daemonPlistPath = (label = DICTATION_LABEL): string =>
@@ -44,7 +45,7 @@ export function readHostConfig(repository: string): HostConfig {
 }
 
 export const defaultDictationUser = (): string => process.env.SUDO_USER || userInfo().username;
-export const DICTATION_PORT = 4242;
+export const DICTATION_PORT = HOST_SERVICE_PORT;
 
 export type DictationLaunchdOptions = {
   repository?: string;

@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
 import {
   createModifierState,
   keyboardDimensions,
   keyboardKeys,
   semanticKeyboardLayout,
-} from '../src/keyboard';
+} from '@par/xr-workspace';
+import { describe, expect, it } from 'vitest';
 
 describe('shared keyboard layout', () => {
   it('uses a normal keyboard arrangement with separated inverted-T arrows', () => {

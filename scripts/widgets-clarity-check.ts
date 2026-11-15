@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chromium, type Page } from 'playwright';
+import { assert, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
 type FixtureWindow = Window & {
@@ -31,9 +32,6 @@ if (!BASE_URL || !TEST_ROOT || process.env.MUX_XR_PRIVATE_TEST !== '1')
 if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(BASE_URL).hostname))
   throw new Error('Widgets clarity verification is loopback-only');
 
-function assert(value: unknown, message: string): asserts value {
-  if (!value) throw new Error(message);
-}
 function assertPoseClose(actual: Pose | undefined, expected: Pose, label: string): void {
   assert(actual, `${label} was not restored`);
   const values = [...actual.position, ...actual.quaternion, ...actual.scale];
@@ -44,18 +42,6 @@ function assertPoseClose(actual: Pose | undefined, expected: Pose, label: string
       values.every((value, index) => Math.abs(value - expectedValues[index]) <= 1e-6),
     `${label} changed across reload: ${JSON.stringify({ expected, actual })}`,
   );
-}
-async function waitFor(
-  page: Page,
-  predicate: () => Promise<boolean>,
-  message: string,
-): Promise<void> {
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await page.waitForTimeout(50);
-  }
-  throw new Error(message);
 }
 async function target(
   page: Page,
@@ -119,7 +105,6 @@ async function toggleKeyboardFromMenu(page: Page): Promise<void> {
     );
   });
   await waitFor(
-    page,
     async () =>
       page.evaluate(() =>
         Boolean(
@@ -157,7 +142,6 @@ async function selectRadial(page: Page, action: string): Promise<void> {
     );
   });
   await waitFor(
-    page,
     async () =>
       await page.evaluate(() =>
         Boolean(
@@ -235,7 +219,6 @@ try {
     timeout: 15_000,
   });
   await waitFor(
-    page,
     async () =>
       (await page.evaluate(() => Boolean((window as unknown as FixtureWindow).__muxXR))) &&
       (await page.evaluate(
@@ -245,7 +228,6 @@ try {
   );
   await page.locator('[data-action="xr"]').click();
   await waitFor(
-    page,
     async () =>
       (await page.evaluate(
         () => (window as unknown as FixtureWindow).__muxXR.getState().scene.xrMode,
@@ -286,7 +268,6 @@ try {
 
   await target(page, 'toggleWidget', { widgetKind: 'digital-clock' });
   await waitFor(
-    page,
     async () =>
       (
         await page.evaluate(
@@ -315,7 +296,6 @@ try {
   await selectRadial(page, 'widgets');
   await target(page, 'toggleWidget', { widgetKind: 'analog-clock' });
   await waitFor(
-    page,
     async () =>
       (
         await page.evaluate(
@@ -333,7 +313,6 @@ try {
   await target(page, 'closeWidget', { widgetId: 'clock-widget-1' });
   await target(page, 'closeWidget', { widgetId: 'clock-widget-2' });
   await waitFor(
-    page,
     async () =>
       (
         await page.evaluate(
@@ -424,7 +403,6 @@ try {
   await page.waitForTimeout(450);
   await target(page, 'exit');
   await waitFor(
-    page,
     async () =>
       (await page.evaluate(
         () => (window as unknown as FixtureWindow).__muxXR.getState().scene.xrMode,
@@ -434,7 +412,6 @@ try {
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('[data-action="xr"]').click();
   await waitFor(
-    page,
     async () =>
       (await page.evaluate(
         () => (window as unknown as FixtureWindow).__muxXR.getState().scene.xrMode,

@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { assert } from './lib/harness';
 
 if (process.env.MUX_XR_PRIVATE_TEST !== '1') {
   throw new Error('Set MUX_XR_PRIVATE_TEST=1 to run the private WebGL terminal texture check');
@@ -16,10 +17,6 @@ type CheckResult = {
   maxDelta: number;
   glErrors: number[];
 };
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
 
 const browser = await chromium.launch({
   channel: 'chromium',

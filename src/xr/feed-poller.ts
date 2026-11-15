@@ -1,5 +1,6 @@
 import type * as THREE from 'three';
 import type { HostFeedFailure, HostFeedResult, HostFeedSource } from '../host-feed';
+import { HOST_SERVICE_PORT } from '../host-service';
 import {
   HOST_LOAD_AUTH_RETRY_KEY,
   HOST_LOAD_AUTH_RETRY_MS,
@@ -24,7 +25,7 @@ export const FEED_FAILURE_TEXT: Record<
   'no-secret': 'Not paired: Settings > Host clipboard',
   auth: 'Host rejected the pairing secret',
   'rate-limited': 'Host busy, retrying',
-  unavailable: 'Host service unreachable (port 4242)',
+  unavailable: `Host service unreachable (port ${HOST_SERVICE_PORT})`,
   timeout: 'Host service timed out',
 };
 

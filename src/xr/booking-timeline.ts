@@ -1,3 +1,4 @@
+import { applyUIEnvironment, createScalableLabel, updateScalableLabel } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { defaultHostFeedSource, type HostFeedFailure, type HostFeedSource } from '../host-feed';
 import {
@@ -7,8 +8,6 @@ import {
   formatLocalTime,
   isWidgetShown,
 } from './feed-poller';
-import { createScalableLabel, updateScalableLabel } from './labels';
-import { applyUIEnvironment } from './ui-environment';
 import { disposeOwned, type Widget } from './widgets';
 
 export const BOOKING_TIMELINE_KIND = 'booking-timeline';

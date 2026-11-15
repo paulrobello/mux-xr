@@ -14,15 +14,16 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import { requirePrivateTest, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 import { pressWristMenu } from './wrist-menu-fixture';
 
 // Compares the render and script cost of the closed, standard and Keyborb keyboards in the
 // synthetic Quest fixture. Draw calls and per-frame script time are proxies for headset fps.
-const baseUrl = process.env.MUX_XR_BASE_URL;
-const testRoot = process.env.MUX_XR_TEST_ROOT;
-if (!baseUrl || !testRoot || process.env.MUX_XR_PRIVATE_TEST !== '1')
-  throw new Error('Keyborb perf check requires MUX_XR_PRIVATE_TEST=1, BASE_URL, and TEST_ROOT');
+const { MUX_XR_BASE_URL: baseUrl, MUX_XR_TEST_ROOT: testRoot } = requirePrivateTest([
+  'MUX_XR_BASE_URL',
+  'MUX_XR_TEST_ROOT',
+]);
 if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(baseUrl).hostname))
   throw new Error('Loopback only');
 const checkedBaseUrl = baseUrl;
@@ -112,14 +113,6 @@ const connected = (id: string): Buffer =>
     }),
   );
 
-async function waitFor(page: Page, predicate: () => Promise<boolean>, message: string) {
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await page.waitForTimeout(50);
-  }
-  throw new Error(message);
-}
 async function frames(page: Page, count: number): Promise<void> {
   await page.evaluate(async (n) => {
     for (let i = 0; i < n; i++)
@@ -156,7 +149,6 @@ const visible = (page: Page, name: string) =>
 async function openKeyboard(page: Page): Promise<void> {
   await pressWristMenu(page, { leftConnected: LEFT_HAND !== 'none' });
   await waitFor(
-    page,
     async () =>
       page.evaluate(() => {
         const menu = (window as unknown as FixtureWindow).__questScene.getObjectByName(
@@ -167,12 +159,8 @@ async function openKeyboard(page: Page): Promise<void> {
     'XR radial menu did not become interactive',
   );
   await targetSelect(page, { inputAction: 'radialAction', radialAction: 'keyboard' });
-  await waitFor(
-    page,
-    async () => (await visible(page, 'xr-keyboard-controls')) === true,
-    'no keyboard',
-  );
-  await waitFor(page, async () => !(await visible(page, 'radial-menu')), 'radial stayed open');
+  await waitFor(async () => (await visible(page, 'xr-keyboard-controls')) === true, 'no keyboard');
+  await waitFor(async () => !(await visible(page, 'radial-menu')), 'radial stayed open');
 }
 
 interface StateReport {
@@ -246,7 +234,6 @@ async function measure(
     { waitUntil: 'domcontentloaded' },
   );
   await waitFor(
-    page,
     async () => (await page.locator('[data-action="settings"]').count()) === 1,
     'Workspace did not mount',
   );
@@ -254,7 +241,6 @@ async function measure(
   await page.locator('[data-keyborb-mode]').selectOption(state === 'keyborb' ? 'on' : 'off');
   await page.reload({ waitUntil: 'domcontentloaded' });
   await waitFor(
-    page,
     async () =>
       page.evaluate(
         () => (window as unknown as FixtureWindow).__muxXR?.getState().attached.length === 2,
@@ -263,7 +249,6 @@ async function measure(
   );
   await page.locator('[data-action="xr"]').click();
   await waitFor(
-    page,
     async () =>
       page.evaluate(
         () => (window as unknown as FixtureWindow).__muxXR.getState().scene.xrMode === 'vr',

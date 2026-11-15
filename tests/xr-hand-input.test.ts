@@ -1,6 +1,6 @@
+import { type HandInputState, updateHandInput } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { type HandInputState, updateHandInput } from '../src/xr/hand-input';
 
 type HandFixture = THREE.Group & { joints: Record<string, THREE.Group> };
 

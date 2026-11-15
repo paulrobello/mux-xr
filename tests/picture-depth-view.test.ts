@@ -1,27 +1,31 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('troika-three-text', () => ({
-  Text: class MockText extends THREE.Mesh {
-    sync(callback?: () => void): void {
-      callback?.();
-    }
-    dispose(): void {
-      /* test double */
-    }
-  },
-  configureTextBuilder: vi.fn(),
-}));
+vi.mock('troika-three-text', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('troika-three-text')>();
+  return {
+    ...actual,
+    Text: class MockText extends THREE.Mesh {
+      sync(callback?: () => void): void {
+        callback?.();
+      }
+      dispose(): void {
+        /* test double */
+      }
+    },
+    configureTextBuilder: vi.fn(),
+  };
+});
 
-import type { PictureDepthEstimator, PictureDepthResult } from '../src/host-picture-depth';
-import { createPictureController } from '../src/workspace/pictures';
 import {
   DEFAULT_DEPTH_VIEW,
   depthDisplacement,
-  depthFailureNotice,
   normalizeDepthView,
   stepDepthStrength,
-} from '../src/xr/picture-depth';
+} from '@par/xr-workspace';
+import type { PictureDepthEstimator, PictureDepthResult } from '../src/host-picture-depth';
+import { createPictureController } from '../src/workspace/pictures';
+import { depthFailureNotice } from '../src/xr/picture-depth';
 import { createPictureFrameWidget } from '../src/xr/picture-frame';
 import type { PictureImage, PreparedPicture } from '../src/xr/picture-image';
 import {

@@ -4,18 +4,23 @@ import { join } from 'node:path';
 import * as THREE from 'three';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('troika-three-text', () => ({
-  Text: class MockText extends THREE.Mesh {
-    sync(callback?: () => void): void {
-      callback?.();
-    }
-    dispose(): void {
-      /* test double */
-    }
-  },
-  configureTextBuilder: vi.fn(),
-}));
+vi.mock('troika-three-text', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('troika-three-text')>();
+  return {
+    ...actual,
+    Text: class MockText extends THREE.Mesh {
+      sync(callback?: () => void): void {
+        callback?.();
+      }
+      dispose(): void {
+        /* test double */
+      }
+    },
+    configureTextBuilder: vi.fn(),
+  };
+});
 
+import { PERF_TONE_COLORS } from '@par/xr-workspace';
 import type { HostFeedResult, HostFeedSource } from '../src/host-feed';
 import type { FeedEvent } from '../src/server/feed-route';
 import {
@@ -26,7 +31,6 @@ import {
   SERVICE_HEALTH_PROTOCOL,
   type ServiceHealthFetch,
 } from '../src/server/service-health';
-import { PERF_TONE_COLORS } from '../src/xr/perf-gauge';
 import {
   createServiceHealthWidget,
   formatAge,

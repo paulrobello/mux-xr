@@ -1,6 +1,6 @@
+import { CachedTextBatch } from '@par/xr-workspace';
 import * as THREE from 'three';
 import type { Text, TroikaTextMaterial } from 'troika-three-text';
-import { CachedTextBatch } from './text-batch';
 
 /** A layer no camera renders: batched label text stays in the scene graph but draws via its batch. */
 export const LABEL_BATCH_HIDDEN_LAYER = 31;

@@ -3,6 +3,7 @@ import { fromBinary } from '@bufbuild/protobuf';
 import { chromium } from 'playwright';
 import { decodeServerMessage } from '../src/terminal/protocol';
 import { ClientMessageSchema } from '../src/terminal/vendor/terminal_pb';
+import { assert } from './lib/harness';
 
 type LiveResult = {
   kind: 'live-adapter-diagnostic';
@@ -25,10 +26,6 @@ const panes = (process.env.MUX_XR_PANES ?? '')
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean);
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
 
 function arrayBuffer(data: Buffer): ArrayBuffer {
   return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;

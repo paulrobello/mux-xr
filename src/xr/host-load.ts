@@ -1,16 +1,19 @@
+import {
+  applyUIEnvironment,
+  createScalableLabel,
+  PERF_TONE_COLORS,
+  updateScalableLabel,
+} from '@par/xr-workspace';
 import * as THREE from 'three';
 import { createHostClipboardSecretStore } from '../host-clipboard';
+import { HOST_SERVICE_PORT, hostServiceUrl } from '../host-service';
 import {
   createHostStatsClient,
-  dictationServiceUrl,
   type HostStatsFailure,
   type HostStatsResult,
   type HostStatsSnapshot,
   type HostStatsSource,
 } from '../host-stats';
-import { createScalableLabel, updateScalableLabel } from './labels';
-import { PERF_TONE_COLORS } from './perf-gauge';
-import { applyUIEnvironment } from './ui-environment';
 import { disposeOwned, type Widget } from './widgets';
 
 export type HostLoadTone = 'ok' | 'warn' | 'critical' | 'unknown';
@@ -91,7 +94,7 @@ export const HOST_LOAD_UNAVAILABLE: Record<HostStatsFailure, string> = {
   'no-secret': 'Not paired: Settings > Host clipboard',
   disabled: 'No pairing secret on the host',
   auth: 'Host rejected the pairing secret',
-  unavailable: 'Host stats unreachable (port 4242)',
+  unavailable: `Host stats unreachable (port ${HOST_SERVICE_PORT})`,
   timeout: 'Host stats timed out',
   'rate-limited': 'Host stats busy, retrying',
 };
@@ -101,7 +104,7 @@ export function defaultHostStatsSource(): HostStatsSource {
   let client: HostStatsSource | undefined;
   return () => {
     client ??= createHostStatsClient({
-      url: () => dictationServiceUrl('/host-stats', window.location),
+      url: () => hostServiceUrl('/host-stats', window.location),
       secret: createHostClipboardSecretStore().get,
     });
     return client();

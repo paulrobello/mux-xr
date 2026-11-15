@@ -1,5 +1,3 @@
-import * as THREE from 'three';
-import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_ACCENT,
   DEFAULT_ACCENT_HOVER,
@@ -10,7 +8,9 @@ import {
   retintAccentMaterials,
   tagAccentMaterial,
   tintToLuminance,
-} from '../src/xr/accent-colors';
+} from '@par/xr-workspace';
+import * as THREE from 'three';
+import { describe, expect, it } from 'vitest';
 
 describe('accent colors', () => {
   it('keeps every authored cyan for the default accent', () => {

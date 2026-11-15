@@ -14,6 +14,7 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import { assert, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 import { pressWristMenu } from './wrist-menu-fixture';
 
@@ -114,22 +115,6 @@ const output = (text: string): Buffer =>
       },
     }),
   );
-
-function assert(value: unknown, message: string): asserts value {
-  if (!value) throw new Error(message);
-}
-async function waitFor(
-  _page: Page,
-  predicate: () => Promise<boolean>,
-  message: string,
-): Promise<void> {
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(message);
-}
 
 async function handAction(page: Page, data: Record<string, unknown>, hold = 0): Promise<void> {
   await page.evaluate(
@@ -233,7 +218,6 @@ async function poke(page: Page, data: Record<string, unknown>, hold = 0): Promis
 async function radial(page: Page, action: string): Promise<void> {
   await pressWristMenu(page, { leftConnected: true });
   await waitFor(
-    page,
     async () =>
       await page.evaluate(() =>
         Boolean(
@@ -245,7 +229,6 @@ async function radial(page: Page, action: string): Promise<void> {
   );
   await handAction(page, { inputAction: 'radialAction', radialAction: action });
   await waitFor(
-    page,
     async () =>
       await page.evaluate(
         () =>
@@ -299,7 +282,6 @@ async function main(): Promise<void> {
       waitUntil: 'domcontentloaded',
     });
     await waitFor(
-      page,
       async () =>
         await page.evaluate(
           () => (window as unknown as FixtureWindow).__muxXR.getState().attached.length >= 2,
@@ -312,7 +294,6 @@ async function main(): Promise<void> {
     await page.locator('[data-action="close-settings"]').click();
     await page.locator('[data-action="xr"]').click();
     await waitFor(
-      page,
       async () =>
         await page.evaluate(
           () => (window as unknown as FixtureWindow).__muxXR.getState().scene.xrMode === 'vr',
@@ -499,7 +480,7 @@ async function main(): Promise<void> {
     assert(restoredRay, 'Distant laser did not restore');
     await radial(page, 'keyboard');
     await handAction(page, { key: 'e', inputAction: 'key' });
-    await waitFor(page, async () => frames.length >= 5, 'Input protocol did not settle');
+    await waitFor(async () => frames.length >= 5, 'Input protocol did not settle');
     const expected = [
       ['%1', 'a'],
       ['%1', 'B'],

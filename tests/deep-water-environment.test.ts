@@ -1,6 +1,6 @@
+import { CAUSTIC_PERIOD, createDeepWaterEnvironment } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
-import { CAUSTIC_PERIOD, createDeepWaterEnvironment } from '../src/xr/environments/deep-water';
 
 function meshes(root: THREE.Object3D): THREE.Mesh[] {
   const found: THREE.Mesh[] = [];

@@ -2,25 +2,25 @@ import { webcrypto } from 'node:crypto';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('troika-three-text', () => ({
-  Text: class MockText extends THREE.Mesh {
-    sync(callback?: () => void): void {
-      callback?.();
-    }
-    dispose(): void {
-      /* test double */
-    }
-  },
-  configureTextBuilder: vi.fn(),
-}));
+vi.mock('troika-three-text', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('troika-three-text')>();
+  return {
+    ...actual,
+    Text: class MockText extends THREE.Mesh {
+      sync(callback?: () => void): void {
+        callback?.();
+      }
+      dispose(): void {
+        /* test double */
+      }
+    },
+    configureTextBuilder: vi.fn(),
+  };
+});
 
 import type { HostClipboardSocket } from '../src/host-clipboard';
-import {
-  createHostStatsClient,
-  dictationServiceUrl,
-  type HostStatsResult,
-  parseHostStats,
-} from '../src/host-stats';
+import { hostServiceUrl } from '../src/host-service';
+import { createHostStatsClient, type HostStatsResult, parseHostStats } from '../src/host-stats';
 import { hostStatsMac } from '../src/server/host-stats-server';
 import {
   cpuTone,
@@ -450,13 +450,13 @@ describe('host stats client', () => {
 
   it('builds the dictation server URL like the clipboard client', () => {
     expect(
-      dictationServiceUrl('/host-stats', {
+      hostServiceUrl('/host-stats', {
         href: 'https://10.0.0.5:4240/app/?x=1#y',
         protocol: 'https:',
       }),
     ).toBe('wss://10.0.0.5:4242/host-stats');
     expect(
-      dictationServiceUrl('/host-stats', { href: 'http://localhost:4240/', protocol: 'http:' }),
+      hostServiceUrl('/host-stats', { href: 'http://localhost:4240/', protocol: 'http:' }),
     ).toBe('ws://localhost:4242/host-stats');
   });
 });
