@@ -103,3 +103,18 @@ not eliminate, the 1 Hz static outliers.
 Evidence retained under .local/evidence/trace-2026-11-15/ (static-damage/ and sweep-after/, traces
 30.4 and 32.7 MB plus capacity reports and classification JSONs), minimac booked window
 05:17-06:05Z, holder claude-dbl@macdaddy:mux-xr.
+
+## Follow-up 2026-11-15b: GPU-side blit candidate rejected
+
+Tried eliminating the readback entirely: the copyRegion path blitted from a CanvasTexture over the
+live canvas (initTexture re-upload per batch, commit 21cbde4, never merged). Same Metal renderer,
+identical pixelDigest, zero page errors — and a large regression: imageDataBytes fell to 0 but
+textureUploadBytes exploded to 8.1 GiB across 468 full-canvas re-uploads. In headless chromium
+with ANGLE Metal the 2D canvas is CPU-backed, so each batch copies the full 29.8 MB canvas
+CPU-to-GPU, while the existing path uploads only the dirty strips. frameCpuMean/p95 went
+5.3/26.8 ms to 129/299.8 ms; the trace holds 218 frames (baseline 601) with 30 gaps all over
+50 ms, worst 335.7 ms. The change was discarded (branch deleted, not merged). Lesson recorded on
+the card: the strip readback path is already upload-minimal for CPU-backed canvases; a GPU-GPU
+strip-copy candidate only exists where the canvas is GPU-backed, which headless cannot exercise —
+it needs Quest-grounded profiling. Evidence: .local/evidence/trace-2026-11-15/blit-regression/
+(trace 14.8 MB, classification).
