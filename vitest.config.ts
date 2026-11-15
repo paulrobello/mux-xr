@@ -8,7 +8,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text-summary', 'html'],
-      include: ['src/**', 'packages/**'],
+      include: ['src/**/*.ts', 'packages/**/*.ts'],
       exclude: ['src/terminal/vendor/**'],
     },
   },
