@@ -1,5 +1,5 @@
-import { readFileSync, statSync } from 'node:fs';
 import { cleanText } from './board-feeds';
+import { openSecretFile, type SecretFile } from './clipboard-server';
 import { FeedError } from './feed-route';
 
 export const SERVICE_HEALTH_PATH = '/service-health';
@@ -23,37 +23,56 @@ export interface ParObsCredential {
 }
 
 export interface ParObsFileAccess {
-  readFile?: (path: string) => string;
-  /** The file's `st_mode`. */
-  fileMode?: (path: string) => number;
+  /** Opens without following a final symlink and fstats the descriptor; defaults to the real one. */
+  open?: typeof openSecretFile;
+  /** The server user's uid; defaults to the process uid. */
+  uid?: () => number | undefined;
   /** Told why a file was refused; it gets the path and reason, never the contents. */
   warn?: (line: string) => void;
 }
 
+const MAX_ENV_FILE_BYTES = 4096;
+
 /**
  * The CF Access service token from a `KEY=value` file; only the two keys are read. Null when the
- * file is missing, unreadable, open to group or others, or lacks either key. Values never reach a
- * log or an error.
+ * file is missing, a symlink, not a regular file, open to group or others, not owned by the server
+ * user, oversized, or lacks either key. Values never reach a log or an error.
  */
 export const loadParObsCredential = (
   path: string,
   access: ParObsFileAccess = {},
 ): ParObsCredential | null => {
-  const read = access.readFile ?? ((file: string) => readFileSync(file, 'utf8'));
-  const fileMode = access.fileMode ?? ((file: string) => statSync(file).mode);
-  let text: string;
+  const open = access.open ?? openSecretFile;
+  let file: SecretFile;
   try {
-    const mode = fileMode(path);
-    if (mode & 0o077) {
-      access.warn?.(
-        `Service health: refusing ${path}: group or others can access it (mode ${(mode & 0o777).toString(8)}); chmod 600 it.`,
-      );
-      return null;
-    }
-    text = read(path);
-  } catch {
+    file = open(path, MAX_ENV_FILE_BYTES);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP')
+      access.warn?.(`Service health: refusing ${path}: the path is a symlink.`);
     return null;
   }
+  if (!file.isFile) {
+    access.warn?.(`Service health: refusing ${path}: it is not a regular file.`);
+    return null;
+  }
+  if (file.mode & 0o077) {
+    access.warn?.(
+      `Service health: refusing ${path}: group or others can access it (mode ${(file.mode & 0o777).toString(8)}); chmod 600 it.`,
+    );
+    return null;
+  }
+  const uid = access.uid?.() ?? process.getuid?.();
+  if (uid !== undefined && file.uid !== uid) {
+    access.warn?.(`Service health: refusing ${path}: it is not owned by the server user.`);
+    return null;
+  }
+  if (file.truncated) {
+    access.warn?.(
+      `Service health: refusing ${path}: it is larger than ${MAX_ENV_FILE_BYTES} bytes.`,
+    );
+    return null;
+  }
+  const text = file.data.toString('utf8');
   const values: Partial<Record<(typeof CREDENTIAL_KEYS)[number], string>> = {};
   for (const line of text.split(/\r?\n/)) {
     const match = /^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
@@ -145,8 +164,8 @@ export interface ServiceHealthFeedOptions {
   /** The `KEY=value` file holding the CF Access service token, reread on each upstream query. */
   envFile: string;
   fetch?: ServiceHealthFetch;
-  readFile?: ParObsFileAccess['readFile'];
-  fileMode?: ParObsFileAccess['fileMode'];
+  open?: ParObsFileAccess['open'];
+  uid?: ParObsFileAccess['uid'];
   /** Where a refused token file is reported, once per distinct reason; console.warn by default. */
   warn?: (line: string) => void;
   baseUrl?: string;
@@ -171,8 +190,8 @@ export const createServiceHealthFeed = (
   const warn = options.warn ?? ((line: string) => console.warn(line));
   let lastWarning = '';
   const access: ParObsFileAccess = {
-    readFile: options.readFile,
-    fileMode: options.fileMode,
+    open: options.open,
+    uid: options.uid,
     warn: (line) => {
       if (line === lastWarning) return;
       lastWarning = line;

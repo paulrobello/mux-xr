@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as THREE from 'three';
@@ -22,6 +22,7 @@ vi.mock('troika-three-text', async (importOriginal) => {
 
 import { PERF_TONE_COLORS } from '@par/xr-workspace';
 import type { HostFeedResult, HostFeedSource } from '../src/host-feed';
+import type { SecretFile } from '../src/server/clipboard-server';
 import type { FeedEvent } from '../src/server/feed-route';
 import {
   createServiceHealthFeed,
@@ -59,16 +60,33 @@ const ENV_TEXT = [
   'OTHER_KEY=ignored',
 ].join('\n');
 const ENV_FILE = '/owner/.local/par-obs-query.env';
-const readEnv = (path: string): string => {
-  if (path !== ENV_FILE) throw new Error('ENOENT');
-  return ENV_TEXT;
+const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
+const envOpen = (path: string): SecretFile => {
+  if (path !== ENV_FILE) throw missing;
+  return {
+    isFile: true,
+    mode: 0o100600,
+    uid: process.getuid?.() ?? 0,
+    data: Buffer.from(ENV_TEXT),
+    truncated: false,
+  };
 };
-const ownerOnly = (path: string): number => {
-  if (path !== ENV_FILE) throw new Error('ENOENT');
-  return 0o100600;
-};
-const io = { readFile: readEnv, fileMode: ownerOnly, baseUrl: 'https://grafana.example.test' };
-const textFile = (text: string) => ({ readFile: () => text, fileMode: ownerOnly });
+const modeOpen = (mode: number) => (): SecretFile => ({
+  isFile: true,
+  mode,
+  uid: process.getuid?.() ?? 0,
+  data: Buffer.from(ENV_TEXT),
+  truncated: false,
+});
+const textOpen = (text: string) => (): SecretFile => ({
+  isFile: true,
+  mode: 0o100600,
+  uid: process.getuid?.() ?? 0,
+  data: Buffer.from(text),
+  truncated: false,
+});
+const io = { open: envOpen, baseUrl: 'https://grafana.example.test' };
+const textFile = (text: string) => ({ open: textOpen(text) });
 
 const vector = (rows: Array<[string, string, number]>) => ({
   status: 'success',
@@ -131,8 +149,7 @@ describe('par-obs credential file', () => {
     const lines: string[] = [];
     for (const mode of [0o100644, 0o100640, 0o100604, 0o100660]) {
       const access = {
-        readFile: readEnv,
-        fileMode: () => mode,
+        open: modeOpen(mode),
         warn: (line: string) => lines.push(line),
       };
       expect(loadParObsCredential(ENV_FILE, access), mode.toString(8)).toBeNull();
@@ -147,8 +164,7 @@ describe('par-obs credential file', () => {
     const { calls, fetch } = fakeParObs({ up: vector([]) });
     const feed = createServiceHealthFeed({
       envFile: ENV_FILE,
-      readFile: readEnv,
-      fileMode: () => 0o100644,
+      open: modeOpen(0o100644),
       baseUrl: io.baseUrl,
       warn: (line) => warned.push(line),
       fetch,
@@ -168,6 +184,26 @@ describe('par-obs credential file', () => {
       expect(loadParObsCredential(file, { warn: () => undefined })).toBeNull();
       chmodSync(file, 0o600);
       expect(loadParObsCredential(file)).toEqual({
+        clientId: CLIENT_ID,
+        clientSecret: CLIENT_SECRET,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a symlinked credential path without following it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mux-xr-par-obs-'));
+    const real = join(dir, 'par-obs-query.env');
+    const link = join(dir, 'link.env');
+    try {
+      writeFileSync(real, ENV_TEXT, { mode: 0o600 });
+      symlinkSync(real, link);
+      const lines: string[] = [];
+      expect(loadParObsCredential(link, { warn: (line) => lines.push(line) })).toBeNull();
+      expect(lines.join('\n')).toContain('symlink');
+      // The real file itself stays valid and untouched.
+      expect(loadParObsCredential(real)).toEqual({
         clientId: CLIENT_ID,
         clientSecret: CLIENT_SECRET,
       });

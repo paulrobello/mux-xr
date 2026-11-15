@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { hostname as osHostname } from 'node:os';
+import { openSecretFile, type SecretFile } from './clipboard-server';
 
 export type TranscriptionOutcome = 'success' | 'error' | 'cancelled' | 'timeout';
 export interface DictationTelemetry {
@@ -27,6 +27,7 @@ type Attr = { key: string; value: { stringValue: string } };
 type Counter = { name: string; value: number; attributes: Attr[] };
 type Signal = 'metrics' | 'traces' | 'logs';
 const MAX_BUFFER = 128;
+const MAX_OTEL_ENV_FILE_BYTES = 4096;
 const BOUNDS = [0.1, 0.5, 1, 2, 5, 10, 30, 60, 90];
 const noop = (): void => undefined;
 const str = (value: string): { stringValue: string } => ({ stringValue: value });
@@ -49,22 +50,33 @@ const disabled = (): DictationTelemetry => ({
 
 const parseEnvFile = (path?: string): NodeJS.ProcessEnv => {
   if (!path) return {};
+  let file: SecretFile;
   try {
-    const values: NodeJS.ProcessEnv = {};
-    for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
-      const match = /^\s*(?:export\s+)?(OTEL_[A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-      if (!match) continue;
-      let value = match[2];
-      if (value.startsWith('"') && value.endsWith('"')) value = JSON.parse(value);
-      else if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1);
-      values[match[1]] = value;
-    }
-    return values;
+    file = openSecretFile(path, MAX_OTEL_ENV_FILE_BYTES);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
       console.warn('Whisper telemetry configuration could not be loaded.');
     return {};
   }
+  if (
+    !file.isFile ||
+    (file.mode & 0o077) !== 0 ||
+    (process.getuid?.() !== undefined && file.uid !== process.getuid?.()) ||
+    file.truncated
+  ) {
+    console.warn('Whisper telemetry configuration could not be loaded.');
+    return {};
+  }
+  const values: NodeJS.ProcessEnv = {};
+  for (const line of file.data.toString('utf8').split(/\r?\n/)) {
+    const match = /^\s*(?:export\s+)?(OTEL_[A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+    if (!match) continue;
+    let value = match[2];
+    if (value.startsWith('"') && value.endsWith('"')) value = JSON.parse(value);
+    else if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1);
+    values[match[1]] = value;
+  }
+  return values;
 };
 const headersFor = (env: NodeJS.ProcessEnv, signal: Signal): Record<string, string> => {
   const result: Record<string, string> = { 'content-type': 'application/json' };
@@ -93,7 +105,12 @@ const endpointFor = (env: NodeJS.ProcessEnv, signal: Signal): string | undefined
   if (!value) return undefined;
   try {
     const url = new URL(value);
-    if (url.protocol === 'http:' || url.protocol === 'https:') return value;
+    if (url.protocol === 'https:') return value;
+    if (
+      url.protocol === 'http:' &&
+      ['127.0.0.1', '::1', '[::1]', 'localhost'].includes(url.hostname)
+    )
+      return value;
   } catch {
     /* Only validated endpoints reach the exporter. */
   }
