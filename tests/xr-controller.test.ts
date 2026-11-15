@@ -1,91 +1,25 @@
-const handPoses = vi.hoisted(() => ({ count: 0, probeReads: 0 }));
-vi.mock('@par/xr-workspace', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@par/xr-workspace')>();
-  const { createCartoonHand } = actual;
-  return {
-    ...actual,
-    ...(await import('./helpers/labels')),
-    createStandardHand: (...args: Parameters<typeof createCartoonHand>) => {
-      const hand = createCartoonHand(...args);
-      const update = hand.update.bind(hand);
-      hand.update = (...pose: Parameters<typeof hand.update>) => {
-        handPoses.count++;
-        update(...pose);
-      };
-      const probes = hand.contactProbes;
-      return Object.defineProperty(hand, 'contactProbes', {
-        get: () => {
-          handPoses.probeReads++;
-          return probes;
-        },
-      });
-    },
-  };
-});
-const focusedDirectories = vi.hoisted(() => ({ git: vi.fn(), kanban: vi.fn() }));
-vi.mock('../src/xr/repo-status-widget', async (original) => {
-  const actual = await original<typeof import('../src/xr/repo-status-widget')>();
-  return {
-    ...actual,
-    createRepoStatusWidget: (texture: THREE.Texture | null) => ({
-      ...actual.createRepoStatusWidget(texture),
-      setFocusedPane: focusedDirectories.git,
-    }),
-  };
-});
-vi.mock('../src/xr/kanban-strip', async (original) => {
-  const actual = await original<typeof import('../src/xr/kanban-strip')>();
-  return {
-    ...actual,
-    createKanbanStripWidget: (texture: THREE.Texture | null) => ({
-      ...actual.createKanbanStripWidget(texture),
-      setFocusedPane: focusedDirectories.kanban,
-    }),
-  };
-});
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const fakeXR = vi.hoisted(() => ({
-  controllers: [] as unknown[],
-  hands: [] as unknown[],
-  presenting: false,
-  camera: null as unknown,
-  frame: null as ((time: number, frame?: unknown) => void) | null,
-}));
-
-vi.mock('three', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('three')>();
-  fakeXR.controllers = [new actual.Group(), new actual.Group()];
-  fakeXR.hands = [new actual.Group(), new actual.Group()];
-  class FakeRenderer {
-    xr = {
-      enabled: false,
-      get isPresenting() {
-        return fakeXR.presenting;
-      },
-      getController: (index: number) => fakeXR.controllers[index],
-      getHand: (index: number) => fakeXR.hands[index],
-      getCamera: () => fakeXR.camera,
-      setReferenceSpaceType: vi.fn(),
-      getReferenceSpace: () => ({}),
-      setSession: vi.fn(async () => undefined),
-    };
-    capabilities = { getMaxAnisotropy: () => 1 };
-    setPixelRatio(_ratio: number): void {}
-    setSize(_width: number, _height: number, _updateStyle?: boolean): void {}
-    autoClear = true;
-    clearDepth(): void {}
-    setAnimationLoop(callback: ((time: number) => void) | null): void {
-      fakeXR.frame = callback;
-    }
-    render(scene: { updateMatrixWorld(force?: boolean): void }): void {
-      scene.updateMatrixWorld(true);
-    }
-    dispose(): void {}
-  }
-  return { ...actual, WebGLRenderer: FakeRenderer };
-});
+vi.mock('@par/xr-workspace', async (importOriginal) =>
+  (await import('./helpers/xr-mocks')).withLabelsAndCountingHand(
+    await importOriginal<typeof import('@par/xr-workspace')>(),
+  ),
+);
+vi.mock('../src/xr/repo-status-widget', async (original) =>
+  (await import('./helpers/xr-mocks')).withSpiedRepoStatus(
+    await original<typeof import('../src/xr/repo-status-widget')>(),
+  ),
+);
+vi.mock('../src/xr/kanban-strip', async (original) =>
+  (await import('./helpers/xr-mocks')).withSpiedKanbanStrip(
+    await original<typeof import('../src/xr/kanban-strip')>(),
+  ),
+);
+vi.mock('three', async (importOriginal) =>
+  (await import('./helpers/xr-mocks')).createThreeMock(
+    await importOriginal<typeof import('three')>(),
+  ),
+);
 
 import {
   createHandContact,
@@ -94,12 +28,7 @@ import {
   ON_TOP_LAYER,
 } from '@par/xr-workspace';
 import * as THREE from 'three';
-import {
-  BACKGROUND_MODES,
-  type PaneDescriptor,
-  type TerminalSurface,
-  type WorkspaceActions,
-} from '../src/contracts';
+import { BACKGROUND_MODES, type PaneDescriptor, type TerminalSurface } from '../src/contracts';
 import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
 import { createPictureController, type PictureLoaders } from '../src/workspace/pictures';
 import { BACKGROUND_LABELS } from '../src/xr/background-picker';
@@ -112,247 +41,33 @@ import {
   createPictureLibrary,
   createRecentPictureLibrary,
 } from '../src/xr/picture-store';
-import { createWorkspaceScene } from '../src/xr/scene';
+import type { createWorkspaceScene } from '../src/xr/scene';
 import { terminalWarpPoint } from '../src/xr/terminal-warp';
-import { NOMINAL_VIEWER_HEIGHT } from '../src/xr/ui-poses';
 import { WIDGET_REGISTRY } from '../src/xr/widget-registry';
-
-const pane = (id: string, title = id): PaneDescriptor => ({
-  id,
-  title,
-  workspaceId: 'workspace',
-  workspaceName: 'Workspace',
-  sessionId: 'session',
-  sessionName: 'Session',
-  windowId: 'window',
-  windowName: 'Window',
-});
-
-function surface(descriptor: PaneDescriptor): TerminalSurface {
-  return {
-    canvas: document.createElement('canvas'),
-    pane: descriptor,
-    revision: 0,
-    cols: 80,
-    rows: 24,
-    status: 'connected',
-    error: null,
-    connect() {},
-    disconnect() {},
-    sendText: () => true,
-    sendKey: () => true,
-    paste: () => true,
-    focus() {},
-    resizeGrid: vi.fn(() => true),
-    canResizeGrid: true,
-    setColorMode: vi.fn(),
-    dispose() {},
-    subscribe(_next) {
-      return () => undefined;
-    },
-  };
-}
-
-function fixture(options?: Parameters<typeof createWorkspaceScene>[2]) {
-  const actions: WorkspaceActions = {
-    selectPane: vi.fn(),
-    closePane: vi.fn(),
-    togglePaneConnection: vi.fn(),
-    sendText: vi.fn(),
-    sendKey: vi.fn(),
-    sendMouse: vi.fn(() => true),
-    runCommand: vi.fn(),
-    openKeyboard: vi.fn(),
-    openCommands: vi.fn(),
-    resizeGrid: vi.fn(() => true),
-    setTerminalColorMode: vi.fn(),
-    setKeyboardBackground: vi.fn(),
-    reloadApp: vi.fn(),
-    saveCommand: vi.fn(() => true),
-  };
-  const container = document.createElement('div');
-  const workspace = createWorkspaceScene(container, actions, options);
-  fakeXR.camera = workspace.camera;
-  const left = surface(pane('pane-a', 'A'));
-  const right = surface(pane('pane-b', 'B'));
-  workspace.addTerminal(left);
-  workspace.addTerminal(right);
-  workspace.setAvailablePanes([left.pane, right.pane]);
-  workspace.scene.updateMatrixWorld(true);
-  return { workspace, actions, container, left, right };
-}
-
-function hit(
-  workspace: ReturnType<typeof createWorkspaceScene>,
-  data: Record<string, unknown>,
-  event = 'selectstart',
-  distance = 0.3,
-): void {
-  if (data.inputAction === 'toggleWidget') turnToWidget(workspace, data);
-  const button = visibleWithData(workspace, data);
-  if (!button) throw new Error(`Control not found: ${JSON.stringify(data)}`);
-  workspace.scene.updateMatrixWorld(true);
-  const controller = fakeXR.controllers[0] as THREE.Group;
-  const orientation = button.getWorldQuaternion(new THREE.Quaternion());
-  controller.position.copy(
-    button
-      .getWorldPosition(new THREE.Vector3())
-      .add(new THREE.Vector3(0, 0, distance).applyQuaternion(orientation)),
-  );
-  controller.quaternion.copy(orientation);
-  workspace.scene.updateMatrixWorld(true);
-  controller.dispatchEvent({ type: event } as never);
-}
-
-function visibleWithData(
-  workspace: ReturnType<typeof createWorkspaceScene>,
-  data: Record<string, unknown>,
-): THREE.Object3D | undefined {
-  let found: THREE.Object3D | undefined;
-  workspace.scene.traverse((object) => {
-    let visible = true;
-    for (let parent: THREE.Object3D | null = object; parent; parent = parent.parent)
-      if (!parent.visible) visible = false;
-    if (
-      visible &&
-      !found &&
-      Object.entries(data).every(([key, value]) => object.userData[key] === value)
-    )
-      found = object;
-  });
-  return found;
-}
-
-/** The Widgets panel pages once the registry outgrows one page: turn to the entry's page. */
-function turnToWidget(
-  workspace: ReturnType<typeof createWorkspaceScene>,
-  data: Record<string, unknown>,
-): void {
-  for (const delta of [-1, 1])
-    for (let turns = 0; turns < 8 && !visibleWithData(workspace, data); turns += 1) {
-      if (!visibleWithData(workspace, { inputAction: 'widgetsPage', delta })) break;
-      hit(workspace, { inputAction: 'widgetsPage', delta });
-    }
-}
-
-function objectWithData(
-  workspace: ReturnType<typeof createWorkspaceScene>,
-  data: Record<string, unknown>,
-): THREE.Object3D {
-  let result: THREE.Object3D | undefined;
-  workspace.scene.traverse((object) => {
-    if (!result && Object.entries(data).every(([key, value]) => object.userData[key] === value))
-      result = object;
-  });
-  if (!result) throw new Error(`Control not found: ${JSON.stringify(data)}`);
-  return result;
-}
-
-function aimController(controller: THREE.Group, target: THREE.Object3D, distance = 0.3): void {
-  const orientation = target.getWorldQuaternion(new THREE.Quaternion());
-  controller.position.copy(
-    target
-      .getWorldPosition(new THREE.Vector3())
-      .add(new THREE.Vector3(0, 0, distance).applyQuaternion(orientation)),
-  );
-  controller.quaternion.copy(orientation);
-}
-
-function aimControllerAtScreen(
-  controller: THREE.Group,
-  screen: THREE.Object3D,
-  localPoint: THREE.Vector3,
-  distance = 0.3,
-): void {
-  const orientation = screen.getWorldQuaternion(new THREE.Quaternion());
-  controller.position.copy(
-    screen
-      .localToWorld(localPoint.clone())
-      .add(new THREE.Vector3(0, 0, distance).applyQuaternion(orientation)),
-  );
-  controller.quaternion.copy(orientation);
-}
-
-function connectController(
-  index: number,
-  axes = [0, 0, 0, 0],
-  handedness: 'left' | 'right' | 'none' = 'right',
-): Gamepad {
-  const gamepad = {
-    axes,
-    buttons: Array.from({ length: 8 }, () => ({ pressed: false })),
-  } as unknown as Gamepad;
-  (fakeXR.controllers[index] as THREE.Group).dispatchEvent({
-    type: 'connected',
-    data: { gamepad, handedness },
-  } as never);
-  return gamepad;
-}
-
-function pressFocusButton(gamepad: Gamepad, time: number): void {
-  (gamepad.buttons[5] as { pressed: boolean }).pressed = true;
-  fakeXR.frame?.(time);
-  (gamepad.buttons[5] as { pressed: boolean }).pressed = false;
-  fakeXR.frame?.(time + 16);
-}
-let graphFrameTime = 0;
-function settleHierarchy(): void {
-  for (let frame = 0; frame < 40; frame++) {
-    graphFrameTime += 16;
-    fakeXR.frame?.(graphFrameTime);
-  }
-}
-
-function openRadialMenu(gamepad: Gamepad, time: number): void {
-  (gamepad.buttons[4] as { pressed: boolean }).pressed = true;
-  fakeXR.frame?.(time);
-  (gamepad.buttons[4] as { pressed: boolean }).pressed = false;
-  fakeXR.frame?.(time + 16);
-  fakeXR.frame?.(time + 900);
-}
-
-function selectRadialAction(
-  workspace: ReturnType<typeof createWorkspaceScene>,
-  gamepad: Gamepad,
-  action: 'keyboard' | 'commands' | 'panes' | 'layout' | 'warp' | 'widgets' | 'settings' | 'cancel',
-  time: number,
-): void {
-  openRadialMenu(gamepad, time);
-  hit(workspace, { inputAction: 'radialAction', radialAction: action });
-  fakeXR.frame?.(time + 1100);
-}
-
-function selectKeyboardViaRadial(
-  workspace: ReturnType<typeof createWorkspaceScene>,
-  gamepad: Gamepad,
-  time: number,
-): void {
-  selectRadialAction(workspace, gamepad, 'keyboard', time);
-}
+import {
+  aimController,
+  aimControllerAtScreen,
+  connectController,
+  fakeXR,
+  fixture,
+  focusedDirectories,
+  handPoses,
+  hit,
+  objectWithData,
+  openRadialMenu,
+  pane,
+  pressFocusButton,
+  resetXRControllers,
+  selectKeyboardViaRadial,
+  selectRadialAction,
+  settleHierarchy,
+  surface,
+  turnToWidget,
+  visibleWithData,
+} from './helpers/xr-harness';
 
 describe('native XR controller event routing', () => {
-  beforeEach(() => {
-    fakeXR.presenting = true;
-    localStorage.removeItem('mux-xr:ui-poses:v2');
-    localStorage.removeItem('mux-xr:widget-poses:v2');
-    localStorage.removeItem('mux-xr:sticky-notes:v1');
-    localStorage.removeItem('mux-xr:terminal-warp:v1');
-    fakeXR.controllers.forEach((controller) => {
-      const object = controller as THREE.Group;
-      object.position.set(0, 0, 0);
-      object.visible = true;
-      object.rotation.set(0, 0, 0);
-      delete object.userData.inputSourceHand;
-    });
-    fakeXR.hands.forEach((hand) => {
-      const object = hand as THREE.Group & { joints: Record<string, THREE.Group> };
-      object.clear();
-      object.joints = {};
-      object.visible = false;
-      object.position.set(0, 0, 0);
-      object.quaternion.identity();
-    });
-  });
+  beforeEach(resetXRControllers);
 
   describe('tracked hand sources', () => {
     type Hand = THREE.Group & { joints: Record<string, THREE.Group> };
@@ -9682,74 +9397,6 @@ describe('terminal pose persistence across reloads', () => {
     );
     expect(front.dot(toEye.normalize())).toBeGreaterThan(0.999);
     await workspace.exitXR();
-    workspace.dispose();
-    container.remove();
-  });
-});
-
-describe('outside-program toasts', () => {
-  const toast = (overrides: Record<string, unknown>) => ({
-    type: 'toast' as const,
-    toast: {
-      id: 't',
-      message: 'hello',
-      title: null,
-      level: 'info' as const,
-      color: '#5ad1e6',
-      timeout: 0,
-      placement: 'top' as const,
-      paneId: null,
-      source: null,
-      ...overrides,
-    },
-  });
-
-  it('places cards in view and above their pane, and a ray dismisses them through a nearer panel', () => {
-    const onToastDismissed = vi.fn();
-    const { workspace, container } = fixture({ onToastDismissed });
-    workspace.receiveToast(toast({ id: 'top', level: 'error', color: '#ff7a6b' }));
-    workspace.receiveToast(toast({ id: 'over-b', placement: 'pane', paneId: 'pane-b' }));
-    fakeXR.frame?.(16);
-    fakeXR.frame?.(32);
-    workspace.scene.updateMatrixWorld(true);
-
-    const card = workspace.scene.getObjectByName('xr-toast-top-1');
-    if (!card?.visible) throw new Error('top toast card not shown');
-    const eye = workspace.camera.getWorldPosition(new THREE.Vector3());
-    const ahead = card.getWorldPosition(new THREE.Vector3()).sub(eye);
-    expect(ahead.dot(workspace.camera.getWorldDirection(new THREE.Vector3()))).toBeGreaterThan(1);
-    expect(ahead.y).toBeGreaterThan(0.3);
-
-    const paneCard = workspace.scene.getObjectByName('xr-toast-pane-1');
-    const panel = workspace.scene.getObjectByName('terminal-panel-pane-b');
-    if (!paneCard?.visible || !panel) throw new Error('pane toast or panel missing');
-    const panelBox = new THREE.Box3().setFromObject(panel);
-    expect(paneCard.getWorldPosition(new THREE.Vector3()).y).toBeGreaterThan(panelBox.max.y);
-
-    // A terminal pushed between the controller and the card still loses the ray to the card.
-    const blocker = workspace.scene.getObjectByName('terminal-panel-pane-a') as THREE.Group;
-    blocker.position
-      .copy(card.getWorldPosition(new THREE.Vector3()))
-      .add(
-        new THREE.Vector3(0, 0, 0.15).applyQuaternion(
-          card.getWorldQuaternion(new THREE.Quaternion()),
-        ),
-      );
-    blocker.quaternion.copy(card.getWorldQuaternion(new THREE.Quaternion()));
-    hit(workspace, { inputAction: 'dismissToast', toastId: 'top' });
-    expect(onToastDismissed).toHaveBeenCalledWith('top');
-    expect(card.visible).toBe(false);
-    workspace.dispose();
-    container.remove();
-  });
-
-  it('does not report a dismissal for a toast another headset already cleared', () => {
-    const onToastDismissed = vi.fn();
-    const { workspace, container } = fixture({ onToastDismissed });
-    workspace.receiveToast(toast({ id: 'gone', placement: 'center' }));
-    workspace.receiveToast({ type: 'dismiss', id: 'gone' });
-    expect(workspace.scene.getObjectByName('xr-toast-center-1')?.visible).toBe(false);
-    expect(onToastDismissed).not.toHaveBeenCalled();
     workspace.dispose();
     container.remove();
   });
