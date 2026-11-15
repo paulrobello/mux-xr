@@ -32,7 +32,20 @@ const DAMAGE = process.env.MUX_XR_DAMAGE === '1';
 const WORKLOAD = process.env.MUX_XR_WORKLOAD ?? 'mixed';
 // Gauge arm: restore the performance gauge widget before load, to measure its frame cost.
 const PERF_GAUGE = process.env.MUX_XR_PERF_GAUGE === '1';
+// Trace arm: capture a bounded Chrome trace (main-thread + GPU + stack attribution) around the
+// measured window of each count, for long-frame outlier classification.
+const TRACE = process.env.MUX_XR_TRACE === '1';
 const damageGenerations = new Map<string, bigint>();
+const TRACE_CATEGORIES = [
+  '-*',
+  'devtools.timeline',
+  'v8.execute',
+  'v8',
+  'gpu',
+  'disabled-by-default-devtools.timeline.stack',
+  'disabled-by-default-devtools.timeline.frame',
+  'disabled-by-default-gpu.timeline',
+];
 const PANE_IDS = Array.from({ length: 18 }, (_, index) => `%${index + 1}`);
 const COLS = 149;
 const ROWS = 54;
@@ -764,6 +777,7 @@ async function measure(
 async function runCount(
   browser: Awaited<ReturnType<typeof chromium.launch>>,
   count: number,
+  tracePath: string | null,
 ): Promise<Record<string, unknown>> {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
@@ -785,11 +799,23 @@ async function runCount(
   await installSocketFixture(page, state, count);
   try {
     const scene = await prepareScene(page, count);
-    const result = await measure(page, state, count);
+    let result: Record<string, unknown>;
+    if (tracePath)
+      await browser.startTracing(page, {
+        path: tracePath,
+        screenshots: false,
+        categories: TRACE_CATEGORIES,
+      });
+    try {
+      result = await measure(page, state, count);
+    } finally {
+      if (tracePath) await browser.stopTracing();
+    }
     return {
       ...result,
       scene,
       connectedSockets: Object.fromEntries(state.socketByPane),
+      ...(tracePath ? { tracePath } : {}),
       baseline: BASELINE,
     };
   } finally {
@@ -819,8 +845,16 @@ async function main(): Promise<void> {
     args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
   });
   try {
+    const arm = `${BASELINE ? 'baseline' : 'candidate'}-${WORKLOAD}${DAMAGE ? '-damage' : ''}${PERF_GAUGE ? '-perf-gauge' : ''}${TRACE ? '-trace' : ''}`;
     const results: Record<string, unknown>[] = [];
-    for (const count of COUNTS) results.push(await runCount(browser, count));
+    for (const count of COUNTS)
+      results.push(
+        await runCount(
+          browser,
+          count,
+          TRACE ? join(evidence, `terminal-capacity-${arm}-trace-${count}.json`) : null,
+        ),
+      );
     const report = {
       kind: 'terminal-capacity-check',
       baseline: BASELINE,
@@ -829,6 +863,7 @@ async function main(): Promise<void> {
       background: BACKGROUND,
       damage: DAMAGE,
       perfGauge: PERF_GAUGE,
+      trace: TRACE,
       workloadKind: WORKLOAD,
       counts: COUNTS,
       viewport: { width: 1440, height: 1000, deviceScaleFactor: 2 },
@@ -845,7 +880,6 @@ async function main(): Promise<void> {
       },
       results,
     };
-    const arm = `${BASELINE ? 'baseline' : 'candidate'}-${WORKLOAD}${DAMAGE ? '-damage' : ''}${PERF_GAUGE ? '-perf-gauge' : ''}`;
     const path = join(evidence, `terminal-capacity-${arm}.json`);
     await writeFile(path, JSON.stringify(report, null, 2));
     const invalid = results.find(
