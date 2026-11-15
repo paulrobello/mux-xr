@@ -1,4 +1,5 @@
 /** Explicit, one-request-per-connection clipboard transfers with the host's dictation server. */
+import { reportSwallowed } from './diagnostics';
 import { openPairedSocket, type PairedOutcome } from './host-pairing';
 
 import { HOST_SERVICE_PORT } from './host-service';
@@ -190,15 +191,16 @@ export function createHostClipboardSecretStore(
       try {
         storage()?.setItem(HOST_CLIPBOARD_SECRET_KEY, value);
         return true;
-      } catch {
+      } catch (error) {
+        reportSwallowed('host-clipboard.secret-save', error);
         return false;
       }
     },
     forget(): void {
       try {
         storage()?.removeItem(HOST_CLIPBOARD_SECRET_KEY);
-      } catch {
-        /* Storage unavailable. */
+      } catch (error) {
+        reportSwallowed('host-clipboard.secret-forget', error);
       }
     },
   };
