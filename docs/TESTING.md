@@ -9,6 +9,12 @@ Run these commands from the repository root. Install the pinned dependencies wit
 
 There are no tracked CI workflows. `make checkall-ci` is the full local gate. The browser and live-streamer checks below run separately.
 
+### Git hooks
+
+Install both hooks once in every clone and every worktree with `pre-commit install --hook-type pre-commit --hook-type pre-push`. The pre-commit stage scans staged files for secrets and runs the fast gate, which documentation-only commits skip. The pre-push stage runs `make checkall-ci`.
+
+The hooks are advisory. `git commit --no-verify` and `git push --no-verify` skip them, and a fresh clone or worktree has none until the install command runs. They narrow the gap left by having no remote CI without closing it.
+
 ## Browser fixtures
 
 Install the Chromium revision pinned by Playwright with `bunx playwright install chromium --no-shell --no-remove`. Run `make e2e` against a local app. Set `MUX_XR_BASE_URL` if the app is on a different port. The suite uses synthetic protocol fixtures across desktop, tablet, and mobile viewports.

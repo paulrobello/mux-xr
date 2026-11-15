@@ -1,23 +1,9 @@
 {
-  "compilerOptions": {
-    "target": "ES2023",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "strict": true,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "types": ["vite/client", "node", "webxr"],
-    "allowImportingTsExtensions": true,
-    "resolveJsonModule": true,
-    "verbatimModuleSyntax": true
-  },
-  "include": [
-    "src",
-    "packages/xr-workspace/src",
-    "tests",
-    "scripts",
-    "vite.config.ts",
-    "vitest.config.ts"
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.web.json" },
+    { "path": "./tsconfig.node.json" },
+    { "path": "./tsconfig.scripts.json" },
+    { "path": "./tsconfig.tests.json" }
   ]
 }

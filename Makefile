@@ -14,7 +14,10 @@ fmt: ## Format the sources with Biome
 	bun run fmt
 typecheck: ## Run strict TypeScript
 	bun run typecheck
-checkall: lint typecheck test build ## Fast gate: lint, typecheck, unit tests and build
+.PHONY: protocol-check
+protocol-check: ## Verify the vendored protobuf binding against core-release.json
+	bun run scripts/protocol-check.ts
+checkall: protocol-check lint typecheck test build ## Fast gate: protocol check, lint, typecheck, unit tests and build
 checkall-ci: checkall asset-check ## CI-parity gate: checkall, asset checks, Gitleaks and the dependency audit
 	gitleaks dir . --redact --no-banner
 	bun audit --audit-level high
