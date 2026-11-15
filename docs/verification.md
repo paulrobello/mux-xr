@@ -1,14 +1,65 @@
 # Tested build evidence
 
-This report records successive software checks on November 1, 2026 (Etc/GMT+8). The latest stream-lifecycle evidence is at the end. Paul confirmed the app works in headset XR. Each subsequent change still requires the relevant physical headset recheck.
+This report records successive software checks from November 1–12, 2026 (Etc/GMT+8), with sections in date order. The latest stream-lifecycle evidence is in [Held-pane exit and respawn through a real streamer (2026-11-12)](#held-pane-exit-and-respawn-through-a-real-streamer-2026-11-12). Paul confirmed the app works in headset XR. Each subsequent change still requires the relevant physical headset recheck.
 
-## Software gate
+## Table of contents
+
+- [Software gate (2026-11-01)](#software-gate-2026-11-01)
+- [Browser evidence (2026-11-01)](#browser-evidence-2026-11-01)
+- [LAN and published release qualification (2026-11-01)](#lan-and-published-release-qualification-2026-11-01)
+- [Visual and asset checks (2026-11-01)](#visual-and-asset-checks-2026-11-01)
+- [Pending owner checks (2026-11-01)](#pending-owner-checks-2026-11-01)
+- [Owner desktop feedback fixes (2026-11-01)](#owner-desktop-feedback-fixes-2026-11-01)
+- [Spatial controls, hover help and separate input views (2026-11-01)](#spatial-controls-hover-help-and-separate-input-views-2026-11-01)
+- [Single input presentation and panel recovery (2026-11-01)](#single-input-presentation-and-panel-recovery-2026-11-01)
+- [First Quest feedback: rays, keyboard manipulation and gaze input (2026-11-01)](#first-quest-feedback-rays-keyboard-manipulation-and-gaze-input-2026-11-01)
+- [Universal direct manipulation (2026-11-01)](#universal-direct-manipulation-2026-11-01)
+- [Orientation, explicit grids and readable XR text (2026-11-01)](#orientation-explicit-grids-and-readable-xr-text-2026-11-01)
+- [Served label repair, reversed pitch and quieter blues (2026-11-01)](#served-label-repair-reversed-pitch-and-quieter-blues-2026-11-01)
+- [Explicit frontend update notices (2026-11-01)](#explicit-frontend-update-notices-2026-11-01)
+- [Spatial terminal arrangements (2026-11-01)](#spatial-terminal-arrangements-2026-11-01)
+- [Quest feedback repair and existing-daemon profile (2026-11-01)](#quest-feedback-repair-and-existing-daemon-profile-2026-11-01)
+- [Independent view/stream controls and four-stream diagnostics (2026-11-01)](#independent-viewstream-controls-and-four-stream-diagnostics-2026-11-01)
+- [Two-pane agent-spinner rendering repair (2026-11-01)](#two-pane-agent-spinner-rendering-repair-2026-11-01)
+- [Spatial controls and TUI mouse batch (2026-11-01)](#spatial-controls-and-tui-mouse-batch-2026-11-01)
+- [Reversible terminal focus mode (2026-11-01)](#reversible-terminal-focus-mode-2026-11-01)
+- [Gaze-prioritized terminal LOD and exterior space (2026-11-02)](#gaze-prioritized-terminal-lod-and-exterior-space-2026-11-02)
+- [Keyboard, controller and visual comfort batch (2026-11-02)](#keyboard-controller-and-visual-comfort-batch-2026-11-02)
+- [Clock widgets, saved UI poses and terminal clarity (2026-11-02)](#clock-widgets-saved-ui-poses-and-terminal-clarity-2026-11-02)
+- [XR entry, remembered clocks, curvature, scroll and radial review (2026-11-02)](#xr-entry-remembered-clocks-curvature-scroll-and-radial-review-2026-11-02)
+- [Live radial animation, adjustable glass and restored views (2026-11-02)](#live-radial-animation-adjustable-glass-and-restored-views-2026-11-02)
+- [Panel ownership, direct Warp and reload entry (2026-11-02)](#panel-ownership-direct-warp-and-reload-entry-2026-11-02)
+- [Window defaults, focus preferences and curved rims (2026-11-02)](#window-defaults-focus-preferences-and-curved-rims-2026-11-02)
+- [XR trigger selection and clipboard copy (2026-11-02)](#xr-trigger-selection-and-clipboard-copy-2026-11-02)
+- [Floor placement, hierarchy motion and clipboard feedback (2026-11-03)](#floor-placement-hierarchy-motion-and-clipboard-feedback-2026-11-03)
+- [Local Whisper dictation (2026-11-03)](#local-whisper-dictation-2026-11-03)
+- [Hand input (2026-11-03)](#hand-input-2026-11-03)
+- [Cartoon hands, elastic arms and wrist Menu (2026-11-04)](#cartoon-hands-elastic-arms-and-wrist-menu-2026-11-04)
+- [Near hand typing, contact grip and side thumb (2026-11-04)](#near-hand-typing-contact-grip-and-side-thumb-2026-11-04)
+- [Terminal creation (2026-11-09)](#terminal-creation-2026-11-09)
+- [Agent roster (2026-11-09)](#agent-roster-2026-11-09)
+- [Agent board widget (2026-11-10)](#agent-board-widget-2026-11-10)
+- [Environment backgrounds wiring (2026-11-10)](#environment-backgrounds-wiring-2026-11-10)
+- [Picture frame widget (2026-11-11)](#picture-frame-widget-2026-11-11)
+- [Bell feed widget (2026-11-11)](#bell-feed-widget-2026-11-11)
+- [Performance gauge widget (2026-11-11)](#performance-gauge-widget-2026-11-11)
+- [Git & CI status widget (2026-11-11)](#git--ci-status-widget-2026-11-11)
+- [Timer widget (2026-11-11)](#timer-widget-2026-11-11)
+- [Host clipboard sync (2026-11-11)](#host-clipboard-sync-2026-11-11)
+- [In-XR picture picking and the placeholder fixes (2026-11-11)](#in-xr-picture-picking-and-the-placeholder-fixes-2026-11-11)
+- [Review fixes for in-XR picture picking (2026-11-11)](#review-fixes-for-in-xr-picture-picking-2026-11-11)
+- [Host load widget (2026-11-11)](#host-load-widget-2026-11-11)
+- [Held-pane exit and respawn through a real streamer (2026-11-12)](#held-pane-exit-and-respawn-through-a-real-streamer-2026-11-12)
+- [Picture proxy (2026-11-12)](#picture-proxy-2026-11-12)
+- [Living environments and the Backgrounds picker (2026-11-12)](#living-environments-and-the-backgrounds-picker-2026-11-12)
+
+## Software gate (2026-11-01)
 
 The initial controller build's `make checkall-ci` covered Biome, strict TypeScript, 83 unit tests across eight files, the production build, observatory asset validation, secret scanning and a high-severity dependency audit. That audit reported zero vulnerabilities. Its production JavaScript chunk was approximately 1.27 MB before gzip (346 KB gzip). The chunk-size warning is not a headset performance result.
 
 The unit suite exercises protobuf/zlib framing, ANSI seeding and live output, disconnected input rejection, bounded reconnects, target capture, persistence failures, key encoding, hierarchy normalization, native controller events, relative panel transforms, local zoom and resource teardown. Controller tests dispatch actual Three.js Group events with GPU/SDF drawing mocked. A separate native-GPU fixture exercises the real SDF text implementation and bundled fonts. They caught and reproduce fixes for DOM-style event assumptions, grip activating keys, inverted zoom and hierarchy leaves failing to attach new panes.
 
-## Browser evidence
+## Browser evidence (2026-11-01)
 
 `make e2e` uses explicit protocol fixtures. Desktop (1440×900), tablet (820×900) and mobile (390×844) passed with native Chromium headless and the Apple M4 Metal renderer. Each captured 24 input frames with no page errors. The final rerun recorded test-mac load 1.856 before and 2.028 after. The final visual reviewer cleared all six previously reported material findings, including the mobile Backspace label. It verifies hierarchy selection, two panels, command scopes, optional Enter, frozen input target, modifier bytes, detach, backgrounds and settings. Fixture results do not establish a real daemon round trip.
 
@@ -27,7 +78,7 @@ The focused `make live-check` diagnostic separately sent distinct split-marker c
 
 Raw logs and screenshots are preserved locally under `.local/evidence` and `.impeccable/review`. Temporary fleet scratch trees and private remote daemons were removed after the run. An earlier diagnostic using an older daemon reported zero geometry and was excluded from grid-preservation acceptance.
 
-## LAN and published release qualification
+## LAN and published release qualification (2026-11-01)
 
 Paul explicitly approved the application firewall rule on November 1, 2026. The rule was applied only to `.local/bin/streamer-candidate`, preserving the approved binary hash. The app allow entry is present. HTTPS immediately became reachable from test-mac, confirming the earlier inbound connectivity problem was resolved by that change. No other application rule or global firewall setting changed.
 
@@ -47,11 +98,11 @@ The LAN run exposed a test timing assumption: attached panel controls can exist 
 
 Accepted logs are `.local/evidence/lan-full-app.log`, `release-full-app.log` and `lan-release-summary.json`. Temporary remote daemons, browsers, copied packages and scratch trees were cleaned up after qualification.
 
-## Visual and asset checks
+## Visual and asset checks (2026-11-01)
 
 Desktop, tablet and mobile captures were reviewed. The interface uses a nested hierarchy, readable two-panel framing, a themed command editor and responsive input controls. The final mechanical Impeccable detector returned no findings. The observatory is an original, deterministic Blender asset with editable sources, 22,712 triangles, ten draw calls and a 2,528,120-byte runtime GLB. Its technical validator and source/runtime byte comparison pass.
 
-## Pending owner checks
+## Pending owner checks (2026-11-01)
 
 Quest Browser access and immersive XR entry are owner-confirmed. Acceptance of the revised rays, keyboard size and manipulation, gaze input, two-panel readability, passthrough, observatory taste and frame pacing remains pending. No maximum pane count or production-scale performance improvement is claimed. Black and gradient modes provide simpler backgrounds for comparison.
 
@@ -59,7 +110,7 @@ The LAN preview reuses the existing IWSDK development certificate. It is self-si
 
 Both the matching daemon and streamer are required for complete geometry metadata. A published `0.75` version string alone is insufficient. The original candidate hashes above describe gated local builds. Official 0.76.0 release artifacts were additionally qualified as recorded above. Held-pane exit/respawn metadata shipped upstream in 0.76.0. The viewer badges shipped in dd622a0 and are verified end to end in the held-pane section below.
 
-## Owner desktop feedback fixes
+## Owner desktop feedback fixes (2026-11-01)
 
 The November 1 desktop feedback is addressed with these separate checks:
 
@@ -73,7 +124,7 @@ The November 1 desktop feedback is addressed with these separate checks:
 
 The final design detector reported advisory differences between legacy embedded UI colors/type sizes and DESIGN.md. The new desktop view reuses the incumbent palette. These advisories were not treated as functional failures or as permission for a broader redesign. Physical Quest behavior after these fixes remains owner-pending.
 
-## Spatial controls, hover help and separate input views
+## Spatial controls, hover help and separate input views (2026-11-01)
 
 The subsequent owner feedback confirmed the other desktop fixes and identified inert spatial strips and indistinguishable Commands/Keyboard drawers. These are now covered separately:
 
@@ -83,7 +134,7 @@ The subsequent owner feedback confirmed the other desktop fixes and identified i
 - Commands shows saved-command controls/editor. Keyboard shows the composer and key grid. Unit and browser visibility assertions verify the views differ and preserve explicit pane targeting. DOM icon/modifier buttons include descriptive hover titles.
 - Full fast and CI-parity gates pass with 42 tests. test-mac native-GPU browser load was 1.610 before and 1.737 after. Owned preview processes and scratch files were removed after the run.
 
-## Single input presentation and panel recovery
+## Single input presentation and panel recovery (2026-11-01)
 
 The next owner screenshots exposed the combined DOM/spatial keyboard presenter and panel growth clipping its own shrink controls. The fixes use one presenter per mode: browser HUD input opens the compact drawer only, native XR input does not invoke DOM opening callbacks, and session end clears spatial input. A lifecycle regression explicitly checks keyboard disposal on immersive exit.
 
@@ -92,7 +143,7 @@ Browser growth now projects the whole panel hierarchy, including attached contro
 All 46 unit tests and the parity gate pass. Desktop, tablet and mobile native-GPU fixtures pass after clicking the actual HUD Keyboard control, asserting no spatial keyboard exists, enlarging 25 times, checking viewport bounds/reachable shrink controls, and using recovery/reset. Accepted screenshots include `desktop-single-keyboard.png` and `desktop-bounded-panel.png`. The final screenshot run recorded test-mac load 1.843 to 2.290 with no page errors. These are browser/simulated XR results; physical Quest comfort/readability remains owner-pending.
 
 
-## First Quest feedback: rays, keyboard manipulation and gaze input
+## First Quest feedback: rays, keyboard manipulation and gaze input (2026-11-01)
 
 Paul confirmed headset XR operation and reported short visible rays, a keyboard filling the view, missing hover/contact feedback and missing manipulation controls. The revised scene uses the actual picked intersection for the visible ray endpoint, an eight-meter fallback ray, a small contact dot and per-controller key highlights. Both controllers can hover one key without clearing each other's tint. Disconnect hides contact/ray visuals and releases the grab.
 
@@ -107,7 +158,7 @@ Gaze input is a separate, persistent, default-off option in browser settings, th
 The accepted logs are `.local/evidence/quest-final-parity.log` and `quest-final-browser.log`, with `quest-keyboard-native.png` and `quest-keyboard-native-highlight.png` under `.impeccable/review`. This round uses protocol fixtures and simulated XR, not a fresh real-daemon round trip or physical headset acceptance. Existing real-core/LAN evidence above remains separate. Terminal processes, streamer binaries, firewall rules and certificates are preserved.
 
 
-## Universal direct manipulation
+## Universal direct manipulation (2026-11-01)
 
 The owner subsequently requested all XR UI surfaces be directly manipulable, replacing the prior fixed-HUD and dedicated resize/reset-button approach. Terminal panes, keyboard, quick commands, hierarchy and HUD now share whole-surface grip behavior. Child keys and actions remain attached. XR panel-size buttons, keyboard-size/reset actions and the separate recovery strip are removed. A−/A+ remain local terminal text zoom, and the desktop DOM toolbar retains mouse-accessible scale/reset controls.
 
@@ -124,7 +175,7 @@ Native Metal verification also passes with no XR transform actions in the scene,
 The final visual review also caught passive grip help from the other controller covering the keyboard while a letter key was targeted. Control hover now takes priority over body help, with a positive two-ray regression and native Metal rerun. The latest gate passes 68 tests. The focused rerun reproduced the same geometry, scale and ray values with test-mac load 1.903 before and after; its log is `.local/evidence/direct-hover-visual.log`. No headset performance or physical controller acceptance is inferred from these fixtures.
 
 
-## Orientation, explicit grids and readable XR text
+## Orientation, explicit grids and readable XR text (2026-11-01)
 
 The latest owner feedback adds grip-only stick yaw/pitch, grip-plus-trigger laser-axis roll and push/pull, explicit terminal grid control, scalable keyboard labels, quieter hints, measured FPS and a buttons-only keyboard option. One- and two-controller physical manipulation remains independent from the PTY grid.
 
@@ -145,7 +196,7 @@ Excluded diagnostics found an overbroad glyph coverage table that triggered exte
 The final browser grid-form pass used the actual UI component and global CSS at mobile and desktop widths. Numeric inputs are themed dark, 122×36 px in the settings panel, arranged in two columns, and the panel scrolls within the viewport. Initial Apply is disabled until a terminal is available. Both captures passed; readability-grid-style.log records the computed field styling. This static DOM check ran in a booked load-tolerant local window and is not a timing or GPU-performance sample.
 
 
-## Served label repair, reversed pitch and quieter blues
+## Served label repair, reversed pitch and quieter blues (2026-11-01)
 
 Owner testing found that the previous candidate had no XR UI glyphs. The earlier native fixture imported source modules from Vite and missed the streamer's production Content Security Policy. The actual served build reproduced zero foreground pixels in three HUD-label crops, with console errors explicitly blocking Troika blob workers. The supported configureTextBuilder useWorker:false path restores typesetting under the unchanged policy. No CSP, certificate, firewall rule, credential or streamer binary was modified.
 
@@ -155,7 +206,7 @@ Normal-grip pitch was reversed exactly as requested. Tests compare its quaternio
 
 All83 tests, strict TypeScript and full parity checks pass. Accepted logs are label-repair-parity.log and production-label-final.log under .local/evidence; production-label-baseline.log records the failing served build. A remaining GLTFLoader texture fetch is blocked by the existing connect-src policy and is tracked separately on core card01a19895bd22721e9042583d8f5f8357. That optional custom-root CSP capability was filed upstream with strict-default and owner-opt-in requirements. The label regression test reports these unrelated environment messages separately rather than claiming all asset requests succeed.
 
-## Explicit frontend update notices
+## Explicit frontend update notices (2026-11-01)
 
 Production builds emit a deterministic SHA-256 fingerprint in index.html and version.json, covering the bundled application, package version and public assets. The frontend compares the embedded identifier with an immediate same-origin manifest request and subsequent 30-second polls. Requests bypass the cache, time out after five seconds, and never overlap. Malformed, failed or aborted requests retain any existing notice. Returning to the running build clears the notice. Development retains Vite reload behavior.
 
@@ -169,7 +220,7 @@ The same final run rendered 188/281/228 foreground glyph pixels under native App
 
 Run make update-notice-check only against an owned isolated fixture, with MUX_XR_PRIVATE_TEST=1, MUX_XR_BASE_URL and MUX_XR_UPDATE_TEST_ROOT explicitly set. The script deliberately replaces that fixture's served directory to exercise a real build change. It must not target the live workspace.
 
-## Spatial terminal arrangements
+## Spatial terminal arrangements (2026-11-01)
 
 Attached terminal panels now support Row, Grid, Arc and Sphere presets. Browser Workspace settings provide a persisted pattern draft and explicit Apply arrangement, which opens the 3D preview. The native grabbable Arrange menu exposes the same four actions. Sphere occupies a forward spherical surface and curves in both axes for multi-row layouts. Every panel faces the viewer. Geometry uses size-aware spacing and chord-safe curved separation, including high-latitude contraction, with no clamped edge positions that collapse large grids.
 
@@ -185,7 +236,7 @@ Evidence is under .local/evidence/arrangements, with the gate in arrangements-pa
 
 For an owned private test root containing a copy of dist, compile scripts/arrangement-fixture.ts into arrangement-fixture.js in that root with bun build --target browser. Serve the root using the streamer, then run make arrangement-check with MUX_XR_BASE_URL, MUX_XR_PRIVATE_TEST=1 and MUX_XR_TEST_ROOT explicitly set. The script writes fixture HTML and screenshots to that root, so do not point it at the live workspace.
 
-## Quest feedback repair and existing-daemon profile
+## Quest feedback repair and existing-daemon profile (2026-11-01)
 
 Owner testing confirmed readable keyboard text at all distances, working grip/rotation/push-pull, and functional background modes. The next repair removes separate gaze-emphasis highlighting: only the selected input pane receives the active marker. Labels use solid backgrounds instead of raster hairlines, and the active marker is a broad, static low-opacity mesh. Tooltips retain their 700 ms dwell and target-relative placement, with bounded distance scaling. The authored planet's base tint and emissive intensity are reduced so a failed optional texture cannot leave a bright white disc. SDF fonts and manipulation contracts are preserved.
 
@@ -201,7 +252,7 @@ Evidence is under .local/evidence/quest-feedback and quest-feedback-parity.log. 
 
 The final desktop/tablet/mobile protocol-fixture suite also passed on native M4 Metal with 46 captured frames and zero page errors per viewport. It ran on a separate private Vite static preview at loopback port 4241 with every WebSocket intercepted by Playwright, and no mux socket configured. The obsolete independent gaze-emphasis controls were removed from the assertions, and startup attachment is verified before any Connect click. A racing socket-count baseline was replaced with actual attached-pane state. Its private host and static server were removed, with port 4241 clear. Evidence is under .local/evidence/quest-feedback-mocked.
 
-## Independent view/stream controls and four-stream diagnostics
+## Independent view/stream controls and four-stream diagnostics (2026-11-01)
 
 The November 1 lifecycle batch passes `make checkall-ci` with 148 tests across 17 files, strict TypeScript, production build, asset checks, gitleaks and dependency audit. There is no CI workflow in this repository. The parity target includes the fast gate and the additional asset/security checks.
 
@@ -215,7 +266,7 @@ The comparable desktop workload used four 149×54 panes, device scale 2, native 
 
 Evidence is retained under `.local/evidence/stream-lifecycle`. Generated XR fixtures are test-only and are excluded from the delivered production build. The live preview keeps its existing daemon, certificate, origins and firewall configuration.
 
-## Two-pane agent-spinner rendering repair
+## Two-pane agent-spinner rendering repair (2026-11-01)
 
 Owner feedback rejected Quest performance of build 8560f8c: two small panes with little scrolling and an agent spinner produced 10–25 FPS and periodic head/controller tracking pauses, including Black with keyboard and menus closed. Earlier desktop burst tests did not establish headset acceptance.
 
@@ -230,7 +281,7 @@ Baseline host load was 1.762 to 2.227 and candidate load 2.227 to 1.905. Several
 macOS detects the Quest 3 USB device, but ADB exposes no debugging device yet. No USB trace was captured. Subsequently, Paul confirmed five-plus panes together with the keyboard held around 60 FPS and reported performance was much better. This is owner hardware acceptance of ad00aba, not an inferred desktop result or a maximum-capacity benchmark. Developer Mode and the headset USB debugging prompt are required only for remote profiling, not for normal browser use.
 
 
-## Spatial controls and TUI mouse batch
+## Spatial controls and TUI mouse batch (2026-11-01)
 
 Paul confirmed creation and execution of a native quick command worked perfectly, and that the existing arrangement actions worked before this size-aware change. Terminal scaling now clamps at0.3 instead of0.6 in controller and desktop paths. Both native background button groups are compact synchronized selectors with uniform options. Layout inputs measure actual grid-sized frames and control geometry in root-local coordinates, preserve manual scale and center the complete envelope. Perspective overlap checks move the layout outward when necessary while retaining its shape and inward-facing orientation. Controller interaction range follows those farther windows.
 
@@ -241,7 +292,7 @@ The mixed-size rendered fixture uses six grids(80×24,120×36,160×48,52×30,100
 The final `make checkall-ci` passed with 187 tests across 23 files, strict TypeScript, production build, asset checks, secret scanning and dependency audit. Desktop, tablet and mobile protocol fixtures each captured 46 frames with zero page errors on native Apple M4 Max Metal. The independent mixed-size rendered fixture passed all four arrangements with no fixture errors. The private real-core TUI check passed press/drag/release, grip suppression, grip-transition release, original-pane capture, native selector selection and desktop cell mapping. These are software checks. New physical Quest mouse precision and mixed-size layout comfort remain owner checks. The private daemons and browsers were stopped, and localhost port 4241 was clear afterward.
 
 
-## Reversible terminal focus mode
+## Reversible terminal focus mode (2026-11-01)
 
 Right-controller B toggles the aimed terminal, falling back to the active pane. Handedness comes from the XR input source rather than controller slot order. Press edges are consumed even while either grip is held, so releasing a grip with B still down cannot activate focus. The pane moves over 250 ms to a position centered on the current view, with distance fitted to its complete envelope and physical size. It remains world-stable afterward. Other terminal roots fade out and reject ray/gaze input immediately. The keyboard and HUD are unaffected.
 
@@ -254,7 +305,7 @@ Run `make focus-mode-check` only with `MUX_XR_PRIVATE_TEST=1`, an explicit `MUX_
 The final `make checkall-ci` passed 198 tests across 24 files, strict TypeScript, production build, asset checks, secret scan and dependency audit. The final actual-main native focus fixture passed and the desktop/tablet/mobile protocol fixtures each passed 46 frames with zero page errors. These are functional native-GPU checks, not new frame-time or Quest capacity measurements.
 
 
-## Gaze-prioritized terminal LOD and exterior space
+## Gaze-prioritized terminal LOD and exterior space (2026-11-02)
 
 The full parity gate passes 212 tests across 27 files, strict TypeScript, production build, asset/provenance checks, secret scanning and dependency audit. Focused tests cover raster scaling, 60 Hz flush throttling, hidden output/promotion, independent rendering gaze, input/grid preservation, distance hysteresis, async asset cancellation and resource disposal. An immediate full-quality color preference repaint regression and a TextureLoader import error were caught and fixed before acceptance.
 
@@ -263,7 +314,7 @@ Matched native M4 Mac mini runs used 6/12/18 actual terminal surfaces at149×54,
 The final desktop/tablet/mobile protocol fixtures pass46frames/errors0 each, and the native focus regression retains520 title foreground pixels, exact restore and no page/font/shader errors. Rendered exterior and workspace captures were inspected. The final space has three added draws, textured planet detail and static colored stars/cloud bands. The original clipped star positions were beyond the camera far plane. The fallback PNG preserves the existing owned map hash, and CSP remains unchanged. New owner creative/Quest comfort acceptance remains pending.
 
 
-## Keyboard, controller and visual comfort batch
+## Keyboard, controller and visual comfort batch (2026-11-02)
 
 Desktop and XR share a conventional positioned keyboard, with wide main keys and a separate inverted-T arrow cluster. A short modifier tap is one-shot. A 550 ms hold locks Shift/Ctrl/Alt until a later tap. Case/symbol labels and lock markers follow the active state. Pointer cancellation restores pre-press state, and target/context changes clear locks and cached A-resume state. Right-controller A toggles keyboard visibility once per press without activating during grips. B still toggles Focus mode. Closer/Farther move all terminal panels through one shared horizontal translation, preserving transforms relative to each other, input and PTY grids, with a nearest-bound clamp.
 
@@ -275,7 +326,7 @@ Matched native M4 6/12/18-pane149×54 spinner/log checks retained the same wire 
 
 The final full parity gate passed 227 tests across 28 files. The actual-main native protocol check passed both controller and real DOM long presses with Shift A/B/c and Ctrl01/02/d, zero resize frames, exact A-toggle pose retention, B focus, and shared layout movement. Native animation evidence recorded0.4044rad planet rotation with center displacement0 and1.2m meteor travel. Desktop/tablet/mobile each passed46 captured frames with zero page errors. Normal, locked, browser keyboard and motion captures were visually inspected.
 
-## Clock widgets, saved UI poses and terminal clarity
+## Clock widgets, saved UI poses and terminal clarity (2026-11-02)
 
 The native HUD replaces Keyboard with Widgets, while controller A and the desktop Keyboard shortcut remain. Digital and analog clocks are local-time 3D roots with close controls, grip translation/rotation, laser push/pull, two-grip scale and recovery. Horizontal grip yaw and laser-axis roll directions are reversed. Keyboard/HUD transforms save on final grip release, keyboard hide and XR exit, restore in the next session's viewer-relative yaw frame, and clear on both-stick recovery. The original HUD Exit path hid the keyboard before saving it. A native reload test exposed that defect, and the corrected hide path now persists it first.
 
@@ -287,7 +338,7 @@ All four arrangements passed with six mixed-grid/mixed-scale panels: full geomet
 
 Filtering settings persist and synchronize across browser/native UI. Four sampler types and five anisotropy levels are exposed. Sharper gaze defaults on and prioritizes full raster/base-level sampling independently of Gaze input. An initial sampler-switch implementation regressed uploads and was excluded. The final uniform-based implementation and matched6/12/18-pane moving-gaze results are recorded in [the clarity comparison](performance/terminal-clarity-2026-11-02.md). Physical Quest clarity, star appearance, clock comfort and saved-pose feel remain owner checks.
 
-## XR entry, remembered clocks, curvature, scroll and radial review
+## XR entry, remembered clocks, curvature, scroll and radial review (2026-11-02)
 
 The refinement batch passes 280 tests across 37 files and full parity. Native M4 Metal under the unchanged production CSP verifies 60° screen curvature and ray UV(.25,.5), applicable filter controls, sharper-gaze on/off across the chosen distance, no input retargeting, and notice dismissal. Controller scroll changes actual shell-scrollback pixels and emits raw SGR 65 for a mouse-aware TUI. Holding grip suppresses scroll. The final desktop/tablet/mobile fixtures each pass46 captured protocol frames and zero page errors. The existing keyboard/HUD reload fixture passes. Clock persistence, single-flight XR, activation fallback, stable tooltip pose and signed rotation are covered in the unit/controller suite.
 
@@ -297,7 +348,7 @@ Solid ring, floating controls, tinted ring and curved-glass-pane captures are ac
 
 Core 0.77.0 release hashes were verified and a separate private raw-mode TUI confirmed exact wheel bytes. The generated schema is pinned to the tag. No automated check connected to the real/default mux daemon. Headset curvature/scroll feel, restored widget placement, tooltip placement, optical filtering and eventual radial/glass acceptance remain owner checks. Evidence is retained under .local/evidence/warp-radial.
 
-## Live radial animation, adjustable glass and restored views
+## Live radial animation, adjustable glass and restored views (2026-11-02)
 
 The selected tinted ring is implemented with an 800 ms timeline: center growth, stack emergence, then polar fan-out. Native M4 Metal observed 808.7 ms from A press to interaction readiness with host load 1.856 before/1.947 after. All five destinations and Cancel route through the actual controller/scene path. Intermediate snapshots use paused states of the same component at 160/320/800 ms, avoiding screenshot-capture overhead in the wall-clock trace. Input, grab and scroll are gated while targets move or the modal menu owns interaction.
 
@@ -307,7 +358,7 @@ Opacity pixel checks preserved white, green, saturated blue and dim-gray foregro
 
 CPU verification on Linux initially timed out comparing multi-megabyte typed arrays through a general deep matcher. The assertion now checks the same complete payload with native Buffer.equals and an explicit presence guard. No payload size, decoder bound or timeout was relaxed. The full source gate then passed; Mac native/commit gates provide target-platform qualification. Evidence is retained under .local/evidence/radial-live. Physical Quest motion feel, glass contrast and restored layout comfort remain owner checks.
 
-## Panel ownership, direct Warp and reload entry (November 2, 2026)
+## Panel ownership, direct Warp and reload entry (2026-11-02)
 
 The A radial now exposes Keyboard, Commands, Panes, Layout, Warp, Widgets and Settings. Keyboard alone owns native Gaze input and Backing; the browser Gaze input checkbox moved from Workspace Settings to Keyboard. Display owns colors and Filtering, World owns backgrounds and immersive mode selection, and Selected terminal owns grid, text zoom and per-pane opacity. The HUD contains status, FPS, notices, update and Exit. Terminal key strips and side zoom buttons were removed. A mode change leaves XR and prepares a named browser entry button for a fresh activation.
 
@@ -325,7 +376,7 @@ Final source verification is the full checkall-ci gate (39 files/313 tests, Type
 
 Physical Quest review remains separate: label depth under head motion, glass contrast, controller feel and automatic entry under Quest Browser permission policy need owner confirmation.
 
-## Window defaults, focus preferences and curved rims (November 2, 2026)
+## Window defaults, focus preferences and curved rims (2026-11-02)
 
 Settings → Display and browser settings now save a 10–100% new-window opacity default, focus distance (0.5–5 m, default 1.5 m) and temporary focus warp (0–100°, default flat). New defaults leave live panes unchanged and defer to saved pane overrides. Reset to defaults (Selected terminal page and browser per-pane controls) clears the saved opacity and warp, applies the defaults without re-saving, keeps an open Warp panel edit live on the reset values, survives Focus (including the fade restore on a faded pane); tests cover 0.3/70 resetting to 0.6/30, following changed defaults after a reopen, Focus, the browser button invoking its callback (the main.ts slider sync is untested) and the Selected terminal bounding boxes. Warp Done with an untouched, unchanged curve saves nothing, while a preset press before Done saves even when the value is unchanged. Focus changes retarget the active window without replacing its original pose. Exit restores original position, rotation, scale and normal warp. Direct Warp exits Focus first. Additive settings validation preserves prior saved settings.
 
@@ -337,7 +388,7 @@ Four isolated native checks passed in the reserved test-mac window: window prefe
 
 Final native host loads were 2.218–5.385 before/after checks. Evidence is under .local/evidence/window-preferences/test-mac; the earlier candidate is retained in test-mac-initial. The first launcher used an incorrect local Bun path and stopped before tests; it was corrected before the passing runs. The earlier radial unit test was updated to assert the same choreography at the shortened boundaries. The final candidate repeats all four native checks after the selection-outline join fix. Source verification passes checkall-ci with 323 tests across 40 files, TypeScript, build, assets, secret scanning and dependency audit. Physical Quest distance/warp comfort and curved-border appearance still require owner recheck. Automatic XR entry remains best-effort and was not changed in this batch.
 
-## XR trigger selection and clipboard copy (November 2, 2026)
+## XR trigger selection and clipboard copy (2026-11-02)
 
 Ordinary terminal views now support local trigger-drag text selection. Only a completed XR select gesture starts a clipboard write. Selectend alone cancels a drag. A plain click selects the pane without overwriting the clipboard. The clipboard promise clears the highlight after success and retains it with a notice on rejection. Grip cancels an active drag, while grip/recenter/menu actions after release preserve a pending write. A newer text selection or removed view can supersede the prior selection. Mouse-aware TUIs keep their existing mouse reports, and disconnected retained text remains locally selectable.
 
@@ -347,7 +398,7 @@ The final full parity gate passes 337 tests across 40 files, TypeScript, build, 
 
 Three final private checks pass under the unchanged live CSP: clipboard/controller integration, minified production glyph pixels and desktop/tablet/mobile protocol flows. Final pre/post host loads are2.335–2.440, all below15. Native screenshots include the selected and cleared region; an initial equally passing run used a centered-between-panes view that clipped the left terminal's text, so the final capture aims the verification camera at that pane. Every test WebSocket is intercepted, and no real/default mux is a test target. Evidence is under .local/evidence/clipboard-selection/test-mac. Clipboard permissions are granted only in the isolated browser context. This validates browser integration, not the physical Quest permission prompt or gesture policy; owner recheck remains separate.
 
-## Floor placement, hierarchy motion and clipboard feedback (November 3, 2026)
+## Floor placement, hierarchy motion and clipboard feedback (2026-11-03)
 
 Floor correction now follows restored poses, grid/curve geometry updates, background changes and Warp completion. Focus targets also respect the applicable floor. Native M4 Metal checks measured minimum panel heights of 1.005 m after arrangement, 0.405 m after grid growth and 0.1303 m after restoring a low pose, all above the Observatory clearance threshold of 0.095 m. A controller-moved digital clock remained at its released transform through menu, settings, layout and head movement. Unit coverage also checks saved clock restoration and guards against late restoration overwriting a touched widget.
 
@@ -357,7 +408,7 @@ This batch supersedes the previous clipboard rejection behavior: completing a tr
 
 Both full gates pass 377 tests across 45 files, TypeScript, production build, assets, secret scanning and dependency audit. Native placement/clock, hierarchy, keyboard/dictation-controller, clipboard and desktop/tablet/mobile browser suites pass on Apple M4 Metal. Pre/post loads were 2.04–2.40. Fresh visual review returned ship for this refinement scope, with no required fixes. Evidence is under `.local/evidence/placement-01a1a273`. Physical Quest floor perception, manipulation and microphone acceptance remain separate owner checks. A launcher syntax error prevented the first native run from starting; the corrected launcher ran during its booked window.
 
-## Local Whisper dictation (November 3, 2026)
+## Local Whisper dictation (2026-11-03)
 
 Owner testing found that Quest reports Speech unavailable. Local dictation now uses MediaRecorder, a separate TLS WebSocket listener and the installed Whisper/FFmpeg tools. The base.en model is pinned and checksum-verified. No cloud API credentials, existing authentication, streamer process or CSP were changed. The service accepts the configured frontend origins, bounds clips to 8 MiB/60 seconds and jobs to 90 seconds, processes one job at a time, aborts on cancellation and removes temporary audio.
 
@@ -365,7 +416,7 @@ Full `checkall` and `checkall-ci` pass 392 tests across 47 files. Native M4 Meta
 
 The headless browser could not address the Mac's LAN endpoint directly (`ERR_ADDRESS_UNREACHABLE`), although LAN HTTPS health and real WSS transcription probes passed. The browser-to-Whisper pipeline therefore used a temporary loopback TCP forward. No system permission was changed. Native pre/post loads were below 3, and the test explicitly used a fake microphone sample. The forward, test services and remote scratch trees were removed afterward. Evidence is under `.local/evidence/local-dictation-01a1a273`. Physical Quest microphone permission, recognition quality and comfort remain owner acceptance.
 
-## Hand input (November 3, 2026)
+## Hand input (2026-11-03)
 
 Paul reports that his existing testing has been on Quest 3 and the current controller build works well, and explicitly selected hand tracking next. VR and passthrough now request optional hand tracking. The runtime target-ray group remains the single input identity, while the separate hand joint container supplies tracking and wrist manipulation poses. Index-to-thumb pinch selects, and on Keyborb it highlights the orb on close and types it on release. Middle-to-thumb pinch grabs the same UI roots as controller grip, including two-hand scale/rotation/translation and rebased one-hand continuation. A far one-hand ray grab reels the surface with the wrist's reach since hands have no thumbstick. Missing wrist, thumb, index, middle or target-ray tracking cancels captures and requires neutral pinches before new input. Controller source replacement clears stale hand and gamepad state.
 
@@ -379,7 +430,7 @@ Final browser evidence uses headless full Chromium on ANGLE Metal / Apple M4 Max
 
 Evidence is retained under .local/evidence/hand-tracking-01a1a54d. Automated WebSockets are intercepted and use private synthetic panes. No real/default mux is a test target. Existing streamer, authentication, certificates and CSP are preserved. No remote push is included.
 
-## Cartoon hands, elastic arms and wrist Menu (November 4, 2026)
+## Cartoon hands, elastic arms and wrist Menu (2026-11-04)
 
 The supplied orange glove reference now drives the hand presentation: a padded palm, three rounded fingers plus thumb, and matching elastic arms. The two camera-local arm anchors are independently placed 20 cm left/right, 18 cm below and 4 cm forward. Tube geometry stays attached to the wrist, with about 3.74 cm of settled sag in the native open-hand fixture and bounded smoothing in its middle. Tracked wrist/finger poses stay immediate. Each hand and arm uses two meshes with fixed geometry buffers; all avatar skin remains outside ray picking.
 
@@ -391,7 +442,7 @@ Independent reference/screenshot review scored visual fit 87/100, with no requir
 
 The workstation repeat passed all three viewports with 46 protocol frames each and zero page errors on native M4 Max Metal. Its first attempt stopped at browser launch because the pinned Chromium revision was absent from the shared cache. Installing that revision fixed setup without changing test assertions. The final source tree passes the full 450-test gate on both hosts. The existing browser cache still contains the other projects' registered browser versions.
 
-## Near hand typing, contact grip and side thumb (November 4, 2026)
+## Near hand typing, contact grip and side thumb (2026-11-04)
 
 The thumb now extends from the side of the palm in the same plane as the fingers, matching the supplied reference. Controller face-button curl keeps that side attachment. Measured tracked thumb tips are preserved. Native open/trigger/grip/button images and seven hand-geometry tests verify the change. Paul confirmed the wrist Menu works on Quest 3. New contact interactions still require device feel and typing-precision acceptance.
 
@@ -403,7 +454,7 @@ Native full Chromium on ANGLE Metal / Apple M4, at 1440×1000, verifies direct a
 
 Evidence is retained under .local/evidence/near-hand-contact-01a1a835. Initial browser attempts stopped because the helper tried to withdraw from a Close button after successfully removing it. The corrected fixture withdraws the physical joint positions without looking up disposed controls. The idle opposite hand is parked clear of the test surfaces. No failed attempt contributes acceptance evidence. Synthetic intercepted WebSockets never target the real/default mux. Streamer, terminal processes, TLS, credentials and CSP remain unchanged.
 
-## Terminal creation
+## Terminal creation (2026-11-09)
 
 Browser and XR **New terminal** controls send core `pane_create_request` over a short-lived writable pane stream. The `?metadata=1` hierarchy socket is always read-only and cannot carry it. The vendored `terminal_pb.ts` is unchanged: its SHA-256 `74568289834b31bf654307ce151f5928472f1b33a9a92f5b1b8c4fd0dba894fe` matches core's generated file at v0.77.0, v0.78.1 and v0.80.0. Pane creation shipped in core v0.77.0.
 
@@ -418,11 +469,18 @@ Browser and XR **New terminal** controls send core `pane_create_request` over a 
 
 Run both checks only with `MUX_XR_PRIVATE_TEST=1` against an isolated daemon and a loopback streamer. The `created` cases add real default-shell windows to that daemon.
 
-## Picture frame widget (November 11, 2026)
+## Agent roster (2026-11-09)
 
-`tests/picture-frame.test.ts` covers the pure helpers (fit within 2048 px, frame size from aspect, five slots per layer more than 0.66 m apart, slot 5 cascading 0.07 m nearer and 0.035 m lower and slot 7 0.07 m nearer, 15 distinct slot poses, lowest free slot, notice text), `probeImageSize` on PNG, GIF, WebP (VP8X, VP8L, VP8) and JPEG headers, decoding through injected fakes (downscale and WebP re-encode, bitmap closed, stored blob reused on restore, and rejection of oversized files, non-images, undecodable and zero-size decodes, over-16384 px sources, and an oversized PNG header refused without decoding), URL loading (a fetch `TypeError` becomes the CORS notice, HTTP errors, non-http and malformed URLs refused, CORS mode without credentials, and a body with no Content-Length cancelled once past the byte cap without decoding), the eviction policy and library over the in-memory storage seam, `createIndexedDBPictureStorage` against stubs (unavailable factory, an open failure retried on the next call, store creation on upgrade and an aborted write rejecting), per-frame pose keys (`picture:<id>` accepted, bare and malformed keys refused), the frame widget (aspect for landscape and portrait, sRGB, mipmaps, anisotropy, texture disposal, the placeholder text), the controller (store and show, failure notice with no frame or record, eviction notice, show-but-not-saved on storage failure, a scene-capped frame reported in the eviction notice, four concurrent adds running one at a time, a restore never showing a frame an add evicted, restore deleting undecodable records, close deleting the blob) and the picker (Add, Enter and a file pick ignored while a pick loads, and the row styled by class). The registry tests spawn landscape, portrait and square frames with the `faceViewer` yaw in every slot of two layers against the other widgets (including the real perf gauge entry) and both HUD poses, check that frames in one layer neither intersect nor overlap on screen and that a cascaded frame overlapping on screen sits more than 0.04 m nearer, and keep the placeholder inside 45 degrees horizontally and 30 degrees vertically and clear of the fixed widgets. A filled placeholder keeps its pose, so its oriented box is checked clear of every slot frame in both layers and, where they overlap on screen, more than 0.04 m nearer. Controller tests keep two frames under separate pose keys and apart, fill a menu placeholder in place without saving a placeholder pose or taking a slot, keep one placeholder at a time, restore a saved pose while dropping a pose with no stored picture, close a frame through its control (pose removed, `onPictureClosed` called, texture disposed), re-slot unmoved frames on recenter while a grabbed frame stays put, cap 10 adds at 8 with the oldest two evicted at 8 distinct positions, and re-apply anisotropy when filtering changes. A reload pass checks that two restored frames keep slots 0 and 1 (saved with their slot and no `placed` flag) and a new pick takes slot 2 more than 0.6 m from both, that a restored never-moved frame is re-slotted by recenter while a grabbed one (saved `placed`, no slot) stays put, and that a frame that filled the placeholder moves into a slot when a new placeholder spawns on its spot. The loader tests add the 64 MP limit from a header and from a decode, refuse an 8 MB+ file whose header gives no size without decoding, abort a hung fetch through `AbortSignal.timeout(20000)` with a timeout notice, and refuse an `http:` URL from an `https:` page with "Mixed content blocked: use an https URL". Every slot centre in three layers stays within 50 degrees of forward. Headless Chromium on ANGLE Metal (Apple M4 Max) rendered a 4000x2250 source as a 2048x1152 texture and a 1200x2000 source unchanged, each in a matching frame, and the placeholder with the CORS notice for an unreachable host. Headset placement and real CORS hosts remain owner checks.
+The roster comes from core `AgentRoster` (sent on every connect, including `/ws?metadata=1`) and `AgentStateChanged` deltas, which the streamer has pushed in mux mode since core 0.58. A read-only probe of the LAN streamer (0.78.1, against the real default daemon) received `AgentRoster` entries such as pane `228` in workspace `+4`, and the tree listed `%228` in workspace `+4`, which confirms the `%N` join. No input, resize or state change was sent to that daemon.
 
-## Agent board widget (November 10, 2026)
+`make agent-roster-app-check` ran the built app in headless Chromium against a private par-mux 0.80.0 daemon (its own `--socket` and `--state-dir`) and the 0.78.1 mux streamer on loopback port 4241. Stand-in `claude` and `codex` processes ran in the private panes, and agent states were set with `pane.report_agent` hook reports. The working state arrived in the connect snapshot. Blocked and question changes arrived as live deltas without a reload. Clicking the question row attached that pane, marked the row selected and sent zero resize messages. After `kill-pane`, the row left the list. There were no page errors. With `MUX_XR_REASON_ONLY=1`, after a fresh private streamer start, the row showed the reason "pick a plan". Load average was 89 to 97, so these are functional checks, not timing measurements, and no fleet window was booked. Evidence is under `.local/evidence/agent-roster`.
+
+The same runs exposed three core faults, filed on the core board (card 01a1c28e). The streamer roster drops `report-state` claims (`source=self`). Live deltas carry no reason, and the cached entry loses it, so later snapshots omit it too. A killed pane can stay in the streamer's roster cache. The app hides that ghost by listing only panes the hierarchy has. XR dispatch is covered by `tests/xr-controller.test.ts` and `tests/hierarchy-navigator.test.ts`. Physical Quest use remains an owner check.
+
+The configurable layout (2026-11-09) was rerun against a private par-mux 0.80.0 daemon and the 0.78.1 streamer on loopback port 4241, with the worktree's built `dist`. The connect snapshot rendered the `full` layout. The header button cycled to `priority`, which put the question pane ahead of the blocked one. Custom rows `agent, pane / session, window, source` set in the settings panel rendered `claude · %1` over `rc · rc · hook`. Selecting a row again sent zero resize messages, and there were no page errors. The reason-only run after a fresh streamer start showed the `full` entry with workspace, project, pane, the reason `pick a plan` and `active 56s`. Load average was about 91, so these are functional checks only. Evidence is under `.local/evidence/agent-roster-config`. Reading `roster_watcher.rs` shows that a state delta copies the previous activity, input, viewer and cpu values, and that the streamer refetches the full roster only on connect and on host-telemetry changes. The README describes those tokens as being as of the last fetch.
+
+
+## Agent board widget (2026-11-10)
 
 The Widgets panel registers a third entry, `agent-board` (Agent board), spawned at (0, -0.27, -1.25) and 0.8 scale through the registry's `spawnScale`, below both clocks and above the HUD. A registry test spawns every entry at its offset and scale and checks that no boxes intersect and that none covers another, or the HUD backing at its default or recentered pose, when projected from the eye. The first offset, (0, -0.4, -1.25) at scale 1, covered the HUD's active-pane label and Exit after a both-stick recenter, which review caught. Review then found the board still covering the HUD's transient lines (notice, toast, Reload) after a recenter. Those lines, with the FPS readout, now draw over widgets without depth testing, and HUD buttons win the ray over a nearer widget. Controller tests read the real HUD children at the default and recentered poses and, at eye heights 1.1, 1.35, 1.52 and 1.8 m, assert that overlay controls stay reachable through widgets, that no other HUD control (Exit) fires through one, that a press on a board row covering Exit selects the row, that the overlay lines carry the overlay settings, and that a ray through the board reaches Reload. `tests/agent-board.test.ts` covers the empty state, row text, state colours, stalled chip, ages, rows that hold their slots through state flips, an urgent agent taking only the displaced agent's slot past the cap, urgent agents claiming fresh capped slots, the six-row cap with `+4 more`, freed rows returning to grab, once-a-second age ticks, and a disposed board ignoring updates and roster feeds. A controller test feeds the roster, opens the board, checks that an age-only roster change still reaches it (the menu signature omits ages), selects a row pane through `actions.selectPane`, grips a row to move the board without selecting, shows a notice for a row whose pane left the tree, and closes it.
 
@@ -430,7 +488,15 @@ The same change fixed the registry review findings. Widget close, contact or ray
 
 Headless Chromium on Apple M4 Max (ANGLE Metal) rendered the board through a scratch harness at 1.25 m with mixed states, a stalled row, a ten-agent overflow and the empty state. Row text renders at one size and the long title clips. The full checkall-ci gate, rebased onto the world environments, passes 882 tests across 76 files, TypeScript, Biome, production build, asset checks, gitleaks and dependency audit. Quest readability remains an owner check.
 
-## Bell feed widget (November 11, 2026)
+## Environment backgrounds wiring (2026-11-10)
+
+The World background choices are Black, Gradient, Observatory, Hangar deck, Deep-water station, Minimal studio, Desert night, Aurora tundra, Koi garden, Cloud summit and Rain rooftop, persisted in workspace settings (a choice made in the XR selector is synced to the browser settings and saved, and later setting changes keep it) and validated against that list (an unknown stored value falls back to Observatory). An environment manager in `src/environment.ts` creates the procedural environment only for its selected mode outside passthrough and disposes it fully on any switch, so one is alive at a time. Unit tests cover create/dispose per mode, passthrough hiding, persistence fallback and per-mode floor Y. The XR selector is now the Backgrounds picker (see "Living environments and the Backgrounds picker" below). No headset check of these environments has been made.
+
+## Picture frame widget (2026-11-11)
+
+`tests/picture-frame.test.ts` covers the pure helpers (fit within 2048 px, frame size from aspect, five slots per layer more than 0.66 m apart, slot 5 cascading 0.07 m nearer and 0.035 m lower and slot 7 0.07 m nearer, 15 distinct slot poses, lowest free slot, notice text), `probeImageSize` on PNG, GIF, WebP (VP8X, VP8L, VP8) and JPEG headers, decoding through injected fakes (downscale and WebP re-encode, bitmap closed, stored blob reused on restore, and rejection of oversized files, non-images, undecodable and zero-size decodes, over-16384 px sources, and an oversized PNG header refused without decoding), URL loading (a fetch `TypeError` becomes the CORS notice, HTTP errors, non-http and malformed URLs refused, CORS mode without credentials, and a body with no Content-Length cancelled once past the byte cap without decoding), the eviction policy and library over the in-memory storage seam, `createIndexedDBPictureStorage` against stubs (unavailable factory, an open failure retried on the next call, store creation on upgrade and an aborted write rejecting), per-frame pose keys (`picture:<id>` accepted, bare and malformed keys refused), the frame widget (aspect for landscape and portrait, sRGB, mipmaps, anisotropy, texture disposal, the placeholder text), the controller (store and show, failure notice with no frame or record, eviction notice, show-but-not-saved on storage failure, a scene-capped frame reported in the eviction notice, four concurrent adds running one at a time, a restore never showing a frame an add evicted, restore deleting undecodable records, close deleting the blob) and the picker (Add, Enter and a file pick ignored while a pick loads, and the row styled by class). The registry tests spawn landscape, portrait and square frames with the `faceViewer` yaw in every slot of two layers against the other widgets (including the real perf gauge entry) and both HUD poses, check that frames in one layer neither intersect nor overlap on screen and that a cascaded frame overlapping on screen sits more than 0.04 m nearer, and keep the placeholder inside 45 degrees horizontally and 30 degrees vertically and clear of the fixed widgets. A filled placeholder keeps its pose, so its oriented box is checked clear of every slot frame in both layers and, where they overlap on screen, more than 0.04 m nearer. Controller tests keep two frames under separate pose keys and apart, fill a menu placeholder in place without saving a placeholder pose or taking a slot, keep one placeholder at a time, restore a saved pose while dropping a pose with no stored picture, close a frame through its control (pose removed, `onPictureClosed` called, texture disposed), re-slot unmoved frames on recenter while a grabbed frame stays put, cap 10 adds at 8 with the oldest two evicted at 8 distinct positions, and re-apply anisotropy when filtering changes. A reload pass checks that two restored frames keep slots 0 and 1 (saved with their slot and no `placed` flag) and a new pick takes slot 2 more than 0.6 m from both, that a restored never-moved frame is re-slotted by recenter while a grabbed one (saved `placed`, no slot) stays put, and that a frame that filled the placeholder moves into a slot when a new placeholder spawns on its spot. The loader tests add the 64 MP limit from a header and from a decode, refuse an 8 MB+ file whose header gives no size without decoding, abort a hung fetch through `AbortSignal.timeout(20000)` with a timeout notice, and refuse an `http:` URL from an `https:` page with "Mixed content blocked: use an https URL". Every slot centre in three layers stays within 50 degrees of forward. Headless Chromium on ANGLE Metal (Apple M4 Max) rendered a 4000x2250 source as a 2048x1152 texture and a 1200x2000 source unchanged, each in a matching frame, and the placeholder with the CORS notice for an unreachable host. Headset placement and real CORS hosts remain owner checks.
+
+## Bell feed widget (2026-11-11)
 
 The Widgets panel registers `bell-feed` (Bell feed) after the timer, spawned at (1.05, 0.15, -1.1) and 0.8 scale with `faceViewer: true`. The registry projection test applies each entry's spawn yaw, and a registry test checks that only the feed turns, toward the eye. A controller test spawns every widget and checks, at eye heights 1.1, 1.52 and 1.8 m, that the feed's projection overlaps no other widget and no visible HUD child at the default or recentered HUD pose. At x 1.0 the turned feed's projection reached the analog clock's, so it moved to 1.05.
 
@@ -440,7 +506,7 @@ Controller tests drive the scene: bells on two attached panes and an opted-in no
 
 Headless Chromium on Apple M4 Max (ANGLE Metal) rendered the registry layout from a seated eye at (0, 1.35, 0) through a scratch harness, forward-wide and turned toward the feed. The feed faces the eye, clears the analog clock and reads at one row size. The full checkall-ci gate passes 968 tests across 79 files. The feed was not exercised against live par-mux bells, and Quest readability remains an owner check.
 
-## Performance gauge widget (November 11, 2026)
+## Performance gauge widget (2026-11-11)
 
 The Widgets panel registers `perf-gauge` (Performance) after the bell feed, spawned at (-1, 0.15, -1.1) and 0.9 scale and turned toward the eye (`faceViewer`). It shows `current / target fps` with a status shape (a green circle on pace, a triangle that is amber within 25% of target and coral beyond), and the shown pane count beside it. Below them is `worst (20 s)` on its own row, all at a fixed 22 mm stat font. Underneath is its 40-sample window as bars tinted by each bar's own frame time against a mid-height budget line. Shown means visible and not focus-hidden, the single `isPanelShown` predicate that terminal LOD, hand hit-testing and the ray roots also use. The scene pushes one sample each time `createFrameCounter` reports, about every 500 ms. An interval counts toward the worst frame only if it is 5 s or shorter, ends while the page and XR session are visible, and spans no `visibilitychange` event on the document or the session. A hidden tab or the Quest system menu therefore no longer reads as `worst 4800 ms`, while a real 1.5 s freeze still shows. Starting or ending an XR session clears the scene's running worst frame and the gauge history. `tests/perf-gauge.test.ts` covers the FPS and per-frame tone thresholds, the pause rule and its 5 s cap, the formatters, the ring buffer including clear, sparkline scaling, label, tone and status-shape updates, reset, the in-place bar buffer, per-bar tints that ignore the current FPS, and a disposed gauge ignoring samples. Controller tests drive real frames:
 
@@ -462,7 +528,7 @@ The gauge mean is 0.187 ms higher, inside the 0.335 ms spread between baseline r
 
 `MUX_XR_PRIVATE_TEST=1 make perf-gauge-check` (with `MUX_XR_BASE_URL` and `MUX_XR_TEST_ROOT`) times the 2 Hz update path with real Troika typesetting on the same GPU, and it fails when the 1-minute load before or after exceeds 15. Batches of 20 are used because `performance.now()` is coarsened to 100 µs. Over 1,000 updates on the final layout at load 10.66 before and 13.09 after, a sample that changes every readout and all 40 bar tints took a mean of 41.5 µs (p95 65 µs) until typesetting resolved. A sample with unchanged text took 1.3 µs, and the gauge-only scene render took 35.9 µs. At 2 Hz the worst case is about 83 µs of main-thread work per second, under 0.005 ms per 60 Hz frame. The script also writes `perf-gauge-good.png`, `perf-gauge-warn.png` and `perf-gauge-bad.png`, which were inspected. These are desktop native-GPU diagnostics. They are not Quest frame-time measurements.
 
-## Git & CI status widget (November 11, 2026)
+## Git & CI status widget (2026-11-11)
 
 The Widgets panel registers `repo-status` (Git & CI) after the performance gauge, spawned at (0.6, -0.1, -1.4) and 0.7 scale with `faceViewer`, right of the agent board and below the analog clock. After host load took (-1.15, 0.53, -1.3), a grid search over offsets and scales from 0.55 to 0.7, checked against every other widget, both HUD poses, every picture slot and the Add Picture placeholder, found this the only clear spot near eye level at 0.7 scale. The registry tests check it with every other entry. Terminal surfaces expose `cwd` from the streamer's `connected` message and `cwdChanged` events (OSC 7), and `cwdHost` from the `cwdChanged` hostname. A relative directory clears both. The client sends the host with the directory and signs both, and the server decides whether the host is this Mac. The standalone streaming server forwards `cwdChanged` to clients without a subscription filter, but the par-mux mirror path (`mux_factory/stream.rs` in par-term-emu-core-rust) forwards only bell and graphics events, and its mirror terminal is seeded from a re-rendered screen. Panes streamed from par-mux therefore report a cwd only if the mirror saw an OSC 7 before the client connected, and do not follow later `cd`s until the streamer forwards `cwdChanged`. A `connected` cwd carries no host and is trusted as local only because the server still confines it to home. Each frame the scene passes the focused pane id, its cwd and its host to `setFocusedPane`, and the widget ignores repeats.
 
@@ -472,22 +538,7 @@ The route is off unless the dictation server runs with `--repo-status on`. `scri
 
 `bun run scripts/repo-status-shots.ts` renders every state with real Troika text in headless Chromium against a stub status source and writes them to `/tmp/git-ci-shots`. Not yet verified end to end: the route goes live only after the dictation LaunchAgent is reinstalled with `--repo-status` and restarts on this code, and the headset placement is an owner check.
 
-## Agent roster
-
-The roster comes from core `AgentRoster` (sent on every connect, including `/ws?metadata=1`) and `AgentStateChanged` deltas, which the streamer has pushed in mux mode since core 0.58. A read-only probe of the LAN streamer (0.78.1, against the real default daemon) received `AgentRoster` entries such as pane `228` in workspace `+4`, and the tree listed `%228` in workspace `+4`, which confirms the `%N` join. No input, resize or state change was sent to that daemon.
-
-`make agent-roster-app-check` ran the built app in headless Chromium against a private par-mux 0.80.0 daemon (its own `--socket` and `--state-dir`) and the 0.78.1 mux streamer on loopback port 4241. Stand-in `claude` and `codex` processes ran in the private panes, and agent states were set with `pane.report_agent` hook reports. The working state arrived in the connect snapshot. Blocked and question changes arrived as live deltas without a reload. Clicking the question row attached that pane, marked the row selected and sent zero resize messages. After `kill-pane`, the row left the list. There were no page errors. With `MUX_XR_REASON_ONLY=1`, after a fresh private streamer start, the row showed the reason "pick a plan". Load average was 89 to 97, so these are functional checks, not timing measurements, and no fleet window was booked. Evidence is under `.local/evidence/agent-roster`.
-
-The same runs exposed three core faults, filed on the core board (card 01a1c28e). The streamer roster drops `report-state` claims (`source=self`). Live deltas carry no reason, and the cached entry loses it, so later snapshots omit it too. A killed pane can stay in the streamer's roster cache. The app hides that ghost by listing only panes the hierarchy has. XR dispatch is covered by `tests/xr-controller.test.ts` and `tests/hierarchy-navigator.test.ts`. Physical Quest use remains an owner check.
-
-The configurable layout (2026-11-09) was rerun against a private par-mux 0.80.0 daemon and the 0.78.1 streamer on loopback port 4241, with the worktree's built `dist`. The connect snapshot rendered the `full` layout. The header button cycled to `priority`, which put the question pane ahead of the blocked one. Custom rows `agent, pane / session, window, source` set in the settings panel rendered `claude · %1` over `rc · rc · hook`. Selecting a row again sent zero resize messages, and there were no page errors. The reason-only run after a fresh streamer start showed the `full` entry with workspace, project, pane, the reason `pick a plan` and `active 56s`. Load average was about 91, so these are functional checks only. Evidence is under `.local/evidence/agent-roster-config`. Reading `roster_watcher.rs` shows that a state delta copies the previous activity, input, viewer and cpu values, and that the streamer refetches the full roster only on connect and on host-telemetry changes. The README describes those tokens as being as of the last fetch.
-
-
-## Environment backgrounds wiring
-
-The World background choices are Black, Gradient, Observatory, Hangar deck, Deep-water station, Minimal studio, Desert night, Aurora tundra, Koi garden, Cloud summit and Rain rooftop, persisted in workspace settings (a choice made in the XR selector is synced to the browser settings and saved, and later setting changes keep it) and validated against that list (an unknown stored value falls back to Observatory). An environment manager in `src/environment.ts` creates the procedural environment only for its selected mode outside passthrough and disposes it fully on any switch, so one is alive at a time. Unit tests cover create/dispose per mode, passthrough hiding, persistence fallback and per-mode floor Y. The XR selector is now the Backgrounds picker (see "Living environments and the Backgrounds picker" below). No headset check of these environments has been made.
-
-## Timer widget (November 11, 2026)
+## Timer widget (2026-11-11)
 
 The Widgets panel registers a fourth entry, `timer` (Timer), spawned at (0, 0.3, -1.25), centred between the clocks at their height. The panel is 0.25 m wide against a 0.30 m gap between the clock bodies (the first 0.27 m width overlapped the digital clock once projected from the eye, which the registry test caught). `tests/timer-state.test.ts` covers the pure state machine: idle, running, paused and done transitions for both modes, nowMs-based remaining and elapsed time across long frame gaps, pause and resume, the exact due-time stamp when the first tick is late, the five second flash window, restart from done, presets, separate countdown and stopwatch state across mode switches, a countdown finishing while the stopwatch is shown, input immutability and time formatting. `tests/timer-widget.test.ts` presses the real buttons: start, pause, resume and reset, presets, the amber pulse and Done face, steady tint after the flash, mode switching with presets handed back to grab in stopwatch mode, at most one label write per displayed second over 300 frames, and a single late update landing on the right time. `tests/widget-registry.test.ts` adds the timer to the spawn overlap check and asserts margins to both clocks and the board. `tests/xr-controller.test.ts` casts rays from the eye to every HUD child at the default and recentered poses at eye heights 1.1, 1.35, 1.52 and 1.8 m and asserts the timer never covers one. Not verified: on-device pinch targeting of the 0.052 m preset buttons. The controller haptic pulse on completion is not implemented.
 
@@ -495,7 +546,7 @@ The Widgets panel registers a fourth entry, `timer` (Timer), spawned at (0, 0.3,
 
 Review findings F1 to F8 were fixed. The timer is now 0.27 x 0.325 m at (0.01, 0.3, -1.25), centred in the actual 0.30 m clock gap with 15 mm to each clock body (the registry test asserts equal margins of at least 10 mm). Controls sit 0.02 m inside the face top and bottom in both modes, presets are 0.048 m with 12.7 mm gaps, the close button is 0.05 m, and the minimum widget scale is 0.65 so a preset stays above 30 mm. `fontSize` is a new label option that skips the fit-to-width shrink, and each row uses one fixed size. Idle frames and frames between displayed seconds return before any readout work, which the widget test pins by counting `readout` calls over 300 frames. A countdown that ends under the stopwatch shows a badge and flashes on return, a preset is ignored while the countdown runs, and a controller test presses the Start, Resume, 15m preset and mode buttons through a real select on the `widgetControl` branch. Before and after renders from the review harness are in `/tmp/timer-shots/before` and `/tmp/timer-shots/after`.
 
-## Host clipboard sync (November 11, 2026)
+## Host clipboard sync (2026-11-11)
 
 `/clipboard` on the dictation server (port 4242) moves text between the Mac pasteboard and the Quest browser clipboard on explicit user actions only. The route shares the `/dictate` Origin allow-list and adds a user-created pairing secret, `.local/clipboard-secret` (mode 600, at least 16 bytes, owned by the server user, reread for every request). A missing, empty or loose file disables the route, and the client then shows setup steps. Auth is a per-connection HMAC-SHA256 challenge over the nonce and operation, compared with `timingSafeEqual`. Failures close the socket, and five failures per IP per minute return HTTP 429. Payloads are binary UTF-8 frames capped at 256 KiB, with NUL and invalid UTF-8 rejected. `pbcopy`/`pbpaste` run through `execFile` without a shell, with stdin/stdout text, a 5-second timeout and `LC_CTYPE=UTF-8`.
 
@@ -507,15 +558,15 @@ Pasteboard reachability: the installed LaunchDaemon runs in `domain = system` (`
 
 The review findings F1 to F8 were fixed. F1: `pbcopy` stdin errors are handled, so an early-exiting `pbcopy` returns `host_failed` instead of an uncaught EPIPE that killed the server (reproduced before the fix under Bun with `/usr/bin/true` and 256 KiB, and covered by a real early-exit test and a fake). F2: the agent installer boots out a previous agent inside its rollback scope, waits up to 15 seconds for port 4242 to free, and on failure restores and re-bootstraps the previous plist in `gui/<uid>`. F3: the LaunchDaemon installer refuses while `gui/<uid>/org.mux-xr.whisper` is loaded, and `make uninstall-whisper-agent` switches back. F4: in-flight auth attempts count toward the five-per-minute limit, the block is rechecked at auth time, concurrent clipboard connections are capped at 8, expired limiter entries are swept, IPv6 clients are grouped by /64, and secrets need at least 32 characters. F5: host text kept after a refused Quest write serves only the next read or 60 seconds and is never returned to Copy to host. F6: Paste host ignores a second press in flight and drops a result superseded by another clipboard action. F7: the secret file is opened once with `O_NOFOLLOW`, checked with `fstat` on the descriptor and read to at most 4 KiB. F8: host pasteboard operations are serialized, and the client accepts one well-formed nonce per connection. `tests/agent-installer.test.ts` drives the install, rollback and uninstall flows with fake launchctl and filesystem dependencies. A live `--install --agent` still refused while the LaunchDaemon was loaded, and a live `--uninstall --agent` was a no-op with no agent installed. The installed LaunchDaemon was not changed.
 
-## In-XR picture picking and the placeholder fixes (November 11, 2026)
+## In-XR picture picking and the placeholder fixes (2026-11-11)
 
 `tests/picture-frame.test.ts` adds the Recent library (12-entry and 48 MB defaults, LRU eviction counting thumbnails, `touch` reordering, one entry per source, survival across a reopen of the same storage, its own `mux-xr-recent-pictures` IndexedDB database, rejection without IndexedDB), the 256 px WebP thumbnail, and the controller (page and URL picks filed in Recent, `placeRecent` touching rather than duplicating, a Change replacing its frame without evicting another at the cap, the least-recently-used notice, removal, survival across a reopen, and `listRecent` returning null on failed storage while a URL pick still shows). `tests/xr-controller.test.ts` drives a real picture controller through the scene's ray and select path: the placeholder's Enter URL, Recent and × targets measure at least 0.045 m; Enter URL opens the keyboard, Paste host fills the field (whitespace dropped), a typed key edits it, Load fills the placeholder at its pose and closes the panel; a CORS failure shows the page picker's notice and keeps the URL; Change on a filled frame opens Recent, which pages, removes an entry, places another into that frame at its pose, closes and releases every thumbnail; Recent lists after a reload, closes, and shows "Recent pictures need browser storage" without storage. Two placeholder tests cover Paul's Quest report: the placeholder survives XR exit, a page pick and re-entry with the image at its pose, and survives a reload (scene disposed and recreated) as a persisted placeholder pose that the next page pick fills. Before the fix the in-page path already kept the placeholder; the loss was the reload on returning to the page (the update auto-reload or a browser reload), because the placeholder saved no pose. The Pictures section was cut off because the sidebar had no overflow; it now scrolls with the tree keeping a 96 px floor. Headless renders of the page at 1280x720 and 800x600 and of the XR picker are listed in the change report; the native-select Quest clipboard paste into the URL field and headset ergonomics remain owner checks.
 
-## Review fixes for in-XR picture picking (November 11, 2026)
+## Review fixes for in-XR picture picking (2026-11-11)
 
 After rebasing onto the physical-keyboard feature (merge base 0d58654), tests cover: a grabbed placeholder restored after a reload keeps `placed`, fills in place, and does not move when a new placeholder opens, with the placeholder pose removed from saved poses after the fill; a CORS failure shown once in the URL panel's message line with no HUD notice, and the URL panel's actions on the row above the field; Remove showing its toast only after the delete succeeds and an in-panel message when storage refuses it; each remove control at least 0.118 panel units and covering at most 30% of its thumbnail; a second Load while one loads showing "Loading…", and a panel reopened for another frame during the load staying open and keeping its target; an explicit terminal paste reaching the terminal while the URL field is open; physical keys typed into the URL field through `typeTextEntryKey`, and the router sending nothing to the shell while a text field is active; and the Recent eviction notice shown once per page session. The widget pose store already rejects poses with the same rules as `applyUIPose`, so the placeholder's invalid-pose fallback is defensive and has no storage-driven test.
 
-## Host load widget (November 11, 2026)
+## Host load widget (2026-11-11)
 
 The Widgets panel registers `host-load` (Host load) after the performance gauge, spawned at (-1.15, 0.53, -1.3) and 0.7 scale with `faceViewer: true`. A scratch grid search with the registry tests' projection and intersection checks (every fixed widget, both picture layers in wide, tall and square shapes, the Add Picture placeholder and both HUD poses) found no clear spot at 0.8 or 0.9 scale within 52 degrees of forward. The chosen spot sits above the gauge and below the upper picture row. The registry and controller placement tests pass with it.
 
@@ -525,13 +576,13 @@ The Widgets panel registers `host-load` (Host load) after the performance gauge,
 
 `make host-load-check` rendered the widget in headless `channel: 'chromium'` on ANGLE Metal (Apple M4 Max) with real Troika text, writing `/tmp/host-load-shots/host-load-{ok,warn,unavailable}.png`. The host's 1-minute load was about 104 during that run. These are screenshots, not timings, so the load does not invalidate them. The route was not exercised against the installed dictation LaunchAgent, which needs a restart to serve it, and Quest readability remains an owner check.
 
-## Held-pane exit and respawn through a real streamer (November 12, 2026)
+## Held-pane exit and respawn through a real streamer (2026-11-12)
 
 `scripts/pane-lifecycle-check.ts` starts its own par-mux daemon on a temporary socket with `remain-on-exit` on, opens one shell pane, and serves it through a real streamer on a loopback port. It reads the pane stream with the client's own `paneWebSocketURL`, `decodeServerMessage` and `parsePaneProcess`. The shell runs `exit 3`, then the pane is respawned with `respawn-pane`. Run against the mux-enabled `par-term-streamer 0.78.1` candidate (`MUX_XR_STREAMER_BIN=.local/bin/streamer-candidate bun scripts/pane-lifecycle-check.ts`), the client received `exited(3)` and then `running` on the same stream, and the script passed and exited 0. The shared default daemon's session list was identical before and after, and no private daemon or streamer process was left running.
 
 The released `par-term-streamer 0.80.0` (cargo and pardeck installs) lists `--mux-socket` but exits with "--mux-socket needs a par-term-streamer built with the `mux` feature", so it cannot serve this check.
 
-### Picture proxy
+## Picture proxy (2026-11-12)
 
 `/picture-fetch` (`src/server/picture-fetch-server.ts`) is off unless the dictation server runs with `--picture-proxy on`. `scripts/install-dictation-service.ts --agent --picture-proxy` adds that flag to the LaunchAgent, the LaunchDaemon never gets it, and `tests/dictation-launchd.test.ts` checks both plists and the installer flag. The client (`src/host-picture-fetch.ts`) is tried by `loadPictureUrl` only after the direct CORS fetch fails as `cors` and only when a pairing secret exists.
 
@@ -539,7 +590,7 @@ The released `par-term-streamer 0.80.0` (cargo and pardeck installs) lists `--mu
 
 Security review follow-up (SEC-001 to SEC-007). Every hop also refuses the host's own addresses and on-link prefixes from a fresh `os.networkInterfaces()` read (injectable), checked by tests with an own global IPv6, a same-/64 neighbour, an own IPv4 address, a hostname resolving to each, a redirect to each, and a rotating interface list read once per hop. Destination ports other than 80 (http) and 443 (https) are refused on the first URL and on redirects, with the explicit default ports allowed. The fetch takes an abort signal tied to the client socket, tested at both the `fetchPicture` and the route level, where closing the socket aborts the transport and frees the per-client slot. `192.88.99.0/24`, `::ffff:0:0/96`, `2001:20::/28` and `3fff::/20` are table-tested with their neighbours. Route tests now show auth failures on `/picture-fetch` blocking `/clipboard` and the reverse, a 503 once the global connection cap is full, and exactly 20 requests a minute before a 429. An `http:` picture on an `https:` page goes straight to the proxy when a secret exists (the direct fetch is never attempted) and keeps the mixed-content notice otherwise. SEC-004 is accepted by design: the server allows `http:` URLs and https-to-http redirects. SEC-006 (refusal codes reveal whether an address or port was refused) is accepted once the own-network and port rules apply. Not verified: a fetch of the Mac's real global IPv6 address, which would need a listener on this Mac.
 
-## Living environments and the Backgrounds picker (November 12, 2026)
+## Living environments and the Backgrounds picker (2026-11-12)
 
 Four procedural backgrounds were added, each in `src/xr/environments/` with its own test file: Aurora tundra (`aurora`, 6 draw calls, 12 tests), Koi garden (`koi`, 10 draw calls, 11 while a leaf falls, 12 tests), Cloud summit (`summit`, 8 draw calls, 13 tests) and Rain rooftop (`rooftop`, 9 draw calls, 12 tests). Their tests cover named parts, seeded determinism, a bounded far extent, the 0.035 m floor, the pane-sector rules for each world (low silhouettes, no lanterns, beacons, pillars, accents or birds in front, rain and snow thinned or kept clear there), brightness under the desert moon disc, shader hygiene (no loops, no unbounded time in a trig call, CPU-wrapped periods passed as phases or cos/sin pairs), update advance, wrap, delta clamping and hidden or disposed no-ops, accent retint at the authored luminance with null keeping the authored colour, and disposal of every geometry, material, texture and instanced mesh exactly once. Each was rendered headlessly on ANGLE Metal (Apple M4 Max) with a sample terminal panel from the standing eye in several directions and at two times to show motion; the white text stayed high-contrast in every forward view.
 
