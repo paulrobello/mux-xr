@@ -475,6 +475,7 @@ export function routeInput(
   return false;
 }
 
+const CONTEXT_LOST_NOTICE = 'The headset reclaimed graphics memory. Restoring the workspace.';
 const PANEL_WIDTH = 1.42;
 const PANEL_HEIGHT = 0.8;
 const _KEYBORB_DICTATION_COLUMN = 9;
@@ -3577,6 +3578,23 @@ export function createWorkspaceScene(
   canvas.addEventListener('pointerup', onPointerUp);
   canvas.addEventListener('pointercancel', onPointerUp);
   canvas.addEventListener('lostpointercapture', onPointerUp);
+  // three.js rebuilds its own GL state on restore only when the lost event was default-prevented.
+  // The focus quad layer holds a raw texture and framebuffer outside three.js, so it is rebuilt here.
+  const onContextLost = (event: Event): void => {
+    event.preventDefault();
+    focusQuadLayer?.dispose();
+    focusQuadLayer = null;
+    setNotice(CONTEXT_LOST_NOTICE);
+  };
+  const onContextRestored = (): void => {
+    if (mutableState.notice === CONTEXT_LOST_NOTICE) setNotice(null);
+    for (const panel of panels.values()) panel.texture.needsUpdate = true;
+    syncFocusQuadLayer();
+  };
+  if (renderer) {
+    canvas.addEventListener('webglcontextlost', onContextLost);
+    canvas.addEventListener('webglcontextrestored', onContextRestored);
+  }
 
   const setSelectedVisual = (): void => {
     for (const panel of panels.values()) {
@@ -6972,6 +6990,8 @@ export function createWorkspaceScene(
     canvas.removeEventListener('pointerup', onPointerUp);
     canvas.removeEventListener('pointercancel', onPointerUp);
     canvas.removeEventListener('lostpointercapture', onPointerUp);
+    canvas.removeEventListener('webglcontextlost', onContextLost);
+    canvas.removeEventListener('webglcontextrestored', onContextRestored);
     renderer?.setAnimationLoop(null);
     focusQuadLayer?.dispose();
     focusQuadLayer = null;

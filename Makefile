@@ -134,3 +134,6 @@ warp-radial-check:
 	bun run scripts/warp-radial-check.ts
 xr-visual-check:
 	bun run scripts/xr-visual-check.ts
+.PHONY: context-loss-check
+context-loss-check:
+	bun run scripts/context-loss-check.ts
