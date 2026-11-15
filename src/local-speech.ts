@@ -1,3 +1,4 @@
+import { reportSwallowed } from './diagnostics';
 import { createHostClipboardSecretStore, type HostClipboardSocket } from './host-clipboard';
 import { openPairedSocket } from './host-pairing';
 import type {
@@ -165,7 +166,8 @@ export function createLocalSpeechRecognition(
     let currentSocket: WebSocket;
     try {
       currentSocket = new WebSocketConstructor(url);
-    } catch {
+    } catch (error) {
+      reportSwallowed('local-speech.socket-open', error);
       fail('service-not-allowed', 'Local speech service could not start.', currentGeneration);
       return;
     }
@@ -177,7 +179,8 @@ export function createLocalSpeechRecognition(
       if (currentGeneration !== generation || socket !== currentSocket) return;
       try {
         currentSocket.send(new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' }));
-      } catch {
+      } catch (error) {
+        reportSwallowed('local-speech.socket-send', error);
         fail('network', 'Local speech service could not receive the recording.', currentGeneration);
       }
     };
@@ -323,7 +326,8 @@ export function createLocalSpeechRecognition(
     try {
       if (currentRecorder.state !== 'inactive') currentRecorder.stop();
       else currentRecorder.onstop(new Event('stop'));
-    } catch {
+    } catch (error) {
+      reportSwallowed('local-speech.recorder-stop', error);
       fail('audio-capture', 'The microphone recording could not stop.', currentGeneration);
     }
   };
@@ -363,7 +367,8 @@ export function createLocalSpeechRecognition(
           recorder = mimeType
             ? new MediaRecorderConstructor(currentStream, { mimeType })
             : new MediaRecorderConstructor(currentStream);
-        } catch {
+        } catch (error) {
+          reportSwallowed('local-speech.recorder-create', error);
           fail('audio-capture', 'The microphone recorder could not start.', currentGeneration);
           return;
         }
@@ -381,7 +386,8 @@ export function createLocalSpeechRecognition(
           fail('audio-capture', 'The microphone recording failed.', currentGeneration);
         try {
           currentRecorder.start();
-        } catch {
+        } catch (error) {
+          reportSwallowed('local-speech.recorder-start', error);
           fail('audio-capture', 'The microphone recorder could not start.', currentGeneration);
           return;
         }

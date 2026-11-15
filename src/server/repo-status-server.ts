@@ -3,6 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import { access, realpath as fsRealpath } from 'node:fs/promises';
 import { homedir, hostname as osHostname } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { errorName, reportSwallowed } from '../diagnostics';
 import { rosterDirectoryProject } from '../workspace/project-directory';
 import {
   type ClipboardSecret,
@@ -137,7 +138,8 @@ export const createSpawnRunner =
           stdio: ['ignore', 'pipe', 'ignore'],
           windowsHide: true,
         });
-      } catch {
+      } catch (error) {
+        reportSwallowed('repo-status.spawn', errorName(error));
         resolveRun({ code: null, stdout: '', truncated: false });
         return;
       }
@@ -263,7 +265,8 @@ export const parseGhRuns = (stdout: string): RepoCiStatus | null => {
   let runs: unknown;
   try {
     runs = JSON.parse(stdout);
-  } catch {
+  } catch (error) {
+    reportSwallowed('repo-status.gh-parse', errorName(error));
     return null;
   }
   if (!Array.isArray(runs)) return null;
@@ -548,7 +551,10 @@ export const createRepoStatusRoute = (options: RepoStatusRouteOptions): RepoStat
     const step = async (): Promise<GitProbeResult | null> => (alive() ? probe.git(cwd) : null);
     const result = gitQueue.then(step, step);
     gitQueue = result.catch(() => undefined);
-    return result.catch((): GitProbeResult => ({ status: { state: 'unavailable' } }));
+    return result.catch((error: unknown): GitProbeResult => {
+      reportSwallowed('repo-status.git-probe', errorName(error));
+      return { status: { state: 'unavailable' } };
+    });
   };
   return createPairedRoute({
     protocol: REPO_STATUS_PROTOCOL,
@@ -590,7 +596,10 @@ export const createRepoStatusRoute = (options: RepoStatusRouteOptions): RepoStat
           if (status.state === 'ok' && 'ci' in result && result.ci) {
             const target = result.ci;
             const ci = target.slug
-              ? await probe.ci(target.slug, target.branch).catch(() => null)
+              ? await probe.ci(target.slug, target.branch).catch((error: unknown) => {
+                  reportSwallowed('repo-status.ci-probe', errorName(error));
+                  return null;
+                })
               : { ...UNKNOWN_CI };
             status = { ...status, ci };
           }

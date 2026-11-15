@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { chromium, type Page, type WebSocketRoute } from 'playwright';
+import { chromium, type WebSocketRoute } from 'playwright';
 import { assert, requirePrivateTest, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 

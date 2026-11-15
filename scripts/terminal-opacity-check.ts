@@ -1,5 +1,4 @@
 import { chromium } from 'playwright';
-import type * as Three from 'three';
 import { assert } from './lib/harness';
 
 if (process.env.MUX_XR_PRIVATE_TEST !== '1') {

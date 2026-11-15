@@ -19,6 +19,7 @@ import type {
 } from '../contracts';
 import { isBackgroundMode } from '../contracts';
 import { getKeyHelp } from '../control-help';
+import { reportSwallowed } from '../diagnostics';
 import { HOST_CLIPBOARD_SETUP } from '../host-clipboard';
 import {
   commandServerKey,
@@ -281,7 +282,8 @@ export function createCommandStatsStore(
       try {
         storage?.setItem(COMMAND_STATS_KEY, JSON.stringify(values));
         return true;
-      } catch {
+      } catch (error) {
+        reportSwallowed('ui.command-stats-save', error);
         return false;
       }
     },
@@ -463,7 +465,8 @@ export function createCommandStore(
     try {
       storage?.setItem(COMMANDS_KEY, JSON.stringify(values));
       return true;
-    } catch {
+    } catch (error) {
+      reportSwallowed('ui.commands-save', error);
       return false;
     }
   };
@@ -1240,7 +1243,8 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     try {
       storage?.setItem(SETTINGS_KEY, JSON.stringify(settings));
       callbacks.onSettingsChange?.(settings);
-    } catch {
+    } catch (error) {
+      reportSwallowed('ui.settings-save', error);
       qs<HTMLElement>('[data-detail]').textContent = 'Settings could not be saved on this device.';
     }
   };

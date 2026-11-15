@@ -93,8 +93,15 @@ export async function connectHierarchy(
       );
     current.onmessage = (event: MessageEvent<ArrayBuffer>) => {
       if (socket !== current || stopped) return;
+      let message: ReturnType<typeof decodeServerMessage>;
       try {
-        const message = decodeServerMessage(event.data);
+        message = decodeServerMessage(event.data);
+      } catch {
+        onError('The streamer sent an unsupported message. Check its protocol version.');
+        current.close();
+        return;
+      }
+      try {
         if (message.message.case === 'muxTreeSnapshot') {
           clearTimeout(timer);
           attempts = 0;
@@ -104,9 +111,13 @@ export async function connectHierarchy(
         else if (message.message.case === 'agentStateChanged')
           onRoster?.apply(message.message.value.agent, message.message.value.released);
         else if (message.message.case === 'error') onError(message.message.value.message);
-      } catch {
-        onError('The streamer sent an unsupported message. Check its protocol version.');
-        current.close();
+      } catch (cause) {
+        console.error('[mux-xr] hierarchy consumer failed', cause);
+        try {
+          onError('The workspace view hit an internal error. Reload the page if panes look wrong.');
+        } catch (reportCause) {
+          console.error('[mux-xr] hierarchy error reporter failed', reportCause);
+        }
       }
     };
     current.onerror = () => {

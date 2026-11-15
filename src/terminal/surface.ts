@@ -97,8 +97,8 @@ export function terminalKeyBytes(
   }
   const code = named[key];
   if (code?.endsWith('~')) return `${code.slice(0, -1)};${mod + 1}~`;
-  if (code?.startsWith('\x1b[')) return `\x1b[1;${mod + 1}${code.slice(2)}`;
-  if (code?.startsWith('\x1bO')) return `\x1b[1;${mod + 1}${code.slice(2)}`;
+  if (code?.startsWith('\x1b[') || code?.startsWith('\x1bO'))
+    return `\x1b[1;${mod + 1}${code.slice(2)}`;
   return prefix + (named[key] ?? key);
 }
 
@@ -181,7 +181,13 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
   const link = createLinkStatsRecorder();
   const listeners = new Set<() => void>();
   const notify = (): void => {
-    for (const listener of listeners) listener();
+    for (const listener of listeners) {
+      try {
+        listener();
+      } catch (cause) {
+        console.error('[mux-xr] terminal surface listener failed', cause);
+      }
+    }
   };
   const acknowledgeBell = (): void => {
     bellAckEpoch += 1;
@@ -331,8 +337,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     } else if (selectionMarker?.line === -1) invalidateSelection();
   });
   const bellSubscription = terminal.onBell?.(() => markBell());
-  const failProtocol = (message: string): void => {
-    error = message.slice(0, 256);
+  const stopStream = (nextStatus: TerminalStatus): void => {
     ready = false;
     paused = true;
     generation += 1;
@@ -344,7 +349,11 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     const current = socket;
     socket = null;
     current?.close();
-    setStatus('error');
+    setStatus(nextStatus);
+  };
+  const failProtocol = (message: string): void => {
+    error = message.slice(0, 256);
+    stopStream('error');
   };
   const send = (message: Parameters<typeof encodeClientMessage>[0]): boolean => {
     if (!ready || readonly || !socket || socket.readyState !== WebSocket.OPEN) return false;
@@ -356,6 +365,122 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     const delay = Math.min(INITIAL_RETRY_MS * 2 ** retries, MAX_RETRY_MS);
     retries += 1;
     retry = setTimeout(connect, delay);
+  };
+  const handleServerMessage = (
+    msg: ReturnType<typeof decodeServerMessage>,
+    token: number,
+    ws: SocketLike,
+  ): void => {
+    switch (msg.message.case) {
+      case 'connected': {
+        const connected = msg.message.value;
+        ready = true;
+        readonly = connected.readonly ?? false;
+        cwd = connected.cwd?.startsWith('/') ? connected.cwd : null;
+        cwdHost = cwd ? (connected.cwdHostname ?? null) : null;
+        paneCreateAllowed = connected.paneCreateAllowed;
+        link.noteConnected();
+        mouseTrackingFallback = 'none';
+        mouseTrackingDisabled = false;
+        serverMouseMode = null;
+        serverMouseModeKnown = false;
+        retries = 0;
+        // The server replays only a stored PaneProcessState and stores none for a pane that never changed state, so silence means running.
+        // The tree seed covers only the connecting phase before this message.
+        processState = RUNNING_PROCESS;
+        if (validGrid(connected.cols, connected.rows)) {
+          cols = connected.cols;
+          rows = connected.rows;
+        }
+        gridEpoch += 1;
+        terminal.resize(cols, rows);
+        terminal.reset();
+        painter.resetDamage();
+        invalidateSelection();
+        const current = (): boolean => token === generation;
+        if (connected.initialScreen?.length) writeTerminal(connected.initialScreen, token, false);
+        else queuePaint(current);
+        setStatus('connected');
+        break;
+      }
+      case 'output': {
+        const output = msg.message.value;
+        // Both fields absent means unknown damage; a resync frame arrives this way.
+        const damage =
+          output.damageGeneration === undefined
+            ? null
+            : { generation: output.damageGeneration, ranges: output.damage };
+        link.noteOutput(damage !== null);
+        writeTerminal(output.data, token, true, damage);
+        break;
+      }
+      case 'bell':
+        markBell(token, true);
+        break;
+      case 'pong':
+        link.notePong(performance.now());
+        break;
+      case 'resize':
+        if (!validGrid(msg.message.value.cols, msg.message.value.rows)) break;
+        cols = msg.message.value.cols;
+        rows = msg.message.value.rows;
+        gridEpoch += 1;
+        terminal.resize(cols, rows);
+        // A reflow moves rows, so the previous chunk's seam rows no longer apply.
+        painter.noteOutput(null);
+        invalidateSelection();
+        cancelPaint();
+        queuePaint();
+        break;
+      case 'modeChanged': {
+        if (msg.message.value.mode === 'application_cursor') appCursor = msg.message.value.enabled;
+        const exactMouseMode = SERVER_MOUSE_MODES[msg.message.value.mode];
+        if (exactMouseMode) {
+          serverMouseModeKnown = true;
+          if (msg.message.value.enabled) {
+            serverMouseMode = exactMouseMode;
+            mouseTrackingDisabled = false;
+          } else if (serverMouseMode === exactMouseMode) {
+            serverMouseMode = null;
+          }
+        } else if (msg.message.value.mode === 'mouse_tracking' && !serverMouseModeKnown) {
+          // Compatibility with older servers that only exposed an aggregate flag.
+          mouseTrackingDisabled = !msg.message.value.enabled;
+          mouseTrackingFallback = msg.message.value.enabled ? 'vt200' : 'none';
+        }
+        break;
+      }
+      case 'paneProcessState': {
+        const { paneId, state, exitCode } = msg.message.value;
+        if (paneId !== '' && !samePaneId(paneId, pane.id)) break;
+        const next = parsePaneProcess(state, exitCode);
+        if (next && !sameProcess(processState, next)) {
+          processState = next;
+          notify();
+        }
+        break;
+      }
+      case 'cwdChanged': {
+        const change = msg.message.value;
+        cwd = change.newCwd.startsWith('/') ? change.newCwd : null;
+        cwdHost = cwd ? (change.hostname ?? null) : null;
+        break;
+      }
+      case 'shutdown':
+        ready = false;
+        setStatus('exited');
+        ws.close();
+        break;
+      case 'error':
+        failProtocol(
+          msg.message.value.code
+            ? `${msg.message.value.code}: ${msg.message.value.message}`
+            : msg.message.value.message,
+        );
+        break;
+      default:
+        break;
+    }
   };
   const connect = (): void => {
     if (
@@ -390,125 +515,21 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     ws.onmessage = (event) => {
       if (token !== generation || ws !== socket) return;
       link.noteMessage(event.data instanceof ArrayBuffer ? event.data.byteLength : 0);
+      let msg: ReturnType<typeof decodeServerMessage>;
       try {
-        const msg = decodeServerMessage(event.data as ArrayBuffer);
-        switch (msg.message.case) {
-          case 'connected': {
-            const connected = msg.message.value;
-            ready = true;
-            readonly = connected.readonly ?? false;
-            cwd = connected.cwd?.startsWith('/') ? connected.cwd : null;
-            cwdHost = cwd ? (connected.cwdHostname ?? null) : null;
-            paneCreateAllowed = connected.paneCreateAllowed;
-            link.noteConnected();
-            mouseTrackingFallback = 'none';
-            mouseTrackingDisabled = false;
-            serverMouseMode = null;
-            serverMouseModeKnown = false;
-            retries = 0;
-            // The server replays only a stored PaneProcessState and stores none for a pane that never changed state, so silence means running.
-            // The tree seed covers only the connecting phase before this message.
-            processState = RUNNING_PROCESS;
-            if (validGrid(connected.cols, connected.rows)) {
-              cols = connected.cols;
-              rows = connected.rows;
-            }
-            gridEpoch += 1;
-            terminal.resize(cols, rows);
-            terminal.reset();
-            painter.resetDamage();
-            invalidateSelection();
-            const current = (): boolean => token === generation;
-            if (connected.initialScreen?.length)
-              writeTerminal(connected.initialScreen, token, false);
-            else queuePaint(current);
-            setStatus('connected');
-            break;
-          }
-          case 'output': {
-            const output = msg.message.value;
-            // Both fields absent means unknown damage; a resync frame arrives this way.
-            const damage =
-              output.damageGeneration === undefined
-                ? null
-                : { generation: output.damageGeneration, ranges: output.damage };
-            link.noteOutput(damage !== null);
-            writeTerminal(output.data, token, true, damage);
-            break;
-          }
-          case 'bell':
-            markBell(token, true);
-            break;
-          case 'pong':
-            link.notePong(performance.now());
-            break;
-          case 'resize':
-            if (!validGrid(msg.message.value.cols, msg.message.value.rows)) break;
-            cols = msg.message.value.cols;
-            rows = msg.message.value.rows;
-            gridEpoch += 1;
-            terminal.resize(cols, rows);
-            // A reflow moves rows, so the previous chunk's seam rows no longer apply.
-            painter.noteOutput(null);
-            invalidateSelection();
-            cancelPaint();
-            queuePaint();
-            break;
-          case 'modeChanged': {
-            if (msg.message.value.mode === 'application_cursor')
-              appCursor = msg.message.value.enabled;
-            const exactMouseMode = SERVER_MOUSE_MODES[msg.message.value.mode];
-            if (exactMouseMode) {
-              serverMouseModeKnown = true;
-              if (msg.message.value.enabled) {
-                serverMouseMode = exactMouseMode;
-                mouseTrackingDisabled = false;
-              } else if (serverMouseMode === exactMouseMode) {
-                serverMouseMode = null;
-              }
-            } else if (msg.message.value.mode === 'mouse_tracking' && !serverMouseModeKnown) {
-              // Compatibility with older servers that only exposed an aggregate flag.
-              mouseTrackingDisabled = !msg.message.value.enabled;
-              mouseTrackingFallback = msg.message.value.enabled ? 'vt200' : 'none';
-            }
-            break;
-          }
-          case 'paneProcessState': {
-            const { paneId, state, exitCode } = msg.message.value;
-            if (paneId !== '' && !samePaneId(paneId, pane.id)) break;
-            const next = parsePaneProcess(state, exitCode);
-            if (next && !sameProcess(processState, next)) {
-              processState = next;
-              notify();
-            }
-            break;
-          }
-          case 'cwdChanged': {
-            const change = msg.message.value;
-            cwd = change.newCwd.startsWith('/') ? change.newCwd : null;
-            cwdHost = cwd ? (change.hostname ?? null) : null;
-            break;
-          }
-          case 'shutdown':
-            ready = false;
-            setStatus('exited');
-            ws.close();
-            break;
-          case 'error':
-            failProtocol(
-              msg.message.value.code
-                ? `${msg.message.value.code}: ${msg.message.value.message}`
-                : msg.message.value.message,
-            );
-            break;
-          default:
-            break;
-        }
+        msg = decodeServerMessage(event.data as ArrayBuffer);
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
         const data = event.data as ArrayBuffer | ArrayBufferView;
-        const byteLength = data instanceof ArrayBuffer ? data.byteLength : data.byteLength;
-        failProtocol(`decode failed for ${byteLength} bytes: ${message}`);
+        failProtocol(`decode failed for ${data.byteLength} bytes: ${message}`);
+        return;
+      }
+      try {
+        handleServerMessage(msg, token, ws);
+      } catch (cause) {
+        // Terminal or painter internals failed after a valid frame. Subscriber exceptions never reach here: notify() isolates them.
+        const message = cause instanceof Error ? cause.message : String(cause);
+        failProtocol(`stream processing failed: ${message}`);
       }
     };
     ws.onerror = () => {
@@ -601,18 +622,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     flush,
     disconnect: () => {
       if (disposed || paused) return;
-      paused = true;
-      ready = false;
-      generation += 1;
-      if (retry) {
-        clearTimeout(retry);
-        retry = null;
-      }
-      cancelPaint();
-      const current = socket;
-      socket = null;
-      current?.close();
-      setStatus('paused');
+      stopStream('paused');
     },
     get applicationCursor() {
       return terminal.modes?.applicationCursorKeysMode ?? appCursor;

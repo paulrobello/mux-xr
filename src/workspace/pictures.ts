@@ -4,6 +4,7 @@ import {
   type PictureDepthView,
   usesDepthMap,
 } from '@par/xr-workspace';
+import { reportSwallowed, swallowTo } from '../diagnostics';
 import type { PictureDepthEstimator } from '../host-picture-depth';
 import { depthFailureNotice } from '../xr/picture-depth';
 import {
@@ -132,7 +133,8 @@ export function createPictureController(options: {
       let depth: PictureImage;
       try {
         depth = await loaders.stored(result.depth, 'depth');
-      } catch {
+      } catch (error) {
+        reportSwallowed('pictures.depth-decode', error);
         depthKnown.delete(id);
         return;
       }
@@ -146,7 +148,9 @@ export function createPictureController(options: {
       // Library writes share the add queue: an update read before a close's delete must not
       // write the closed picture back.
       const stored = await serial(() =>
-        options.library.update(id, { depth: result.depth }).catch(() => false),
+        options.library
+          .update(id, { depth: result.depth })
+          .catch(swallowTo('pictures.depth-store', false)),
       );
       // A frame closed or replaced while its depth was made has nothing to show it on.
       if (stored) options.scene()?.setPictureDepth(id, depth);
@@ -177,11 +181,11 @@ export function createPictureController(options: {
     // The thumbnail is drawn before the frame shows: closing a frame zeroes its canvas.
     let thumbnail: Blob | null = null;
     if (recent && 'sourceKey' in remember)
-      thumbnail = await loaders.thumbnail(picture).catch(() => null);
+      thumbnail = await loaders.thumbnail(picture).catch(swallowTo('pictures.thumbnail', null));
     // Changing a filled frame replaces it, so its live record goes before the cap is planned.
     if (target && !target.startsWith('placeholder-')) {
       depthKnown.delete(target);
-      await options.library.delete(target).catch(() => {});
+      await options.library.delete(target).catch(swallowTo('pictures.replace-delete', undefined));
     }
     let evicted: string[] = [];
     try {
@@ -235,8 +239,9 @@ export function createPictureController(options: {
             );
           }
         }
-      } catch {
+      } catch (error) {
         // The frame is shown and saved; only the Recent gallery misses it.
+        reportSwallowed('pictures.recent-update', error);
       }
     }
     if (notices.length) options.notify(notices.join('. '));
@@ -277,7 +282,8 @@ export function createPictureController(options: {
       let records: Awaited<ReturnType<RecentPictureLibrary['list']>>;
       try {
         records = await recent.list();
-      } catch {
+      } catch (error) {
+        reportSwallowed('pictures.recent-list', error);
         return null;
       }
       const entries: RecentPicture[] = [];
@@ -285,15 +291,18 @@ export function createPictureController(options: {
         try {
           const thumbnail = await loaders.stored(record.thumbnail, record.name);
           entries.push({ id: record.id, name: record.name, thumbnail });
-        } catch {
-          await recent.delete(record.id).catch(() => {});
+        } catch (error) {
+          reportSwallowed('pictures.recent-decode', error);
+          await recent.delete(record.id).catch(swallowTo('pictures.recent-prune', undefined));
         }
       }
       return entries;
     },
     placeRecent: (recentId, target) =>
       serial(async () => {
-        const record = await recent?.get(recentId).catch(() => undefined);
+        const record = await recent
+          ?.get(recentId)
+          .catch(swallowTo('pictures.recent-get', undefined));
         if (!record) {
           options.notify('That picture is no longer in Recent');
           return false;
@@ -314,25 +323,30 @@ export function createPictureController(options: {
       try {
         await recent.delete(recentId);
         return true;
-      } catch {
+      } catch (error) {
+        reportSwallowed('pictures.recent-delete', error);
         return false;
       }
     },
     restore: () => serial(restore),
     closed(id): void {
       depthKnown.delete(id);
-      void serial(() => options.library.delete(id).catch(() => {}));
+      void serial(() =>
+        options.library.delete(id).catch(swallowTo('pictures.close-delete', undefined)),
+      );
     },
     setDepthView(id, view): void {
       const depthView = normalizeDepthView(view);
       void (async () => {
         const stored = await serial(() =>
-          options.library.update(id, { depthView }).catch(() => false),
+          options.library
+            .update(id, { depthView })
+            .catch(swallowTo('pictures.depth-view-store', false)),
         );
         if (!stored || depthKnown.has(id)) return;
-        const record = (await options.library.list().catch(() => [])).find(
-          (entry) => entry.id === id,
-        );
+        const record = (
+          await options.library.list().catch(swallowTo('pictures.depth-view-list', []))
+        ).find((entry) => entry.id === id);
         if (!record || !usesDepthMap(depthView, Boolean(record.right))) return;
         if (!options.depth) {
           options.notify(depthFailureNotice('unavailable'));
@@ -346,7 +360,9 @@ export function createPictureController(options: {
   /** Adds a stored right eye; one that no longer decodes or matches leaves a flat picture. */
   async function withRightEye<T extends PictureImage>(picture: T, right?: Blob): Promise<T> {
     if (!right) return picture;
-    const eye = await loaders.stored(right, 'right eye').catch(() => undefined);
+    const eye = await loaders
+      .stored(right, 'right eye')
+      .catch(swallowTo('pictures.right-eye', undefined));
     if (!eye) return picture;
     if (eye.width !== picture.width || eye.height !== picture.height) {
       eye.source.width = 0;
@@ -360,7 +376,8 @@ export function createPictureController(options: {
     let records: Awaited<ReturnType<PictureLibrary['list']>>;
     try {
       records = await options.library.list();
-    } catch {
+    } catch (error) {
+      reportSwallowed('pictures.restore-list', error);
       return;
     }
     const restored: RestoredPicture[] = [];
@@ -370,15 +387,20 @@ export function createPictureController(options: {
       let image: PictureImage;
       try {
         image = await withRightEye(await loaders.stored(record.blob, record.name), record.right);
-      } catch {
+      } catch (error) {
+        reportSwallowed('pictures.restore-decode', error);
         broken += 1;
-        await options.library.delete(record.id).catch(() => {});
+        await options.library
+          .delete(record.id)
+          .catch(swallowTo('pictures.restore-prune', undefined));
         continue;
       }
       const depthView = normalizeDepthView(record.depthView);
       // A stored depth map that no longer decodes is made again, not a reason to drop the picture.
       const depth = record.depth
-        ? await loaders.stored(record.depth, 'depth').catch(() => undefined)
+        ? await loaders
+            .stored(record.depth, 'depth')
+            .catch(swallowTo('pictures.restore-depth', undefined))
         : undefined;
       if (depth) depthKnown.add(record.id);
       else if (usesDepthMap(depthView, Boolean(image.right)))

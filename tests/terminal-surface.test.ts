@@ -697,6 +697,36 @@ describe('terminal surface lifecycle', () => {
     expect(revisions).toHaveLength(1);
     surface.dispose();
   });
+
+  it('isolates a throwing subscriber: later listeners run, the status holds and the error is logged', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { createTerminalSurface } = await import('../src/terminal/surface');
+    const surface = createTerminalSurface('http://127.0.0.1:9', pane());
+    surface.connect();
+    const socket = MockSocket.instances[0];
+    socket.open();
+    surface.subscribe(() => {
+      throw new Error('consumer bug');
+    });
+    const seen: string[] = [];
+    surface.subscribe(() => seen.push(surface.status));
+    socket.message(
+      frame(
+        create(ServerMessageSchema, {
+          message: { case: 'connected', value: create(ConnectedSchema, {}) },
+        }),
+      ),
+    );
+    expect(surface.status).toBe('connected');
+    expect(surface.error).toBeNull();
+    expect(seen).toContain('connected');
+    expect(consoleError).toHaveBeenCalledWith(
+      '[mux-xr] terminal surface listener failed',
+      expect.any(Error),
+    );
+    surface.dispose();
+    consoleError.mockRestore();
+  });
 });
 
 describe('terminal color modes', () => {

@@ -17,7 +17,7 @@ import {
 } from '../src/terminal/vendor/terminal_pb';
 import { layoutWidgetPanel } from '../src/xr/widget-panel-layout';
 import { WIDGET_REGISTRY } from '../src/xr/widget-registry';
-import { assert, waitFor } from './lib/harness';
+import { assert } from './lib/harness';
 
 type Viewport = { name: string; width: number; height: number };
 type Frame = { paneId: string; case: string; data?: string; cols?: number; rows?: number };

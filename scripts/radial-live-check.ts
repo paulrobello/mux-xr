@@ -144,14 +144,6 @@ async function nativeAction(
     { action, expected },
   );
 }
-async function waitRafMilliseconds(page: Page, milliseconds: number): Promise<number> {
-  return page.evaluate(async (duration) => {
-    const started = performance.now();
-    while (performance.now() - started < duration)
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    return performance.now() - started;
-  }, milliseconds);
-}
 
 async function main(): Promise<void> {
   const loadBefore = loadavg()[0];
