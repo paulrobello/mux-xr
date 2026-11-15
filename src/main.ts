@@ -20,6 +20,7 @@ import { installKeyboardRouter } from './keyboard-router';
 import { createLocalSpeechRecognition, isLocalSpeechSupported } from './local-speech';
 import { executeQuickCommand, loadSharedCommands } from './quick-commands';
 import { reloadAfterXR } from './reload';
+import { classifyServerParam } from './server-param';
 import {
   createSpeechInput,
   type DictationAction,
@@ -410,6 +411,15 @@ function startDemo(): void {
   ui.setConnection('connected', 'Demo preview · synthetic terminals');
 }
 
+/** Host part of an endpoint for status text; falls back to the raw value when unparseable. */
+function endpointHostLabel(value: string): string {
+  try {
+    return new URL(value).host || value;
+  } catch {
+    return value;
+  }
+}
+
 async function connect(nextEndpoint: string): Promise<void> {
   persistOpenViews();
   const current = ++generation;
@@ -427,7 +437,7 @@ async function connect(nextEndpoint: string): Promise<void> {
   }
   applySnapshot({ panes: [] }, false);
   ui.setDemoMode(false);
-  ui.setConnection('connecting', 'Connecting to your streamer…');
+  ui.setConnection('connecting', `Connecting to ${endpointHostLabel(endpoint)}…`);
   try {
     const { connectHierarchy } = await import('./workspace/hierarchy');
     const connection = await connectHierarchy(
@@ -723,9 +733,17 @@ if (scene.state.rendererError) notice(scene.state.rendererError);
 void xrEntry.enableAutoStart().catch(() => undefined);
 
 const params = new URLSearchParams(location.search);
+const serverParam = params.get('server');
+const savedEndpoint = ui.getSettings().endpoint.trim();
 if (params.get('demo') === '1') startDemo();
-else if (params.get('server')) void connect(params.get('server') ?? '');
-else if (ui.getSettings().endpoint.trim()) void connect(ui.getSettings().endpoint.trim());
+else if (serverParam) {
+  if (classifyServerParam(serverParam, location.host, savedEndpoint) === 'connect')
+    void connect(serverParam);
+  else {
+    ui.setEndpointDraft(serverParam);
+    notice('This link names a different streamer. Check the endpoint and press Connect.');
+  }
+} else if (savedEndpoint) void connect(savedEndpoint);
 
 window.addEventListener(
   'pagehide',

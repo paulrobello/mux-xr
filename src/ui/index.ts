@@ -169,6 +169,8 @@ export interface WorkspaceUI {
   update(snapshot: WorkspaceSnapshot): void;
   setConnection(status: TerminalStatus | 'idle', detail?: string): void;
   setDemoMode(enabled: boolean): void;
+  /** Fills the endpoint field without persisting or connecting; used for a link-named streamer awaiting confirmation. */
+  setEndpointDraft(value: string): void;
   setPaneCreation(state: PaneCreationState): void;
   /** Show the par-mux agent roster; each row selects its pane through the tree path. */
   setAgentRoster(rows: readonly AgentRosterRow[]): void;
@@ -2054,6 +2056,9 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     },
     setDemoMode(enabled) {
       qs<HTMLElement>('.demo-badge').hidden = !enabled;
+    },
+    setEndpointDraft(value) {
+      qs<HTMLInputElement>('#endpoint').value = value;
     },
     setActivePane: (id) => {
       if (id) {
