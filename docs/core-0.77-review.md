@@ -1,6 +1,6 @@
 # Core 0.77.0 usefulness for Mux XR
 
-Published November 2 at12:09 PM PST, tag v0.77.0, commit f1059d42cbaa8c744ffdf53794f4ec7a8ce6ae14. [Official changelog](https://github.com/paulrobello/par-term-emu-core-rust/blob/v0.77.0/CHANGELOG.md).
+Published November 2 at 12:09 PM PST, tag v0.77.0, commit f1059d42cbaa8c744ffdf53794f4ec7a8ce6ae14. [Official changelog](https://github.com/paulrobello/par-term-emu-core-rust/blob/v0.77.0/CHANGELOG.md).
 
 | Addition | Mux XR value | Decision |
 | --- | --- | --- |

@@ -30,7 +30,7 @@ The staged GLB has 22,712 triangles, ten meshes, ten materials, ten draw calls, 
 
 `previews/review-sheet.png` presents the same-camera high, low and reimported views plus a wider peripheral view. All renders used Cycles CPU, 12 samples, 960×600. These are visual evidence, not performance measurements. Average high-to-low RGB difference is approximately 0.72/0.89/1.03 on a 0–255 scale. The low-to-reimport difference is below 0.004 per channel.
 
-Technical asset checks pass. Runtime loading, fallback/lifecycle tests, Quest 3 behavior and owner visual acceptance remain pending with the integrating session. The authoring agent has not recorded owner approval or promoted the GLB into the public asset directory.
+Technical asset checks pass. Runtime loading, fallback/lifecycle tests, Quest 3 behavior and owner visual acceptance remain pending with the integrating session. The GLB is promoted to `public/assets/observatory.glb`, and `make asset-check` compares it with the staged file. The authoring agent has not recorded owner approval.
 
 ## Build findings
 
