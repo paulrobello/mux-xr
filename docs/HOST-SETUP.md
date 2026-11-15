@@ -225,3 +225,63 @@ The server accepts only `http:` and `https:` URLs without a username or password
 It connects to the validated address, so a second DNS answer cannot redirect the request, while the Host header and TLS server name stay the original hostname. Redirects are followed by hand, at most 3, and every hop is validated again. No cookies or credentials are sent. The whole exchange has a 10 second deadline and a 10 MiB body cap enforced while streaming. Only `image/png`, `image/jpeg`, `image/gif`, `image/webp` and HEVC HEIF (declared `image/heic` or `image/heif`, returned as `image/heif`) are returned, and the first bytes must match the declared type. Closing the client socket aborts its in-flight fetch. Each client may make 20 requests a minute and hold 2 connections, auth failures share the five-per-minute block with the other routes, and at most 8 connections are open at once. The server log records refusal codes and byte counts, never a URL.
 
 An `http:` picture on an `https:` page skips the blocked direct fetch and goes straight to the proxy when a pairing secret exists, and keeps the mixed-content notice otherwise. The server therefore allows `http:` URLs and https-to-http redirects by design, so an on-path observer between the Mac and the image host can read or alter that traffic.
+
+## Route reference
+
+Every route lives on the host service port (4242 by default) and shares one failure budget. The page connects to `wss://<host>:4242<path>` and the server accepts only paths with no query string.
+
+### Paired WebSocket handshake
+
+Every WebSocket route follows one handshake, except `/dictate` when `--dictate-auth` is off, which skips steps 2 and 3:
+
+1. The server checks the `Origin` allow-list, the failure budget and the connection caps. A refusal here is an HTTP 403, 429 or 503 before the upgrade completes.
+2. The server sends `{"type":"challenge","nonce":"<base64, 32 bytes>","protocol":"<label>"}`. If no pairing secret is configured, or the route's feature flag is off, it sends `{"type":"error","code":"disabled"}` instead and closes.
+3. The client replies with `{"type":"auth","mac":"<base64>", ...fields}`. The MAC is HMAC-SHA256 over `<protocol>\n<nonce>\n<material>`, keyed by the pairing secret. Each route fixes its own `material`. The secret itself never crosses the wire.
+4. The server answers with the route's frames below, then closes with code 1000. A bad or missing MAC, or no reply in time, ends with `{"type":"error","code":"auth"}` and close code 1008.
+
+Error frames are `{"type":"error","code":"<code>"}` with an optional `message`. The common codes are `disabled`, `auth` and `protocol` (a frame that arrives out of phase). The refusals in step 1 are HTTP statuses, not frames: 403 for a bad origin, 429 for the failure budget or a per-client cap, and 503 for the connection cap. Each route also has route-specific codes.
+
+### Routes
+
+| Path | Protocol label | Gate | Auth fields and signed material | Request | Response |
+| --- | --- | --- | --- | --- | --- |
+| `/dictate` | `mux-xr-dictate-v1` | `--dictate-auth on` for the challenge, otherwise origin only | With `--dictate-auth on`: `request` must be the empty string, which is also the signed material | One binary audio clip, at most 8 MiB. WebM and MP4 containers | `{"type":"transcript","text":"..."}`, or `{"type":"error","message":"..."}`. With auth on, error frames also carry `code` |
+| `/clipboard` | `mux-xr-clipboard-v1` | `--clipboard-secret-file` | `op` (`read` or `write`) signs `op` | For `write`, wait for `{"type":"ready"}` and send one binary UTF-8 frame, at most 256 KiB | `read`: one binary UTF-8 frame. `write`: `{"type":"ok","bytes":N}` |
+| `/host-stats` | `mux-xr-host-stats-v1` | Pairing secret | Signs `stats` | None after auth | `{"type":"stats", ...}` with three load averages, CPU percentage and core count |
+| `/repo-status` | `mux-xr-repo-status-v1` | `--repo-status on` | `cwd` and `host` sign `<host>\n<cwd>` | None after auth | `{"type":"status","status":{...}}` |
+| `/picture-fetch` | `mux-xr-picture-fetch-v1` | `--picture-proxy on` | `url` signs the URL | None after auth | `{"type":"image","contentType":"...","size":N}` then one binary frame of image bytes, at most 10 MiB |
+| `/picture-depth` | `mux-xr-picture-depth-v1` | `--picture-depth on` | `size` and `sha256` sign `<size>\n<sha256>` | After `{"type":"ready"}`, one binary image, at most 4 MiB | `{"type":"depth","width":W,"height":H,"size":N}` then one binary PNG |
+| `/weather` | `mux-xr-weather-v1` | Pairing secret | `zip` signs the ZIP | None after auth | `{"type":"weather","status":{...}}` |
+| `/kanban-strip` | `mux-xr-kanban-strip-v1` | `--board-feeds on` | `request` signs the request string | `request` is `{"cwd":"...","host":"..."}` as a JSON string. `host` may be null | `{"type":"feed","data":{...}}` |
+| `/bookings` | `mux-xr-bookings-v1` | `--board-feeds on` | `request` signs the request string | `request` is `{}` | `{"type":"feed","data":{...}}` |
+| `/service-health` | `mux-xr-service-health-v1` | `--service-health on` | `request` signs the request string | `request` is `{}` | `{"type":"feed","data":{...}}` |
+| `/mesh-inbox` | `mux-xr-mesh-inbox-v1` | `--mesh-inbox on` | `request` signs the request string | `request` is `{}` | `{"type":"feed","data":{...}}` |
+| `/toasts` | `mux-xr-toasts-v1` | Pairing secret | Signs `subscribe` | None. The socket stays open | `{"type":"ready"}`, then `{"type":"toast", "toast":{...}}` and dismiss envelopes, with `replay: true` for toasts replayed on connect. A ping every 25 seconds |
+
+The kanban strip, bookings, service health and mesh inbox routes share one request limit of 20 per client per minute and allow 6 connections, 3 per client. Picture depth allows 4 connections, 2 per client. Other caps are in [Pairing and request limits](#pairing-and-request-limits) and the sections for each route.
+
+### Plain HTTP routes
+
+| Method and path | Auth | Request | Response |
+| --- | --- | --- | --- |
+| `GET /health` | None | None | `200 {"ready": true, "engine": "whisper.cpp"}`. Every other path answers `404 {"error": "Not found"}` |
+| `POST /toast` | `Authorization: Bearer <secret or toast token>` | `Content-Type: application/json` body, at most 4 KiB. Fields are in [Toasts from other programs](#toasts-from-other-programs) | `202 {"id": "...", "delivered": N}`, or the refusals listed in that section |
+
+## Troubleshooting
+
+Each row gives the symptom you see, its cause, the fix and how to check it worked.
+
+| Symptom | Cause | Fix | Verify |
+| --- | --- | --- | --- |
+| `make dev` or `bun run dev` fails or serves another app on port 4240 | Another listener owns 4240, often the LAN preview | Run `bun run dev --port <free-port>` and open that port | The page loads at the port you chose |
+| The browser or Quest shows a certificate warning, or `wss://` connections never open | The certificate is self-signed or its name does not match the address you opened | Serve the app and the streamer with a PEM the headset trusts, whose name matches the address ([Quest and LAN HTTPS](#quest-and-lan-https)) | The page loads over HTTPS without a warning and the streamer endpoint connects |
+| The streamer refuses to start on a LAN address | Since core 0.80.0, an unauthenticated non-loopback bind needs `--allow-unauthenticated` | Preserve your streamer authentication settings. Add the flag only for a LAN you trust ([Serve the built app](#serve-the-built-app)) | The streamer starts and the page connects |
+| Terminal labels or text render blank in the production build | The streamer's CSP blocks blob workers, so Troika cannot typeset in a worker | Serve the built app from the streamer, not a Vite dev server, and run `make production-label-check` ([testing guide](TESTING.md#check-targets)) | The check reports glyph pixels |
+| **New terminal** is disabled | The streamer was not started with `--allow-pane-create`, the connection is read-only, or mux support is missing | Restart the streamer with `--allow-pane-create` on a writable connection ([Create terminals](WORKSPACE.md#create-terminals)) | The control enables after you reconnect |
+| **Git & CI** reads **Directory unknown** | The shell sends no OSC 7 directory report, or the streamer has not forwarded one for this pane | Use a shell that reports OSC 7, or open the pane after the streamer sees one. The widget falls back to the agent roster's project under `~/Repos` | The widget shows the repo folder and branch |
+| **Git & CI**, **Kanban strip**, **Host bookings**, **Service health** or **Mesh inbox** reads **Unavailable** or "... is off on the host" | The route's flag is off, or the pairing secret is missing | Reinstall the LaunchAgent with the feature flag ([Optional host routes](#optional-host-routes)) and pair the browser | The widget shows data within one refresh interval |
+| **Paste host** or **Copy to host** fails, or the clipboard route answers `disabled` | No pairing secret file, the file has the wrong mode or owner, or the service runs as the LaunchDaemon | Create `.local/clipboard-secret` with mode 600, run the service as the LaunchAgent and save the secret in Workspace settings ([Host clipboard sync](#host-clipboard-sync)) | **Paste host** types the Mac clipboard into the selected pane |
+| A route answers `rate_limited` or HTTP 429 | Five failed or pending proofs in a minute from one client | Wait a minute. Fix the secret on the client first ([Pairing and request limits](#pairing-and-request-limits)) | The next request authenticates |
+| A route answers `auth` | The browser holds a different secret than the one in the Mac's secret file | **Forget** the saved secret in Workspace settings, then paste the file's current contents and **Save** | The request succeeds |
+| A picture fails with a CORS notice | The image host sends no CORS headers and the proxy is off or unpaired | Enable `--picture-proxy` and pair the browser ([Picture proxy](#picture-proxy)) | The picture loads |
+| Dictation fails to start or reports an error | `ffmpeg` or `whisper-cli` is missing, or the model path is wrong | Check the `--ffmpeg`, `--whisper` and `--model` values ([Configuration reference](#configuration-reference)) and the service log | A short recording returns a transcript |
