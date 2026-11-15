@@ -63,10 +63,10 @@ frame-critical tick.
   damage-scoped repaints first, then upload-shape work measured separately).
 - Tier flips: keep the GPU texture allocated at full size across tiers (resize the upload, not the
   texture), removing the reallocation + full re-upload on each promotion.
-  **Tested 2026-11-15 (commit 19d073b): landed and insufficient** — see the follow-up section.
-  The reallocation is not the dominant flip cost; the remaining candidates are upload-shape work
-  (avoid the full-canvas getImageData + full re-upload round trip on promotion) and eliminating the
-  canvas resize itself.
+  **Tested 2026-11-15 (commit 19d073b): landed, measured insufficient, then reverted (da8a8a1)**
+  after owner-reported Quest artifact — see the follow-up section. The reallocation is not the
+  dominant flip cost; the remaining candidates are upload-shape work (avoid the full-canvas
+  getImageData + full re-upload round trip on promotion) and eliminating the canvas resize itself.
 
 ## Evidence binding
 
@@ -118,3 +118,17 @@ the card: the strip readback path is already upload-minimal for CPU-backed canva
 strip-copy candidate only exists where the canvas is GPU-backed, which headless cannot exercise —
 it needs Quest-grounded profiling. Evidence: .local/evidence/trace-2026-11-15/blit-regression/
 (trace 14.8 MB, classification).
+
+## Follow-up 2026-11-15c: texture-reuse reverted after Quest artifact
+
+Owner validation on the Quest 3 (build 406a373, served via the LAN streamer) passed every Focus
+mode check but surfaced a mesh-mode artifact: on rapid gaze switches, the newly focused pane
+showed for about one frame a half-scale copy of the full pane in its bottom-left corner, then
+corrected. Root cause (found in three r186 internals, not our scene code): the retained-path
+re-specify from 19d073b bumps needsUpdate with new image dimensions, but three uploads through
+immutable texStorage2D — on re-upload allocateMemory is false, so three texSubImage2Ds the new
+smaller image into the bottom-left of the still-larger old storage (a legal partial write),
+leaving stale full-res rows sampled elsewhere for that frame; the next grow-upload corrects it.
+Since the A/B already showed the reuse fix gave no measurable perf gain, the honest resolution is
+the revert da8a8a1, restoring the recreate-on-resize path with proven Quest behavior and equal
+measured performance. Both Quest probes below need re-running on the reverted build.
