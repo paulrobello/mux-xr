@@ -284,4 +284,55 @@ describe('cartoon tracked hands', () => {
     expect((visual.root.userData.indexTip as THREE.Vector3).y).toBeGreaterThan(0);
     visual.dispose();
   });
+
+  describe('arm controls', () => {
+    const armOf = (visual: { root: THREE.Group }): THREE.Mesh =>
+      visual.root.getObjectByName('elastic-hand-arm') as THREE.Mesh;
+    const armMaterial = (visual: { root: THREE.Group }): THREE.MeshStandardMaterial =>
+      armOf(visual).material as THREE.MeshStandardMaterial;
+
+    it('fades the arm near the eye unless told not to', () => {
+      const faded = createCartoonHand();
+      const opaque = createCartoonHand({ armNearFade: false });
+      expect(armMaterial(faded).transparent).toBe(true);
+      expect(armMaterial(opaque).transparent).toBe(false);
+      faded.dispose();
+      opaque.dispose();
+    });
+
+    it('keeps a hidden arm hidden through updates', () => {
+      const camera = new THREE.PerspectiveCamera();
+      const hand = trackedHand('right');
+      hand.updateMatrixWorld(true);
+      const off = createCartoonHand({ arm: false });
+      off.update(hand, camera, 'right', 1 / 60);
+      expect(armOf(off).visible).toBe(false);
+      const toggled = createCartoonHand();
+      toggled.update(hand, camera, 'right', 1 / 60);
+      expect(armOf(toggled).visible).toBe(true);
+      toggled.setArmVisible(false);
+      toggled.update(hand, camera, 'right', 1 / 60);
+      expect(armOf(toggled).visible).toBe(false);
+      toggled.setArmVisible(true);
+      toggled.update(hand, camera, 'right', 1 / 60);
+      expect(armOf(toggled).visible).toBe(true);
+      off.dispose();
+      toggled.dispose();
+    });
+
+    it('lights the arm with a glow that survives setColor and clears back to the tint', () => {
+      const visual = createCartoonHand();
+      const handMaterial = (visual.root.getObjectByName('cartoon-hand-skin') as THREE.Mesh)
+        .material as THREE.MeshStandardMaterial;
+      visual.setArmGlow('#ff0000');
+      expect(armMaterial(visual).emissive.getHex()).toBe(0xff0000);
+      visual.setColor('#00ff00');
+      expect(armMaterial(visual).emissive.getHex()).toBe(0xff0000);
+      expect(handMaterial.emissive.getHex()).toBe(dim('#00ff00'));
+      visual.setArmGlow(null);
+      expect(armMaterial(visual).emissive.getHex()).toBe(dim('#00ff00'));
+      expect(handMaterial.emissive.getHex()).toBe(dim('#00ff00'));
+      visual.dispose();
+    });
+  });
 });

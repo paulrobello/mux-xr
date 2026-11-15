@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { WorkspaceColors } from './accent-colors';
-import { type CartoonHand, createCartoonHand } from './cartoon-hand';
+import { type CartoonHand, type CartoonHandOptions, createCartoonHand } from './cartoon-hand';
 import { dimHandColor } from './hand-colors';
 import type { HandContactProbe } from './hand-contact';
 import controllerPoses from './standard-hand-controller-poses.json';
@@ -61,7 +61,9 @@ const PARENT = new Map<string, string>(
   ]),
 );
 
-export interface StandardHandOptions extends Pick<WorkspaceColors, 'handColor' | 'armColor'> {
+export interface StandardHandOptions
+  extends Pick<WorkspaceColors, 'handColor' | 'armColor'>,
+    CartoonHandOptions {
   assetUrls?: Record<HandSide, string>;
   loader?: GLTFLoader;
 }
@@ -259,7 +261,7 @@ const CONTROLLER_POSES = {
 };
 
 export function createStandardHand(options: StandardHandOptions = {}): StandardHand {
-  const fallback = createCartoonHand();
+  const fallback = createCartoonHand({ arm: options.arm, armNearFade: options.armNearFade });
   const originalUpdate = fallback.update.bind(fallback);
   const skin = fallback.root.getObjectByName('cartoon-hand-skin') as THREE.Mesh | undefined;
   fallback.root.userData.handAsset = 'loading';
@@ -269,6 +271,7 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
   let customColor: THREE.ColorRepresentation | null = options.handColor || null;
   let customArmColor: THREE.ColorRepresentation | null = options.armColor || null;
   const armMesh = fallback.root.getObjectByName('elastic-hand-arm') as THREE.Mesh | undefined;
+  let armGlow: THREE.Color | null = null;
   // Each loaded side's own color, restored when the custom color is cleared.
   const modelColors: Partial<Record<HandSide, THREE.Color>> = {};
   // Hand and wrist cap take the hand color and the arm its own, each lit by an equal emissive
@@ -296,6 +299,7 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
       const cap = model.root.getObjectByName(`standard-hand-wrist-cap-${side}`);
       if (cap instanceof THREE.Mesh) tint(cap.material, handColor);
     }
+    if (armGlow && armMesh) (armMesh.material as THREE.MeshStandardMaterial).emissive.copy(armGlow);
   };
   const curls = [0, 0, 0];
   // The controller hand is posed as a tracked hand with every joint visible.
@@ -412,6 +416,7 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
           material.emissiveIntensity = 0.6;
           if (skin) (skin.material as THREE.MeshStandardMaterial).copy(material);
           if (armMesh) (armMesh.material as THREE.MeshStandardMaterial).copy(material);
+          fallback.reapplyArmMaterial();
         }
         // A material shared by a skinned and an unskinned mesh makes three rebuild its program
         // parameters on every draw of either, so the wrist cap gets its own copy.
@@ -563,6 +568,13 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
       customArmColor = armColor;
       applyColor();
     },
+    setArmVisible: (visible) => fallback.setArmVisible(visible),
+    setArmGlow(color) {
+      armGlow = color === null ? null : new THREE.Color(color);
+      fallback.setArmGlow(color);
+      if (color === null && loaded) applyColor();
+    },
+    reapplyArmMaterial: () => fallback.reapplyArmMaterial(),
     dispose() {
       if (disposed) return;
       disposed = true;

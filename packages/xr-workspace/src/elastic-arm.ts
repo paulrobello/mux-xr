@@ -4,7 +4,38 @@ export interface ElasticArm {
   mesh: THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
   update(anchor: THREE.Vector3, wrist: THREE.Vector3, deltaSeconds: number): void;
   reset(): void;
+  /** A hidden arm stays hidden through later updates. */
+  setVisible(visible: boolean): void;
   dispose(): void;
+}
+
+export const ELASTIC_ARM_RENDER_ORDER = 900;
+/** Metres from the eye: invisible inside `near`, fully drawn beyond `far`. */
+export type ArmNearFade = readonly [near: number, far: number];
+export const DEFAULT_ARM_NEAR_FADE: ArmNearFade = [0.3, 0.55];
+
+/** Makes `material` fade out toward the eye. Call again after anything copies over the material. */
+export function applyArmNearFade(
+  material: THREE.MeshStandardMaterial,
+  fade: ArmNearFade | false,
+): void {
+  if (fade) {
+    const [near, far] = fade;
+    material.transparent = true;
+    material.depthWrite = true;
+    material.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `diffuseColor.a *= smoothstep(${near.toFixed(3)}, ${far.toFixed(3)}, length(vViewPosition));\n#include <opaque_fragment>`,
+      );
+    };
+    material.customProgramCacheKey = () => `arm-near-fade:${near.toFixed(3)}:${far.toFixed(3)}`;
+  } else {
+    material.transparent = false;
+    material.onBeforeCompile = () => {};
+    material.customProgramCacheKey = () => '';
+  }
+  material.needsUpdate = true;
 }
 
 const SEGMENTS = 24;
@@ -57,6 +88,7 @@ export function createElasticArm(material: THREE.Material): ElasticArm {
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   const mesh = new THREE.Mesh(geometry, material);
   mesh.raycast = () => undefined;
+  mesh.renderOrder = ELASTIC_ARM_RENDER_ORDER;
 
   const midpoint = new THREE.Vector3();
   const targetMidpoint = new THREE.Vector3();
@@ -73,6 +105,7 @@ export function createElasticArm(material: THREE.Material): ElasticArm {
   const vertexPosition = new THREE.Vector3();
   let initialized = false;
   let disposed = false;
+  let shown = true;
 
   const writeVertex = (
     vertex: number,
@@ -160,12 +193,16 @@ export function createElasticArm(material: THREE.Material): ElasticArm {
     (geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     (geometry.getAttribute('normal') as THREE.BufferAttribute).needsUpdate = true;
     geometry.computeBoundingSphere();
-    mesh.visible = true;
+    mesh.visible = shown;
   };
   return {
     mesh,
     update,
     reset,
+    setVisible: (visible) => {
+      shown = visible;
+      if (!visible) mesh.visible = false;
+    },
     dispose: () => {
       if (disposed) return;
       disposed = true;

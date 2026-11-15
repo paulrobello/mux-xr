@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { configureTextBuilder, Text } from 'troika-three-text';
+import { setControlId } from './control-ids';
 import { isMainLabelCodePoint, isSupportedLabelCodePoint } from './glyph-ranges';
 
 /** Fonts bundled with the app. Coverage is checked by glyph-ranges.ts before sync. */
@@ -44,6 +45,8 @@ export interface ScalableLabelOptions {
   align?: 'center' | 'left';
   /** Fixed font size in metres, so sibling labels match; the fit-to-width shrink is skipped. */
   fontSize?: number;
+  /** Stable id for automated checks; sets `name` and `userData.controlId`. */
+  name?: string;
 }
 
 interface LabelUserData {
@@ -275,6 +278,7 @@ export function createScalableLabel(
     };
     userData.labelSyncPromise.then(finalize, finalize);
   };
+  if (options.name !== undefined) setControlId(root, options.name);
   liveLabels.add(root);
   return root;
 }
@@ -282,6 +286,7 @@ export function createScalableLabel(
 export function updateScalableLabel(root: THREE.Mesh, label: string): void {
   const data = root.userData as Partial<LabelUserData>;
   if (data.labelDisposed || !data.labelTextObject) return;
+  if (data.labelText === label) return;
   configureText(
     data.labelTextObject,
     label,

@@ -25,6 +25,7 @@ vi.mock('troika-three-text', () => ({
   configureTextBuilder: vi.fn(),
 }));
 
+import { findControl } from '../packages/xr-workspace/src/control-ids';
 import { createRadialMenu, type RadialMenuAction } from '../src/xr/radial-menu';
 
 function actionNodes(menu: ReturnType<typeof createRadialMenu>): THREE.Object3D[] {
@@ -65,6 +66,23 @@ describe('animated radial menu', () => {
       expect(label.rotation.z + target.rotation.z).toBeCloseTo(0);
     }
     expect(menu.root.scale.x).toBeCloseTo(0.8);
+    menu.dispose();
+  });
+
+  it('gives sectors, the cancel disc and the footer a findable control id', () => {
+    const menu = createRadialMenu();
+    for (const name of [
+      'radial-menu-keyboard',
+      'radial-menu-cancel',
+      'radial-menu-reload-update',
+    ]) {
+      const control = findControl(menu.root, name);
+      expect(control?.name).toBe(name);
+      expect(control?.userData.controlId).toBe(name);
+    }
+    expect(findControl(menu.root, 'radial-menu-keyboard')).toBe(
+      menu.root.getObjectByName('radial-menu-keyboard'),
+    );
     menu.dispose();
   });
 

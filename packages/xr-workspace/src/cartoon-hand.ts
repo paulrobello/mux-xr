@@ -1,10 +1,22 @@
 import * as THREE from 'three';
-import { createElasticArm } from './elastic-arm';
+import {
+  type ArmNearFade,
+  applyArmNearFade,
+  createElasticArm,
+  DEFAULT_ARM_NEAR_FADE,
+} from './elastic-arm';
 import { dimHandColor } from './hand-colors';
 import type { HandContactProbe } from './hand-contact';
 
 type HandSide = 'left' | 'right';
 type HandJoints = THREE.Group & { joints?: Record<string, THREE.Object3D | undefined> };
+
+export interface CartoonHandOptions {
+  /** Draw the elastic arm. Defaults to true. */
+  arm?: boolean;
+  /** Fade the arm out near the eye. Defaults to DEFAULT_ARM_NEAR_FADE; false keeps it opaque. */
+  armNearFade?: ArmNearFade | false;
+}
 
 export interface CartoonHand {
   root: THREE.Group;
@@ -24,6 +36,15 @@ export interface CartoonHand {
     color: THREE.ColorRepresentation | null,
     armColor?: THREE.ColorRepresentation | null,
   ): void;
+  /** Hides or shows the elastic arm; the choice survives updates, hide() and a model load. */
+  setArmVisible(visible: boolean): void;
+  /**
+   * Self-lit colour of the arm; components may exceed 1. Null returns the arm to the emissive its
+   * tint gives it. A set glow survives setColor and a model load.
+   */
+  setArmGlow(color: THREE.ColorRepresentation | null): void;
+  /** For hand visuals that replace the arm material's contents: restores the fade and the glow. */
+  reapplyArmMaterial(): void;
   dispose(): void;
 }
 
@@ -80,7 +101,7 @@ const REST = [
 const DEFAULT_COLOR = 0xff672f;
 const DEFAULT_EMISSIVE = 0xff4f1f;
 
-export function createCartoonHand(): CartoonHand {
+export function createCartoonHand(options: CartoonHandOptions = {}): CartoonHand {
   const root = new THREE.Group();
   root.name = 'xr-cartoon-hand';
   root.visible = false;
@@ -125,7 +146,17 @@ export function createCartoonHand(): CartoonHand {
   mesh.frustumCulled = false;
   mesh.raycast = () => undefined;
   const armMaterial = material.clone();
+  const armNearFade = options.armNearFade ?? DEFAULT_ARM_NEAR_FADE;
+  applyArmNearFade(armMaterial, armNearFade);
   const arm = createElasticArm(armMaterial);
+  arm.setVisible(options.arm ?? true);
+  let armGlow: THREE.Color | null = null;
+  let handTint: THREE.ColorRepresentation | null = null;
+  let armTint: THREE.ColorRepresentation | null = null;
+  const tintArm = (): void => {
+    dimHandColor(armMaterial.color, armTint ?? handTint ?? DEFAULT_COLOR);
+    dimHandColor(armMaterial.emissive, armTint ?? handTint ?? DEFAULT_EMISSIVE);
+  };
   arm.mesh.name = 'elastic-hand-arm';
   root.add(mesh, arm.mesh);
 
@@ -440,10 +471,26 @@ export function createCartoonHand(): CartoonHand {
       this.update(synthetic, camera, side, deltaSeconds);
     },
     setColor(color, armColor = null) {
+      handTint = color;
+      armTint = armColor;
       dimHandColor(material.color, color ?? DEFAULT_COLOR);
       dimHandColor(material.emissive, color ?? DEFAULT_EMISSIVE);
-      dimHandColor(armMaterial.color, armColor ?? color ?? DEFAULT_COLOR);
-      dimHandColor(armMaterial.emissive, armColor ?? color ?? DEFAULT_EMISSIVE);
+      tintArm();
+      if (armGlow) armMaterial.emissive.copy(armGlow);
+    },
+    setArmVisible: (visible) => arm.setVisible(visible),
+    setArmGlow(color) {
+      if (color === null) {
+        armGlow = null;
+        tintArm();
+        return;
+      }
+      armGlow = new THREE.Color(color);
+      armMaterial.emissive.copy(armGlow);
+    },
+    reapplyArmMaterial() {
+      applyArmNearFade(armMaterial, armNearFade);
+      if (armGlow) armMaterial.emissive.copy(armGlow);
     },
     dispose() {
       if (disposed) return;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { tintToLuminance } from './accent-colors';
+import { setControlId } from './control-ids';
 import { createScalableLabel, disposeScalableLabel } from './labels';
 
 export interface RadialMenuItem<Action extends string> {
@@ -171,7 +172,7 @@ export function createRadialMenu<Action extends string>(
       })
     : null;
   if (footer && footerButton) {
-    footerButton.name = footer.name ?? `radial-menu-${footer.id}`;
+    setControlId(footerButton, footer.name ?? `radial-menu-${footer.id}`);
     footerButton.position.set(0, -0.43, 0.01);
     footerButton.traverse((child) => {
       child.userData.inputAction = footer.id;
@@ -181,7 +182,7 @@ export function createRadialMenu<Action extends string>(
     contents.add(footerButton);
   }
   const center = new THREE.Group();
-  center.name = 'radial-menu-cancel';
+  setControlId(center, 'radial-menu-cancel');
   center.userData.inputAction = 'radialAction';
   center.userData.radialAction = 'cancel';
   const centerDisc = new THREE.Mesh(
@@ -210,7 +211,7 @@ export function createRadialMenu<Action extends string>(
   for (const [index, { id: action, label: text }] of items.entries()) {
     const finalAngle = Math.PI / 2 - (index * Math.PI * 2) / items.length;
     const group = new THREE.Group();
-    group.name = `radial-menu-${action}`;
+    setControlId(group, `radial-menu-${action}`);
     group.userData.inputAction = 'radialAction';
     group.userData.radialAction = action;
     group.userData.finalAngle = finalAngle;

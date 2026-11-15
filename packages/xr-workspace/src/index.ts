@@ -4,6 +4,7 @@ export type { WorkspaceColors } from './accent-colors';
 export { installBatchedHandPoses } from './batched-hand-poses';
 export { type CartoonHand, createCartoonHand } from './cartoon-hand';
 export { type ClockKind, createClockWidget } from './clock-widget';
+export * from './consumer-apis';
 export {
   createEnvironmentController,
   ENVIRONMENT_FACTORIES as BUILT_IN_ENVIRONMENTS,
