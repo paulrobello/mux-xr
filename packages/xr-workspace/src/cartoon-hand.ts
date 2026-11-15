@@ -22,6 +22,17 @@ export interface CartoonHand {
   root: THREE.Group;
   /** Current only for the latest pose: read it again after each update, never keep it. */
   readonly contactProbes: readonly HandContactProbe[];
+  /** Live joint vectors, rewritten in place by every update: read them each frame, never keep a copy. */
+  readonly wristPosition: THREE.Vector3;
+  readonly palmForward: THREE.Vector3;
+  readonly wristBackNormal: THREE.Vector3;
+  readonly palmPosition: THREE.Vector3;
+  readonly indexTip: THREE.Vector3;
+  readonly middleTip: THREE.Vector3;
+  readonly outerTip: THREE.Vector3;
+  readonly thumbTip: THREE.Vector3;
+  /** Midpoint between the index and thumb tips while both digits are tracked, otherwise undefined. */
+  readonly keyborbPoint: THREE.Vector3 | undefined;
   update(hand: THREE.Group, camera: THREE.Object3D, side: HandSide, deltaSeconds: number): void;
   updateController(
     pose: THREE.Object3D,
@@ -274,6 +285,17 @@ export function createCartoonHand(options: CartoonHandOptions = {}): CartoonHand
   const hand: CartoonHand = {
     root,
     contactProbes,
+    wristPosition: wrist,
+    palmForward: forward,
+    wristBackNormal: backNormal,
+    palmPosition: center,
+    indexTip: controls[1][4],
+    middleTip: controls[2][4],
+    outerTip: controls[3][4],
+    thumbTip: controls[0][4],
+    get keyborbPoint() {
+      return root.userData.keyborbPoint as THREE.Vector3 | undefined;
+    },
     hide,
     update(hand, camera, side, deltaSeconds) {
       if (disposed || !hand.visible) {

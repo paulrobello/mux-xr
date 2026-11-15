@@ -24,7 +24,7 @@ export const filteringPanel: PanelModule = {
       root.add(button);
     });
     const mipMode = ctx.mutableState.filtering.mode.startsWith('mipmap-');
-    const maximum = Number(ctx.scene.userData.maxAnisotropy ?? 1);
+    const maximum = ctx.maxAnisotropy;
     if (mipMode) {
       const levels = ([1, 2, 4, 8, 16] as const).filter((value) => value <= maximum);
       levels.forEach((anisotropy, index) => {

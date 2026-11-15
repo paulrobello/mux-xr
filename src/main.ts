@@ -685,7 +685,7 @@ const stopPresentation = scene.subscribe((state) => {
     ui.setAccentColor(state.accentColor, true);
     ui.setEnvironmentAccentColor(state.environmentAccentColor, true);
     ui.setWeatherZip(state.weatherZip, true);
-    ui.setFilteringCapabilities(Number(scene.scene.userData.maxAnisotropy ?? 1));
+    ui.setFilteringCapabilities(scene.maxAnisotropy);
     for (const id of surfaces.keys()) {
       ui.setTerminalCurvature(id, scene.getTerminalCurvature(id));
       ui.setTerminalOpacity(id, scene.getTerminalOpacity(id) * 100);

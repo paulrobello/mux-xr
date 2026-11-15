@@ -302,6 +302,8 @@ export interface WorkspaceScene {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
   readonly state: Readonly<WorkspaceSceneState>;
+  /** The renderer's anisotropic filtering ceiling; 1 without a renderer. */
+  readonly maxAnisotropy: number;
   addTerminal(surface: TerminalSurface): void;
   removeTerminal(id: string): void;
   selectTerminal(id: string | null): void;
@@ -847,6 +849,7 @@ export function createWorkspaceScene(
       surface.pane.id,
     ]);
   scene.userData.maxAnisotropy = renderer?.capabilities.getMaxAnisotropy() ?? 1;
+  const maxAnisotropy = (): number => Number(scene.userData.maxAnisotropy ?? 1);
   let widgetRestorePending = true;
   let poseRestorePending = false;
   // Three keeps the XR camera at the origin (or the last session's pose) until a frame reports a
@@ -2224,11 +2227,7 @@ export function createWorkspaceScene(
       visual &&
         keyboardProximity
           .get(source)
-          ?.near(
-            visual.root.userData.indexTip as THREE.Vector3,
-            visual.root.userData.palmPosition as THREE.Vector3,
-            keyboardSurface(),
-          ),
+          ?.near(visual.indexTip, visual.palmPosition, keyboardSurface()),
     );
   };
   const suppressKeyboardRays = (): boolean => {
@@ -2312,8 +2311,8 @@ export function createWorkspaceScene(
       const tipsTracked = visual && (!hand || gesture?.tracked);
       const sample = keyborbInput.sample(
         controller,
-        tipsTracked ? (visual.root.userData.indexTip as THREE.Vector3) : null,
-        tipsTracked ? (visual.root.userData.thumbTip as THREE.Vector3) : null,
+        tipsTracked ? visual.indexTip : null,
+        tipsTracked ? visual.thumbTip : null,
         rayKey,
         Boolean(
           keyboard &&
@@ -2322,7 +2321,7 @@ export function createWorkspaceScene(
             !priorityHandActions.has(String(ray?.object?.userData.inputAction)),
         ),
         deltaSeconds,
-        visual?.root.userData.keyborbPoint as THREE.Vector3 | undefined,
+        visual?.keyborbPoint,
       );
       if (sample.released && pokeSources.delete(controller)) modifierPresses.delete(controller);
       const key = sample.pressed?.userData.modifier ? sample.pressed : sample.committed;
@@ -2391,8 +2390,8 @@ export function createWorkspaceScene(
       const free = visual && !gesture?.pinching && !dragStates.has(controller);
       const sample = hierarchyTouch.sample(
         controller,
-        free ? (visual.root.userData.indexTip as THREE.Vector3) : null,
-        free ? (visual.root.userData.thumbTip as THREE.Vector3) : null,
+        free ? visual.indexTip : null,
+        free ? visual.thumbTip : null,
         targets,
       );
       marked ??= sample.hovered;
@@ -2446,7 +2445,7 @@ export function createWorkspaceScene(
     }
     const visual = contactVisual(controller);
     if (!visual) return none;
-    const thumb = visual.root.userData.thumbTip as THREE.Vector3;
+    const thumb = visual.thumbTip;
     const pane = hierarchyTouch.nearest(thumb, hierarchyTargets(root, true), HIERARCHY_NEAR_ENTER);
     if (pane) return { pane: pulling(pane) ? null : pane, tree: false };
     return {
@@ -2567,12 +2566,12 @@ export function createWorkspaceScene(
         );
     return query.grip(
       [
-        { point: visual.root.userData.palmPosition as THREE.Vector3, radius: 0.045 },
-        { point: visual.root.userData.indexTip as THREE.Vector3, radius: 0.022 },
-        { point: visual.root.userData.thumbTip as THREE.Vector3, radius: 0.024 },
-        { point: visual.root.userData.middleTip as THREE.Vector3, radius: 0.022 },
-        { point: visual.root.userData.outerTip as THREE.Vector3, radius: 0.024 },
-        { point: visual.root.userData.wristPosition as THREE.Vector3, radius: 0.03 },
+        { point: visual.palmPosition, radius: 0.045 },
+        { point: visual.indexTip, radius: 0.022 },
+        { point: visual.thumbTip, radius: 0.024 },
+        { point: visual.middleTip, radius: 0.022 },
+        { point: visual.outerTip, radius: 0.024 },
+        { point: visual.wristPosition, radius: 0.03 },
       ],
       roots,
     );
@@ -2848,17 +2847,15 @@ export function createWorkspaceScene(
       wristWatch.setVisible(Boolean(rightVisual?.root.visible));
       if (rightVisual?.root.visible)
         wristWatch.update(
-          rightVisual.root.userData.wristPosition as THREE.Vector3,
-          rightVisual.root.userData.palmForward as THREE.Vector3,
-          rightVisual.root.userData.wristBackNormal as THREE.Vector3,
+          rightVisual.wristPosition,
+          rightVisual.palmForward,
+          rightVisual.wristBackNormal,
         );
       const watchWasNear = wristWatch.near;
       let watchPressed = false;
       if (!leftVisual?.root.visible || !wristWatch.root.visible) wristWatch.updateTouch(null);
       else if (
-        wristWatch.root
-          .getWorldPosition(watchProbeCenter)
-          .distanceTo(leftVisual.root.userData.palmPosition as THREE.Vector3) >=
+        wristWatch.root.getWorldPosition(watchProbeCenter).distanceTo(leftVisual.palmPosition) >=
         WRIST_WATCH_PROBE_REACH
       )
         // Reading contactProbes skins the hand's probe vertices, which cannot touch from here.
@@ -2903,8 +2900,8 @@ export function createWorkspaceScene(
         }
         const wasNear = Boolean(contactSamples.get(controller)?.nearKeyboard);
         const sample = query.sample(
-          visual.root.userData.indexTip as THREE.Vector3,
-          visual.root.userData.palmPosition as THREE.Vector3,
+          visual.indexTip,
+          visual.palmPosition,
           keyboardSurface(),
           !gripActive(),
         );
@@ -3833,7 +3830,7 @@ export function createWorkspaceScene(
     );
   };
   const pictureAnisotropy = (): number =>
-    Math.min(mutableState.filtering.anisotropy, Number(scene.userData.maxAnisotropy ?? 1));
+    Math.min(mutableState.filtering.anisotropy, maxAnisotropy());
   const showPicture = (
     id: string,
     image: PictureImage,
@@ -6102,7 +6099,7 @@ export function createWorkspaceScene(
   const setTerminalFiltering = (filtering: TerminalFiltering): void => {
     const next = validateTerminalFiltering({
       ...filtering,
-      anisotropy: Math.min(filtering.anisotropy, Number(scene.userData.maxAnisotropy ?? 1)),
+      anisotropy: Math.min(filtering.anisotropy, maxAnisotropy()),
     });
     if (JSON.stringify(next) === JSON.stringify(mutableState.filtering)) return;
     mutableState.filtering = next;
@@ -7132,6 +7129,9 @@ export function createWorkspaceScene(
       scene,
       camera,
       mutableState,
+      get maxAnisotropy() {
+        return maxAnisotropy();
+      },
       actions,
       panels,
       widgets,
@@ -7375,6 +7375,9 @@ export function createWorkspaceScene(
     scene,
     camera,
     state: mutableState,
+    get maxAnisotropy() {
+      return maxAnisotropy();
+    },
     addTerminal,
     removeTerminal,
     selectTerminal,

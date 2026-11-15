@@ -66,6 +66,7 @@ export interface SceneContext {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
   readonly mutableState: WorkspaceSceneState;
+  readonly maxAnisotropy: number;
   readonly actions: WorkspaceActions;
   readonly panels: ReadonlyMap<string, TerminalPanel>;
   readonly widgets: ReadonlyMap<WidgetKey, Widget>;

@@ -532,6 +532,17 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
 
   return {
     root: fallback.root,
+    wristPosition: fallback.wristPosition,
+    palmForward: fallback.palmForward,
+    wristBackNormal: fallback.wristBackNormal,
+    palmPosition: fallback.palmPosition,
+    indexTip: fallback.indexTip,
+    middleTip: fallback.middleTip,
+    outerTip: fallback.outerTip,
+    thumbTip: fallback.thumbTip,
+    get keyborbPoint() {
+      return fallback.keyborbPoint;
+    },
     get contactProbes() {
       const model = models[(fallback.root.userData.handedness as HandSide) ?? 'left'];
       return loaded && model && fallback.root.visible ? skinProbes(model) : fallback.contactProbes;
