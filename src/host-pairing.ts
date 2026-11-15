@@ -20,6 +20,16 @@ export type PairedSessionSocket = {
   close(code?: number, reason?: string): void;
 };
 
+/** One host service as a client sees it: where it is, how this device proves it is paired, and how to ask. */
+export interface PairedHost {
+  /** The host service WebSocket URL for `path`. */
+  url(path: string): string;
+  /** The paired host clipboard secret, or null when this device is not paired. */
+  secret(): string | null;
+  /** Opens one paired request-response connection. */
+  openPaired: typeof openPairedSocket;
+}
+
 export type PairedOutcome<V, F extends string> = { ok: true; value: V } | { ok: false; code: F };
 
 export type PairedCloseInfo = {

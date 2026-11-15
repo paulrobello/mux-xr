@@ -7,6 +7,7 @@ import {
   sortAgentRows,
 } from '../workspace/agent-roster';
 import { AGENT_TONE_COLORS } from './hierarchy-navigator';
+import type { AgentRosterConsumer } from './widget-types';
 import { disposeOwned, type Widget } from './widgets';
 
 /** Rows shown before the "+N more" line; sized so text stays legible at spawn distance. */
@@ -90,7 +91,9 @@ function setText(label: THREE.Mesh, text: string): void {
   if (label.userData.labelText !== text) updateScalableLabel(label, text);
 }
 
-export function createAgentBoardWidget(envMap: THREE.Texture | null = null): Widget {
+export function createAgentBoardWidget(
+  envMap: THREE.Texture | null = null,
+): Widget & AgentRosterConsumer {
   const widgetId = `agent-board-${nextBoardId++}`;
   const root = new THREE.Group();
   root.name = widgetId;

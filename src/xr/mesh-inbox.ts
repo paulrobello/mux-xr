@@ -1,8 +1,9 @@
 import { applyUIEnvironment, createScalableLabel, updateScalableLabel } from '@par/xr-workspace';
 import * as THREE from 'three';
-import { defaultHostFeedSource, type HostFeedFailure, type HostFeedSource } from '../host-feed';
+import type { HostFeedFailure, HostFeedSource } from '../host-feed';
 import { type AgentRosterRow, formatAge } from '../workspace/agent-roster';
 import { createFeedPoller, FEED_FAILURE_TEXT, isWidgetShown } from './feed-poller';
+import type { AgentRosterConsumer } from './widget-types';
 import { disposeOwned, type Widget } from './widgets';
 
 export const MESH_INBOX_KIND = 'mesh-inbox';
@@ -222,7 +223,8 @@ interface Slot {
 }
 
 export interface MeshInboxWidgetOptions {
-  source?: HostFeedSource<MeshInbox>;
+  /** The host feed this widget polls; the registry builds it from the scene's host connection. */
+  source: HostFeedSource<MeshInbox>;
   pollMs?: number;
   retryStore?: () => Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined;
   now?: () => number;
@@ -230,9 +232,9 @@ export interface MeshInboxWidgetOptions {
 }
 
 export function createMeshInboxWidget(
-  envMap: THREE.Texture | null = null,
-  options: MeshInboxWidgetOptions = {},
-): Widget {
+  envMap: THREE.Texture | null,
+  options: MeshInboxWidgetOptions,
+): Widget & AgentRosterConsumer {
   const widgetId = `${MESH_INBOX_KIND}-${nextMeshInboxId++}`;
   const clock = options.now ?? Date.now;
   const root = new THREE.Group();
@@ -339,11 +341,7 @@ export function createMeshInboxWidget(
   };
 
   const poller = createFeedPoller<MeshInbox>({
-    source:
-      options.source ??
-      defaultHostFeedSource(MESH_INBOX_PATH, MESH_INBOX_PROTOCOL, (data) =>
-        parseMeshInbox(data, clock()),
-      ),
+    source: options.source,
     pollMs: options.pollMs ?? MESH_INBOX_POLL_MS,
     retryStore: options.retryStore,
     now: options.now,

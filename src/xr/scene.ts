@@ -151,7 +151,7 @@ import {
   setModifierVisual,
 } from './panel-ui';
 import { isTypingMode, PANELS } from './panels';
-import { createPictureFrameWidget, PICTURE_KIND } from './picture-frame';
+import { PICTURE_KIND } from './picture-frame';
 import type { PictureImage } from './picture-image';
 import {
   freePictureSlot,
@@ -196,8 +196,10 @@ import {
 } from './ui-poses';
 import { updateVisibleMatrixWorld } from './visible-matrix-world';
 import { intersectVisible } from './visible-raycast';
+import { createBrowserHost } from './widget-host';
 import { createWidgetPoseStore, type WidgetPose } from './widget-poses';
 import {
+  createPictureWidget,
   findWidgetEntry,
   getWidgetEntry,
   isWidgetKind,
@@ -208,6 +210,12 @@ import {
   widgetSpawnYaw,
 } from './widget-registry';
 import { keepWidgetSpawnInView } from './widget-spawn';
+import {
+  createWidgetChannels,
+  type PictureDepthTarget,
+  type WidgetContext,
+  type WidgetHost,
+} from './widget-types';
 import type { Widget } from './widgets';
 
 type InputKind = 'hand' | 'controller';
@@ -766,6 +774,8 @@ export function createWorkspaceScene(
     pictures?: ScenePicturePicker;
     /** The user changed a picture frame's 3D options. */
     onPictureDepthView?: (id: string, view: PictureDepthView) => void;
+    /** The host service connection host-backed widgets use; defaults to the page's own. */
+    host?: WidgetHost;
   } = {},
 ): WorkspaceScene {
   const feedback = options.feedback ?? createUIFeedback();
@@ -1273,7 +1283,7 @@ export function createWorkspaceScene(
   const resetPerfStats = (): void => {
     perfWorstFrameMs = 0;
     perfWasHidden = true;
-    for (const widget of widgets.values()) widget.resetPerf?.();
+    widgetChannels.perfReset.publish();
   };
   let fpsLabel: THREE.Mesh | null = null;
   let keyLabel: THREE.Mesh | null = null;
@@ -1366,9 +1376,19 @@ export function createWorkspaceScene(
   scene.add(messageToasts.root);
   // Reused every frame: widgets whose meshes a controller ray hit.
   const pointedWidgets = new Set<Widget>();
-  bellFeed.subscribe(() => {
-    for (const widget of widgets.values()) widget.setBellFeed?.(bellFeed.entries());
+  const widgetChannels = createWidgetChannels({
+    bellFeed: bellFeed.entries(),
+    textureAnisotropy: Math.min(mutableState.filtering.anisotropy, maxAnisotropy()),
+    weatherZip: mutableState.weatherZip,
   });
+  const widgetContext: WidgetContext = {
+    get envMap() {
+      return uiEnvironment.texture;
+    },
+    host: options.host ?? createBrowserHost(),
+    channels: widgetChannels,
+  };
+  bellFeed.subscribe(() => widgetChannels.bellFeed.publish(bellFeed.entries()));
   const rosterDirectories = new Map<string, string>();
   let agentRosterSignature = '';
   let agentRosterRows: AgentRows = DEFAULT_AGENT_ROSTER_LAYOUT.rows;
@@ -2640,9 +2660,7 @@ export function createWorkspaceScene(
   };
   // Pings and per-pane sampling run only while a stream health widget is mounted.
   const sampleStreamLinks = (time: number): void => {
-    const consumers: Widget[] = [];
-    for (const widget of widgets.values()) if (widget.setStreamLinks) consumers.push(widget);
-    if (!consumers.length) return;
+    if (!widgetChannels.streamLinks.hasSubscribers()) return;
     const links: StreamLinkInput[] = [];
     const pingAt = performance.now();
     for (const [paneId, panel] of panels) {
@@ -2656,7 +2674,7 @@ export function createWorkspaceScene(
         stats: surface.linkStats,
       });
     }
-    for (const widget of consumers) widget.setStreamLinks?.(links, time);
+    widgetChannels.streamLinks.publish({ links, nowMs: time });
   };
   let focusQuadLayer: FocusQuadLayer | null = null;
   let focusQuadPending = false;
@@ -2667,7 +2685,7 @@ export function createWorkspaceScene(
       // Multi-instance widgets (pictures) restore from their own records, not from a pose.
       if (!pose || touchedWidgets.has(kind)) continue;
       if (isPlaceholderKey(kind) && !widgets.has(kind)) {
-        const widget = createPictureFrameWidget(uiEnvironment.texture, {
+        const widget = createPictureWidget(widgetContext, {
           id: kind.slice(PICTURE_KIND.length + 1),
         });
         mountWidget(PICTURE_KIND, widget, false);
@@ -2796,7 +2814,7 @@ export function createWorkspaceScene(
       ? focusedPanel.surface.cwd || rosterDirectories.get(focusedPanel.id) || null
       : null;
     for (const widget of widgets.values()) {
-      widget.setFocusedPane?.(
+      widgetChannels.focusedPane.publish(
         focusedPanel?.id ?? null,
         focusedCwd,
         focusedPanel?.surface.cwdHost ?? null,
@@ -2960,7 +2978,7 @@ export function createWorkspaceScene(
         shownPanes,
         targetHz: renderer?.xr.isPresenting ? (activeSession?.frameRate ?? 72) : 60,
       };
-      for (const widget of widgets.values()) widget.setPerfSample?.(sample);
+      widgetChannels.perfSample.publish(sample);
       perfWorstFrameMs = 0;
     }
     if (time - streamSampleAt >= STREAM_HEALTH_SAMPLE_MS) {
@@ -3740,9 +3758,6 @@ export function createWorkspaceScene(
       object.userData.widgetId = widgetId;
       if (!object.userData.inputAction) object.userData.inputAction = 'grabWidget';
     });
-    widget.setAgentRoster?.(latestAgentRoster);
-    widget.setBellFeed?.(bellFeed.entries());
-    widget.setWeatherZip?.(mutableState.weatherZip);
     retintAccentMaterials(widget.root, '', mutableState.accentColor);
     widgets.set(key, widget);
     scene.add(widget.root);
@@ -3750,7 +3765,7 @@ export function createWorkspaceScene(
     return key;
   };
   const addWidget = (kind: WidgetKind): Widget => {
-    const widget = getWidgetEntry(kind).create(uiEnvironment.texture);
+    const widget = getWidgetEntry(kind).create(widgetContext);
     mountWidget(kind, widget);
     return widget;
   };
@@ -3872,7 +3887,7 @@ export function createWorkspaceScene(
       ? undefined
       : (targeted ??
         [...widgets.values()].reverse().find((entry) => entry.root.userData.picturePlaceholder));
-    const widget = createPictureFrameWidget(uiEnvironment.texture, {
+    const widget = createPictureWidget(widgetContext, {
       id,
       image,
       anisotropy: pictureAnisotropy(),
@@ -6064,7 +6079,7 @@ export function createWorkspaceScene(
       setTerminalMaterialFiltering(panel.screen.material, next, panel.filterGaze);
       panel.filterVersion = filterVersion;
     }
-    for (const widget of widgets.values()) widget.setTextureAnisotropy?.(pictureAnisotropy());
+    widgetChannels.textureAnisotropy.publish(pictureAnisotropy());
     if (inputRoot && inputMode === 'filtering') refreshInputRoot('filtering');
     notify();
   };
@@ -6161,7 +6176,7 @@ export function createWorkspaceScene(
     const next = validateWeatherZip(zip);
     if (next === mutableState.weatherZip) return;
     mutableState.weatherZip = next;
-    for (const widget of widgets.values()) widget.setWeatherZip?.(next);
+    widgetChannels.weatherZip.publish(next);
     if (inputRoot && inputMode === 'world') refreshInputRoot(inputMode);
     notify();
   };
@@ -6263,7 +6278,7 @@ export function createWorkspaceScene(
       const directory = rosterProjectDirectory(row.project);
       if (directory) rosterDirectories.set(row.paneId, directory);
     }
-    for (const widget of widgets.values()) widget.setAgentRoster?.(latestAgentRoster);
+    widgetChannels.agentRoster.publish(latestAgentRoster);
     const signature = agentRowsSignature(rows, layout);
     if (signature === agentRosterSignature) return;
     agentRosterSignature = signature;
@@ -7397,7 +7412,9 @@ export function createWorkspaceScene(
     },
     removePicture: (id) => removeWidget(widgetKey(PICTURE_KIND, id)),
     setPictureDepth: (id, depth) => {
-      const widget = widgets.get(widgetKey(PICTURE_KIND, id));
+      const widget: (Widget & Partial<PictureDepthTarget>) | undefined = widgets.get(
+        widgetKey(PICTURE_KIND, id),
+      );
       if (widget?.setPictureDepth) widget.setPictureDepth(depth);
       else {
         depth.source.width = 0;

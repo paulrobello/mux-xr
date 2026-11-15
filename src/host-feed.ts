@@ -1,7 +1,6 @@
 /** One authenticated read-only JSON feed per connection to a dictation server feed route. */
-import { createHostClipboardSecretStore, type HostClipboardSocket } from './host-clipboard';
+import type { HostClipboardSocket } from './host-clipboard';
 import { openPairedSocket } from './host-pairing';
-import { hostServiceUrl } from './host-service';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const CONTROL_CHARS = /\p{Cc}/u;
@@ -28,6 +27,8 @@ export interface HostFeedClientOptions<T> {
   /** Rebuilds the payload field by field; null rejects it. */
   parse: (data: unknown) => T | null;
   socketFactory?: (url: string) => HostClipboardSocket;
+  /** Replaces the paired-socket session, so a host fake can answer without a socket. */
+  openPaired?: typeof openPairedSocket;
   subtle?: Pick<SubtleCrypto, 'importKey' | 'sign'>;
   timeoutMs?: number;
 }
@@ -51,7 +52,7 @@ export function createHostFeedClient<T>(options: HostFeedClientOptions<T>): Host
     if (!secret) return Promise.resolve({ ok: false, code: 'no-secret' });
     const crypto = options.subtle ?? globalThis.crypto?.subtle;
     if (!crypto) return Promise.resolve({ ok: false, code: 'unavailable' });
-    return openPairedSocket<T, HostFeedFailure>({
+    return (options.openPaired ?? openPairedSocket)<T, HostFeedFailure>({
       url: options.url(),
       secret,
       protocol: options.protocol,
@@ -76,23 +77,5 @@ export function createHostFeedClient<T>(options: HostFeedClientOptions<T>): Host
         return { ok: false, code: 'unavailable' };
       },
     });
-  };
-}
-
-/** A feed client on the dictation server's `path`, paired with the host clipboard secret. */
-export function defaultHostFeedSource<T>(
-  path: string,
-  protocol: string,
-  parse: (data: unknown) => T | null,
-): HostFeedSource<T> {
-  let client: HostFeedSource<T> | undefined;
-  return (request) => {
-    client ??= createHostFeedClient({
-      protocol,
-      parse,
-      url: () => hostServiceUrl(path, window.location),
-      secret: createHostClipboardSecretStore().get,
-    });
-    return client(request);
   };
 }

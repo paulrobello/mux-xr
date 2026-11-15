@@ -1,8 +1,7 @@
 /** One authenticated weather query per connection to the dictation server's `/weather`. */
 
-import { createHostClipboardSecretStore, type HostClipboardSocket } from './host-clipboard';
+import type { HostClipboardSocket } from './host-clipboard';
 import { openPairedSocket } from './host-pairing';
-import { hostServiceUrl } from './host-service';
 
 const PROTOCOL = 'mux-xr-weather-v1';
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -18,6 +17,8 @@ export interface WeatherClientOptions {
   url: () => string;
   secret: () => string | null;
   socketFactory?: (url: string) => HostClipboardSocket;
+  /** Replaces the paired-socket session, so a host fake can answer without a socket. */
+  openPaired?: typeof openPairedSocket;
   subtle?: Pick<SubtleCrypto, 'importKey' | 'sign'>;
   timeoutMs?: number;
 }
@@ -88,7 +89,7 @@ export function createWeatherClient(options: WeatherClientOptions): WeatherFetch
     if (!secret) return Promise.resolve({ ok: false, code: 'no-secret' });
     const crypto = options.subtle ?? globalThis.crypto?.subtle;
     if (!crypto) return Promise.resolve({ ok: false, code: 'unavailable' });
-    return openPairedSocket<{ status: WeatherStatus }, WeatherFailure>({
+    return (options.openPaired ?? openPairedSocket)<{ status: WeatherStatus }, WeatherFailure>({
       url: options.url(),
       secret,
       protocol: PROTOCOL,
@@ -109,13 +110,4 @@ export function createWeatherClient(options: WeatherClientOptions): WeatherFetch
       },
     }).then((outcome) => (outcome.ok ? { ok: true, status: outcome.value.status } : outcome));
   };
-}
-
-/** The production client: the host service port on the page's host, paired by the host clipboard secret. */
-export function createDefaultWeatherFetcher(): WeatherFetcher {
-  const secret = createHostClipboardSecretStore();
-  return createWeatherClient({
-    url: () => hostServiceUrl('/weather', window.location),
-    secret: () => secret.get(),
-  });
 }

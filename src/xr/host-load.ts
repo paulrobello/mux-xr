@@ -5,14 +5,12 @@ import {
   updateScalableLabel,
 } from '@par/xr-workspace';
 import * as THREE from 'three';
-import { createHostClipboardSecretStore } from '../host-clipboard';
-import { HOST_SERVICE_PORT, hostServiceUrl } from '../host-service';
-import {
-  createHostStatsClient,
-  type HostStatsFailure,
-  type HostStatsResult,
-  type HostStatsSnapshot,
-  type HostStatsSource,
+import { HOST_SERVICE_PORT } from '../host-service';
+import type {
+  HostStatsFailure,
+  HostStatsResult,
+  HostStatsSnapshot,
+  HostStatsSource,
 } from '../host-stats';
 import { disposeOwned, type Widget } from './widgets';
 
@@ -99,20 +97,9 @@ export const HOST_LOAD_UNAVAILABLE: Record<HostStatsFailure, string> = {
   'rate-limited': 'Host stats busy, retrying',
 };
 
-/** The browser's connection to the dictation server, with the host clipboard pairing secret. */
-export function defaultHostStatsSource(): HostStatsSource {
-  let client: HostStatsSource | undefined;
-  return () => {
-    client ??= createHostStatsClient({
-      url: () => hostServiceUrl('/host-stats', window.location),
-      secret: createHostClipboardSecretStore().get,
-    });
-    return client();
-  };
-}
-
 export interface HostLoadWidgetOptions {
-  source?: HostStatsSource;
+  /** The host stats client; the registry builds it from the scene's host connection. */
+  source: HostStatsSource;
   pollMs?: number;
   /** Where the rejected-secret deadline survives a reload; sessionStorage by default. */
   retryStore?: () => RetryStore | undefined;
@@ -151,10 +138,10 @@ function isShown(object: THREE.Object3D): boolean {
 }
 
 export function createHostLoadWidget(
-  envMap: THREE.Texture | null = null,
-  options: HostLoadWidgetOptions = {},
+  envMap: THREE.Texture | null,
+  options: HostLoadWidgetOptions,
 ): Widget {
-  const source = options.source ?? defaultHostStatsSource();
+  const { source } = options;
   const pollMs = options.pollMs ?? HOST_LOAD_POLL_MS;
   const retryStore = options.retryStore ?? browserSessionStorage;
   const clock = options.now ?? Date.now;

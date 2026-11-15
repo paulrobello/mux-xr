@@ -3,9 +3,10 @@ import * as THREE from 'three';
 import { vi } from 'vitest';
 import type { PaneDescriptor, TerminalSurface, WorkspaceActions } from '../../src/contracts';
 import { createWorkspaceScene } from '../../src/xr/scene';
+import { createFakeHost } from './widget-context';
 import { fakeXR } from './xr-mocks';
 
-export { fakeXR, focusedDirectories, handPoses } from './xr-mocks';
+export { fakeXR, handPoses } from './xr-mocks';
 
 export const pane = (id: string, title = id): PaneDescriptor => ({
   id,
@@ -61,7 +62,8 @@ export function fixture(options?: Parameters<typeof createWorkspaceScene>[2]) {
     saveCommand: vi.fn(() => true),
   };
   const container = document.createElement('div');
-  const workspace = createWorkspaceScene(container, actions, options);
+  const fakeHost = createFakeHost();
+  const workspace = createWorkspaceScene(container, actions, { host: fakeHost.host, ...options });
   fakeXR.camera = workspace.camera;
   const left = surface(pane('pane-a', 'A'));
   const right = surface(pane('pane-b', 'B'));
@@ -69,7 +71,7 @@ export function fixture(options?: Parameters<typeof createWorkspaceScene>[2]) {
   workspace.addTerminal(right);
   workspace.setAvailablePanes([left.pane, right.pane]);
   workspace.scene.updateMatrixWorld(true);
-  return { workspace, actions, container, left, right };
+  return { workspace, actions, container, left, right, hostRequests: fakeHost.requests };
 }
 
 export function hit(

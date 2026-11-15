@@ -39,6 +39,7 @@ import {
   widgetKinds,
   widgetSpawnYaw,
 } from '../src/xr/widget-registry';
+import { createTestWidgetContext } from './helpers/widget-context';
 
 const pose = {
   position: [1, 2, -3] as [number, number, number],
@@ -122,7 +123,7 @@ describe('widget registry', () => {
   };
   const spawnBoxes = () =>
     WIDGET_REGISTRY.map((entry) => {
-      const widget = entry.create(null);
+      const widget = entry.create(createTestWidgetContext().context);
       const [x, y, z] = entry.spawnOffset;
       widget.root.position.set(x, y, z);
       widget.root.scale.setScalar('spawnScale' in entry ? entry.spawnScale : 1);
@@ -320,7 +321,7 @@ describe('widget registry', () => {
 
   it('creates widgets with a matching widgetKind and a non-empty widgetId', () => {
     for (const entry of WIDGET_REGISTRY) {
-      const widget = entry.create(null);
+      const widget = entry.create(createTestWidgetContext().context);
       expect(widget.root.userData.widgetKind).toBe(entry.kind);
       expect(String(widget.root.userData.widgetId)).not.toBe('');
       expect(widget.root.userData.widgetId).toBeTruthy();
