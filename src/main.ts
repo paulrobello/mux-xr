@@ -21,6 +21,7 @@ import { createLocalSpeechRecognition, isLocalSpeechSupported } from './local-sp
 import { executeQuickCommand, loadSharedCommands } from './quick-commands';
 import { reloadAfterXR } from './reload';
 import { classifyServerParam } from './server-param';
+import { agentRosterLayout, browserStorage, createSettingsStore } from './settings/store';
 import {
   createSpeechInput,
   type DictationAction,
@@ -28,12 +29,7 @@ import {
   type SpeechInput,
 } from './speech-input';
 import { createTerminalSurface } from './terminal';
-import {
-  agentRosterLayout,
-  mountWorkspaceUI,
-  type WorkspaceSettings,
-  type WorkspaceUI,
-} from './ui';
+import { mountWorkspaceUI, type WorkspaceUI } from './ui';
 import { mountPicturePicker } from './ui/pictures';
 import { createUpdateChecker, type UpdateChecker } from './update-check';
 import { shouldAutoReload } from './update-policy';
@@ -41,7 +37,6 @@ import {
   type AgentRosterLayout,
   agentRosterRows,
   createAgentRosterStore,
-  DEFAULT_AGENT_ROSTER_LAYOUT,
   sortAgentRows,
 } from './workspace/agent-roster';
 import { initialPaneSelection } from './workspace/initial';
@@ -82,9 +77,10 @@ let generation = 0;
 let stopMetadata: (() => void) | undefined;
 let refreshMetadata: (() => void) | undefined;
 let autoAttachPending = true;
+const settingsStore = createSettingsStore(browserStorage());
 const openViewsStore = createOpenViewsStore();
 const agentRoster = createAgentRosterStore();
-let rosterLayout: AgentRosterLayout = DEFAULT_AGENT_ROSTER_LAYOUT;
+let rosterLayout: AgentRosterLayout = agentRosterLayout(settingsStore.get());
 let pendingOpenViews: OpenViewsProfile | null = null;
 let pauseViewPersistence = 0;
 let lastLayoutRevision = 0;
@@ -95,7 +91,6 @@ let desktop: DesktopPanels;
 let disposeEnvironment: (() => void) | undefined;
 let disposeEnvironmentManager: (() => void) | undefined;
 const environmentAbort = new AbortController();
-let applyingSettings = false;
 let updateChecker: UpdateChecker | undefined;
 let reloading = false;
 let updateAvailable = false;
@@ -323,33 +318,6 @@ function setKeyboardBackground(enabled: boolean): void {
   ui.setKeyboardBackgroundEnabled(enabled);
 }
 
-function applySettings(settings: WorkspaceSettings): void {
-  if (!scene || applyingSettings) return;
-  applyingSettings = true;
-  try {
-    scene.setTerminalColorMode(settings.colorMode);
-    scene.setKeyboardBackgroundEnabled(settings.keyboardBackground);
-    scene.setKeyboardCurvature(settings.keyboardCurvature);
-    scene.setGazeInputEnabled(settings.gazeInput);
-    scene.setTerminalFiltering(settings.filtering);
-    scene.setWindowPreferences(settings.windowPreferences);
-    scene.setHierarchyStyle(settings.hierarchyStyle);
-    scene.setKeyborbMode(settings.keyborbMode);
-    scene.setUISounds(settings.uiSounds);
-    scene.setHandColor(settings.handColor || null);
-    scene.setArmColor(settings.armColor || null);
-    scene.setAccentColor(settings.accentColor || null);
-    scene.setEnvironmentAccentColor(settings.environmentAccentColor || null);
-    scene.setWeatherZip(settings.weatherZip);
-    scene.setBackground(settings.background);
-    for (const surface of surfaces.values()) surface.setColorMode(settings.colorMode);
-    rosterLayout = agentRosterLayout(settings);
-    syncAgentRoster();
-  } finally {
-    applyingSettings = false;
-  }
-}
-
 function detachAll(): void {
   stopMetadata?.();
   stopMetadata = undefined;
@@ -553,7 +521,6 @@ ui = mountWorkspaceUI(app, {
   onPassthrough: (mode) => {
     void enterXR(mode);
   },
-  onSettingsChange: applySettings,
   onTerminalCurvature: (id, degrees) => scene.setTerminalCurvature(id, degrees),
   onTerminalOpacity: (id, opacity) => scene.setTerminalOpacity(id, opacity / 100),
   onTerminalReset: (id) => scene.resetTerminalAppearance(id),
@@ -590,6 +557,7 @@ scene = createWorkspaceScene(ui.sceneHost, actions, {
   onPictureClosed: (id) => pictures.closed(id),
   onPictureDepthView: (id, view) => pictures.setDepthView(id, view),
   pictures,
+  settings: settingsStore,
 });
 // Toasts outside programs post to the host service; it needs the host clipboard pairing secret.
 const toastSubscription = createToastSubscription({
@@ -669,30 +637,12 @@ desktop = createDesktopPanels(ui.sceneHost, selectPane, {
   onReset: () => scene.resetLayout(),
 });
 const stopPresentation = scene.subscribe((state) => {
-  if (!applyingSettings) {
-    ui.setBackground(state.background, true);
-    ui.setGazeInputEnabled(state.gazeInputEnabled);
-    ui.setKeyboardBackgroundEnabled(state.keyboardBackgroundEnabled, false);
-    ui.setKeyboardCurvature(state.keyboardCurvature, true);
-    ui.setTerminalColorMode(state.terminalColorMode, false);
-    ui.setTerminalFiltering(state.filtering, true);
-    ui.setWindowPreferences(state.windowPreferences, true);
-    ui.setHierarchyStyle(state.hierarchyStyle, true);
-    ui.setKeyborbMode(state.keyborbMode, true);
-    ui.setUISounds(state.uiSounds, true);
-    ui.setHandColor(state.handColor, true);
-    ui.setArmColor(state.armColor, true);
-    ui.setAccentColor(state.accentColor, true);
-    ui.setEnvironmentAccentColor(state.environmentAccentColor, true);
-    ui.setWeatherZip(state.weatherZip, true);
-    ui.setFilteringCapabilities(scene.maxAnisotropy);
-    for (const id of surfaces.keys()) {
-      ui.setTerminalCurvature(id, scene.getTerminalCurvature(id));
-      ui.setTerminalOpacity(id, scene.getTerminalOpacity(id) * 100);
-    }
-    if (state.arrangement && state.arrangement !== ui.getSettings().arrangement)
-      ui.setArrangement(state.arrangement);
+  for (const id of surfaces.keys()) {
+    ui.setTerminalCurvature(id, scene.getTerminalCurvature(id));
+    ui.setTerminalOpacity(id, scene.getTerminalOpacity(id) * 100);
   }
+  if (state.arrangement && state.arrangement !== settingsStore.get().arrangement)
+    ui.setArrangement(state.arrangement);
   ui.setNotice(state.notice);
   ui.setToast(state.toast);
   if (state.layoutRevision !== lastLayoutRevision) {
@@ -703,7 +653,20 @@ const stopPresentation = scene.subscribe((state) => {
   if (state.xrMode !== 'desktop') ui.closeInput();
   maybeReloadUpdate();
 });
-applySettings(ui.getSettings());
+ui.setFilteringCapabilities(scene.maxAnisotropy);
+// Terminal color mode and the roster layout are the only settings the scene does not present.
+const stopSettingsSync = settingsStore.subscribe((next, previous) => {
+  if (next.colorMode !== previous.colorMode)
+    for (const surface of surfaces.values()) surface.setColorMode(next.colorMode);
+  if (
+    next.agentRows !== previous.agentRows ||
+    next.agentRowsCustom !== previous.agentRowsCustom ||
+    next.agentsSort !== previous.agentsSort
+  ) {
+    rosterLayout = agentRosterLayout(next);
+    syncAgentRoster();
+  }
+});
 void loadSharedCommands(new URL('quick-commands.json', window.location.href).href).then(
   (commands) => {
     if (!commands.length) return;
@@ -748,6 +711,7 @@ window.addEventListener(
     speechInput?.dispose();
     withoutViewPersistence(detachAll);
     stopPresentation();
+    stopSettingsSync();
     desktop.dispose();
     disposeEnvironment?.();
     disposeEnvironmentManager?.();

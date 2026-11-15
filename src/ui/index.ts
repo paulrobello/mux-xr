@@ -17,7 +17,6 @@ import type {
   TerminalStatus,
   WorkspaceSnapshot,
 } from '../contracts';
-import { isBackgroundMode } from '../contracts';
 import { getKeyHelp } from '../control-help';
 import { reportSwallowed } from '../diagnostics';
 import { HOST_CLIPBOARD_SETUP } from '../host-clipboard';
@@ -31,20 +30,22 @@ import {
   serializeCommandFile,
   toSharedCommands,
 } from '../quick-commands';
-import type { DictationAction, DictationState } from '../speech-input';
 import {
-  DEFAULT_TERMINAL_FILTERING,
-  type TerminalFiltering,
-  validateTerminalFiltering,
-} from '../terminal/filtering';
+  agentRosterLayout,
+  browserStorage,
+  createSettingsStore,
+  type SettingsStore,
+  settingChanged,
+  type WorkspaceSettings,
+} from '../settings/store';
+import type { DictationAction, DictationState } from '../speech-input';
+import { type TerminalFiltering, validateTerminalFiltering } from '../terminal/filtering';
 import { type PaneProcess, processBadge } from '../terminal/lifecycle';
 import { terminalKeyLabel } from '../terminal/protocol';
 import {
   AGE_TOKENS,
-  AGENT_ROWS_CHOICES,
   AGENT_TOKENS,
   AGENTS_SORTS,
-  type AgentRosterLayout,
   type AgentRosterRow,
   type AgentRowsChoice,
   type AgentsSort,
@@ -53,9 +54,7 @@ import {
   agentRowsSignature,
   agentStateTone,
   agentTokenText,
-  DEFAULT_AGENT_ROSTER_LAYOUT,
   parseAgentRows,
-  resolveAgentRows,
 } from '../workspace/agent-roster';
 import {
   BUTTON_FUNCTION_LABELS,
@@ -65,21 +64,23 @@ import {
   type ControllerButton,
   DEFAULT_BUTTON_MAP,
 } from '../workspace/controller-buttons';
-import {
-  DEFAULT_HIERARCHY_STYLE,
-  type HierarchyStyle,
-  validateHierarchyStyle,
-} from '../workspace/hierarchy-style';
+import { type HierarchyStyle, validateHierarchyStyle } from '../workspace/hierarchy-style';
 import { validateKeyboardCurvature } from '../workspace/keyboard-curvature';
 import type { KeyborbMode } from '../workspace/keyborb';
 import { validateKeyborbMode } from '../workspace/keyborb';
 import { XR_ENTRY_LABELS, type XrEntryMode } from '../xr/entry';
 
+// The settings moved to ../settings/store; these keep existing importers compiling until ARC-010.
+export {
+  agentRosterLayout,
+  loadSettings,
+  validateSettings,
+  type WorkspaceSettings,
+} from '../settings/store';
 export { validateHandColor };
 
 import type { PaneCreationState } from '../workspace/pane-create';
 import {
-  DEFAULT_WINDOW_PREFERENCES,
   MAX_TERMINAL_CURVATURE_DEGREES,
   validateWindowPreferences,
   type WindowPreferences,
@@ -128,46 +129,6 @@ export interface UICallbacks {
   onDismissNotice?(): void;
   onDictationAction?(action: DictationAction): void;
   onDictationDraftChange?(text: string): void;
-}
-
-export interface WorkspaceSettings {
-  version: 1;
-  endpoint: string;
-  background: BackgroundMode;
-  gazeInput: boolean;
-  colorMode: TerminalColorMode;
-  keyboardBackground: boolean;
-  keyboardCurvature: number;
-  arrangement: PanelArrangement;
-  filtering: TerminalFiltering;
-  windowPreferences: WindowPreferences;
-  hierarchyStyle: HierarchyStyle;
-  keyborbMode: KeyborbMode;
-  uiSounds: boolean;
-  /** `#rrggbb` tint for the XR hands and arms, or empty for the default color. */
-  handColor: string;
-  /** `#rrggbb` arm tint, or empty to match the hands. */
-  armColor: string;
-  /** `#rrggbb` XR interface accent, or empty for the default cyan. */
-  accentColor: string;
-  /** `#rrggbb` XR environment accent, or empty to match the interface accent. */
-  environmentAccentColor: string;
-  /** Five-digit US ZIP for the weather widget, or empty when none is set. */
-  weatherZip: string;
-  /** par-mux `agent-rows` preset, or `custom` for {@link agentRowsCustom}. */
-  agentRows: AgentRowsChoice;
-  agentRowsCustom: string;
-  agentsSort: AgentsSort;
-}
-
-/** The roster layout a settings value selects. */
-export function agentRosterLayout(
-  settings: Pick<WorkspaceSettings, 'agentRows' | 'agentRowsCustom' | 'agentsSort'>,
-): AgentRosterLayout {
-  return {
-    rows: resolveAgentRows(settings.agentRows, settings.agentRowsCustom),
-    sort: settings.agentsSort,
-  };
 }
 
 export interface WorkspaceUI {
@@ -236,7 +197,6 @@ export interface CommandStore {
   setAll(values: Record<string, QuickCommand[]>): boolean;
 }
 
-const SETTINGS_KEY = 'mux-xr:settings:v1';
 // The swatch the color picker shows while the hands keep their default color.
 const DEFAULT_HAND_SWATCH = '#b4b4b4';
 // The swatch the accent pickers show while the XR accent stays the default cyan.
@@ -289,30 +249,6 @@ export function createCommandStatsStore(
     },
   };
 }
-const DEFAULT_SETTINGS: WorkspaceSettings = {
-  version: 1,
-  endpoint: '',
-  background: 'observatory',
-  gazeInput: false,
-  colorMode: 'comfort',
-  keyboardBackground: true,
-  keyboardCurvature: 0,
-  arrangement: 'arc',
-  filtering: { ...DEFAULT_TERMINAL_FILTERING },
-  windowPreferences: { ...DEFAULT_WINDOW_PREFERENCES },
-  hierarchyStyle: DEFAULT_HIERARCHY_STYLE,
-  keyborbMode: 'auto',
-  uiSounds: true,
-  handColor: '',
-  weatherZip: '',
-  armColor: '',
-  accentColor: '',
-  environmentAccentColor: '',
-  agentRows: 'full',
-  agentRowsCustom: '',
-  agentsSort: DEFAULT_AGENT_ROSTER_LAYOUT.sort,
-};
-
 export function workspaceScope(endpoint: string, workspaceId: string): string {
   return `${commandServerKey(endpoint)}::${workspaceId}`;
 }
@@ -392,50 +328,6 @@ export function reorderCommands(
   return result;
 }
 
-export function validateSettings(value: unknown): WorkspaceSettings {
-  if (!value || typeof value !== 'object') return { ...DEFAULT_SETTINGS };
-  const candidate = value as Partial<WorkspaceSettings>;
-  return {
-    version: 1,
-    endpoint: typeof candidate.endpoint === 'string' ? candidate.endpoint : '',
-    background: isBackgroundMode(candidate.background)
-      ? candidate.background
-      : DEFAULT_SETTINGS.background,
-    gazeInput: candidate.gazeInput === true,
-    colorMode:
-      candidate.colorMode === 'original' || candidate.colorMode === 'monochrome'
-        ? candidate.colorMode
-        : 'comfort',
-    keyboardBackground: candidate.keyboardBackground !== false,
-    keyboardCurvature: validateKeyboardCurvature(candidate.keyboardCurvature),
-    filtering: validateTerminalFiltering(candidate.filtering),
-    windowPreferences: validateWindowPreferences(candidate.windowPreferences),
-    hierarchyStyle: validateHierarchyStyle(candidate.hierarchyStyle),
-    keyborbMode: validateKeyborbMode(candidate.keyborbMode),
-    uiSounds: candidate.uiSounds !== false,
-    handColor: validateHandColor(candidate.handColor),
-    armColor: validateHandColor(candidate.armColor),
-    accentColor: validateHandColor(candidate.accentColor),
-    environmentAccentColor: validateHandColor(candidate.environmentAccentColor),
-    weatherZip: validateWeatherZip(candidate.weatherZip),
-    agentRows: AGENT_ROWS_CHOICES.includes(candidate.agentRows as AgentRowsChoice)
-      ? (candidate.agentRows as AgentRowsChoice)
-      : DEFAULT_SETTINGS.agentRows,
-    agentRowsCustom:
-      typeof candidate.agentRowsCustom === 'string' ? candidate.agentRowsCustom.slice(0, 500) : '',
-    agentsSort: AGENTS_SORTS.includes(candidate.agentsSort as AgentsSort)
-      ? (candidate.agentsSort as AgentsSort)
-      : DEFAULT_SETTINGS.agentsSort,
-    arrangement:
-      candidate.arrangement === 'row' ||
-      candidate.arrangement === 'grid' ||
-      candidate.arrangement === 'sphere' ||
-      candidate.arrangement === 'arc'
-        ? candidate.arrangement
-        : DEFAULT_SETTINGS.arrangement,
-  };
-}
-
 export function createCommandStore(
   storage: Storage | undefined = typeof localStorage === 'undefined' ? undefined : localStorage,
 ): CommandStore {
@@ -494,17 +386,6 @@ export function createCommandStore(
   };
 }
 
-export function loadSettings(
-  storage: Storage | undefined = typeof localStorage === 'undefined' ? undefined : localStorage,
-): WorkspaceSettings {
-  if (!storage) return { ...DEFAULT_SETTINGS };
-  try {
-    return validateSettings(JSON.parse(storage.getItem(SETTINGS_KEY) ?? 'null'));
-  } catch {
-    return { ...DEFAULT_SETTINGS };
-  }
-}
-
 function icon(name: 'close' | 'link' | 'xr' | 'send' | 'plus' | 'settings'): string {
   const paths: Record<string, string> = {
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
@@ -530,11 +411,47 @@ function connectionActionTitle(title: string, status: TerminalStatus | undefined
     : `Reconnect ${title} view to the running terminal`;
 }
 
-export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks): WorkspaceUI {
-  const storage = typeof localStorage === 'undefined' ? undefined : localStorage;
-  let settings = loadSettings(storage);
-  if (!settings.endpoint && typeof location !== 'undefined')
-    settings = { ...settings, endpoint: location.origin };
+export interface WorkspaceUIOptions {
+  /** The settings both presenters share; a private store over `localStorage` when omitted. */
+  settings?: SettingsStore;
+}
+
+export function mountWorkspaceUI(
+  container: HTMLElement,
+  callbacks: UICallbacks,
+  options: WorkspaceUIOptions = {},
+): WorkspaceUI {
+  const storage = browserStorage();
+  const settingsStore = options.settings ?? createSettingsStore(storage);
+  if (!settingsStore.get().endpoint && typeof location !== 'undefined')
+    settingsStore.update({ endpoint: location.origin }, { persist: false });
+  let settings = settingsStore.get();
+  // Each control registers the settings it shows, so a change from XR or another presenter
+  // re-renders exactly the controls whose fields moved.
+  const settingsViews: Array<{ keys: Array<keyof WorkspaceSettings>; refresh: () => void }> = [];
+  const bindSettings = (keys: Array<keyof WorkspaceSettings>, refresh: () => void): void => {
+    settingsViews.push({ keys, refresh });
+  };
+  const refreshSettingsViews = (changed: (key: keyof WorkspaceSettings) => boolean): void => {
+    for (const view of settingsViews) if (view.keys.some(changed)) view.refresh();
+  };
+  // Re-renders the patched controls even when the store ignored the patch, because a control may
+  // hold a raw typed value that validation changed back to the stored one.
+  const saveSettings = (
+    patch: Partial<WorkspaceSettings>,
+    saveOptions?: { persist?: boolean },
+  ): void => {
+    const saved = settingsStore.update(patch, saveOptions);
+    settings = settingsStore.get();
+    refreshSettingsViews((key) => key in patch);
+    if (!saved)
+      qs<HTMLElement>('[data-detail]').textContent = 'Settings could not be saved on this device.';
+  };
+  const stopSettings = settingsStore.subscribe((next, previous) => {
+    settings = settingsStore.get();
+    refreshSettingsViews((key) => settingChanged(next, previous, key));
+    callbacks.onSettingsChange?.(next);
+  });
   let snapshot: WorkspaceSnapshot = { panes: [] };
   let activePaneId: string | undefined;
   let attachedPaneIds: string[] = [];
@@ -740,14 +657,12 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       keyboardCurvatureInput.value = String(settings.keyboardCurvature);
       keyboardCurvatureValue.textContent = `${settings.keyboardCurvature}°`;
     };
-    keyboardCurvatureInput.addEventListener('input', () => {
-      settings = {
-        ...settings,
+    keyboardCurvatureInput.addEventListener('input', () =>
+      saveSettings({
         keyboardCurvature: validateKeyboardCurvature(Number(keyboardCurvatureInput.value)),
-      };
-      updateKeyboardCurvature();
-      saveSettings();
-    });
+      }),
+    );
+    bindSettings(['keyboardCurvature'], updateKeyboardCurvature);
     updateKeyboardCurvature();
     const keyborb = document.createElement('label');
     keyborb.innerHTML =
@@ -758,6 +673,10 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     );
     keyborbModeSelect = keyborb.querySelector('[data-keyborb-mode]');
     if (!keyborbModeSelect) throw new Error('Keyborb control missing');
+    const keyborbSelect = keyborbModeSelect;
+    bindSettings(['keyborbMode'], () => {
+      keyborbSelect.value = settings.keyborbMode;
+    });
     keyborbModeSelect.value = settings.keyborbMode;
     const uiSounds = document.createElement('label');
     uiSounds.className = 'check';
@@ -798,16 +717,10 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         input.value = settings[key] || swatch();
         clear.disabled = !settings[key];
       };
-      input.addEventListener('input', () => {
-        settings = { ...settings, [key]: validateHandColor(input.value) };
-        updateHandColorControls();
-        saveSettings();
-      });
-      clear.addEventListener('click', () => {
-        settings = { ...settings, [key]: '' };
-        updateHandColorControls();
-        saveSettings();
-      });
+      input.addEventListener('input', () =>
+        saveSettings({ [key]: validateHandColor(input.value) }),
+      );
+      clear.addEventListener('click', () => saveSettings({ [key]: '' }));
       return update;
     };
     const updateHandPicker = colorPicker(
@@ -844,6 +757,9 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       updateAccentPicker();
       updateEnvironmentAccentPicker();
     };
+    bindSettings(['handColor', 'armColor', 'accentColor', 'environmentAccentColor'], () =>
+      updateHandColorControls(),
+    );
     updateHandColorControls();
     const filteringControls = document.createElement('div');
     filteringControls.innerHTML =
@@ -880,29 +796,28 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       filterAnisotropyRow.hidden = !mipmapMode;
       filterDistanceRow.hidden = !mipmapMode || !filterGaze.checked;
     };
-    const changeFiltering = (): void => {
-      settings = {
-        ...settings,
+    const showFiltering = (): void => {
+      filterMode.value = settings.filtering.mode;
+      filterAnisotropy.value = String(settings.filtering.anisotropy);
+      filterGaze.checked = settings.filtering.gazeClarity;
+      filterDistance.value = String(settings.filtering.gazeMaxDistance);
+      updateFilteringVisibility();
+    };
+    const changeFiltering = (): void =>
+      saveSettings({
         filtering: validateTerminalFiltering({
           mode: filterMode.value,
           anisotropy: Number(filterAnisotropy.value),
           gazeClarity: filterGaze.checked,
           gazeMaxDistance: Number(filterDistance.value),
         }),
-      };
-      filterDistance.value = String(settings.filtering.gazeMaxDistance);
-      updateFilteringVisibility();
-      saveSettings();
-    };
+      });
+    bindSettings(['filtering'], showFiltering);
     filterMode.addEventListener('change', changeFiltering);
     filterAnisotropy.addEventListener('change', changeFiltering);
     filterGaze.addEventListener('change', changeFiltering);
     filterDistance.addEventListener('change', changeFiltering);
-    filterMode.value = settings.filtering.mode;
-    filterAnisotropy.value = String(settings.filtering.anisotropy);
-    filterGaze.checked = settings.filtering.gazeClarity;
-    filterDistance.value = String(settings.filtering.gazeMaxDistance);
-    updateFilteringVisibility();
+    showFiltering();
     const hierarchyStyle = document.createElement('label');
     hierarchyStyle.innerHTML =
       '<span>Hierarchy style</span><select data-hierarchy-style aria-label="Hierarchy style"><option value="helix">Helix Navigator</option><option value="spatial-docks">Spatial Docks</option></select>';
@@ -912,6 +827,10 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     );
     hierarchyStyleSelect = hierarchyStyle.querySelector('[data-hierarchy-style]');
     if (!hierarchyStyleSelect) throw new Error('Hierarchy style control missing');
+    const hierarchySelect = hierarchyStyleSelect;
+    bindSettings(['hierarchyStyle'], () => {
+      hierarchySelect.value = settings.hierarchyStyle;
+    });
     hierarchyStyleSelect.value = settings.hierarchyStyle;
     const agentControls = document.createElement('fieldset');
     agentControls.dataset.agentRoster = 'true';
@@ -952,16 +871,14 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       agentRowsHint.classList.toggle('warn', unknown.length > 0);
     };
     const changeAgentLayout = (): void => {
-      settings = {
-        ...settings,
-        agentRows: validateSettings({ ...settings, agentRows: agentRowsSelect.value }).agentRows,
+      saveSettings({
+        agentRows: agentRowsSelect.value as AgentRowsChoice,
         agentRowsCustom: agentRowsCustom.value.slice(0, 500),
-        agentsSort: validateSettings({ ...settings, agentsSort: sortSelect.value }).agentsSort,
-      };
-      updateAgentControls();
-      saveSettings();
+        agentsSort: sortSelect.value as AgentsSort,
+      });
       renderAgents();
     };
+    bindSettings(['agentRows', 'agentRowsCustom', 'agentsSort'], updateAgentControls);
     agentRowsSelect.addEventListener('change', changeAgentLayout);
     agentRowsCustom.addEventListener('change', changeAgentLayout);
     sortSelect.addEventListener('change', changeAgentLayout);
@@ -1019,9 +936,8 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       windowDistanceValue.textContent = `${windowDistance.value} m`;
       windowCurvatureValue.textContent = `${windowCurvature.value}°`;
     };
-    const changeWindowPreferences = (): void => {
-      settings = {
-        ...settings,
+    const changeWindowPreferences = (): void =>
+      saveSettings({
         windowPreferences: validateWindowPreferences({
           defaultOpacity: Number(windowOpacity.value) / 100,
           defaultCurvature: Number(windowWarp.value),
@@ -1032,10 +948,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
           frameChin: frameChin.checked,
           buttonMap: settings.windowPreferences.buttonMap,
         }),
-      };
-      updateWindowPreferenceControls();
-      saveSettings();
-    };
+      });
     windowOpacity.addEventListener('input', changeWindowPreferences);
     windowWarp.addEventListener('input', changeWindowPreferences);
     windowDistance.addEventListener('input', changeWindowPreferences);
@@ -1067,14 +980,10 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         select.value =
           settings.windowPreferences.buttonMap[select.dataset.controllerButton as ControllerButton];
     };
-    const saveButtonMap = (buttonMap: unknown): void => {
-      settings = {
-        ...settings,
+    const saveButtonMap = (buttonMap: unknown): void =>
+      saveSettings({
         windowPreferences: validateWindowPreferences({ ...settings.windowPreferences, buttonMap }),
-      };
-      updateButtonControls();
-      saveSettings();
-    };
+      });
     for (const select of buttonSelects)
       select.addEventListener('change', () =>
         saveButtonMap(
@@ -1091,6 +1000,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       refreshWindowControls();
       updateButtonControls();
     };
+    bindSettings(['windowPreferences'], () => updateWindowPreferenceControls());
     updateButtonControls();
     const grid = document.createElement('div');
     grid.dataset.gridControls = 'true';
@@ -1130,10 +1040,12 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     if (!arrangementSelect || !arrangementApply) throw new Error('Missing arrangement controls');
     const select = arrangementSelect;
     select.value = settings.arrangement;
+    bindSettings(['arrangement'], () => {
+      select.value = settings.arrangement;
+    });
     arrangementApply.addEventListener('click', () => {
       const pattern = select.value as PanelArrangement;
-      settings = { ...settings, arrangement: pattern };
-      saveSettings();
+      saveSettings({ arrangement: pattern });
       callbacks.onArrange?.(pattern);
     });
     root
@@ -1239,15 +1151,6 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   root
     .querySelector('[data-command-newline]')
     ?.setAttribute('title', 'Append Enter after the command text to execute it');
-  const saveSettings = (): void => {
-    try {
-      storage?.setItem(SETTINGS_KEY, JSON.stringify(settings));
-      callbacks.onSettingsChange?.(settings);
-    } catch (error) {
-      reportSwallowed('ui.settings-save', error);
-      qs<HTMLElement>('[data-detail]').textContent = 'Settings could not be saved on this device.';
-    }
-  };
   const renderAgents = (): void => {
     const section = qs<HTMLElement>('[data-agents-section]');
     section.hidden = agentRows.length === 0;
@@ -1619,19 +1522,16 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       case 'agents-sort': {
         const next =
           AGENTS_SORTS[(AGENTS_SORTS.indexOf(settings.agentsSort) + 1) % AGENTS_SORTS.length];
-        settings = { ...settings, agentsSort: next };
-        if (agentSortSelect) agentSortSelect.value = next;
-        saveSettings();
+        saveSettings({ agentsSort: next });
         renderAgents();
         break;
       }
       case 'connect': {
         const endpoint = qs<HTMLInputElement>('#endpoint').value.trim();
-        settings = { ...settings, endpoint };
         capturedTarget = undefined;
         clearModifiers();
         qs<HTMLElement>('[data-drawer]').hidden = true;
-        saveSettings();
+        saveSettings({ endpoint });
         loadCommands();
         callbacks.onConnect(endpoint);
         break;
@@ -1859,57 +1759,54 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     transcript: '',
     error: null,
   });
-  qs<HTMLSelectElement>('[data-background]').addEventListener('change', (event) => {
-    settings = {
-      ...settings,
-      background: (event.target as HTMLSelectElement).value as BackgroundMode,
-    };
-    saveSettings();
-  });
-  qs<HTMLSelectElement>('[data-hierarchy-style]').addEventListener('change', (event) => {
-    settings = {
-      ...settings,
+  qs<HTMLSelectElement>('[data-background]').addEventListener('change', (event) =>
+    saveSettings({ background: (event.target as HTMLSelectElement).value as BackgroundMode }),
+  );
+  qs<HTMLSelectElement>('[data-hierarchy-style]').addEventListener('change', (event) =>
+    saveSettings({
       hierarchyStyle: validateHierarchyStyle((event.target as HTMLSelectElement).value),
-    };
-    saveSettings();
-  });
-  qs<HTMLSelectElement>('[data-keyborb-mode]').addEventListener('change', (event) => {
-    settings = {
-      ...settings,
-      keyborbMode: validateKeyborbMode((event.target as HTMLSelectElement).value),
-    };
-    saveSettings();
-  });
+    }),
+  );
+  qs<HTMLSelectElement>('[data-keyborb-mode]').addEventListener('change', (event) =>
+    saveSettings({ keyborbMode: validateKeyborbMode((event.target as HTMLSelectElement).value) }),
+  );
   const weatherZipInput = qs<HTMLInputElement>('[data-weather-zip]');
   weatherZipInput.value = settings.weatherZip;
+  bindSettings(['weatherZip'], () => {
+    weatherZipInput.value = settings.weatherZip;
+  });
   weatherZipInput.addEventListener('change', () => {
     const next = validateWeatherZip(weatherZipInput.value.trim());
     weatherZipInput.value = next;
     if (settings.weatherZip === next) return;
-    settings = { ...settings, weatherZip: next };
-    saveSettings();
+    saveSettings({ weatherZip: next });
   });
-  qs<HTMLInputElement>('[data-ui-sounds]').addEventListener('change', (event) => {
-    settings = { ...settings, uiSounds: (event.target as HTMLInputElement).checked };
-    saveSettings();
+  qs<HTMLInputElement>('[data-ui-sounds]').addEventListener('change', (event) =>
+    saveSettings({ uiSounds: (event.target as HTMLInputElement).checked }),
+  );
+  qs<HTMLInputElement>('[data-gaze-input]').addEventListener('change', (event) =>
+    saveSettings({ gazeInput: (event.target as HTMLInputElement).checked }),
+  );
+  qs<HTMLSelectElement>('[data-color-mode]').addEventListener('change', (event) =>
+    saveSettings({ colorMode: (event.target as HTMLSelectElement).value as TerminalColorMode }),
+  );
+  qs<HTMLInputElement>('[data-keyboard-background]').addEventListener('change', (event) =>
+    saveSettings({ keyboardBackground: (event.target as HTMLInputElement).checked }),
+  );
+  bindSettings(['background'], () => {
+    qs<HTMLSelectElement>('[data-background]').value = settings.background;
   });
-  qs<HTMLInputElement>('[data-gaze-input]').addEventListener('change', (event) => {
-    settings = { ...settings, gazeInput: (event.target as HTMLInputElement).checked };
-    saveSettings();
+  bindSettings(['colorMode'], () => {
+    qs<HTMLSelectElement>('[data-color-mode]').value = settings.colorMode;
   });
-  qs<HTMLSelectElement>('[data-color-mode]').addEventListener('change', (event) => {
-    settings = {
-      ...settings,
-      colorMode: (event.target as HTMLSelectElement).value as TerminalColorMode,
-    };
-    saveSettings();
+  bindSettings(['keyboardBackground'], () => {
+    qs<HTMLInputElement>('[data-keyboard-background]').checked = settings.keyboardBackground;
   });
-  qs<HTMLInputElement>('[data-keyboard-background]').addEventListener('change', (event) => {
-    settings = {
-      ...settings,
-      keyboardBackground: (event.target as HTMLInputElement).checked,
-    };
-    saveSettings();
+  bindSettings(['gazeInput'], () => {
+    qs<HTMLInputElement>('[data-gaze-input]').checked = settings.gazeInput;
+  });
+  bindSettings(['uiSounds'], () => {
+    qs<HTMLInputElement>('[data-ui-sounds]').checked = settings.uiSounds;
   });
   qs<HTMLTextAreaElement>('[data-dictation-draft]').addEventListener('input', (event) => {
     callbacks.onDictationDraftChange?.((event.target as HTMLTextAreaElement).value);
@@ -2123,12 +2020,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       button.setAttribute('aria-label', label);
       button.title = label;
     },
-    setGazeInputEnabled(enabled) {
-      if (settings.gazeInput === enabled) return;
-      settings = { ...settings, gazeInput: enabled };
-      qs<HTMLInputElement>('[data-gaze-input]').checked = enabled;
-      saveSettings();
-    },
+    setGazeInputEnabled: (enabled) => saveSettings({ gazeInput: enabled }),
     setTerminalGrid(paneId, cols, rows, canResize) {
       const previous = terminalGrid.get(paneId);
       const pending = pendingGrid.get(paneId);
@@ -2167,112 +2059,25 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       terminalOpacity.set(paneId, opacity);
       if (activePaneId === paneId) updateOpacityControls(paneId);
     },
-    setTerminalColorMode(mode, persist = true) {
-      settings = { ...settings, colorMode: mode };
-      qs<HTMLSelectElement>('[data-color-mode]').value = mode;
-      if (persist) saveSettings();
-    },
-    setKeyboardBackgroundEnabled(enabled, persist = true) {
-      settings = { ...settings, keyboardBackground: enabled };
-      qs<HTMLInputElement>('[data-keyboard-background]').checked = enabled;
-      if (persist) saveSettings();
-    },
-    setKeyboardCurvature(degrees, persist = false) {
-      const value = validateKeyboardCurvature(degrees);
-      if (settings.keyboardCurvature === value) return;
-      settings = { ...settings, keyboardCurvature: value };
-      const input = qs<HTMLInputElement>('[data-keyboard-curvature]');
-      input.value = String(value);
-      qs<HTMLElement>('[data-keyboard-curvature-value]').textContent = `${value}°`;
-      if (persist) saveSettings();
-    },
-    setTerminalFiltering(filtering, persist = false) {
-      const next = validateTerminalFiltering(filtering);
-      if (JSON.stringify(settings.filtering) === JSON.stringify(next)) return;
-      settings = { ...settings, filtering: next };
-      qs<HTMLSelectElement>('[data-filter-mode]').value = settings.filtering.mode;
-      qs<HTMLSelectElement>('[data-filter-anisotropy]').value = String(
-        settings.filtering.anisotropy,
-      );
-      qs<HTMLInputElement>('[data-filter-gaze]').checked = settings.filtering.gazeClarity;
-      qs<HTMLInputElement>('[data-filter-distance]').value = String(
-        settings.filtering.gazeMaxDistance,
-      );
-      const mode = settings.filtering.mode;
-      const mipmapMode = mode === 'mipmap-nearest' || mode === 'mipmap-linear';
-      qs<HTMLElement>('[data-filter-anisotropy-row]').hidden = !mipmapMode;
-      qs<HTMLElement>('[data-filter-distance-row]').hidden =
-        !mipmapMode || !settings.filtering.gazeClarity;
-      if (persist) saveSettings();
-    },
-    setWindowPreferences(value, persist = false) {
-      const next = validateWindowPreferences(value);
-      if (JSON.stringify(settings.windowPreferences) === JSON.stringify(next)) return;
-      settings = { ...settings, windowPreferences: next };
-      updateWindowPreferenceControls();
-      if (persist) saveSettings();
-    },
-    setHierarchyStyle(style, persist = false) {
-      const next = validateHierarchyStyle(style);
-      if (settings.hierarchyStyle === next) return;
-      settings = { ...settings, hierarchyStyle: next };
-      if (hierarchyStyleSelect) hierarchyStyleSelect.value = next;
-      if (persist) saveSettings();
-    },
-    setKeyborbMode(mode, persist = false) {
-      const next = validateKeyborbMode(mode);
-      if (settings.keyborbMode === next) return;
-      settings = { ...settings, keyborbMode: next };
-      if (keyborbModeSelect) keyborbModeSelect.value = next;
-      if (persist) saveSettings();
-    },
-    setBackground(mode, persist = false) {
-      if (settings.background === mode) return;
-      settings = { ...settings, background: mode };
-      qs<HTMLSelectElement>('[data-background]').value = mode;
-      if (persist) saveSettings();
-    },
-    setArmColor(color, persist = false) {
-      const next = validateHandColor(color);
-      if (settings.armColor === next) return;
-      settings = { ...settings, armColor: next };
-      updateHandColorControls();
-      if (persist) saveSettings();
-    },
-    setWeatherZip(zip, persist = false) {
-      const next = validateWeatherZip(zip);
-      if (settings.weatherZip === next) return;
-      settings = { ...settings, weatherZip: next };
-      qs<HTMLInputElement>('[data-weather-zip]').value = next;
-      if (persist) saveSettings();
-    },
-    setAccentColor(color, persist = false) {
-      const next = validateHandColor(color);
-      if (settings.accentColor === next) return;
-      settings = { ...settings, accentColor: next };
-      updateHandColorControls();
-      if (persist) saveSettings();
-    },
-    setEnvironmentAccentColor(color, persist = false) {
-      const next = validateHandColor(color);
-      if (settings.environmentAccentColor === next) return;
-      settings = { ...settings, environmentAccentColor: next };
-      updateHandColorControls();
-      if (persist) saveSettings();
-    },
-    setHandColor(color, persist = false) {
-      const next = validateHandColor(color);
-      if (settings.handColor === next) return;
-      settings = { ...settings, handColor: next };
-      updateHandColorControls();
-      if (persist) saveSettings();
-    },
-    setUISounds(enabled, persist = false) {
-      if (settings.uiSounds === enabled) return;
-      settings = { ...settings, uiSounds: enabled };
-      qs<HTMLInputElement>('[data-ui-sounds]').checked = enabled;
-      if (persist) saveSettings();
-    },
+    setTerminalColorMode: (mode, persist = true) => saveSettings({ colorMode: mode }, { persist }),
+    setKeyboardBackgroundEnabled: (enabled, persist = true) =>
+      saveSettings({ keyboardBackground: enabled }, { persist }),
+    setKeyboardCurvature: (degrees, persist = false) =>
+      saveSettings({ keyboardCurvature: degrees }, { persist }),
+    setTerminalFiltering: (filtering, persist = false) => saveSettings({ filtering }, { persist }),
+    setWindowPreferences: (value, persist = false) =>
+      saveSettings({ windowPreferences: value }, { persist }),
+    setHierarchyStyle: (style, persist = false) =>
+      saveSettings({ hierarchyStyle: style }, { persist }),
+    setKeyborbMode: (mode, persist = false) => saveSettings({ keyborbMode: mode }, { persist }),
+    setBackground: (mode, persist = false) => saveSettings({ background: mode }, { persist }),
+    setArmColor: (color, persist = false) => saveSettings({ armColor: color }, { persist }),
+    setWeatherZip: (zip, persist = false) => saveSettings({ weatherZip: zip }, { persist }),
+    setAccentColor: (color, persist = false) => saveSettings({ accentColor: color }, { persist }),
+    setEnvironmentAccentColor: (color, persist = false) =>
+      saveSettings({ environmentAccentColor: color }, { persist }),
+    setHandColor: (color, persist = false) => saveSettings({ handColor: color }, { persist }),
+    setUISounds: (enabled, persist = false) => saveSettings({ uiSounds: enabled }, { persist }),
     setFilteringCapabilities(maxAnisotropy) {
       filteringMaxAnisotropy = Number.isFinite(maxAnisotropy)
         ? Math.max(1, Math.min(16, maxAnisotropy))
@@ -2283,22 +2088,16 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       if (Number(select.value) <= filteringMaxAnisotropy) return;
       const available = [...select.options].reverse().find((option) => !option.hidden);
       if (!available) return;
-      select.value = available.value;
-      settings = {
-        ...settings,
+      saveSettings({
         filtering: validateTerminalFiltering({
           ...settings.filtering,
           anisotropy: Number(available.value),
         }),
-      };
-      saveSettings();
+      });
     },
     setDictationState,
-    setArrangement(pattern, persist = true) {
-      settings = { ...settings, arrangement: pattern };
-      if (arrangementSelect) arrangementSelect.value = pattern;
-      if (persist) saveSettings();
-    },
+    setArrangement: (pattern, persist = true) =>
+      saveSettings({ arrangement: pattern }, { persist }),
     getCommandsForPane(paneId) {
       const pane = snapshot.panes.find((item) => item.id === paneId);
       const workspace = pane?.workspaceId ?? 'default';
@@ -2340,6 +2139,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     },
     captureCommandTarget: () => capturedTarget,
     destroy() {
+      stopSettings();
       clearModifiers();
       clearInterval(agentAgeTimer);
       root.remove();

@@ -64,12 +64,9 @@ import {
   quickStripCommands,
   splitTemplate,
 } from '../quick-commands';
+import { createSettingsStore, type SettingsStore } from '../settings/store';
 import type { DictationState } from '../speech-input';
-import {
-  DEFAULT_TERMINAL_FILTERING,
-  type TerminalFiltering,
-  validateTerminalFiltering,
-} from '../terminal/filtering';
+import { type TerminalFiltering, validateTerminalFiltering } from '../terminal/filtering';
 import { paneHeading, processBadge } from '../terminal/lifecycle';
 import { terminalKeyLabel } from '../terminal/protocol';
 import type { ToastEnvelope } from '../toast-contract';
@@ -81,17 +78,12 @@ import {
   DEFAULT_AGENT_ROSTER_LAYOUT,
 } from '../workspace/agent-roster';
 import type { ButtonFunction, ControllerButton } from '../workspace/controller-buttons';
-import {
-  DEFAULT_HIERARCHY_STYLE,
-  type HierarchyStyle,
-  validateHierarchyStyle,
-} from '../workspace/hierarchy-style';
+import { type HierarchyStyle, validateHierarchyStyle } from '../workspace/hierarchy-style';
 import { validateKeyboardCurvature } from '../workspace/keyboard-curvature';
 import { type KeyborbMode, keyborbEnabled, validateKeyborbMode } from '../workspace/keyborb';
 import type { PaneCreationState } from '../workspace/pane-create';
 import { rosterProjectDirectory } from '../workspace/project-directory';
 import {
-  DEFAULT_WINDOW_PREFERENCES,
   MAX_TERMINAL_CURVATURE_DEGREES,
   validateWindowPreferences,
   type WindowPreferences,
@@ -766,9 +758,12 @@ export function createWorkspaceScene(
     pictures?: ScenePicturePicker;
     /** The user changed a picture frame's 3D options. */
     onPictureDepthView?: (id: string, view: PictureDepthView) => void;
+    /** The device settings shared with the browser presenter; a private in-memory store when omitted. */
+    settings?: SettingsStore;
   } = {},
 ): WorkspaceScene {
   const feedback = options.feedback ?? createUIFeedback();
+  const settingsStore = options.settings ?? createSettingsStore();
   const scene = new THREE.Scene();
   accent.hex = DEFAULT_ACCENT;
   accent.hover = DEFAULT_ACCENT_HOVER;
@@ -884,28 +879,32 @@ export function createWorkspaceScene(
   let filterVersion = 0;
   const paneFocus = createPaneFocus();
   const listeners = new Set<(state: Readonly<WorkspaceSceneState>) => void>();
+  const device = settingsStore.get();
   const mutableState: WorkspaceSceneState = {
     layoutRevision: 0,
     radialOpen: false,
     warpTerminalId: null,
     selectedTerminalId: null,
-    background: 'observatory',
-    gazeInputEnabled: false,
-    terminalColorMode: 'comfort',
-    filtering: { ...DEFAULT_TERMINAL_FILTERING },
-    windowPreferences: { ...DEFAULT_WINDOW_PREFERENCES },
-    hierarchyStyle: DEFAULT_HIERARCHY_STYLE,
+    background: device.background,
+    gazeInputEnabled: device.gazeInput,
+    terminalColorMode: device.colorMode,
+    filtering: validateTerminalFiltering({
+      ...device.filtering,
+      anisotropy: Math.min(device.filtering.anisotropy, maxAnisotropy()),
+    }),
+    windowPreferences: device.windowPreferences,
+    hierarchyStyle: device.hierarchyStyle,
     widgets: [],
-    keyboardBackgroundEnabled: true,
-    keyboardCurvature: 0,
-    keyborbMode: 'auto',
+    keyboardBackgroundEnabled: device.keyboardBackground,
+    keyboardCurvature: device.keyboardCurvature,
+    keyborbMode: device.keyborbMode,
     keyborbEnabled: false,
-    uiSounds: true,
-    handColor: '',
-    armColor: '',
-    accentColor: '',
-    environmentAccentColor: '',
-    weatherZip: '',
+    uiSounds: device.uiSounds,
+    handColor: device.handColor,
+    armColor: device.armColor,
+    accentColor: device.accentColor,
+    environmentAccentColor: device.environmentAccentColor,
+    weatherZip: device.weatherZip,
     dictation: { supported: false, status: 'idle', transcript: '', error: null },
     fps: null,
     xrMode: 'desktop',
@@ -6051,7 +6050,7 @@ export function createWorkspaceScene(
     if (inputRoot && inputMode === 'warp') refreshInputRoot('warp');
     if (persist) notify();
   };
-  const setTerminalFiltering = (filtering: TerminalFiltering): void => {
+  const applyTerminalFiltering = (filtering: TerminalFiltering): void => {
     const next = validateTerminalFiltering({
       ...filtering,
       anisotropy: Math.min(filtering.anisotropy, maxAnisotropy()),
@@ -6068,7 +6067,7 @@ export function createWorkspaceScene(
     if (inputRoot && inputMode === 'filtering') refreshInputRoot('filtering');
     notify();
   };
-  const setBackground = (mode: BackgroundMode): void => {
+  const applyBackground = (mode: BackgroundMode): void => {
     floorCorrectionPending = true;
     mutableState.background = mode;
     if (inputRoot && inputMode === 'backgrounds') {
@@ -6106,7 +6105,7 @@ export function createWorkspaceScene(
       useDeskBackdrop || !worldVisible ? null : (gradientTexture ?? new THREE.Color(color));
     notify();
   };
-  const setGazeInputEnabled = (enabled: boolean): void => {
+  const applyGazeInputEnabled = (enabled: boolean): void => {
     if (mutableState.gazeInputEnabled === enabled) return;
     mutableState.gazeInputEnabled = enabled;
     gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
@@ -6117,27 +6116,27 @@ export function createWorkspaceScene(
       updateLabel(inputToggle as THREE.Mesh, `Gaze input: ${enabled ? 'on' : 'off'}`);
     notify();
   };
-  const setTerminalColorMode = (mode: TerminalColorMode): void => {
+  const applyTerminalColorMode = (mode: TerminalColorMode): void => {
     if (mutableState.terminalColorMode === mode) return;
     mutableState.terminalColorMode = mode;
     for (const panel of panels.values()) panel.surface.setColorMode(mode);
     if (inputRoot && inputMode === 'display') refreshInputRoot(inputMode);
     notify();
   };
-  const setKeyboardBackgroundEnabled = (enabled: boolean): void => {
+  const applyKeyboardBackgroundEnabled = (enabled: boolean): void => {
     if (mutableState.keyboardBackgroundEnabled === enabled) return;
     mutableState.keyboardBackgroundEnabled = enabled;
     if (inputRoot && isTypingMode(inputMode)) refreshInputRoot(inputMode);
     notify();
   };
-  const setKeyboardCurvature = (degrees: number): void => {
+  const applyKeyboardCurvature = (degrees: number): void => {
     const next = validateKeyboardCurvature(degrees);
     if (next === mutableState.keyboardCurvature) return;
     mutableState.keyboardCurvature = next;
     if (inputRoot && isTypingMode(inputMode)) refreshInputRoot(inputMode);
     notify();
   };
-  const setKeyborbMode = (mode: KeyborbMode): void => {
+  const applyKeyborbMode = (mode: KeyborbMode): void => {
     const next = validateKeyborbMode(mode);
     if (next === mutableState.keyborbMode) return;
     mutableState.keyborbMode = next;
@@ -6145,19 +6144,19 @@ export function createWorkspaceScene(
     if (inputRoot && inputMode === 'settings') refreshInputRoot(inputMode);
     notify();
   };
-  const setUISounds = (enabled: boolean): void => {
+  const applyUISounds = (enabled: boolean): void => {
     if (mutableState.uiSounds === enabled) return;
     mutableState.uiSounds = enabled;
     if (inputRoot && inputMode === 'settings') refreshInputRoot(inputMode);
     notify();
   };
-  const setHandColor = (color: string | null): void => {
+  const applyHandColor = (color: string | null): void => {
     const next = validateHandColor(color);
     if (next === mutableState.handColor) return;
     mutableState.handColor = next;
     applyHandColors();
   };
-  const setWeatherZip = (zip: string): void => {
+  const applyWeatherZip = (zip: string): void => {
     const next = validateWeatherZip(zip);
     if (next === mutableState.weatherZip) return;
     mutableState.weatherZip = next;
@@ -6165,33 +6164,115 @@ export function createWorkspaceScene(
     if (inputRoot && inputMode === 'world') refreshInputRoot(inputMode);
     notify();
   };
-  const setArmColor = (color: string | null): void => {
+  const applyArmColor = (color: string | null): void => {
     const next = validateHandColor(color);
     if (next === mutableState.armColor) return;
     mutableState.armColor = next;
     applyHandColors();
   };
-  const setAccentColor = (color: string | null): void => {
-    const next = validateHandColor(color);
-    const previous = mutableState.accentColor;
-    if (next === previous) return;
-    mutableState.accentColor = next;
+  const paintAccent = (previous: string, next: string): void => {
     accent.hex = resolveAccent(next);
     accent.hover = resolveAccentHover(next);
     cursorRest.setHex(accent.hex);
     retintAccentMaterials(scene, previous, next);
     radialMenu.setAccent(next);
+  };
+  const applyAccentColor = (color: string | null): void => {
+    const next = validateHandColor(color);
+    const previous = mutableState.accentColor;
+    if (next === previous) return;
+    mutableState.accentColor = next;
+    paintAccent(previous, next);
     if (inputRoot && (inputMode === 'accent' || inputMode === 'commands'))
       refreshInputRoot(inputMode);
     notify();
   };
-  const setEnvironmentAccentColor = (color: string | null): void => {
+  const applyEnvironmentAccentColor = (color: string | null): void => {
     const next = validateHandColor(color);
     if (next === mutableState.environmentAccentColor) return;
     mutableState.environmentAccentColor = next;
     if (inputRoot && inputMode === 'accent') refreshInputRoot(inputMode);
     notify();
   };
+  // The store owns these settings. A scene setter writes the store, and one subscription applies
+  // every change to the scene. A change made in the scene alone does not persist for the two
+  // settings the browser presenter has always kept session-only.
+  const updateSettings = (
+    patch: Parameters<SettingsStore['update']>[0],
+    updateOptions?: Parameters<SettingsStore['update']>[1],
+  ): void => {
+    if (!settingsStore.update(patch, updateOptions))
+      setNotice('Settings could not be saved on this device.');
+  };
+  const setTerminalFiltering = (filtering: TerminalFiltering): void => {
+    updateSettings({
+      filtering: validateTerminalFiltering({
+        ...filtering,
+        anisotropy: Math.min(filtering.anisotropy, maxAnisotropy()),
+      }),
+    });
+  };
+  const setBackground = (mode: BackgroundMode): void => {
+    // Re-applying the current mode refreshes the environment, which a store no-op would skip.
+    if (settingsStore.get().background === mode) applyBackground(mode);
+    else updateSettings({ background: mode });
+  };
+  const setHierarchyStyle = (style: HierarchyStyle): void => {
+    updateSettings({ hierarchyStyle: style });
+  };
+  const setWindowPreferences = (preferences: WindowPreferences): void => {
+    updateSettings({ windowPreferences: preferences });
+  };
+  const setGazeInputEnabled = (enabled: boolean): void => {
+    updateSettings({ gazeInput: enabled });
+  };
+  const setTerminalColorMode = (mode: TerminalColorMode): void => {
+    updateSettings({ colorMode: mode }, { persist: false });
+  };
+  const setKeyboardBackgroundEnabled = (enabled: boolean): void => {
+    updateSettings({ keyboardBackground: enabled }, { persist: false });
+  };
+  const setKeyboardCurvature = (degrees: number): void => {
+    updateSettings({ keyboardCurvature: degrees });
+  };
+  const setKeyborbMode = (mode: KeyborbMode): void => {
+    updateSettings({ keyborbMode: mode });
+  };
+  const setUISounds = (enabled: boolean): void => {
+    updateSettings({ uiSounds: enabled });
+  };
+  const setHandColor = (color: string | null): void => {
+    updateSettings({ handColor: color ?? '' });
+  };
+  const setArmColor = (color: string | null): void => {
+    updateSettings({ armColor: color ?? '' });
+  };
+  const setAccentColor = (color: string | null): void => {
+    updateSettings({ accentColor: color ?? '' });
+  };
+  const setEnvironmentAccentColor = (color: string | null): void => {
+    updateSettings({ environmentAccentColor: color ?? '' });
+  };
+  const setWeatherZip = (zip: string): void => {
+    updateSettings({ weatherZip: zip });
+  };
+  const stopSettings = settingsStore.subscribe((next) => {
+    if (next.background !== mutableState.background) applyBackground(next.background);
+    applyGazeInputEnabled(next.gazeInput);
+    applyTerminalColorMode(next.colorMode);
+    applyTerminalFiltering(next.filtering);
+    applyWindowPreferences(next.windowPreferences);
+    applyHierarchyStyle(next.hierarchyStyle);
+    applyKeyboardBackgroundEnabled(next.keyboardBackground);
+    applyKeyboardCurvature(next.keyboardCurvature);
+    applyKeyborbMode(next.keyborbMode);
+    applyUISounds(next.uiSounds);
+    applyHandColor(next.handColor);
+    applyArmColor(next.armColor);
+    applyAccentColor(next.accentColor);
+    applyEnvironmentAccentColor(next.environmentAccentColor);
+    applyWeatherZip(next.weatherZip);
+  });
   const applyHandColors = (): void => {
     const { handColor, armColor } = mutableState;
     for (const visual of handVisuals.values()) visual.setColor(handColor || null, armColor || null);
@@ -6650,7 +6731,7 @@ export function createWorkspaceScene(
     }
     return { position, rotation };
   };
-  const setHierarchyStyle = (style: HierarchyStyle): void => {
+  const applyHierarchyStyle = (style: HierarchyStyle): void => {
     const next = validateHierarchyStyle(style);
     if (next === mutableState.hierarchyStyle) return;
     mutableState.hierarchyStyle = next;
@@ -6663,7 +6744,7 @@ export function createWorkspaceScene(
     paneFocus.retarget(placement.position, placement.rotation);
     syncFocusQuadLayer();
   };
-  const setWindowPreferences = (preferences: WindowPreferences): void => {
+  const applyWindowPreferences = (preferences: WindowPreferences): void => {
     const next = validateWindowPreferences(preferences);
     if (JSON.stringify(next) === JSON.stringify(mutableState.windowPreferences)) return;
     const focusDistanceChanged =
@@ -7070,9 +7151,11 @@ export function createWorkspaceScene(
     uiEnvironment.dispose();
     renderer?.dispose();
     if (canvas.parentElement === container) container.removeChild(canvas);
+    stopSettings();
     listeners.clear();
   };
-  setBackground('observatory');
+  if (device.accentColor) paintAccent('', device.accentColor);
+  applyBackground(mutableState.background);
   createHud();
   uiEnvironment.warmPrograms(scene, camera);
   let panelContext: SceneContext | null = null;
