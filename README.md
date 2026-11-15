@@ -6,6 +6,13 @@ Mux XR is a LAN workspace for monitoring par-mux terminals and sending commands 
 
 [![Watch the Mux XR walkthrough](https://i.ytimg.com/vi/Z58u95-GHLI/hqdefault.jpg)](https://www.youtube.com/watch?v=Z58u95-GHLI)
 
+## Prerequisites
+
+- Bun 1.4.4 (required). It installs the dependencies and runs the dev server and every script.
+- For the full gate (`make checkall-ci`): `gitleaks` for the secret scan and `uv` for the observatory asset checks.
+- For browser checks: Playwright Chromium and a mux-enabled `par-term-streamer`. See the [testing guide](docs/TESTING.md).
+- For local dictation: FFmpeg and `whisper-cli` on the Mac that runs the host service. See the [host setup guide](docs/HOST-SETUP.md#local-whisper-dictation).
+
 ## Quick start
 
 Install the dependencies with Bun 1.4.4, then start Vite.
@@ -43,10 +50,21 @@ See the [workspace guide](docs/WORKSPACE.md) for hand input, Keyborb, window con
 
 | Guide | Covers |
 | --- | --- |
-| [Workspace guide](docs/WORKSPACE.md#focus-warp-and-terminal-settings) | XR controls, sharper Focus text, and terminal warp |
+| [Workspace guide](docs/WORKSPACE.md) | Panes, terminal and hand controls, widgets, pictures, saved commands, worlds and Focus warp |
 | [Changelog](CHANGELOG.md) | User-facing changes |
 | [Architecture](docs/ARCHITECTURE.md) | Browser, XR, terminal streaming, persistence, and host-service boundaries |
 | [Host setup](docs/HOST-SETUP.md) | Streamer, HTTPS, local Whisper, clipboard pairing, and optional host routes |
-| [Testing](docs/TESTING.md) | Local gates, browser fixtures, private-streamer tests, and headset acceptance |
+| [Testing](docs/TESTING.md) | Local gates, check targets and their environment, private-streamer tests, and headset acceptance |
+| [Pane bell indicators](docs/pane-bells.md) | How bells reach the pane and the bell feed |
+| [Verification record](docs/verification.md) | Dated evidence for each shipped batch |
+| [Core reviews](docs/core-0.81-review.md) | Streamer and daemon compatibility for the pinned core, with the earlier [0.78](docs/core-0.78-review.md) and [0.77](docs/core-0.77-review.md) reviews |
+| [Performance reports](docs/performance/) | Measured terminal clarity, level-of-detail and frame-trace results |
+| [Observatory asset contract](docs/blender-kit-project.md) | Budgets, deliverables and validation for the observatory background |
+| [XR Workspace package](packages/xr-workspace/README.md) | The reusable toolkit package |
+| [Product](PRODUCT.md) | Users, purpose and design principles |
 | [Contributor guide](CLAUDE.md) | Project commands, source entry points, and implementation constraints |
 | [Design](DESIGN.md) and [product requirements](PRD.md) | Interaction design, product scope, and planned work |
+
+## License
+
+MIT. See [LICENSE](LICENSE).

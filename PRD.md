@@ -1,5 +1,7 @@
 # Mux XR PRD
 
+> Status: historical MVP specification, dated 2026-11-03. The shipped product is described in [README](README.md) and [the workspace guide](docs/WORKSPACE.md).
+
 | Field | Value |
 | --- | --- |
 | Product | Mux XR |
@@ -72,7 +74,7 @@ Plans: [P0](plans/phase-0-live-terminal.md), [P1](plans/phase-1-controller-mvp.m
 
 ## Verification and Readiness
 
-`make checkall` covers formatting/lint, TypeScript, meaningful unit tests and production build. `make checkall-ci` adds CI-equivalent packaging/secret/dependency checks. Browser suites remain local and use actual GPU rendering. `make e2e` is part of the local done gate. Test a real isolated mux daemon/streamer, two pane streams, commands with and without Enter, disconnect/reconnect, pane closure and held-pane lifecycle when available. Synthetic demo mode is explicitly labeled and never counts as streaming acceptance.
+`make checkall` covers formatting/lint, TypeScript, meaningful unit tests and production build. `make checkall-ci` adds CI-equivalent packaging/secret/dependency checks. Browser suites remain local and use actual GPU rendering. The done gate is `make checkall-ci`. `make e2e` and the other browser checks run separately, as [the testing guide](docs/TESTING.md) describes. Test a real isolated mux daemon/streamer, two pane streams, commands with and without Enter, disconnect/reconnect, pane closure and held-pane lifecycle when available. Synthetic demo mode is explicitly labeled and never counts as streaming acceptance.
 
 Actual Quest 3 acceptance checks controller targeting, both readable panels, passthrough/VR transitions, virtual keyboard and text clarity. On November 3, Paul reported that his testing has been on Quest 3 and the current controller build works well, and selected hand tracking next. This general confirmation does not establish acceptance of new hand gestures or an itemized retest of every historical criterion. Software readiness and owner headset acceptance are separate records. Capacity runs record panel count, grids, workload (idle, scrolling logs, busy agent TUI), background, session refresh rate, frame pacing, input response and host load. No maximum is claimed before measurement. Unavailable headset evidence stays pending on its own owner acceptance card.
 

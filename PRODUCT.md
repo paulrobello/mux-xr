@@ -2,6 +2,8 @@
 
 <!-- impeccable:product-schema 1 -->
 
+> Status: historical MVP specification, dated 2026-11-03. The shipped product is described in [README](README.md) and [the workspace guide](docs/WORKSPACE.md).
+
 ## Platform
 
 web
@@ -12,7 +14,7 @@ TypeScript, Vite and Three.js, following par-dots' direct WebXR runtime and webx
 
 ## Users
 
-Paul uses Meta Quest 3 to monitor terminals running on his computer, with occasional commands. Controllers and optional WebXR hand input share the same actions. Physical Quest hand acceptance remains pending. A physical keyboard is not part of the workflow.
+Paul uses Meta Quest 3 to monitor terminals running on his computer, with occasional commands. Controllers and optional WebXR hand input share the same actions. Physical Quest hand acceptance remains pending. A paired Bluetooth or USB keyboard types into the selected terminal, on the page and in immersive XR.
 
 ## Product Purpose
 
