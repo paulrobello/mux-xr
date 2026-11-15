@@ -111,6 +111,7 @@ import {
   validateWindowPreferences,
   type WindowPreferences,
 } from '../workspace/window-preferences';
+import { accent } from './accent-state';
 import { calculateArrangement } from './arrangements';
 import {
   BACKGROUND_LABELS,
@@ -162,6 +163,21 @@ import {
 import { createMessageToastLayer } from './message-toasts';
 import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
+import {
+  ARMED_STYLE,
+  COMMAND_TOOL_HINTS,
+  COMMAND_TOOLS,
+  CONFIRM_LABELS,
+  type CommandTool,
+  type ConfirmAction,
+  createBackgroundSelect,
+  createLabelButton,
+  PINNED_BORDER,
+  raisePanelButton,
+  setModifierVisual,
+  stackAboveControls,
+} from './panel-ui';
+import { PANELS } from './panels';
 import { createPictureFrameWidget, PICTURE_KIND } from './picture-frame';
 import type { PictureImage } from './picture-image';
 import {
@@ -173,6 +189,7 @@ import {
 } from './picture-sizing';
 import { PICTURE_LIMITS } from './picture-store';
 import { createRadialMenu, type RadialMenuAction } from './radial-menu';
+import type { SceneContext } from './scene-context';
 import { addKeyboardKeys, addKeyborbBatches, KEYBOARD_UNIT } from './spatial-keyboard';
 import { STICKY_NOTE_PIN_OFFSET, stickyNoteSpawnOffset } from './sticky-note';
 import {
@@ -498,7 +515,6 @@ const SCROLL_STRIP_WIDTH = 0.05;
 const SCROLL_STRIP_OPACITY = 0.14;
 const SCROLL_STRIP_ACTIVE_OPACITY = 0.38;
 // The live XR accent; each scene resets it and its setter retints what was built with it.
-const accent = { hex: DEFAULT_ACCENT, hover: DEFAULT_ACCENT_HOVER };
 const SELECTED_FRAME_GLOW = 0.45;
 const CONTROLLER_RAY_LENGTH = 8;
 // An XR press becomes a drag only once its hit moves past both limits, so hand and controller
@@ -549,7 +565,7 @@ interface EventRoot {
   removeEventListener(type: string, listener: (event: Event) => void): void;
 }
 
-interface TerminalPanel {
+export interface TerminalPanel {
   id: string;
   surface: TerminalSurface;
   root: THREE.Group;
@@ -620,28 +636,6 @@ function disposeObject(object: THREE.Object3D): void {
   }
 }
 
-function createLabelButton(
-  label: string,
-  width: number,
-  height: number,
-  data: Record<string, unknown>,
-): THREE.Mesh {
-  const mesh = createScalableLabel(label, width, height, {
-    background: typeof data.labelBackground === 'string' ? data.labelBackground : '#1c2a35',
-    wrap: Boolean(data.wrap),
-    border:
-      typeof data.labelBorder === 'string'
-        ? data.labelBorder
-        : typeof data.key === 'string'
-          ? '#7197a8'
-          : undefined,
-  });
-  Object.assign(mesh.userData, data, { helpText: getControlHelp(data) });
-  return mesh;
-}
-
-// Keyboard-panel units; the panel spawns at 0.38 scale, so this is about 11 mm raised, 6 mm travel.
-const BUTTON_DEPTH = 0.03;
 /**
  * Face buttons by gamepad index: 4 is A or X, 5 is B or Y. The left menu button (Touch Plus index 7
  * in the input-profiles registry) never reached the page on a Quest 3 on 2026-11-10, so it is unused.
@@ -663,85 +657,17 @@ const KEYBOARD_SUMMON_CLOSER = 0.2;
 const BUTTON_TRAVEL = 0.016;
 const BUTTON_PRESS_MS = 140;
 const BUTTON_RELEASE_MS = 80;
-const BUTTON_GAP = 0.002;
 const BUTTON_WALL_COLOR = 0x3a5363;
 
-function raisePanelButton(mesh: THREE.Mesh): void {
-  const width = Number(mesh.userData.labelWidth);
-  const height = Number(mesh.userData.labelHeight);
-  if (!Number.isFinite(width) || !Number.isFinite(height)) return;
-  // Hand contact identifies keys the same way, so a press can find the button's rebuilt copy.
-  const { x, y } = mesh.position;
-  mesh.userData.pressKey = `${mesh.userData.inputAction}:${mesh.userData.commandId ?? ''}:${x.toFixed(4)}:${y.toFixed(4)}`;
-  mesh.position.z += BUTTON_DEPTH;
-  Object.assign(mesh.userData, {
-    raisedButton: true,
-    buttonDepth: BUTTON_DEPTH,
-    buttonGap: BUTTON_GAP,
-  });
-}
-
-type CommandTool = 'run' | 'pin' | 'edit' | 'remove';
-const COMMAND_TOOLS: Array<[CommandTool, string]> = [
-  ['run', 'Run'],
-  ['pin', 'Pin'],
-  ['edit', 'Edit'],
-  ['remove', 'Remove'],
-];
-const COMMAND_TOOL_HINTS: Record<CommandTool, string> = {
-  run: '',
-  pin: 'Choose commands to pin or unpin',
-  edit: 'Choose a command to edit',
-  remove: 'Choose a command to remove',
-};
 const CONFIRM_WINDOW_MS = 3000;
 // A controller double-click lands well inside this, so it cannot arm and confirm at once.
 const CONFIRM_MIN_MS = 350;
 // The armed preview shares one 1.1-wide label line, so it is shorter than the browser prompt.
 const XR_PREVIEW_LENGTH = 60;
 // Label text is always white, so the armed amber must stay dark enough to read.
-const ARMED_STYLE = { armed: true, labelBackground: '#7a4a0c', labelBorder: '#f1b65e' };
-const PINNED_BORDER = '#66d5e7';
 const ARMED_TINT = 0xf1b65e;
-type ConfirmAction = 'exit' | 'resetLayout';
-const CONFIRM_LABELS: Record<ConfirmAction, [string, string]> = {
-  exit: ['Exit', 'Exit?'],
-  resetLayout: ['Reset layout', 'Reset?'],
-};
 // Surfaces that a select lands on without pressing a control; they get no click cue.
 const PASSIVE_ACTIONS = new Set(['noop', 'grabInput', 'grabWidget', 'grabRadial', 'scrollStrip']);
-
-function stackAboveControls(root: THREE.Group, rows: THREE.Mesh[][], gap = 0.03): void {
-  let top = Number.NEGATIVE_INFINITY;
-  root.updateMatrixWorld(true);
-  for (const child of root.children) {
-    const geometry = (child as THREE.Mesh).geometry;
-    if (!geometry) continue;
-    geometry.computeBoundingBox();
-    if (geometry.boundingBox)
-      top = Math.max(top, geometry.boundingBox.clone().applyMatrix4(child.matrix).max.y);
-  }
-  if (!Number.isFinite(top)) top = 0;
-  for (const row of rows) {
-    const height = Math.max(...row.map((mesh) => Number(mesh.userData.labelHeight) || 0.09));
-    const y = top + gap + height / 2;
-    const spacing = 0.04;
-    const widths = row.map((mesh) => Number(mesh.userData.labelWidth) || 0.4);
-    let x = -(widths.reduce((sum, width) => sum + width, 0) + spacing * (row.length - 1)) / 2;
-    for (const [index, mesh] of row.entries()) {
-      mesh.position.set(x + widths[index] / 2, y, 0);
-      x += widths[index] + spacing;
-      root.add(mesh);
-    }
-    top = y + height / 2;
-  }
-}
-
-function setModifierVisual(object: THREE.Object3D, armed: boolean): void {
-  object.userData.activeState = armed;
-  const material = (object as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
-  if (material?.color) material.color.setHex(armed ? accent.hex : 0xffffff);
-}
 
 // Transient HUD lines (notice, dismiss, toast, Reload, FPS) sit above the HUD bar, where a widget can
 // be nearer than them, so they draw without depth testing. Draw order then layers each label:
@@ -767,27 +693,6 @@ function updateLabel(object: THREE.Mesh, label: string): void {
     keyborbLabel ? label.replace(' lock', '\nlock') : label,
   );
   object.userData.labelText = label;
-}
-
-/** The World panel's background button; it opens the Backgrounds picker. */
-function createBackgroundSelect(mode: BackgroundMode): THREE.Group {
-  const root = new THREE.Group();
-  root.name = 'background-select';
-  const trigger = createLabelButton(BACKGROUND_LABELS[mode], 0.48, 0.09, {
-    inputAction: 'backgroundSelect',
-  });
-  trigger.name = 'background-select-trigger';
-  trigger.userData.helpText = 'Choose a background';
-  const shape = new THREE.Shape().moveTo(-0.006, 0.009).lineTo(-0.006, -0.009).lineTo(0.006, 0);
-  shape.closePath();
-  const arrow = new THREE.Mesh(
-    new THREE.ShapeGeometry(shape),
-    new THREE.MeshBasicMaterial({ color: 0xffffff }),
-  );
-  arrow.position.set(0.2, 0, 0.003);
-  arrow.raycast = () => undefined;
-  root.add(trigger, arrow);
-  return root;
 }
 
 export function createGradientTexture(): THREE.CanvasTexture {
@@ -5808,6 +5713,7 @@ export function createWorkspaceScene(
   const handleInputTargetAction = (hit: THREE.Object3D): boolean => {
     const action = hit.userData.inputAction as string | undefined;
     if (action === 'scrollStrip') return true;
+    if (PANELS[inputMode]?.handleEarly?.(action, hit, buildContext())) return true;
     if (action === 'keyborbMode') {
       setKeyborbMode(validateKeyborbMode(hit.userData.keyborbMode));
       return true;
@@ -6064,6 +5970,7 @@ export function createWorkspaceScene(
       return true;
     }
     if (radialMenu.root.visible && !radialMenu.interactive) return true;
+    if (PANELS[inputMode]?.handle?.(action, hit, buildContext())) return true;
     if (action === 'radialAction') {
       const choice = hit.userData.radialAction as RadialMenuAction;
       radialMenu.close();
@@ -8778,6 +8685,216 @@ export function createWorkspaceScene(
   setBackground('observatory');
   createHud();
   uiEnvironment.warmPrograms(scene, camera);
+  let panelContext: SceneContext | null = null;
+  /** Builds (once) and returns the SceneContext the panel modules read through. */
+  function buildContext(): SceneContext {
+    if (panelContext) return panelContext;
+    const ctx: SceneContext = {
+      get renderer() {
+        return renderer;
+      },
+      scene,
+      camera,
+      mutableState,
+      actions,
+      panels,
+      widgets,
+      uiEnvironmentTexture: uiEnvironment.texture,
+      picturePicker: options.pictures,
+      cue,
+      notify,
+      setNotice,
+      showToast,
+      refreshInputRoot,
+      showInput,
+      hideInput,
+      get inputMode() {
+        return inputMode;
+      },
+      get inputRoot() {
+        return inputRoot;
+      },
+      availablePanes,
+      get paneCreation() {
+        return paneCreation;
+      },
+      get agentRoster() {
+        return agentRoster;
+      },
+      get agentRosterRows() {
+        return agentRosterRows;
+      },
+      get hierarchyNavigator() {
+        return hierarchyNavigator;
+      },
+      set hierarchyNavigator(value) {
+        hierarchyNavigator = value;
+      },
+      get hierarchyNavigation() {
+        return hierarchyNavigation;
+      },
+      set hierarchyNavigation(value) {
+        hierarchyNavigation = value;
+      },
+      get menuCommands() {
+        return menuCommands;
+      },
+      get stripCommands() {
+        return stripCommands;
+      },
+      get templateHint() {
+        return templateHint;
+      },
+      set templateHint(value) {
+        templateHint = value;
+      },
+      get recentPictures() {
+        return recentPictures;
+      },
+      get recentPage() {
+        return recentPage;
+      },
+      set recentPage(value) {
+        recentPage = value;
+      },
+      get notePage() {
+        return notePage;
+      },
+      set notePage(value) {
+        notePage = value;
+      },
+      get notePages() {
+        return notePages;
+      },
+      get commandDraft() {
+        return commandDraft;
+      },
+      set commandDraft(value) {
+        commandDraft = value;
+      },
+      get commandEditorMessage() {
+        return commandEditorMessage;
+      },
+      set commandEditorMessage(value) {
+        commandEditorMessage = value;
+      },
+      get commandPage() {
+        return commandPage;
+      },
+      set commandPage(value) {
+        commandPage = value;
+      },
+      get commandTool() {
+        return commandTool;
+      },
+      set commandTool(value) {
+        commandTool = value;
+      },
+      get commandsMessage() {
+        return commandsMessage;
+      },
+      set commandsMessage(value) {
+        commandsMessage = value;
+      },
+      get commandWorkspaceId() {
+        return commandWorkspaceId;
+      },
+      set commandWorkspaceId(value) {
+        commandWorkspaceId = value;
+      },
+      get gridDraft() {
+        return gridDraft;
+      },
+      set gridDraft(value) {
+        gridDraft = value;
+      },
+      get gridRequestStatus() {
+        return gridRequestStatus;
+      },
+      set gridRequestStatus(value) {
+        gridRequestStatus = value;
+      },
+      get weatherZipDraft() {
+        return weatherZipDraft;
+      },
+      set weatherZipDraft(value) {
+        weatherZipDraft = value;
+      },
+      get weatherZipMessage() {
+        return weatherZipMessage;
+      },
+      set weatherZipMessage(value) {
+        weatherZipMessage = value;
+      },
+      get pictureUrl() {
+        return pictureUrl;
+      },
+      set pictureUrl(value) {
+        pictureUrl = value;
+      },
+      get pictureBusy() {
+        return pictureBusy;
+      },
+      get picturePanelMessage() {
+        return picturePanelMessage;
+      },
+      set picturePanelMessage(value) {
+        picturePanelMessage = value;
+      },
+      get widgetsPage() {
+        return widgetsPage;
+      },
+      set widgetsPage(value) {
+        widgetsPage = value;
+      },
+      get backgroundRow() {
+        return backgroundRow;
+      },
+      set backgroundRow(value) {
+        backgroundRow = value;
+      },
+      get armedControl() {
+        return armedControl;
+      },
+      confirmControl,
+      manageCommand,
+      getWidgetEntry,
+      getTerminalOpacity,
+      setTerminalOpacity,
+      getTerminalCurvature,
+      setTerminalCurvature,
+      resetTerminalAppearance,
+      setWindowPreferences,
+      settleWarpPanel,
+      setWeatherZip,
+      setKeyborbMode,
+      setUISounds,
+      setHierarchyStyle,
+      setKeyboardCurvature,
+      setKeyboardBackgroundEnabled,
+      setGazeInputEnabled,
+      setTerminalColorMode,
+      setTerminalFiltering,
+      arrangeTerminals,
+      moveLayoutDepth,
+      resetLayout,
+      toggleWidget,
+      submitPictureUrl,
+      placeRecentPicture,
+      dictationCaption,
+      editDictationKey,
+      pinNote,
+      isArmed,
+      armedPreview,
+      consumeArmedModifiers,
+      get modifierState() {
+        return modifierState;
+      },
+      dictationReview,
+    };
+    panelContext = ctx;
+    return ctx;
+  }
   return {
     canvas,
     scene,
