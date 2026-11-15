@@ -47,7 +47,13 @@ export interface ClipboardHost {
 
 export type ClipboardSecret = { enabled: true; key: Buffer } | { enabled: false; reason: string };
 
-type SecretFile = { isFile: boolean; mode: number; uid: number; data: Buffer; truncated: boolean };
+export type SecretFile = {
+  isFile: boolean;
+  mode: number;
+  uid: number;
+  data: Buffer;
+  truncated: boolean;
+};
 
 type SecretFs = {
   /** Opens without following a final symlink, fstats the descriptor and reads a bounded prefix. */
@@ -55,7 +61,8 @@ type SecretFs = {
   uid: () => number | undefined;
 };
 
-const openSecretFile = (path: string, maxBytes: number): SecretFile => {
+/** Opens without following a final symlink and reads a bounded prefix; see {@link SecretFile}. */
+export const openSecretFile = (path: string, maxBytes: number): SecretFile => {
   const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const info = fstatSync(fd);

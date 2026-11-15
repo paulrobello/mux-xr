@@ -6,7 +6,7 @@ Card: Reduce long-frame outliers beyond terminal LOD, criterion 1 (capture + cla
 
 ## Setup and validity
 
-- MiniMac M4 (macOS 27.2), Chromium 153.0.8010.12 new headless, channel 'chromium', ANGLE Metal,
+- The GPU test host (Apple Silicon, macOS 27.2), Chromium 153.0.8010.12 new headless, channel 'chromium', ANGLE Metal,
   1440x1000 viewport, device scale 2 — the accepted native fixture shape from the 2026-11-02 docs.
 - Source: worktree branch worktree-perf-trace-classification commit 6fcf802 (trace arm + classifier;
   tree otherwise identical to main 97a967d).
@@ -71,13 +71,13 @@ frame-critical tick.
 ## Evidence binding
 
 Raw traces (20.9-33.2 MB), capacity reports, and classification JSONs are retained under
-.local/evidence/trace-2026-11-14/ (static/ and sweep/), captured on MiniMac in booked windows
-(23:31-23:43Z staging, 03:45-04:35Z captures, holder claude-dbl@macdaddy:mux-xr). Host: MiniMac
+.local/evidence/trace-2026-11-14/ (static/ and sweep/), captured on the GPU test host in booked windows
+(23:31-23:43Z staging, 03:45-04:35Z captures, holder: a peer agent). Host: the GPU test host
 serial workload identical to the 2026-11-02 accepted fixtures.
 
 ## Follow-up 2026-11-15: texture-reuse A/B and the damage arm
 
-Re-captured both decisive arms on MiniMac (booked 05:17-06:05Z, load 1.2-1.7 vs guard 15, zero
+Re-captured both decisive arms on the GPU test host (booked 05:17-06:05Z, load 1.2-1.7 vs guard 15, zero
 page errors) after the tier-resize texture-reuse fix (commit 19d073b) landed. The generated
 fixture embeds repo source at run time, and the bundled quest-main.js was verified to contain the
 fixed makeTexture (`data.length < required`), so the fix was exercised.
@@ -101,8 +101,8 @@ persist. Damage hints are therefore confirmed as production-real behavior that r
 not eliminate, the 1 Hz static outliers.
 
 Evidence retained under .local/evidence/trace-2026-11-15/ (static-damage/ and sweep-after/, traces
-30.4 and 32.7 MB plus capacity reports and classification JSONs), minimac booked window
-05:17-06:05Z, holder claude-dbl@macdaddy:mux-xr.
+30.4 and 32.7 MB plus capacity reports and classification JSONs), the GPU test host booked window
+05:17-06:05Z, holder: a peer agent.
 
 ## Follow-up 2026-11-15b: GPU-side blit candidate rejected
 

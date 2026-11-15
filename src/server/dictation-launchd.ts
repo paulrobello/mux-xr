@@ -66,6 +66,8 @@ export type DictationLaunchdOptions = {
   meshInbox?: boolean;
   /** Accepts `/toast` senders from other LAN hosts too; this Mac only unless asked for. */
   toastLan?: boolean;
+  /** Opts the agent into the `/dictate` paired-route challenge; off unless asked for. */
+  dictateAuth?: boolean;
 };
 
 const xml = (value: string): string =>
@@ -200,6 +202,7 @@ export const buildLaunchAgentPlist = (options: DictationLaunchdOptions = {}): st
       : []),
     ...(options.meshInbox ? ['--mesh-inbox', 'on'] : []),
     ...(options.toastLan ? ['--toast-lan', 'on'] : []),
+    ...(options.dictateAuth ? ['--dictate-auth', 'on'] : []),
   ]);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

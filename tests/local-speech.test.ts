@@ -1,5 +1,10 @@
+import { webcrypto } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createLocalSpeechRecognition, isLocalSpeechSupported } from '../src/local-speech';
+import {
+  createLocalSpeechRecognition,
+  DICTATE_PAIRING_MESSAGE,
+  isLocalSpeechSupported,
+} from '../src/local-speech';
 
 type FakeSocket = {
   readyState: number;
@@ -192,5 +197,79 @@ describe('local speech recognition', () => {
     recognition.abort();
     socket.onmessage?.({ data: JSON.stringify({ type: 'transcript', text: 'late' }) });
     expect(result).not.toHaveBeenCalled();
+  });
+
+  it('retries a paired server through the challenge handshake before sending audio', async () => {
+    const { recorder } = installRecorder();
+    const first = installSocket();
+    const recognition = createLocalSpeechRecognition('wss://example/dictate', {
+      secret: () => 'test-pairing-secret-value',
+    });
+    const result = vi.fn();
+    recognition.onresult = result;
+    recognition.start();
+    await Promise.resolve();
+    recorder.ondataavailable?.({ data: new Blob(['voice']) } as BlobEvent);
+    recognition.stop();
+    first.readyState = 1;
+    first.onopen?.();
+    // Legacy upload first: the blob goes out, then the paired server refuses it as pre-auth.
+    expect(first.send).toHaveBeenCalledOnce();
+    // The retry reads the constructor at refusal time, so install the fresh socket first.
+    const second = installSocket();
+    first.onmessage?.({ data: JSON.stringify({ type: 'error', code: 'protocol' }) });
+    const nonce = `${'A'.repeat(43)}=`;
+    second.onmessage?.({ data: JSON.stringify({ type: 'challenge', nonce }) });
+    await vi.waitFor(() => expect(second.send).toHaveBeenCalledTimes(2));
+    const authFrame = JSON.parse(String(second.send.mock.calls[0][0])) as {
+      type: string;
+      request: string;
+      mac: string;
+    };
+    expect(authFrame.type).toBe('auth');
+    expect(authFrame.request).toBe('');
+    const key = await webcrypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode('test-pairing-secret-value'),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const expectedMac = await webcrypto.subtle.sign(
+      'HMAC',
+      key,
+      new TextEncoder().encode(`mux-xr-dictate-v1\n${nonce}\n`),
+    );
+    expect(authFrame.mac).toBe(Buffer.from(expectedMac).toString('base64'));
+    expect(await second.send.mock.calls[1][0].text()).toBe('voice');
+    second.onmessage?.({ data: JSON.stringify({ type: 'transcript', text: 'paired' }) });
+    await vi.waitFor(() => expect(result).toHaveBeenCalled());
+    expect(result).toHaveBeenCalledWith(
+      expect.objectContaining({
+        results: expect.objectContaining({
+          0: expect.objectContaining({ 0: expect.objectContaining({ transcript: 'paired' }) }),
+        }),
+      }),
+    );
+  });
+
+  it('names the pairing step when a paired server refuses and no secret is stored', async () => {
+    const { recorder } = installRecorder();
+    const socket = installSocket();
+    const error = vi.fn();
+    const recognition = createLocalSpeechRecognition('wss://example/dictate', {
+      secret: () => null,
+    });
+    recognition.onerror = error;
+    recognition.start();
+    await Promise.resolve();
+    recorder.ondataavailable?.({ data: new Blob(['voice']) } as BlobEvent);
+    recognition.stop();
+    socket.readyState = 1;
+    socket.onopen?.();
+    socket.onmessage?.({ data: JSON.stringify({ type: 'error', code: 'protocol' }) });
+    expect(error).toHaveBeenCalledWith(
+      expect.objectContaining({ message: DICTATE_PAIRING_MESSAGE }),
+    );
   });
 });

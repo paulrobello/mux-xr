@@ -1,7 +1,7 @@
 /**
  * The host service composition root: it wires every host route onto one HTTP server and dispatches
- * WebSocket upgrades by path. Local dictation on `/dictate` is served here too; its origin-only
- * gate stays until SEC-002 adds authentication.
+ * WebSocket upgrades by path. Local dictation on `/dictate` keeps the origin-only gate by default;
+ * `dictate.requireAuth` moves it onto the shared paired-route handshake.
  */
 import { execFile as execFileCallback } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -44,6 +44,7 @@ import {
   MESH_INBOX_PROTOCOL,
   type MeshInboxFeedOptions,
 } from './mesh-inbox';
+import { createPairedRoute, type PairedMessageHandler, type PairedRoute } from './paired-route';
 import {
   createPictureDepthRoute,
   PICTURE_DEPTH_PATH,
@@ -73,12 +74,26 @@ const MAX_PAYLOAD = 8 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 90_000;
 const IDLE_TIMEOUT_MS = 120_000;
 
+/** The paired handshake's protocol label on `/dictate`; mirrors the browser client's copy. */
+export const DICTATE_PROTOCOL = 'mux-xr-dictate-v1';
+/** Concurrent `/dictate` sockets allowed per service and per client address. */
+const MAX_DICTATE_CONNECTIONS = 4;
+const MAX_DICTATE_CONNECTIONS_PER_CLIENT = 2;
+/** Extra time an authenticated session may stay open past the transcription deadline. */
+const DICTATE_SESSION_MARGIN_MS = 15_000;
+
 export type DictationTranscriber = (bytes: Buffer, signal: AbortSignal) => Promise<string>;
 
 export type DictationServerOptions = {
   allowedOrigins: string[];
   /** Clock for the failure limiter and every route's timers; `clipboard.now` stays as a fallback. */
   now?: () => number;
+  /**
+   * Optional paired-route challenge on `/dictate` (`--dictate-auth on`). Off by default: every
+   * existing setup keeps today's origin-only gate, and turning it on refuses clients that send
+   * audio before proving they hold the pairing secret.
+   */
+  dictate?: { requireAuth: boolean };
   transcribe?: DictationTranscriber;
   model?: string;
   ffmpegPath?: string;
@@ -152,7 +167,10 @@ export type DictationServerOptions = {
    * Toasts: senders POST `/toast` with the pairing secret as a bearer token, and paired headsets
    * receive them on `/toasts`. Only this Mac may send unless `allowRemoteSenders`.
    */
-  toasts?: Pick<ToastHubOptions, 'allowRemoteSenders' | 'onEvent' | 'pingIntervalMs' | 'makeId'>;
+  toasts?: Pick<
+    ToastHubOptions,
+    'allowRemoteSenders' | 'onEvent' | 'pingIntervalMs' | 'makeId' | 'toastTokenPath'
+  >;
   telemetry?: Pick<
     DictationTelemetry,
     'connected' | 'disconnected' | 'rejected' | 'beginTranscription'
@@ -167,6 +185,33 @@ type LocalTranscriberOptions = {
   whisperPath: string;
 };
 
+/**
+ * The ffmpeg argv for one clip: `-format_whitelist` keeps the probe to the containers browsers
+ * record (Quest's MediaRecorder writes WebM/Opus; Safari's default is MP4), so attacker-supplied
+ * bytes never reach any other demuxer.
+ */
+export const localTranscriberArgv = (inputPath: string, wavPath: string): string[] => [
+  '-nostdin',
+  '-hide_banner',
+  '-loglevel',
+  'error',
+  '-protocol_whitelist',
+  'file,pipe',
+  '-format_whitelist',
+  'matroska,webm,mov,mp4',
+  '-i',
+  inputPath,
+  '-t',
+  '60',
+  '-ac',
+  '1',
+  '-ar',
+  '16000',
+  '-f',
+  'wav',
+  wavPath,
+];
+
 export const createLocalTranscriber =
   (options: LocalTranscriberOptions): DictationTranscriber =>
   async (bytes, signal) => {
@@ -175,29 +220,7 @@ export const createLocalTranscriber =
     const wavPath = join(directory, 'audio.wav');
     try {
       await writeFile(inputPath, bytes);
-      await execFile(
-        options.ffmpegPath,
-        [
-          '-nostdin',
-          '-hide_banner',
-          '-loglevel',
-          'error',
-          '-protocol_whitelist',
-          'file,pipe',
-          '-i',
-          inputPath,
-          '-t',
-          '60',
-          '-ac',
-          '1',
-          '-ar',
-          '16000',
-          '-f',
-          'wav',
-          wavPath,
-        ],
-        { signal },
-      );
+      await execFile(options.ffmpegPath, localTranscriberArgv(inputPath, wavPath), { signal });
       const { stdout } = await execFile(
         options.whisperPath,
         ['-m', options.model, '-f', wavPath, '-nt', '-np', '-l', 'en', '-t', '4', '-ng'],
@@ -398,8 +421,84 @@ export const attachHostService = (
     allowedOrigins: options.allowedOrigins,
   });
 
-  /** `/dictate` keeps its origin-only gate; SEC-002 adds authentication later. */
-  const dictateRoute: HostRoute = {
+  /** The single audio clip per connection: validation, the busy check and the transcription job. */
+  const acceptAudio = async (
+    socket: WebSocket,
+    rawData: RawData,
+    isBinary: boolean,
+  ): Promise<void> => {
+    if (!isBinary) {
+      observe(() => options.telemetry?.rejected('invalid_payload'));
+      sendJson(socket, { type: 'error', message: 'Expected one binary audio clip.' });
+      socket.close(1003, 'binary audio required');
+      return;
+    }
+    const bytes = rawDataToBuffer(rawData);
+    if (bytes.length > MAX_PAYLOAD) {
+      observe(() => options.telemetry?.rejected('invalid_payload'));
+      sendJson(socket, { type: 'error', message: 'Audio clip exceeds the 8 MiB limit.' });
+      socket.close(1009, 'payload too large');
+      return;
+    }
+    if (activeJob) {
+      observe(() => options.telemetry?.rejected('busy'));
+      sendJson(socket, { type: 'error', message: 'Another dictation is already in progress.' });
+      socket.close(1013, 'dictation busy');
+      return;
+    }
+    const controller = new AbortController();
+    activeJob = { controller, socket };
+    let finishTelemetry: (outcome: TranscriptionOutcome) => void = () => undefined;
+    observe(() => {
+      finishTelemetry = options.telemetry?.beginTranscription(bytes.length) ?? finishTelemetry;
+    });
+    const transcription = Promise.resolve().then(() => transcribe(bytes, controller.signal));
+    let timedOut = false;
+    let timeoutReject!: (error: Error) => void;
+    const timeoutSignal = new Promise<never>((_resolve, reject) => {
+      timeoutReject = reject;
+    });
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort(new Error('Dictation timed out.'));
+      timeoutReject(new Error('Dictation timed out.'));
+    }, timeoutMs);
+    let task: Promise<void>;
+    task = (async () => {
+      try {
+        const text = await Promise.race([transcription, timeoutSignal]);
+        observe(() => finishTelemetry('success'));
+        sendJson(socket, { type: 'transcript', text });
+        socket.close(1000, 'complete');
+      } catch {
+        observe(() =>
+          finishTelemetry(timedOut ? 'timeout' : controller.signal.aborted ? 'cancelled' : 'error'),
+        );
+        if (socket.readyState === WebSocket.OPEN && (!controller.signal.aborted || timedOut)) {
+          sendJson(socket, {
+            type: 'error',
+            message: timedOut ? 'Local dictation timed out.' : 'Local dictation failed.',
+          });
+          socket.close(1011, 'dictation failed');
+        }
+      } finally {
+        clearTimeout(timeout);
+        await transcription.catch(() => undefined);
+        if (activeJob?.controller === controller) activeJob = null;
+      }
+    })();
+    activeTask = task;
+    try {
+      await task;
+    } finally {
+      if (activeTask === task) activeTask = null;
+    }
+  };
+  /** Cancels the job owned by a socket that just closed. */
+  const cancelJobOnClose = (socket: WebSocket): void => {
+    if (activeJob?.socket === socket) activeJob.controller.abort(new Error('Client disconnected.'));
+  };
+  const dictateLegacyRoute: HostRoute = {
     path: '/dictate',
     handleUpgrade: (request, socket, head) => {
       const origin = request.headers.origin;
@@ -413,6 +512,58 @@ export const attachHostService = (
     },
     close: () => new Promise<void>((resolve) => wss.close(() => resolve())),
   };
+  /**
+   * `/dictate` with the paired handshake (`--dictate-auth on`): the challenge precedes any audio,
+   * so attacker-supplied bytes never reach ffmpeg without a verified MAC. The caps bound sockets
+   * per service (4) and per client address (2), answering 503 at upgrade like the feed routes.
+   */
+  const dictatePairedRoute: PairedRoute = createPairedRoute({
+    protocol: DICTATE_PROTOCOL,
+    allowedOrigins: options.allowedOrigins,
+    loadSecret: context.loadSecret,
+    limiter: context.limiter,
+    maxPayloadBytes: MAX_PAYLOAD,
+    maxConnections: MAX_DICTATE_CONNECTIONS,
+    perClient: { cap: MAX_DICTATE_CONNECTIONS_PER_CLIENT, gate: 'busy', release: 'close' },
+    reportGates: true,
+    reportFailures: 'all',
+    emit: (event) => {
+      const code = event.code;
+      observe(() =>
+        options.telemetry?.rejected(
+          code === 'protocol'
+            ? 'invalid_payload'
+            : (code as 'origin' | 'rate_limited' | 'busy' | 'auth' | 'disabled'),
+        ),
+      );
+    },
+    authTimeoutMs: 5_000,
+    sessionTimeoutMs: timeoutMs + DICTATE_SESSION_MARGIN_MS,
+    validateAuth: (message) => typeof message.request === 'string' && message.request === '',
+    macMaterial: (message) => String(message.request),
+    errorMessage: (code) =>
+      code === 'busy'
+        ? 'Another dictation is already in progress.'
+        : code === 'auth'
+          ? 'Local dictation authentication failed. Complete pairing in Settings → Host clipboard.'
+          : code === 'disabled'
+            ? 'Local dictation pairing is not configured on the host.'
+            : undefined,
+    onAuthenticated:
+      (connection): PairedMessageHandler =>
+      (data, isBinary) => {
+        void acceptAudio(connection.socket, data, isBinary);
+      },
+    onConnectionClose: cancelJobOnClose,
+  });
+  const dictateRoute: HostRoute =
+    options.dictate?.requireAuth === true
+      ? {
+          path: '/dictate',
+          handleUpgrade: dictatePairedRoute.handleUpgrade,
+          close: dictatePairedRoute.close,
+        }
+      : dictateLegacyRoute;
   /** Wraps a route object with its path so every map entry is a whole HostRoute. */
   const withPath = (path: string, route: Omit<HostRoute, 'path'>): HostRoute => ({
     path,
@@ -464,83 +615,15 @@ export const attachHostService = (
       if (idleTimer) clearTimeout(idleTimer);
       idleTimer = undefined;
     };
-    socket.on('message', async (rawData, isBinary) => {
+    socket.on('message', (rawData, isBinary) => {
       clearIdleTimer();
-      if (!isBinary) {
-        observe(() => options.telemetry?.rejected('invalid_payload'));
-        sendJson(socket, { type: 'error', message: 'Expected one binary audio clip.' });
-        socket.close(1003, 'binary audio required');
-        return;
-      }
-      const bytes = rawDataToBuffer(rawData);
-      if (bytes.length > MAX_PAYLOAD) {
-        observe(() => options.telemetry?.rejected('invalid_payload'));
-        sendJson(socket, { type: 'error', message: 'Audio clip exceeds the 8 MiB limit.' });
-        socket.close(1009, 'payload too large');
-        return;
-      }
-      if (activeJob) {
-        observe(() => options.telemetry?.rejected('busy'));
-        sendJson(socket, { type: 'error', message: 'Another dictation is already in progress.' });
-        socket.close(1013, 'dictation busy');
-        return;
-      }
-      const controller = new AbortController();
-      activeJob = { controller, socket };
-      let finishTelemetry: (outcome: TranscriptionOutcome) => void = () => undefined;
-      observe(() => {
-        finishTelemetry = options.telemetry?.beginTranscription(bytes.length) ?? finishTelemetry;
-      });
-      const transcription = Promise.resolve().then(() => transcribe(bytes, controller.signal));
-      let timedOut = false;
-      let timeoutReject!: (error: Error) => void;
-      const timeoutSignal = new Promise<never>((_resolve, reject) => {
-        timeoutReject = reject;
-      });
-      const timeout = setTimeout(() => {
-        timedOut = true;
-        controller.abort(new Error('Dictation timed out.'));
-        timeoutReject(new Error('Dictation timed out.'));
-      }, timeoutMs);
-      let task: Promise<void>;
-      task = (async () => {
-        try {
-          const text = await Promise.race([transcription, timeoutSignal]);
-          observe(() => finishTelemetry('success'));
-          sendJson(socket, { type: 'transcript', text });
-          socket.close(1000, 'complete');
-        } catch {
-          observe(() =>
-            finishTelemetry(
-              timedOut ? 'timeout' : controller.signal.aborted ? 'cancelled' : 'error',
-            ),
-          );
-          if (socket.readyState === WebSocket.OPEN && (!controller.signal.aborted || timedOut)) {
-            sendJson(socket, {
-              type: 'error',
-              message: timedOut ? 'Local dictation timed out.' : 'Local dictation failed.',
-            });
-            socket.close(1011, 'dictation failed');
-          }
-        } finally {
-          clearTimeout(timeout);
-          await transcription.catch(() => undefined);
-          if (activeJob?.controller === controller) activeJob = null;
-        }
-      })();
-      activeTask = task;
-      try {
-        await task;
-      } finally {
-        if (activeTask === task) activeTask = null;
-      }
+      void acceptAudio(socket, rawData, isBinary);
     });
     socket.on('close', () => {
       clearIdleTimer();
       sockets.delete(socket);
       observe(() => options.telemetry?.disconnected());
-      if (activeJob?.socket === socket)
-        activeJob.controller.abort(new Error('Client disconnected.'));
+      cancelJobOnClose(socket);
     });
     socket.on('error', (error) => {
       if ((error as Error & { code?: string }).code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH')

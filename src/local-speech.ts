@@ -1,3 +1,5 @@
+import { createHostClipboardSecretStore, type HostClipboardSocket } from './host-clipboard';
+import { openPairedSocket } from './host-pairing';
 import type {
   SpeechRecognitionErrorEventLike,
   SpeechRecognitionEventLike,
@@ -11,12 +13,21 @@ export interface LocalSpeechRecognition extends SpeechRecognitionLike {
 
 export interface LocalSpeechRecognitionOptions {
   responseTimeoutMs?: number;
+  /** The host pairing secret; absent means a paired `/dictate` fails naming the pairing step. */
+  secret?: () => string | null;
 }
 
 const MAX_DURATION_MS = 60_000;
 const MAX_CLIP_BYTES = 8 * 1024 * 1024;
 const DEFAULT_RESPONSE_TIMEOUT_MS = 90_000;
 const PREFERRED_MIME_TYPES = ['audio/webm;codecs=opus', 'audio/webm'];
+
+/** Shown when a paired `/dictate` rejects the clip and no pairing secret is stored. */
+export const DICTATE_PAIRING_MESSAGE =
+  'Local dictation now requires the host pairing secret. Complete pairing in Settings → Host clipboard, then retry.';
+
+/** Mirrors the host service's `DICTATE_PROTOCOL`; the label is a wire contract. */
+const DICTATE_PROTOCOL = 'mux-xr-dictate-v1';
 
 type MediaRecorderConstructor = typeof MediaRecorder & {
   isTypeSupported?: (mimeType: string) => boolean;
@@ -184,7 +195,12 @@ export function createLocalSpeechRecognition(
         return;
       }
       if (!response || typeof response !== 'object') return;
-      const payload = response as { type?: unknown; text?: unknown; message?: unknown };
+      const payload = response as {
+        type?: unknown;
+        text?: unknown;
+        message?: unknown;
+        code?: unknown;
+      };
       if (payload.type === 'transcript' && typeof payload.text === 'string') {
         clearTimers();
         closeSocket();
@@ -199,6 +215,9 @@ export function createLocalSpeechRecognition(
           }) as SpeechRecognitionEventLike,
         );
         recognition.onend?.();
+      } else if (payload.type === 'error' && payload.code === 'protocol' && !payload.message) {
+        // A paired `/dictate` refused the unauthenticated clip; answer its challenge or stop.
+        beginAuthenticatedUpload(currentGeneration);
       } else if (payload.type === 'error' && typeof payload.message === 'string') {
         fail('service-not-allowed', payload.message, currentGeneration);
       }
@@ -209,6 +228,82 @@ export function createLocalSpeechRecognition(
       if (socket === currentSocket)
         fail('network', 'Local speech service closed before returning text.', currentGeneration);
     };
+  };
+
+  /**
+   * The paired-`/dictate` upload: the server refused the plain clip, so answer its challenge
+   * through the shared pairing client and send the recording only after the auth frame. Without a
+   * stored pairing secret the recognition stops naming the pairing step instead of retrying.
+   */
+  const beginAuthenticatedUpload = (currentGeneration: number): void => {
+    const secret = options.secret ? options.secret() : createHostClipboardSecretStore().get();
+    if (!secret) {
+      fail('service-not-allowed', DICTATE_PAIRING_MESSAGE, currentGeneration);
+      return;
+    }
+    const subtle = globalThis.crypto?.subtle;
+    const WebSocketConstructor = browser.WebSocket;
+    if (!subtle || !WebSocketConstructor) {
+      fail('network', 'Local speech service could not start.', currentGeneration);
+      return;
+    }
+    closeSocket();
+    if (responseTimer !== undefined) {
+      clearTimeout(responseTimer);
+      responseTimer = undefined;
+    }
+    const clip = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' });
+    let serverMessage: string | undefined;
+    void openPairedSocket<string, 'timeout' | 'network' | 'service-not-allowed'>({
+      url,
+      secret,
+      protocol: DICTATE_PROTOCOL,
+      material: '',
+      authFields: { request: '' },
+      timeoutMs: responseTimeoutMs,
+      onTimeout: () => 'timeout',
+      subtle,
+      socketFactory: (target) => new WebSocketConstructor(target) as unknown as HostClipboardSocket,
+      onSocket: (pairedSocket) => {
+        socket = pairedSocket as unknown as WebSocket;
+      },
+      onAuthSent: () => {
+        socket?.send(clip);
+      },
+      onOpenError: () => 'network',
+      onServerError: (code, message) => {
+        serverMessage = typeof message === 'string' ? message : undefined;
+        return code === 'auth' ? 'service-not-allowed' : 'network';
+      },
+      onClose: () => 'network',
+      onMessage: (message) => {
+        const payload = message as { type?: unknown; text?: unknown };
+        if (payload?.type === 'transcript' && typeof payload.text === 'string')
+          return { ok: true, value: payload.text };
+        return null;
+      },
+    }).then((outcome) => {
+      if (currentGeneration !== generation) return;
+      processing = false;
+      if (outcome.ok) {
+        recognition.onresult?.(
+          Object.assign(new Event('result'), {
+            resultIndex: 0,
+            results: {
+              length: 1,
+              0: { isFinal: true, length: 1, 0: { transcript: outcome.value } },
+            },
+          }) as SpeechRecognitionEventLike,
+        );
+        recognition.onend?.();
+        return;
+      }
+      if (outcome.code === 'service-not-allowed')
+        fail('service-not-allowed', serverMessage ?? DICTATE_PAIRING_MESSAGE, currentGeneration);
+      else if (outcome.code === 'timeout')
+        fail('network', 'Local speech service timed out.', currentGeneration);
+      else fail('network', 'Local speech service could not be reached.', currentGeneration);
+    });
   };
 
   const stopCapture = (currentGeneration: number): void => {

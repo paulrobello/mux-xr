@@ -4,8 +4,10 @@
 //   bun run scripts/send-toast.ts "Deploying" --id deploy --timeout 0
 //   bun run scripts/send-toast.ts --dismiss deploy
 //
-// The pairing secret is read from .local/clipboard-secret (or --secret-file / MUX_XR_SECRET_FILE)
-// and sent as a bearer token. Exit status: 0 delivered or queued, 1 refused, 2 bad arguments.
+// The credential is read from --token-file (preferred) or the pairing secret at
+// .local/clipboard-secret (--secret-file / MUX_XR_SECRET_FILE) and sent as a bearer token.
+// --insecure is refused unless the URL is loopback. Exit status: 0 delivered or queued,
+// 1 refused, 2 bad arguments.
 import { readFileSync } from 'node:fs';
 import { request } from 'node:https';
 import { dirname, resolve } from 'node:path';
@@ -15,7 +17,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const usage = `Usage: send-toast.ts <message> [--level info|success|warn|error] [--title T]
   [--timeout seconds (0 keeps it)] [--placement top|center|bottom|hud|pane]
   [--pane <id>|current] [--color #rrggbb] [--id ID] [--source S]
-  [--url https://host:4242] [--secret-file path] [--insecure]
+  [--url https://host:4242] [--token-file path] [--secret-file path] [--insecure]
   send-toast.ts --dismiss <id>`;
 
 const fail = (message: string): never => {
@@ -62,18 +64,25 @@ if (dismiss) {
 
 const url = new URL('/toast', options.get('url') ?? 'https://localhost:4242');
 const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+if (insecure && !loopback)
+  fail('--insecure disables certificate checks and is refused for non-loopback URLs.');
+const tokenFile = options.get('token-file');
 const secretFile =
   options.get('secret-file') ??
   process.env.MUX_XR_SECRET_FILE ??
   resolve(repoRoot, '.local/clipboard-secret');
-const readSecret = (): string => {
+const readCredential = (): string => {
   try {
-    return readFileSync(secretFile, 'utf8').trim();
+    return readFileSync(tokenFile ?? secretFile, 'utf8').trim();
   } catch {
-    return fail(`Cannot read the pairing secret at ${secretFile}.`);
+    return fail(
+      tokenFile
+        ? `Cannot read the toast token at ${tokenFile}.`
+        : `Cannot read the pairing secret at ${secretFile}.`,
+    );
   }
 };
-const secret = readSecret();
+const secret = readCredential();
 const payload = JSON.stringify(body);
 const req = request(
   url,

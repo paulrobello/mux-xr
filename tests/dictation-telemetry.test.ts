@@ -1,3 +1,6 @@
+import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDictationTelemetry as create } from '../src/server/dictation-telemetry';
 
@@ -68,6 +71,59 @@ describe('dictation OTLP telemetry', () => {
     expect(telemetry.enabled).toBe(false);
     await expect(telemetry.forceFlush()).resolves.toBeUndefined();
     expect(calls).toHaveLength(0);
+  });
+
+  it('refuses a cleartext http endpoint unless it is loopback', async () => {
+    const { calls, fetch } = exporter();
+    const refused = createDictationTelemetry({
+      env: { OTEL_EXPORTER_OTLP_ENDPOINT: 'http://example.test:4318' },
+      fetch,
+    });
+    expect(refused.enabled).toBe(false);
+    const accepted = createDictationTelemetry({
+      env: { OTEL_EXPORTER_OTLP_ENDPOINT: 'http://127.0.0.1:4318' },
+      fetch,
+    });
+    expect(accepted.enabled).toBe(true);
+    const ipv6 = createDictationTelemetry({
+      env: { OTEL_EXPORTER_OTLP_ENDPOINT: 'http://[::1]:4318' },
+      fetch,
+    });
+    expect(ipv6.enabled).toBe(true);
+    const byName = createDictationTelemetry({
+      env: { OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318' },
+      fetch,
+    });
+    expect(byName.enabled).toBe(true);
+    await refused.forceFlush();
+    expect(calls.filter((call) => call.url.startsWith('http://example.test'))).toEqual([]);
+  });
+
+  it('degrades a symlinked or weak env file to not configured', async () => {
+    const { calls, fetch } = exporter();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const directory = await mkdtemp(join(tmpdir(), 'mux-xr-otel-env-'));
+    try {
+      const real = join(directory, 'whisper-otel.env');
+      const link = join(directory, 'linked.env');
+      await writeFile(real, 'OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.test\n', {
+        mode: 0o600,
+      });
+      await symlink(real, link);
+      const fromSymlink = createDictationTelemetry({ envFile: link, env: {}, fetch });
+      expect(fromSymlink.enabled).toBe(false);
+      expect(warn).toHaveBeenCalledWith('Whisper telemetry configuration could not be loaded.');
+      await chmod(real, 0o640);
+      const fromWeak = createDictationTelemetry({ envFile: real, env: {}, fetch });
+      expect(fromWeak.enabled).toBe(false);
+      await chmod(real, 0o600);
+      const fromGood = createDictationTelemetry({ envFile: real, env: {}, fetch });
+      expect(fromGood.enabled).toBe(true);
+      await fromGood.forceFlush();
+      expect(calls.length).toBeGreaterThan(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('separates counter dimensions and preserves cumulative values across flushes', async () => {

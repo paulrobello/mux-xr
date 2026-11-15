@@ -1,5 +1,5 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { accessSync, closeSync, constants, fchownSync, openSync } from 'node:fs';
+import { accessSync, closeSync, constants, fchownSync, fstatSync, openSync } from 'node:fs';
 import { chmod, chown, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,7 @@ import {
   validateRepository,
   validateUser,
 } from '../src/server/dictation-launchd';
+import { waitFor } from './lib/harness';
 
 type InstallerOptions = {
   install: boolean;
@@ -37,6 +38,7 @@ type InstallerOptions = {
   serviceHealth: boolean;
   meshInbox: boolean;
   toastLan: boolean;
+  dictateAuth: boolean;
 };
 export type ListenerMetadata = {
   uid: number;
@@ -61,6 +63,7 @@ export const parseInstallerArgs = (argv: string[], config: HostConfig = {}): Ins
   let serviceHealth = false;
   let meshInbox = false;
   let toastLan = false;
+  let dictateAuth = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--install') install = true;
@@ -75,6 +78,7 @@ export const parseInstallerArgs = (argv: string[], config: HostConfig = {}): Ins
     else if (argument === '--service-health') serviceHealth = true;
     else if (argument === '--mesh-inbox') meshInbox = true;
     else if (argument === '--toast-lan') toastLan = true;
+    else if (argument === '--dictate-auth') dictateAuth = true;
     else if (argument === '--repo') repository = argv[++index] ?? '';
     else if (argument === '--user') user = argv[++index] ?? '';
     else throw new Error(`Unknown argument: ${argument}`);
@@ -90,6 +94,7 @@ export const parseInstallerArgs = (argv: string[], config: HostConfig = {}): Ins
   if (serviceHealth && !agent) throw new Error('--service-health is only supported with --agent.');
   if (meshInbox && !agent) throw new Error('--mesh-inbox is only supported with --agent.');
   if (toastLan && !agent) throw new Error('--toast-lan is only supported with --agent.');
+  if (dictateAuth && !agent) throw new Error('--dictate-auth is only supported with --agent.');
   if (agent && migrateRunningListener)
     throw new Error('--agent installs never migrate a running listener.');
   return {
@@ -109,6 +114,7 @@ export const parseInstallerArgs = (argv: string[], config: HostConfig = {}): Ins
     serviceHealth,
     meshInbox,
     toastLan,
+    dictateAuth,
   };
 };
 
@@ -205,18 +211,6 @@ const healthReady = (): boolean => {
   }
 };
 
-const waitFor = async (
-  predicate: () => boolean,
-  timeoutMs: number,
-  message: string,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error(message);
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
-  }
-};
-
 const migrateListener = async (
   repository: string,
   user: string,
@@ -229,25 +223,60 @@ const migrateListener = async (
     () =>
       spawnSync('/usr/sbin/lsof', ['-a', '-p', String(pid), '-iTCP:4242', '-sTCP:ESTABLISHED'])
         .status === 1,
+    'dictation clients to finish',
     90_000,
-    'Timed out waiting for dictation clients to finish.',
+    250,
   );
   const metadata = listenerMetadata(pid);
   if (listenerPid() !== pid || !isSafeMigratableListener(metadata, repository, uid))
     throw new Error('Port 4242 owner changed during migration.');
   process.kill(pid, 'SIGTERM');
-  await waitFor(
-    () => listenerPid() === undefined,
-    10_000,
-    'Timed out waiting for port 4242 to become free.',
-  );
+  await waitFor(() => listenerPid() === undefined, 'port 4242 to become free', 10_000, 250);
   return metadata;
 };
 
-const restoreListener = async (metadata: ListenerMetadata, user: string): Promise<void> => {
-  const log = openSync(`${metadata.cwd}/.local/whisper-migration-recovery.log`, 'a', 0o600);
+/**
+ * Opens the migration-recovery log without following a final symlink, then confirms the descriptor
+ * is a singly-linked regular file before any ownership change: a planted link must not turn a
+ * root-owned target into a user-owned file.
+ */
+export const openRecoveryLog = (
+  path: string,
+  uid: number,
+  gid: number,
+  deps: {
+    open?: typeof openSync;
+    fstat?: typeof fstatSync;
+    fchown?: typeof fchownSync;
+  } = {},
+): number => {
+  const open = deps.open ?? openSync;
+  const fstat = deps.fstat ?? fstatSync;
+  const fchown = deps.fchown ?? fchownSync;
+  const fd = open(
+    path,
+    constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | (constants.O_NOFOLLOW ?? 0),
+    0o600,
+  );
   try {
-    fchownSync(log, metadata.uid, metadata.gid);
+    const info = fstat(fd);
+    if (!info.isFile() || info.nlink !== 1)
+      throw new Error(`Recovery log ${path} is not a singly-linked regular file.`);
+    fchown(fd, uid, gid);
+    return fd;
+  } catch (error) {
+    closeSync(fd);
+    throw error;
+  }
+};
+
+const restoreListener = async (metadata: ListenerMetadata, user: string): Promise<void> => {
+  const log = openRecoveryLog(
+    `${metadata.cwd}/.local/whisper-migration-recovery.log`,
+    metadata.uid,
+    metadata.gid,
+  );
+  try {
     const child = spawn(metadata.executable, metadata.args, {
       cwd: metadata.cwd,
       uid: metadata.uid,
@@ -269,8 +298,9 @@ const restoreListener = async (metadata: ListenerMetadata, user: string): Promis
     child.unref();
     await waitFor(
       () => listenerPid() === child.pid && healthReady(),
+      'original listener recovery to become healthy',
       10_000,
-      'Original listener recovery did not become healthy.',
+      250,
     );
   } finally {
     closeSync(log);
@@ -369,8 +399,9 @@ const install = async (plist: string, options: InstallerOptions): Promise<void> 
           healthReady()
         );
       },
+      'the LaunchDaemon to own port 4242 and pass HTTPS health checks',
       60_000,
-      'LaunchDaemon did not own port 4242 and pass HTTPS health checks.',
+      250,
     );
   } catch (error) {
     await unlink(temporary).catch(() => undefined);
@@ -390,8 +421,9 @@ const install = async (plist: string, options: InstallerOptions): Promise<void> 
                 const pid = listenerPid();
                 return pid !== undefined && pid === ownedJobPid(label) && healthReady();
               },
+              'the previous LaunchDaemon to recover',
               20_000,
-              'Previous LaunchDaemon did not recover.',
+              250,
             );
             previousJobRestored = true;
           } catch (restoreError) {
@@ -550,7 +582,8 @@ const agentDeps = (options: InstallerOptions): AgentInstallDeps => {
     lint: (path) => {
       execFileSync('/usr/bin/plutil', ['-lint', path], { stdio: 'pipe' });
     },
-    waitFor,
+    waitFor: (predicate, timeoutMs, message) =>
+      waitFor(predicate, message, timeoutMs, 250).then(() => undefined),
     pid: process.pid,
   };
 };
