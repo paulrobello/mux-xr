@@ -97,9 +97,27 @@ export function createMouseMessage(input: TerminalMouseInput): ClientMessage {
   });
 }
 
+// Strips every C0/C1 control character (ESC included, so a payload cannot close the
+// terminal's bracketed-paste envelope early) while keeping tab, LF and CR. The terminal
+// core wraps the remaining text in its own paste markers, so any control byte a web page
+// plants in the clipboard would otherwise reach the shell as typed input.
+export function sanitizePasteContent(content: string): string {
+  let clean = '';
+  for (const char of content) {
+    const code = char.codePointAt(0) ?? 0;
+    const kept =
+      code === 9 || code === 10 || code === 13 || (code >= 32 && (code < 0x7f || code > 0x9f));
+    if (kept) clean += char;
+  }
+  return clean;
+}
+
 export function createPasteMessage(content: string): ClientMessage {
   return create(ClientMessageSchema, {
-    message: { case: 'paste', value: create(PasteInputSchema, { content }) },
+    message: {
+      case: 'paste',
+      value: create(PasteInputSchema, { content: sanitizePasteContent(content) }),
+    },
   });
 }
 

@@ -3,8 +3,10 @@ import { deflate } from 'pako';
 import { describe, expect, it } from 'vitest';
 import {
   createInputMessage,
+  createPasteMessage,
   decodeServerMessage,
   encodeClientMessage,
+  sanitizePasteContent,
   terminalKeyLabel,
 } from '../src/terminal/protocol';
 import { paneWebSocketURL, terminalKeyBytes } from '../src/terminal/surface';
@@ -146,6 +148,24 @@ describe('terminal key bytes', () => {
     expect(terminalKeyLabel('4', true)).toBe('$');
     expect(terminalKeyLabel('/', true)).toBe('?');
     expect(terminalKeyLabel('ArrowUp', true)).toBe('ArrowUp');
+  });
+});
+
+describe('paste sanitization', () => {
+  it('removes ESC and other C0/C1 control characters from pasted payloads', () => {
+    expect(sanitizePasteContent('a\x1b[201~b\n')).toBe('a[201~b\n');
+    expect(sanitizePasteContent('\tkeep\ttabs\r\n')).toBe('\tkeep\ttabs\r\n');
+    expect(sanitizePasteContent('bell\x07carriage\rdel\x7fcsi\u009bmixed')).toBe(
+      'bellcarriage\rdelcsimixed',
+    );
+    expect(sanitizePasteContent('\u0000nul\u0001\u0002\u0008backspace')).toBe('nulbackspace');
+  });
+
+  it('sanitizes the payload inside the wire paste message', () => {
+    const message = createPasteMessage('safe\x1b[201~ rm -rf /\n');
+    const paste = message.message;
+    if (paste.case !== 'paste') throw new Error('expected paste case');
+    expect(paste.value.content).toBe('safe[201~ rm -rf /\n');
   });
 });
 
