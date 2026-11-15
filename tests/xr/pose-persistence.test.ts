@@ -1,28 +1,28 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@par/xr-workspace', async (importOriginal) =>
-  (await import('./helpers/xr-mocks')).withLabelsAndCountingHand(
+  (await import('../helpers/xr-mocks')).withLabelsAndCountingHand(
     await importOriginal<typeof import('@par/xr-workspace')>(),
   ),
 );
-vi.mock('../src/xr/repo-status-widget', async (original) =>
-  (await import('./helpers/xr-mocks')).withSpiedRepoStatus(
-    await original<typeof import('../src/xr/repo-status-widget')>(),
+vi.mock('../../src/xr/repo-status-widget', async (original) =>
+  (await import('../helpers/xr-mocks')).withSpiedRepoStatus(
+    await original<typeof import('../../src/xr/repo-status-widget')>(),
   ),
 );
-vi.mock('../src/xr/kanban-strip', async (original) =>
-  (await import('./helpers/xr-mocks')).withSpiedKanbanStrip(
-    await original<typeof import('../src/xr/kanban-strip')>(),
+vi.mock('../../src/xr/kanban-strip', async (original) =>
+  (await import('../helpers/xr-mocks')).withSpiedKanbanStrip(
+    await original<typeof import('../../src/xr/kanban-strip')>(),
   ),
 );
 vi.mock('three', async (importOriginal) =>
-  (await import('./helpers/xr-mocks')).createThreeMock(
+  (await import('../helpers/xr-mocks')).createThreeMock(
     await importOriginal<typeof import('three')>(),
   ),
 );
 
 import * as THREE from 'three';
-import { fakeXR, fixture, hit } from './helpers/xr-harness';
+import { fakeXR, fixture, hit } from '../helpers/xr-harness';
 
 describe('terminal pose persistence across reloads', () => {
   const untracked = { getViewerPose: () => null };
