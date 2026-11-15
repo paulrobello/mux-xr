@@ -5,6 +5,7 @@ import { createScalableLabel, updateScalableLabel } from './labels';
 import { applyUIEnvironment } from './ui-environment';
 import { disposeOwned, type SpatialWidget } from './widget';
 
+/** The two clock faces. Each is its own widget kind with its own saved pose. */
 export type ClockKind = 'digital-clock' | 'analog-clock';
 
 let nextWidgetId = 1;
@@ -37,6 +38,11 @@ function digitalText(now: Date): string {
   return `${hour}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} ${suffix}`;
 }
 
+/**
+ * A grabbable clock showing the device's local time. `update(nowMs)` takes epoch milliseconds,
+ * so the hands follow the wall clock and a dropped frame never drifts them. `envMap` lights the
+ * body and may be shared between widgets, in which case the caller owns it.
+ */
 export function createClockWidget(
   kind: ClockKind,
   envMap: THREE.Texture | null = null,

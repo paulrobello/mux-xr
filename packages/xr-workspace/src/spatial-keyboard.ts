@@ -62,14 +62,21 @@ export function addKeyborbBatches(root: THREE.Group): void {
   root.userData.keyborbGlyphs = glyphs;
 }
 
+/** Options for `createSpatialKeyboard`. */
 export interface SpatialKeyboardOptions {
+  /** `panel` (the default) or `keyborb`, the spherical-key keyboard. */
   style?: KeyboardStyle;
+  /** Horizontal curvature, clamped to 0 to 100 degrees. Non-finite values mean flat. Defaults to 0. */
   curvatureDegrees?: number;
+  /** Draws the dark backing plane. Defaults to on for `panel` and off for `keyborb`. */
   backing?: boolean;
+  /** Called when a key is pressed, with the semantic key name and a snapshot of the modifier state. */
   onKey(key: string, modifiers: Readonly<KeyModifiers>): void;
 }
 
+/** A mounted keyboard. Sizes are in metres at `root` scale 1. */
 export interface SpatialKeyboard {
+  /** Add to the scene and place it. The host owns the keyboard's pose. */
   root: THREE.Group;
   /** Supply the object hit by the host's ray, touch, or pinch. */
   press(target: THREE.Object3D): boolean;
@@ -78,6 +85,7 @@ export interface SpatialKeyboard {
   dispose(): void;
 }
 
+/** Builds a keyboard. `KEYBOARD_UNIT` (0.13 m) is the pitch of one key cell at root scale 1. */
 export function createSpatialKeyboard(options: SpatialKeyboardOptions): SpatialKeyboard {
   const style = options.style ?? 'panel';
   const root = new THREE.Group();

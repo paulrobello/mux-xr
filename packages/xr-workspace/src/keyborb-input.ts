@@ -1,8 +1,12 @@
 import * as THREE from 'three';
 
+/** Index-to-thumb distance in metres at which a pinch closes. */
 export const PINCH_CLOSE = 0.045;
+/** Distance in metres at which a closed pinch reopens. Wider than `PINCH_CLOSE` so the threshold does not chatter. */
 export const PINCH_OPEN = 0.05;
+/** Fingertip-to-orb distance in metres at which a hand counts as near the keyboard. */
 export const NEAR_ENTER = 0.08;
+/** Distance in metres at which a near hand stops counting as near. Wider than `NEAR_ENTER` for the same reason. */
 export const NEAR_EXIT = 0.11;
 const REARM_SECONDS = 0.04;
 // While a pinch latches its orb, another orb takes over only when it is this many orb diameters
@@ -47,6 +51,20 @@ interface HandState {
   result: KeyborbPinchSample;
 }
 
+/**
+ * Pinch and proximity input for the Keyborb keyboard. State is tracked per input `source`, so each
+ * hand targets its own orb. All positions are world-space. A pinch only highlights an orb, and
+ * the key types when the pinch opens (`committed`), except modifiers, which act on closure.
+ *
+ * - `begin` sets the keyboard root to read orbs from, or null to detach. A hidden root counts as
+ *   null. Call it each frame: a rebuilt keyboard keeps each hand's near and held orb by slot.
+ * - `sample` is the per-frame update for one hand. `index` and `thumb` are the tracked fingertip
+ *   positions (null on tracking loss), `rayKey` the orb under the hand's ray, and `enabled` false
+ *   to suspend the hand, for example during a grab.
+ * - `near`, `hovered` and `holding` read the state `sample` last computed for a source.
+ * - `nativePress`, `nativeRelease` and `commit` carry the headset's own select events.
+ * - `animate` eases orb lift. `reset` clears one source, or every source when omitted.
+ */
 export function createKeyborbInput(): {
   begin(root: THREE.Group | null): void;
   sample(

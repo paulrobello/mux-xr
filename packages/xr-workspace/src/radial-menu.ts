@@ -3,24 +3,33 @@ import { tintToLuminance } from './accent-colors';
 import { setControlId } from './control-ids';
 import { createScalableLabel, disposeScalableLabel } from './labels';
 
+/** One sector of the radial menu. `id` is the action `actionAt` returns for it. */
 export interface RadialMenuItem<Action extends string> {
   id: Action;
   label: string;
 }
 
+/** Options for `createRadialMenu`. */
 export interface RadialMenuOptions<Action extends string> {
+  /** Two to eight sectors, placed clockwise from the top. Other counts and duplicate ids throw `RangeError`, and `cancel` is reserved. */
   items: readonly RadialMenuItem<Action>[];
+  /** `#rrggbb` accent for the outline and hover fill. Null or omitted keeps the authored cyan. */
   accentColor?: string | null;
+  /** An optional button below the wheel. It is hidden until `setFooterVisible(true)`. */
   footer?: { label: string; id: string; name?: string; helpText?: string };
 }
 
+/** A mounted radial menu. Call `update` every frame while it is open or closing, because the animations advance only there. */
 export interface RadialMenu<Action extends string> {
   root: THREE.Group;
   readonly isOpen: boolean;
+  /** True once the opening animation has settled. Targets that are still moving cannot be activated. */
   readonly interactive: boolean;
   open(): void;
   close(): void;
+  /** Advances the open and close animation by `deltaSeconds`. */
   update(deltaSeconds: number): void;
+  /** Shows or hides the footer button. */
   setFooterVisible(available: boolean): void;
   /** Recolors the outline and hover fill; an empty accent restores the authored cyan. */
   setAccent(accent: string): void;

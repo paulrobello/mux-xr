@@ -5,24 +5,42 @@ import { paneHeading } from '../terminal/lifecycle';
 const CELL_WIDTH = 11;
 const LINE_HEIGHT = 21;
 
+/** The flat desktop terminal panels and their 3D preview toggle. Panels are keyed by pane id. */
 export interface DesktopPanels {
+  /** Adds a panel for the surface. A pane id that already has a panel is ignored. */
   add(surface: TerminalSurface): void;
+  /** Removes a pane's panel and its listeners. Unknown ids are ignored. */
   remove(id: string): void;
+  /** Marks the selected panel, or none for null. Enables the Smaller and Larger buttons only when one is selected. */
   select(id: string | null): void;
+  /** While immersive the desktop workspace is hidden, and entering it cancels any mouse drag in progress. */
   setImmersive(enabled: boolean): void;
+  /** Shows the flat terminal panels. */
   showTerminals(): void;
+  /** Shows the 3D preview of the spatial workspace in place of the panels. */
   showPreview(): void;
+  /** Removes every panel and the toolbar, and restores the host element. */
   dispose(): void;
 }
 
+/** Hooks for panel controls. Each is optional, and an absent hook makes its control do nothing. */
 export interface DesktopPanelCallbacks {
+  /** Smaller (-1) or Larger (1) for the selected panel. */
   onScale?(direction: number): void;
+  /** The 3D preview's Reset layout button. */
   onReset?(): void;
+  /** The panel's Close view button. */
   onClose?(id: string): void;
+  /** The panel's Disconnect or Reconnect button. */
   onToggleConnection?(id: string): void;
+  /** Mouse input addressed by grid cell. Return false when the pane did not accept it. */
   onMouse?(id: string, input: TerminalMouseInput): boolean;
 }
 
+/**
+ * Mounts the desktop workspace into `host`. `onSelect` is called with a pane id when the user
+ * activates its heading, presses in its terminal, or scrolls it. Call `dispose` to unmount.
+ */
 export function createDesktopPanels(
   host: HTMLElement,
   onSelect: (id: string) => void,

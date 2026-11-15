@@ -82,9 +82,17 @@ const MAX_DICTATE_CONNECTIONS_PER_CLIENT = 2;
 /** Extra time an authenticated session may stay open past the transcription deadline. */
 const DICTATE_SESSION_MARGIN_MS = 15_000;
 
+/** Turns one recorded clip into text. Reject with an `Error` to refuse it. `signal` aborts on timeout or shutdown. */
 export type DictationTranscriber = (bytes: Buffer, signal: AbortSignal) => Promise<string>;
 
+/**
+ * Everything `attachHostService` is configured with. Each routed feature takes its own optional
+ * block. The flag-gated features (`repoStatus`, `pictureProxy`, `pictureDepth`, `boardFeeds`,
+ * `serviceHealth`, `meshInbox`) answer `disabled` unless their `enabled` is true, even when a
+ * pairing secret exists.
+ */
 export type DictationServerOptions = {
+  /** Browser origins allowed to open any route. Not authentication, because a LAN client can forge it. */
   allowedOrigins: string[];
   /** Clock for the failure limiter and every route's timers; `clipboard.now` stays as a fallback. */
   now?: () => number;
@@ -94,10 +102,15 @@ export type DictationServerOptions = {
    * audio before proving they hold the pairing secret.
    */
   dictate?: { requireAuth: boolean };
+  /** Replaces the local ffmpeg and `whisper-cli` pipeline. Tests inject one. */
   transcribe?: DictationTranscriber;
+  /** Whisper model path for the local pipeline. Ignored when `transcribe` is set. */
   model?: string;
+  /** Defaults to `/opt/homebrew/bin/ffmpeg`. */
   ffmpegPath?: string;
+  /** Defaults to `/opt/homebrew/bin/whisper-cli`. */
   whisperPath?: string;
+  /** Deadline for one transcription in milliseconds. Defaults to 90 000. */
   timeoutMs?: number;
   /** Clipboard sync on `/clipboard`; without it the route answers that sync is disabled. */
   clipboard?: Omit<ClipboardServerOptions, 'allowedOrigins'>;
@@ -171,6 +184,7 @@ export type DictationServerOptions = {
     ToastHubOptions,
     'allowRemoteSenders' | 'onEvent' | 'pingIntervalMs' | 'makeId' | 'toastTokenPath'
   >;
+  /** Dictation counters and spans. A failure in telemetry never interrupts dictation. */
   telemetry?: Pick<
     DictationTelemetry,
     'connected' | 'disconnected' | 'rejected' | 'beginTranscription'
@@ -212,6 +226,11 @@ export const localTranscriberArgv = (inputPath: string, wavPath: string): string
   wavPath,
 ];
 
+/**
+ * The default transcriber: ffmpeg converts the clip to 16 kHz mono WAV in a private temp
+ * directory, then `whisper-cli` reads it. The directory is removed afterwards. Rejects when
+ * whisper returns no text.
+ */
 export const createLocalTranscriber =
   (options: LocalTranscriberOptions): DictationTranscriber =>
   async (bytes, signal) => {
@@ -257,12 +276,21 @@ type HostRoute = {
   close(): Promise<void> | void;
 };
 
+/** What `attachHostService` returns. */
 export type AttachedDictationServer = {
   /** Answers plain HTTP routes it owns (`/toast`); false leaves the request to the caller. */
   handleRequest: (request: IncomingMessage, response: ServerResponse) => boolean;
+  /** Aborts the running transcription, closes every socket and route, and unhooks the upgrade handler. */
   close: () => Promise<void>;
 };
 
+/**
+ * Attaches the host service routes to an existing HTTPS `server` through its `upgrade` event:
+ * `/dictate` and every paired WebSocket route (clipboard, host stats, repo status, picture fetch
+ * and depth, kanban strip, bookings, service health, mesh inbox, weather, toasts). A path that
+ * matches no route, or any URL with a query string, is refused with 403. Plain HTTP (`/toast`) is
+ * the caller's to dispatch through the returned `handleRequest`.
+ */
 export const attachHostService = (
   server: Server,
   options: DictationServerOptions,

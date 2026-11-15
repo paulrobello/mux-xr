@@ -1,26 +1,42 @@
 import * as THREE from 'three';
 import { ON_TOP_LAYER } from './render-layers';
 
+/** A sphere on the hand's skin, in world space, used to find a surface to grab. `radius` is in metres. */
 export interface HandContactProbe {
   point: THREE.Vector3;
   radius: number;
 }
+/** The result of one `sample` call. The object is reused between calls, so read it before the next. */
 export interface HandContactSample {
+  /** The hand is within about 14 cm of the keyboard. The state exits at about 20 cm. */
   nearKeyboard: boolean;
+  /** The key or raised panel button under the fingertip. Keyborb orbs are never reported. */
   hovered: THREE.Mesh | null;
+  /** The key the fingertip pressed this frame. A press needs the fingertip to have withdrawn in front of the keyboard first. */
   pressed: THREE.Mesh | null;
+  /** The key released this frame, after the fingertip withdrew. */
   released: THREE.Mesh | null;
 }
+/** Fingertip typing and contact grabbing for one hand. Make one per hand. */
 export interface HandContact {
+  /** A key press is currently held. */
   readonly pressed: boolean;
+  /**
+   * Per-frame fingertip update. `index` and `palm` are world-space positions, `keyboard` the
+   * keyboard root (null clears state), and `enabled` false to suspend typing, for example while a
+   * grip is held.
+   */
   sample(
     index: THREE.Vector3,
     palm: THREE.Vector3,
     keyboard: THREE.Group | null,
     enabled: boolean,
   ): HandContactSample;
+  /** Whether the hand is near `keyboard`, without changing press state. */
   near(index: THREE.Vector3, palm: THREE.Vector3, keyboard: THREE.Group | null): boolean;
+  /** The first of `roots` whose surface a probe touches, so a grip can capture it. Null when none. */
   grip(probes: readonly HandContactProbe[], roots: readonly THREE.Group[]): THREE.Group | null;
+  /** Clears press state. `preserveNear` keeps the near-keyboard flag. */
   reset(preserveNear?: boolean): void;
 }
 

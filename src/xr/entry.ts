@@ -1,5 +1,7 @@
+/** How an XR session starts: full VR, passthrough (`ar`), or VR around a passthrough desk window. */
 export type XrEntryMode = 'vr' | 'ar' | 'desk';
 
+/** Button labels for each entry mode, shared by the browser page and the XR scene. */
 export const XR_ENTRY_LABELS: Record<XrEntryMode, string> = {
   vr: 'Enter VR',
   ar: 'Enter passthrough',
@@ -17,18 +19,32 @@ interface XrEntryEventTarget {
   removeEventListener(type: string, listener: EventListener): void;
 }
 
+/** Dependencies of `createXREntryController`, injected so entry can be tested without a headset. */
 export interface XrEntryControllerOptions {
+  /** Requests the XR session. A rejection from an automatic start that needs activation is expected. */
   enter: (mode: XrEntryMode) => Promise<void>;
+  /** True while a session is already running, which makes `start` a no-op. */
   isActive: () => boolean;
+  /** Called for a failure that is not an expected missing-activation refusal. */
   onError: (error: unknown) => void;
+  /** Called when an automatic start was refused for lack of user activation, after the fallback arms. */
   onActivationRequired?: () => void;
   xr?: XrSystemLike;
+  /** Where the first-gesture fallback listens for `pointerup` and `keydown`. */
   eventTarget?: XrEntryEventTarget;
+  /** Reports whether the page has user activation. A gesture without it is ignored. */
   userActivation?: () => boolean;
 }
 
+/** Starts XR on request, and optionally on load with a first-gesture fallback. */
 export interface XrEntryController {
+  /**
+   * Enters XR. A manual call cancels automatic entry, and a call while another attempt is in
+   * flight returns that attempt. An `automatic` refusal for lack of activation arms the fallback
+   * instead of failing.
+   */
   start(mode: XrEntryMode, automatic?: boolean): Promise<void>;
+  /** Enters VR on load when the browser supports it, falling back to the first user gesture. */
   enableAutoStart(): Promise<void>;
   /** True while the first-gesture fallback listeners are waiting to enter XR. */
   isFallbackArmed(): boolean;
@@ -43,6 +59,7 @@ function isExpectedAutomaticError(error: unknown): boolean {
   return ACTIVATION_ERROR_NAMES.has(error.name) || ACTIVATION_ERROR_PATTERN.test(error.message);
 }
 
+/** Creates the XR entry controller. `dispose` removes every listener it added. */
 export function createXREntryController(options: XrEntryControllerOptions): XrEntryController {
   const target = options.eventTarget;
   let disposed = false;

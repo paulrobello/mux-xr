@@ -23,6 +23,10 @@ const MAX_COMPRESSED_SIZE = MAX_DECOMPRESSED_SIZE;
 
 export { keyboardKeyLabel as terminalKeyLabel } from '@par/xr-workspace/keyboard-types';
 
+/**
+ * Frames a client message for the wire: one flag byte (`1` deflated, `0` raw) then the protobuf
+ * payload. Payloads over 256 bytes are deflated only when that makes them smaller.
+ */
 export function encodeClientMessage(message: ClientMessage): ArrayBuffer {
   const payload = toBinary(ClientMessageSchema, message);
   if (payload.length > 256) {
@@ -39,6 +43,10 @@ export function encodeClientMessage(message: ClientMessage): ArrayBuffer {
   return result.buffer as ArrayBuffer;
 }
 
+/**
+ * Reads a server frame written by `encodeClientMessage`'s framing. Throws on an empty frame, an
+ * unknown flag byte, or a payload above 9 MiB compressed or decompressed.
+ */
 export function decodeServerMessage(data: ArrayBuffer): ServerMessage {
   const bytes = new Uint8Array(data);
   if (bytes.length < 2) throw new Error('Empty message');
@@ -67,6 +75,7 @@ export function decodeServerMessage(data: ArrayBuffer): ServerMessage {
   return fromBinary(ServerMessageSchema, payload);
 }
 
+/** Keystroke input. The text is sent as UTF-8 bytes without sanitizing. */
 export function createInputMessage(data: string): ClientMessage {
   return create(ClientMessageSchema, {
     message: {
@@ -76,6 +85,7 @@ export function createInputMessage(data: string): ClientMessage {
   });
 }
 
+/** A mouse report. `move` events set the motion bit (32) on the button code. */
 export function createMouseMessage(input: TerminalMouseInput): ClientMessage {
   const modifiers = input.modifiers ?? {};
   // Raw SGR uses bit 5 for motion and bit 6 for wheels. Releases
@@ -97,10 +107,12 @@ export function createMouseMessage(input: TerminalMouseInput): ClientMessage {
   });
 }
 
-// Strips every C0/C1 control character (ESC included, so a payload cannot close the
-// terminal's bracketed-paste envelope early) while keeping tab, LF and CR. The terminal
-// core wraps the remaining text in its own paste markers, so any control byte a web page
-// plants in the clipboard would otherwise reach the shell as typed input.
+/**
+ * Strips every C0/C1 control character (ESC included, so a payload cannot close the
+ * terminal's bracketed-paste envelope early) while keeping tab, LF and CR. The terminal
+ * core wraps the remaining text in its own paste markers, so any control byte a web page
+ * plants in the clipboard would otherwise reach the shell as typed input.
+ */
 export function sanitizePasteContent(content: string): string {
   let clean = '';
   for (const char of content) {
@@ -112,6 +124,7 @@ export function sanitizePasteContent(content: string): string {
   return clean;
 }
 
+/** A bracketed paste. The content is passed through `sanitizePasteContent` first. */
 export function createPasteMessage(content: string): ClientMessage {
   return create(ClientMessageSchema, {
     message: {
@@ -121,22 +134,26 @@ export function createPasteMessage(content: string): ClientMessage {
   });
 }
 
+/** A request to resize the remote grid, in cells. The server's confirmed size is authoritative. */
 export function createResizeMessage(cols: number, rows: number): ClientMessage {
   return create(ClientMessageSchema, {
     message: { case: 'resize', value: create(ClientResizeSchema, { cols, rows }) },
   });
 }
 
+/** Reports whether this viewer's terminal has focus. */
 export function createFocusMessage(focused: boolean): ClientMessage {
   return create(ClientMessageSchema, {
     message: { case: 'focus', value: create(FocusChangeSchema, { focused }) },
   });
 }
 
+/** A keepalive ping, used to time the stream round trip. */
 export function createPingMessage(): ClientMessage {
   return create(ClientMessageSchema, { message: { case: 'ping', value: create(PingSchema, {}) } });
 }
 
+/** Asks the server to resend the screen. */
 export function createRefreshMessage(): ClientMessage {
   return create(ClientMessageSchema, {
     message: { case: 'refresh', value: create(RequestRefreshSchema, {}) },
