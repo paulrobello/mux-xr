@@ -2853,15 +2853,17 @@ export function createWorkspaceScene(
       wristWatch.setVisible(Boolean(rightVisual?.root.visible));
       if (rightVisual?.root.visible)
         wristWatch.update(
-          rightVisual.wristPosition,
-          rightVisual.palmForward,
-          rightVisual.wristBackNormal,
+          rightVisual.root.userData.wristPosition as THREE.Vector3,
+          rightVisual.root.userData.palmForward as THREE.Vector3,
+          rightVisual.root.userData.wristBackNormal as THREE.Vector3,
         );
       const watchWasNear = wristWatch.near;
       let watchPressed = false;
       if (!leftVisual?.root.visible || !wristWatch.root.visible) wristWatch.updateTouch(null);
       else if (
-        wristWatch.root.getWorldPosition(watchProbeCenter).distanceTo(leftVisual.palmPosition) >=
+        wristWatch.root
+          .getWorldPosition(watchProbeCenter)
+          .distanceTo(leftVisual.root.userData.palmPosition as THREE.Vector3) >=
         WRIST_WATCH_PROBE_REACH
       )
         // Reading contactProbes skins the hand's probe vertices, which cannot touch from here.
@@ -2906,8 +2908,8 @@ export function createWorkspaceScene(
         }
         const wasNear = Boolean(contactSamples.get(controller)?.nearKeyboard);
         const sample = query.sample(
-          visual.indexTip,
-          visual.palmPosition,
+          visual.root.userData.indexTip as THREE.Vector3,
+          visual.root.userData.palmPosition as THREE.Vector3,
           keyboardSurface(),
           !gripActive(),
         );
