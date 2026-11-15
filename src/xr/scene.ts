@@ -165,6 +165,7 @@ import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
 import {
   ARMED_STYLE,
+  addColorSwatchRows,
   COMMAND_TOOL_HINTS,
   COMMAND_TOOLS,
   CONFIRM_LABELS,
@@ -178,6 +179,7 @@ import {
   stackAboveControls,
 } from './panel-ui';
 import { PANELS } from './panels';
+import { accentPanel } from './panels/accent';
 import { createPictureFrameWidget, PICTURE_KIND } from './picture-frame';
 import type { PictureImage } from './picture-image';
 import {
@@ -4181,29 +4183,6 @@ export function createWorkspaceScene(
     }
     inputRoot.scale.setScalar(0.38);
   };
-  /** Adds captioned rows of color swatches; each swatch shows its own color, a white border the current one. */
-  const addColorSwatchRows = (
-    root: THREE.Group,
-    top: number,
-    rows: ReadonlyArray<readonly [string, string, string, string]>,
-  ): void => {
-    for (const [row, [caption, action, current, empty]] of rows.entries()) {
-      const y = top - row * 0.24;
-      const label = createLabelButton(caption, 0.6, 0.08, { inputAction: 'noop' });
-      label.position.y = y;
-      root.add(label);
-      for (const [index, { name, color }] of HAND_COLOR_PRESETS.entries()) {
-        const swatch = createLabelButton(color ? name : empty, 0.19, 0.1, {
-          inputAction: action,
-          [action]: color,
-          labelBackground: color || '#1c2a35',
-          ...(current === color ? { labelBorder: '#ffffff' } : {}),
-        });
-        swatch.position.set((index - (HAND_COLOR_PRESETS.length - 1) / 2) * 0.21, y - 0.11, 0);
-        root.add(swatch);
-      }
-    }
-  };
   const refreshInputRoot = (mode: InputMode): void => {
     if (mode !== 'picture-gallery' && inputMode === 'picture-gallery') releaseRecentPictures();
     if (mode !== 'warp') settleWarpPanel(false);
@@ -4665,15 +4644,7 @@ export function createWorkspaceScene(
       accentButton.position.set(0.39, -0.37, 0);
       inputRoot.add(zip, accentButton);
     } else if (mode === 'accent') {
-      addColorSwatchRows(inputRoot, 0.38, [
-        ['Interface accent', 'accentColor', mutableState.accentColor, 'Default'],
-        [
-          'Environment accent',
-          'environmentAccentColor',
-          mutableState.environmentAccentColor,
-          'Match',
-        ],
-      ]);
+      accentPanel.build(inputRoot, buildContext());
     } else if (mode === 'weather-zip') {
       const field = createLabelButton(
         `ZIP: ${weatherZipDraft}${weatherZipDraft.length < 5 ? '|' : ''}`,
