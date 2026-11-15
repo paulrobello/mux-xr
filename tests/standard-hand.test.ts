@@ -265,6 +265,24 @@ describe('standard XR hand', () => {
     },
   );
 
+  it('keeps the arm fade, glow and visibility through the model load', async () => {
+    const hand = createStandardHand({ loader: parsedLoader() });
+    hand.setArmGlow('#ff0000');
+    hand.setArmVisible(false);
+    await hand.assetReady;
+    const arm = hand.root.getObjectByName('elastic-hand-arm') as THREE.Mesh;
+    const material = arm.material as THREE.MeshStandardMaterial;
+    expect(material.transparent).toBe(true);
+    expect(material.emissive.getHex()).toBe(0xff0000);
+    hand.update(poseSource(neutral.hands[0]), new THREE.PerspectiveCamera(), 'left', 1 / 60);
+    expect(arm.visible).toBe(false);
+    hand.setColor('#3366ff');
+    expect(material.emissive.getHex()).toBe(0xff0000);
+    hand.setArmGlow(null);
+    expect(material.emissive.getHex()).toBe(dim('#3366ff'));
+    hand.dispose();
+  });
+
   it('shows only the model for the side it is updated as and hides on tracking loss', async () => {
     const hand = createStandardHand({ loader: parsedLoader() });
     await hand.assetReady;

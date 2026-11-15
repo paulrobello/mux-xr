@@ -213,6 +213,27 @@ describe('scalable XR labels', () => {
     expect(root.userData.labelText).toBe('B');
   });
 
+  it('skips re-typesetting when the text is unchanged', async () => {
+    const root = createScalableLabel('Same', 0.12, 0.035);
+    const first = root.userData.labelSyncPromise;
+
+    updateScalableLabel(root, 'Same');
+    expect(root.userData.labelSyncPromise).toBe(first);
+
+    updateScalableLabel(root, 'Other');
+    expect(root.userData.labelSyncPromise).not.toBe(first);
+    expect(root.userData.labelText).toBe('Other');
+    await waitForLabelSync(root);
+    disposeScalableLabel(root);
+  });
+
+  it('sets the control id from the name option', () => {
+    const root = createScalableLabel('Named', 0.12, 0.035, { name: 'named-label' });
+    expect(root.name).toBe('named-label');
+    expect(root.userData.controlId).toBe('named-label');
+    disposeScalableLabel(root);
+  });
+
   it('defers Troika disposal until sync settles and disposes owned resources once', async () => {
     const root = createScalableLabel('⌫', 0.12, 0.035);
     const text = root.userData.labelTextObject as MockTextLike;

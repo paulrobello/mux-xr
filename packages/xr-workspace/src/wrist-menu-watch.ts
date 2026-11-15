@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { setControlId } from './control-ids';
 import type { HandContactProbe } from './hand-contact';
 import { updateScalableLabel } from './labels';
 import { applyUIEnvironment } from './ui-environment';
@@ -29,7 +30,7 @@ export function createWristMenuWatch(
   envMap: THREE.Texture | null = null,
 ): WristMenuWatch {
   const root = new THREE.Group();
-  root.name = 'xr-wrist-menu-watch';
+  setControlId(root, 'xr-wrist-menu-watch');
   root.visible = false;
   const caseGeometry = new THREE.BoxGeometry(0.06, 0.044, 0.012);
   const caseMaterial = applyUIEnvironment(
@@ -37,7 +38,7 @@ export function createWristMenuWatch(
     envMap,
   );
   const watchCase = new THREE.Mesh(caseGeometry, caseMaterial);
-  watchCase.name = 'xr-wrist-menu-watch-case';
+  setControlId(watchCase, 'xr-wrist-menu-watch-case');
   watchCase.raycast = () => undefined;
   const strapGeometry = new THREE.TorusGeometry(0.022, 0.005, 8, 20);
   const strapMaterial = applyUIEnvironment(
@@ -46,12 +47,12 @@ export function createWristMenuWatch(
   );
   const strap = new THREE.Mesh(strapGeometry, strapMaterial);
   strap.rotation.x = Math.PI / 2;
-  strap.name = 'xr-wrist-menu-watch-strap';
+  setControlId(strap, 'xr-wrist-menu-watch-strap');
   strap.raycast = () => undefined;
   const updateIndicatorGeometry = new THREE.CircleGeometry(0.003, 16);
   const updateIndicatorMaterial = new THREE.MeshBasicMaterial({ color: 0x35d7ff });
   const updateIndicator = new THREE.Mesh(updateIndicatorGeometry, updateIndicatorMaterial);
-  updateIndicator.name = 'xr-wrist-menu-update-indicator';
+  setControlId(updateIndicator, 'xr-wrist-menu-update-indicator');
   updateIndicator.position.set(0.023, 0.016, 0.016);
   updateIndicator.userData.inputAction = 'wristMenu';
   updateIndicator.userData.helpText = 'Update available. Open menu to reload.';

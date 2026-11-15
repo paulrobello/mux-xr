@@ -15,8 +15,9 @@ export {
   type WorkspaceColors,
 } from './accent-colors';
 export { installBatchedHandPoses } from './batched-hand-poses';
-export { type CartoonHand, createCartoonHand } from './cartoon-hand';
+export { type CartoonHand, type CartoonHandOptions, createCartoonHand } from './cartoon-hand';
 export { type ClockKind, createClockWidget } from './clock-widget';
+export { controlIdOf, findControl, setControlId } from './control-ids';
 export {
   type CurvedSurfaceOptions,
   type CurvedSurfaceSpan,
@@ -26,7 +27,14 @@ export {
   MAX_SURFACE_CURVATURE_RADIANS,
   validateSpan,
 } from './curved-surface';
-export { createElasticArm, type ElasticArm } from './elastic-arm';
+export {
+  type ArmNearFade,
+  applyArmNearFade,
+  createElasticArm,
+  DEFAULT_ARM_NEAR_FADE,
+  ELASTIC_ARM_RENDER_ORDER,
+  type ElasticArm,
+} from './elastic-arm';
 export {
   createEnvironmentController,
   ENVIRONMENT_FACTORIES,
@@ -117,6 +125,14 @@ export {
   waitForLabelSync,
 } from './labels';
 export {
+  createMenuPanel,
+  type MenuCell,
+  type MenuPanel,
+  type MenuPanelOptions,
+  type MenuRow,
+} from './menu-panel';
+export { keepAbove, OVERLAY_RENDER_ORDER } from './overlay-order';
+export {
   countsAsFrame,
   createFrameTimeHistory,
   createPerfGaugeWidget,
@@ -164,6 +180,15 @@ export {
   type PicturePickerAction,
 } from './picture-frame';
 export { frameSize, PICTURE_LONG_EDGE, PLACEHOLDER_ASPECT, type Size } from './picture-sizing';
+export {
+  type AxisRepeat,
+  type ButtonEdges,
+  createAxisRepeat,
+  createButtonEdges,
+  createPointer,
+  type Pointer,
+  type PointerHit,
+} from './pointer';
 export {
   createRadialMenu,
   type RadialMenu,
@@ -273,3 +298,10 @@ export {
   WRIST_WATCH_PROBE_REACH,
   type WristMenuWatch,
 } from './wrist-menu-watch';
+export {
+  createXrSession,
+  FOVEATION_LEVELS,
+  type FoveationLevel,
+  type XrSession,
+  type XrSessionOptions,
+} from './xr-session';

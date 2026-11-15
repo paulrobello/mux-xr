@@ -1,4 +1,4 @@
-import { createElasticArm } from '@par/xr-workspace';
+import { applyArmNearFade, createElasticArm, ELASTIC_ARM_RENDER_ORDER } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -50,5 +50,43 @@ describe('elastic arm', () => {
     arm.update(new THREE.Vector3(0, 2, 0), new THREE.Vector3(1, 2, 0), 0);
     expect(center(position, 12).y).toBeLessThan(2);
     arm.dispose();
+  });
+
+  it('stays hidden through updates after setVisible(false) and draws after scene content', () => {
+    const arm = createElasticArm(new THREE.MeshBasicMaterial());
+    const anchor = new THREE.Vector3();
+    const wrist = new THREE.Vector3(0, 0, 1);
+    expect(arm.mesh.renderOrder).toBe(ELASTIC_ARM_RENDER_ORDER);
+    arm.setVisible(false);
+    expect(arm.mesh.visible).toBe(false);
+    arm.update(anchor, wrist, 1);
+    expect(arm.mesh.visible).toBe(false);
+    arm.setVisible(true);
+    arm.update(anchor, wrist, 1);
+    expect(arm.mesh.visible).toBe(true);
+    arm.dispose();
+  });
+
+  it('fades the arm toward the eye through a patched fragment shader', () => {
+    const material = new THREE.MeshStandardMaterial();
+    const compile = (): string => {
+      const shader = { fragmentShader: 'a\n#include <opaque_fragment>\nb' };
+      material.onBeforeCompile(
+        shader as THREE.WebGLProgramParametersWithUniforms,
+        undefined as never,
+      );
+      return shader.fragmentShader;
+    };
+    applyArmNearFade(material, [0.3, 0.55]);
+    expect(material.transparent).toBe(true);
+    expect(compile()).toContain(
+      'smoothstep(0.300, 0.550, length(vViewPosition));\n#include <opaque_fragment>',
+    );
+    const key = material.customProgramCacheKey();
+    applyArmNearFade(material, [0.1, 0.2]);
+    expect(material.customProgramCacheKey()).not.toBe(key);
+    applyArmNearFade(material, false);
+    expect(material.transparent).toBe(false);
+    expect(compile()).toBe('a\n#include <opaque_fragment>\nb');
   });
 });

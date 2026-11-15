@@ -3,10 +3,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../packages/xr-workspace/src/labels', () => import('./helpers/labels'));
 
-import type { HandContactProbe } from '@par/xr-workspace';
 import {
   createScalableLabel,
   createWristMenuWatch,
+  findControl,
+  type HandContactProbe,
   UI_ENV_MAP_INTENSITY,
   WRIST_WATCH_EXTENT,
 } from '@par/xr-workspace';
@@ -154,6 +155,19 @@ describe('wrist menu watch', () => {
     watch.dispose();
     expect(geometryDispose).toHaveBeenCalledOnce();
     expect(materialDispose).toHaveBeenCalledOnce();
+  });
+
+  it('gives the root, case, strap and indicator control ids equal to their names', () => {
+    const watch = makeWatch();
+    expect(findControl(watch.root, 'xr-wrist-menu-watch')).toBe(watch.root);
+    for (const name of [
+      'xr-wrist-menu-watch-case',
+      'xr-wrist-menu-watch-strap',
+      'xr-wrist-menu-update-indicator',
+    ]) {
+      expect(findControl(watch.root, name)).toBe(watch.root.getObjectByName(name));
+    }
+    watch.dispose();
   });
 
   it('disposes owned case and strap resources but preserves the button resource', () => {
