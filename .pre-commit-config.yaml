@@ -6,11 +6,20 @@ repos:
         entry: gitleaks git --staged --redact --no-banner
         language: system
         pass_filenames: false
+        stages: [pre-commit]
       - id: checkall
         name: Fast project gate
         entry: bash scripts/fast-gate.sh
         language: system
         pass_filenames: false
+        stages: [pre-commit]
+      - id: checkall-ci
+        name: CI-parity project gate
+        entry: make checkall-ci
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c
     hooks:
