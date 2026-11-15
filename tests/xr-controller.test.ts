@@ -4290,6 +4290,7 @@ describe('native XR controller event routing', () => {
       widgetKind: 'digital-clock',
     });
     button.userData.widgetKind = 'unregistered-widget';
+    (button.userData.action as { widgetKind?: string }).widgetKind = 'unregistered-widget';
     hit(workspace, { inputAction: 'toggleWidget', widgetKind: 'unregistered-widget' });
     expect(workspace.state.widgets).toEqual([]);
     workspace.dispose();

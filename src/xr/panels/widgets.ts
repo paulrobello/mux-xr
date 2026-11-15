@@ -1,4 +1,5 @@
 import type * as THREE from 'three';
+import { actionData } from '../panel-actions';
 import { createLabelButton } from '../panel-ui';
 import type { PanelModule, SceneContext } from '../scene-context';
 import { layoutWidgetPanel } from '../widget-panel-layout';
@@ -24,7 +25,7 @@ export const widgetsPanel: PanelModule = {
           displayName,
         rect.width,
         rect.height,
-        { inputAction: 'toggleWidget', widgetKind: kind },
+        actionData({ type: 'toggleWidget', widgetKind: kind }),
       );
       button.position.set(rect.x, rect.y, 0);
       root.add(button);
@@ -35,7 +36,7 @@ export const widgetsPanel: PanelModule = {
         `${layout.page + 1} / ${layout.pages}`,
         caption.width,
         caption.height,
-        { inputAction: 'noop' },
+        actionData({ type: 'noop' }),
       );
       pageLabel.position.set(caption.x, caption.y, 0);
       root.add(pageLabel);
@@ -44,29 +45,35 @@ export const widgetsPanel: PanelModule = {
         ['Next', 1, next],
       ] as const) {
         const enabled = delta < 0 ? layout.page > 0 : layout.page < layout.pages - 1;
-        const button = createLabelButton(label, rect.width, rect.height, {
-          inputAction: enabled ? 'widgetsPage' : 'noop',
-          delta,
-        });
+        const button = createLabelButton(
+          label,
+          rect.width,
+          rect.height,
+          actionData({ type: enabled ? 'widgetsPage' : 'noop', delta }),
+        );
         button.position.set(rect.x, rect.y, 0);
         button.visible = enabled;
         root.add(button);
       }
     }
   },
-  handleEarly(action, hit, ctx) {
-    if (action === 'widgetsPage') {
-      ctx.widgetsPage += Number(hit.userData.delta) || 0;
-      ctx.refreshInputRoot('widgets');
-      return true;
+  handleActionEarly(action, _hit, ctx) {
+    switch (action.type) {
+      case 'widgetsPage':
+        ctx.widgetsPage += Number(action.delta) || 0;
+        ctx.refreshInputRoot('widgets');
+        return true;
+      default:
+        return false;
     }
-    return false;
   },
-  handle(action, hit, ctx) {
-    if (action === 'toggleWidget') {
-      if (isWidgetKind(hit.userData.widgetKind)) ctx.toggleWidget(hit.userData.widgetKind);
-      return true;
+  handleAction(action, _hit, ctx) {
+    switch (action.type) {
+      case 'toggleWidget':
+        if (isWidgetKind(action.widgetKind)) ctx.toggleWidget(action.widgetKind);
+        return true;
+      default:
+        return false;
     }
-    return false;
   },
 };

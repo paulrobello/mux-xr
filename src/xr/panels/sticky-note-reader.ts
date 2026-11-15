@@ -1,5 +1,6 @@
 import { createScalableLabel } from '@par/xr-workspace';
 import * as THREE from 'three';
+import { actionData } from '../panel-actions';
 import { createLabelButton } from '../panel-ui';
 import type { PanelModule, SceneContext } from '../scene-context';
 
@@ -17,24 +18,29 @@ export const stickyNoteReaderPanel: PanelModule = {
     for (const direction of [-1, 1]) {
       if (ctx.notePage + direction < 0 || ctx.notePage + direction >= ctx.notePages.length)
         continue;
-      const button = createLabelButton(direction < 0 ? 'Previous' : 'Next', 0.36, 0.1, {
-        inputAction: 'stickyNotePage',
-        delta: direction,
-      });
+      const button = createLabelButton(
+        direction < 0 ? 'Previous' : 'Next',
+        0.36,
+        0.1,
+        actionData({ type: 'stickyNotePage', delta: direction }),
+      );
       button.position.set(direction * 0.4, -0.52, 0);
       root.add(button);
     }
   },
-  handle(action, hit, ctx) {
-    if (action === 'stickyNotePage') {
-      ctx.notePage = THREE.MathUtils.clamp(
-        ctx.notePage + Number(hit.userData.delta),
-        0,
-        ctx.notePages.length - 1,
-      );
-      ctx.refreshInputRoot('sticky-note-reader');
-      return true;
+  handleAction(action, _hit, ctx) {
+    switch (action.type) {
+      case 'stickyNotePage': {
+        ctx.notePage = THREE.MathUtils.clamp(
+          ctx.notePage + Number(action.delta),
+          0,
+          ctx.notePages.length - 1,
+        );
+        ctx.refreshInputRoot('sticky-note-reader');
+        return true;
+      }
+      default:
+        return false;
     }
-    return false;
   },
 };

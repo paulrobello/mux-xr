@@ -139,6 +139,7 @@ import {
 } from './label-batches';
 import { createMessageToastLayer } from './message-toasts';
 import { createPaneFocus } from './pane-focus';
+import { actionData, getAction, type PanelAction, setAction } from './panel-actions';
 import { measurePanelBounds } from './panel-bounds';
 import {
   CONFIRM_LABELS,
@@ -4207,23 +4208,28 @@ export function createWorkspaceScene(
     }
     if (previousPair) beginPairGrab(inputRoot, ...previousPair.controllers);
     const panel = PANELS[mode];
-    const title = createLabelButton(panel.title(buildContext()), panel.titleWidth ?? 0.9, 0.12, {
-      inputAction: 'grabInput',
-    });
+    const title = createLabelButton(
+      panel.title(buildContext()),
+      panel.titleWidth ?? 0.9,
+      0.12,
+      actionData({ type: 'grabInput' }),
+    );
     title.userData.dragHandle = true;
     title.position.y = panel.titleY ?? 0.56;
     inputRoot.add(title);
     PANELS[mode].build(inputRoot, buildContext());
-    const close = createLabelButton('Close', 0.3, 0.09, { inputAction: 'close' });
+    const close = createLabelButton('Close', 0.3, 0.09, actionData({ type: 'close' }));
     const closePosition = panel.closePosition?.(buildContext()) ?? { x: 0, y: -0.66 };
     close.position.set(closePosition.x, closePosition.y, 0);
     inputRoot.add(close);
     const backTarget = panel.back?.(buildContext());
     if (backTarget) {
-      const back = createLabelButton('Back', 0.3, 0.09, {
-        inputAction: 'openInput',
-        mode: backTarget.target,
-      });
+      const back = createLabelButton(
+        'Back',
+        0.3,
+        0.09,
+        actionData({ type: 'openInput', mode: backTarget.target }),
+      );
       back.position.set(backTarget.x, backTarget.y, 0);
       inputRoot.add(back);
     }
@@ -4272,7 +4278,7 @@ export function createWorkspaceScene(
       backing.material.opacity = 0;
       backing.material.depthWrite = false;
     }
-    backing.userData.inputAction = 'grabInput';
+    setAction(backing, { type: 'grabInput' });
     backing.userData.helpText = getControlHelp({ inputAction: 'grabInput' });
     inputRoot.add(backing);
     if (keyboardRadians) curveKeyboardContent(inputRoot, size.x + 0.12, keyboardRadians);
@@ -4319,18 +4325,25 @@ export function createWorkspaceScene(
     toastLabel.position.set(0, 0.45, 0);
     toastLabel.visible = Boolean(mutableState.toast);
     hudRoot.add(toastLabel);
-    updateNotice = createLabelButton('Update: Reload', 0.42, 0.09, { inputAction: 'reloadUpdate' });
+    updateNotice = createLabelButton(
+      'Update: Reload',
+      0.42,
+      0.09,
+      actionData({ type: 'reloadUpdate' }),
+    );
     updateNotice.position.set(0, 0.16, 0);
     updateNotice.visible = false;
     hudRoot.add(updateNotice);
-    statusNotice = createLabelButton(mutableState.notice ?? '', 1.4, 0.075, {
-      inputAction: 'dismissNotice',
-      wrap: true,
-    });
+    statusNotice = createLabelButton(
+      mutableState.notice ?? '',
+      1.4,
+      0.075,
+      actionData({ type: 'dismissNotice' }, { wrap: true }),
+    );
     statusNotice.position.set(0, 0.3, 0);
     statusNotice.visible = Boolean(mutableState.notice);
     hudRoot.add(statusNotice);
-    statusDismiss = createLabelButton('×', 0.075, 0.075, { inputAction: 'dismissNotice' });
+    statusDismiss = createLabelButton('×', 0.075, 0.075, actionData({ type: 'dismissNotice' }));
     statusDismiss.position.set(0.78, 0.3, 0);
     statusDismiss.visible = Boolean(mutableState.notice);
     hudRoot.add(statusDismiss);
@@ -4509,6 +4522,7 @@ export function createWorkspaceScene(
     if (panel) resizePanel(panel, direction);
   };
   const handleInputTarget = (hit: THREE.Object3D): boolean => {
+    console.log('[hit-entry]', hit.userData.inputAction, hit.userData.action?.type);
     const action = hit.userData.inputAction as string | undefined;
     const keepArmed =
       !action ||
@@ -4522,8 +4536,90 @@ export function createWorkspaceScene(
     if (disarmed && inputRoot && inputRoot === root) refreshInputRoot(inputMode);
     return handled;
   };
+  function sharedEarlyAction(
+    action: PanelAction,
+    _hit: THREE.Object3D,
+    _ctx: SceneContext,
+  ): boolean {
+    switch (action.type) {
+      case 'scrollStrip':
+        return true;
+      case 'handColor':
+        setHandColor(String(action.handColor ?? '') || null);
+        return true;
+      case 'armColor':
+        setArmColor(String(action.armColor ?? '') || null);
+        return true;
+      case 'accentColor':
+        setAccentColor(String(action.accentColor ?? '') || null);
+        return true;
+      case 'environmentAccentColor':
+        setEnvironmentAccentColor(String(action.environmentAccentColor ?? '') || null);
+        return true;
+      case 'closePane':
+        if (action.terminalId) actions.closePane(action.terminalId);
+        return true;
+      case 'toggleConnection':
+        if (action.terminalId) actions.togglePaneConnection?.(action.terminalId);
+        return true;
+      case 'bringHere':
+        if (action.terminalId) bringTerminalHere(action.terminalId);
+        return true;
+      case 'keepHere':
+        keepFocusPlacement();
+        return true;
+      case 'grabInput':
+        return true;
+      default:
+        return false;
+    }
+  }
+  function sharedLateAction(
+    action: PanelAction,
+    _hit: THREE.Object3D,
+    _ctx: SceneContext,
+  ): boolean {
+    switch (action.type) {
+      case 'dismissNotice':
+        setNotice(null);
+        return true;
+      case 'dismissToast': {
+        const id = action.toastId;
+        if (typeof id === 'string' && messageToasts.dismiss(id)) options.onToastDismissed?.(id);
+        return true;
+      }
+      case 'reloadUpdate': {
+        if (radialMenu.root.visible) {
+          radialMenu.close();
+          mutableState.radialOpen = false;
+        }
+        actions.reloadApp?.();
+        return true;
+      }
+      case 'exit': {
+        if (!confirmControl('exit')) return true;
+        hideInput();
+        if (activeSession) void activeSession.end();
+        else actions.exitPreview?.();
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
   const handleInputTargetAction = (hit: THREE.Object3D): boolean => {
-    const action = hit.userData.inputAction as string | undefined;
+    const typed = getAction(hit);
+    if (typed) {
+      console.log('[typed-stage]', typed.type, 'inputMode=', inputMode);
+      if (typed.type === 'noop') return false;
+      const ctx = buildContext();
+      if (PANELS[inputMode].handleActionEarly?.(typed, hit, ctx)) return true;
+      if (sharedEarlyAction(typed, hit, ctx)) return true;
+      if (radialMenu.root.visible && !radialMenu.interactive) return true;
+      if (PANELS[inputMode].handleAction?.(typed, hit, ctx)) return true;
+      if (sharedLateAction(typed, hit, ctx)) return true;
+    }
+    const action = typed?.type ?? (hit.userData.inputAction as string | undefined);
     if (action === 'scrollStrip') return true;
     if (PANELS[inputMode]?.handleEarly?.(action, hit, buildContext())) return true;
     if (action === 'handColor') {

@@ -18,6 +18,7 @@ import type { WindowPreferences } from '../workspace/window-preferences';
 import type { BellFeedStore } from './bell-feed';
 import type { CommandDraft } from './command-editor';
 import type { HierarchyNavigation, HierarchyNavigator } from './hierarchy-navigator';
+import type { PanelAction } from './panel-actions';
 import type { CommandTool, ConfirmAction } from './panel-ui';
 import type { PictureImage } from './picture-image';
 import type {
@@ -207,6 +208,10 @@ export interface PanelModule {
    * declined). Return true when the action belongs to this panel.
    */
   handle?(action: string | undefined, hit: THREE.Object3D, ctx: SceneContext): boolean;
+  /** Typed variant of handleEarly for panels migrated to the PanelAction union. */
+  handleActionEarly?(action: PanelAction, hit: THREE.Object3D, ctx: SceneContext): boolean;
+  /** Typed variant of handle for panels migrated to the PanelAction union. */
+  handleAction?(action: PanelAction, hit: THREE.Object3D, ctx: SceneContext): boolean;
   /** The drag-handle label text. */
   title(ctx: SceneContext): string;
   /** Drag-handle width; the shared default is 0.9. */

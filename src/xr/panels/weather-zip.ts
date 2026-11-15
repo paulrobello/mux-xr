@@ -1,5 +1,6 @@
 import { validateWeatherZip } from '@par/xr-workspace';
 import type * as THREE from 'three';
+import { actionData, type PanelAction } from '../panel-actions';
 import { createLabelButton, setModifierVisual } from '../panel-ui';
 import type { PanelModule, SceneContext } from '../scene-context';
 
@@ -15,7 +16,7 @@ export const weatherZipPanel: PanelModule = {
   build(root: THREE.Group, ctx: SceneContext): void {
     const draft = ctx.weatherZipDraft;
     const field = createLabelButton(`ZIP: ${draft}${draft.length < 5 ? '|' : ''}`, 0.76, 0.12, {
-      inputAction: 'noop',
+      ...actionData({ type: 'noop' }),
     });
     field.name = 'xr-weather-zip-field';
     field.position.y = 0.4;
@@ -30,53 +31,60 @@ export const weatherZipPanel: PanelModule = {
     for (const [row, labels] of keys.entries())
       for (const [column, key] of labels.entries()) {
         const digit = /^\d$/.test(key);
-        const button = createLabelButton(key, 0.22, 0.12, {
-          inputAction: digit ? 'zipDigit' : key === 'Clear' ? 'zipClear' : 'zipDelete',
-          ...(digit ? { zipDigit: key } : {}),
-        });
+        const button = createLabelButton(
+          key,
+          0.22,
+          0.12,
+          actionData({
+            type: digit ? 'zipDigit' : key === 'Clear' ? 'zipClear' : 'zipDelete',
+            ...(digit ? { zipDigit: key } : {}),
+          } as PanelAction),
+        );
         button.name = `xr-weather-zip-key-${digit ? key : key === 'Clear' ? 'clear' : 'delete'}`;
         button.position.set((column - 1) * 0.25, 0.24 - row * 0.14, 0);
         root.add(button);
       }
-    const save = createLabelButton('Save', 0.36, 0.1, { inputAction: 'zipSave' });
+    const save = createLabelButton('Save', 0.36, 0.1, actionData({ type: 'zipSave' }));
     save.name = 'xr-weather-zip-save';
     save.position.set(-0.2, -0.36, 0);
-    const unset = createLabelButton('Remove ZIP', 0.36, 0.1, { inputAction: 'zipUnset' });
+    const unset = createLabelButton('Remove ZIP', 0.36, 0.1, actionData({ type: 'zipUnset' }));
     unset.name = 'xr-weather-zip-unset';
     unset.position.set(0.2, -0.36, 0);
     root.add(save, unset);
     const message = ctx.weatherZipMessage;
     if (message) {
-      const note = createLabelButton(message, 0.76, 0.08, { inputAction: 'noop' });
+      const note = createLabelButton(message, 0.76, 0.08, actionData({ type: 'noop' }));
       note.name = 'xr-weather-zip-message';
       note.position.y = -0.48;
       root.add(note);
     }
   },
-  handleEarly(action, hit, ctx) {
-    if (
-      action !== 'zipDigit' &&
-      action !== 'zipDelete' &&
-      action !== 'zipClear' &&
-      action !== 'zipSave' &&
-      action !== 'zipUnset'
-    )
-      return false;
+  handleActionEarly(action, _hit, ctx) {
+    switch (action.type) {
+      case 'zipDigit':
+      case 'zipDelete':
+      case 'zipClear':
+      case 'zipSave':
+      case 'zipUnset':
+        break;
+      default:
+        return false;
+    }
     ctx.weatherZipMessage = '';
     const draft = ctx.weatherZipDraft;
-    if (action === 'zipDigit' && draft.length < 5)
+    if (action.type === 'zipDigit' && draft.length < 5)
       ctx.weatherZipDraft =
         draft +
-        String(hit.userData.zipDigit ?? '')
+        String(action.zipDigit ?? '')
           .replace(/\D/g, '')
           .slice(0, 1);
-    else if (action === 'zipDelete') ctx.weatherZipDraft = draft.slice(0, -1);
-    else if (action === 'zipClear') ctx.weatherZipDraft = '';
-    else if (action === 'zipUnset') {
+    else if (action.type === 'zipDelete') ctx.weatherZipDraft = draft.slice(0, -1);
+    else if (action.type === 'zipClear') ctx.weatherZipDraft = '';
+    else if (action.type === 'zipUnset') {
       ctx.setWeatherZip('');
       ctx.showInput('world');
       return true;
-    } else if (action === 'zipSave') {
+    } else if (action.type === 'zipSave') {
       if (!validateWeatherZip(draft)) ctx.weatherZipMessage = 'Enter all five digits';
       else {
         ctx.setWeatherZip(draft);

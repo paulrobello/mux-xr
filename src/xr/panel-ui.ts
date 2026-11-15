@@ -4,6 +4,7 @@ import type { BackgroundMode } from '../contracts';
 import { getControlHelp } from '../control-help';
 import { accent } from './accent-state';
 import { BACKGROUND_LABELS } from './background-picker';
+import { actionData, type PanelAction } from './panel-actions';
 
 /**
  * Shared construction helpers for the XR panel modules under `panels/`. Both the scene factory and
@@ -83,16 +84,19 @@ export function addColorSwatchRows(
 ): void {
   for (const [row, [caption, action, current, empty]] of rows.entries()) {
     const y = top - row * 0.24;
-    const label = createLabelButton(caption, 0.6, 0.08, { inputAction: 'noop' });
+    const label = createLabelButton(caption, 0.6, 0.08, actionData({ type: 'noop' }));
     label.position.y = y;
     root.add(label);
     for (const [index, { name, color }] of HAND_COLOR_PRESETS.entries()) {
-      const swatch = createLabelButton(color ? name : empty, 0.19, 0.1, {
-        inputAction: action,
-        [action]: color,
-        labelBackground: color || '#1c2a35',
-        ...(current === color ? { labelBorder: '#ffffff' } : {}),
-      });
+      const swatch = createLabelButton(
+        color ? name : empty,
+        0.19,
+        0.1,
+        actionData({ type: action, [action]: color } as PanelAction, {
+          labelBackground: color || '#1c2a35',
+          ...(current === color ? { labelBorder: '#ffffff' } : {}),
+        }),
+      );
       swatch.position.set((index - (HAND_COLOR_PRESETS.length - 1) / 2) * 0.21, y - 0.11, 0);
       root.add(swatch);
     }
