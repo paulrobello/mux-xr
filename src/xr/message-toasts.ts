@@ -12,6 +12,7 @@ import {
   type ToastLevel,
   type ToastPlacement,
 } from '../toast-contract';
+import { setAction } from './panel-actions';
 import { createToastQueue, type QueuedToast, toastSlots } from './toast-queue';
 import { disposeOwned } from './widgets';
 
@@ -109,8 +110,8 @@ function createCard(placement: ToastPlacement, index: number): Card {
     new THREE.MeshBasicMaterial({ color: CARD_BACKGROUND }),
   );
   plate.name = 'xr-toast-plate';
-  plate.userData.inputAction = 'dismissToast';
-  plate.userData.helpText = getControlHelp({ inputAction: 'dismissToast' });
+  setAction(plate, { type: 'dismissToast' });
+  plate.userData.helpText = getControlHelp({ type: 'dismissToast' });
   const stripe = new THREE.Mesh(
     new THREE.PlaneGeometry(STRIPE_WIDTH, TOAST_CARD_HEIGHT),
     new THREE.MeshBasicMaterial({ color: 0xffffff }),
@@ -130,8 +131,8 @@ function createCard(placement: ToastPlacement, index: number): Card {
   text.position.set(-TOAST_CARD_WIDTH / 2 + STRIPE_WIDTH + 0.02 + textWidth / 2, 0, 0.002);
   const close = createScalableLabel('×', CLOSE_SIZE, CLOSE_SIZE, { background: '#223946' });
   close.name = 'xr-toast-close';
-  close.userData.inputAction = 'dismissToast';
-  close.userData.helpText = getControlHelp({ inputAction: 'dismissToast' });
+  setAction(close, { type: 'dismissToast' });
+  close.userData.helpText = getControlHelp({ type: 'dismissToast' });
   close.position.set(
     TOAST_CARD_WIDTH / 2 - CLOSE_SIZE / 2 - 0.015,
     TOAST_CARD_HEIGHT / 2 - CLOSE_SIZE / 2 - 0.015,
@@ -193,8 +194,10 @@ export function createMessageToastLayer(): MessageToastLayer {
         const entry = visible[index];
         card.group.visible = Boolean(entry);
         card.id = entry?.toast.id ?? null;
-        card.plate.userData.toastId = card.id;
-        card.close.userData.toastId = card.id;
+        for (const target of [card.plate, card.close]) {
+          setAction(target, { type: 'dismissToast', toastId: card.id ?? undefined });
+          target.userData.toastId = card.id;
+        }
         if (!entry) return;
         const text = toastCardText(entry);
         if (card.text.userData.labelText !== text) updateScalableLabel(card.text, text);

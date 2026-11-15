@@ -1,4 +1,5 @@
 import type { PaneDescriptor } from '../contracts';
+import { validPose } from '../pose-validation';
 import { legacyPoseToWorld, type SavedUIPose } from '../xr/ui-poses';
 
 export interface SavedOpenView {
@@ -16,28 +17,10 @@ export interface OpenViewsProfile {
 }
 
 const VERSION = 2;
+/** Open-view poses were saved from farther layouts than widget poses, so they allow 100 m. */
+const MAX_VIEW_POSE_DISTANCE = 100;
 const KEY_PREFIX = 'mux-xr:open-views:v2:';
 const LEGACY_KEY_PREFIX = 'mux-xr:open-views:v1:';
-
-function validPose(value: unknown): value is SavedUIPose {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Partial<SavedUIPose>;
-  if (!Array.isArray(candidate.position) || candidate.position.length !== 3) return false;
-  if (!candidate.position.every((part) => typeof part === 'number' && Number.isFinite(part)))
-    return false;
-  if (Math.hypot(...candidate.position) > 100) return false;
-  if (!Array.isArray(candidate.quaternion) || candidate.quaternion.length !== 4) return false;
-  if (!candidate.quaternion.every((part) => typeof part === 'number' && Number.isFinite(part)))
-    return false;
-  const length = Math.hypot(...candidate.quaternion);
-  if (length < 1e-8 || Math.abs(length - 1) > 1e-4) return false;
-  return (
-    typeof candidate.scale === 'number' &&
-    Number.isFinite(candidate.scale) &&
-    candidate.scale >= 0.2 &&
-    candidate.scale <= 3
-  );
-}
 
 function validView(value: unknown): value is SavedOpenView {
   if (!value || typeof value !== 'object') return false;
@@ -48,7 +31,7 @@ function validView(value: unknown): value is SavedOpenView {
     typeof candidate.sessionId === 'string' &&
     typeof candidate.windowId === 'string' &&
     (candidate.title === undefined || typeof candidate.title === 'string') &&
-    (candidate.pose === undefined || validPose(candidate.pose))
+    (candidate.pose === undefined || validPose(candidate.pose, MAX_VIEW_POSE_DISTANCE))
   );
 }
 

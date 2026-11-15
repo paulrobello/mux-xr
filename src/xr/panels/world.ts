@@ -2,6 +2,7 @@ import type * as THREE from 'three';
 import { backgroundPickerRowShowing } from '../background-picker';
 import { DESK_WINDOW_KIND } from '../desk-window';
 import { XR_ENTRY_LABELS, type XrEntryMode } from '../entry';
+import { actionData } from '../panel-actions';
 import {
   addColorSwatchRows,
   createBackgroundSelect,
@@ -30,7 +31,7 @@ export const worldPanel: PanelModule = {
         ['Desk Window', 'desk'],
       ] as const
     ).entries()) {
-      const button = createLabelButton(label, 0.46, 0.12, { inputAction: 'xrMode', xrMode });
+      const button = createLabelButton(label, 0.46, 0.12, actionData({ type: 'xrMode', xrMode }));
       button.position.set((index - 1) * 0.51, 0.28, 0);
       setModifierVisual(button, activeMode === xrMode);
       root.add(button);
@@ -43,29 +44,33 @@ export const worldPanel: PanelModule = {
       `Weather ZIP: ${ctx.mutableState.weatherZip || 'not set'}`,
       0.76,
       0.1,
-      { inputAction: 'openInput', mode: 'weather-zip' },
+      actionData({ type: 'openInput', mode: 'weather-zip' }),
     );
     zip.name = 'xr-weather-zip-button';
     zip.position.set(-0.4, -0.37, 0);
-    const accentButton = createLabelButton('Accent colors', 0.6, 0.1, {
-      inputAction: 'openInput',
-      mode: 'accent',
-    });
+    const accentButton = createLabelButton(
+      'Accent colors',
+      0.6,
+      0.1,
+      actionData({ type: 'openInput', mode: 'accent' }),
+    );
     accentButton.name = 'xr-accent-colors-button';
     accentButton.position.set(0.39, -0.37, 0);
     root.add(zip, accentButton);
   },
-  handleEarly(action, _hit, ctx) {
-    if (action === 'backgroundSelect') {
-      ctx.backgroundRow = backgroundPickerRowShowing(ctx.mutableState.background, 0);
-      ctx.showInput('backgrounds');
-      return true;
+  handleActionEarly(action, _hit, ctx) {
+    switch (action.type) {
+      case 'backgroundSelect':
+        ctx.backgroundRow = backgroundPickerRowShowing(ctx.mutableState.background, 0);
+        ctx.showInput('backgrounds');
+        return true;
+      default:
+        return false;
     }
-    return false;
   },
-  handle(action, hit, ctx) {
-    if (action !== 'xrMode') return false;
-    const mode = hit.userData.xrMode as XrEntryMode;
+  handleAction(action, _hit, ctx) {
+    if (action.type !== 'xrMode') return false;
+    const mode = action.xrMode as XrEntryMode;
     if (
       ctx.mutableState.xrMode === 'ar' &&
       (mode !== 'vr' || ctx.activeSession?.environmentBlendMode === 'alpha-blend')

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { actionData, setAction } from '../panel-actions';
 import { createLabelButton } from '../panel-ui';
 import type { PanelModule, SceneContext } from '../scene-context';
 import { addPicturePanelMessage } from './picture-url';
@@ -19,7 +20,7 @@ export const pictureGalleryPanel: PanelModule = {
             : 'No recent pictures yet',
         1.3,
         0.1,
-        { inputAction: 'noop' },
+        actionData({ type: 'noop' }),
       );
       status.name = 'xr-recent-status';
       status.position.y = 0.1;
@@ -41,16 +42,15 @@ export const pictureGalleryPanel: PanelModule = {
           new THREE.MeshBasicMaterial({ map: texture, toneMapped: false }),
         );
         tile.name = 'xr-recent-thumbnail';
-        Object.assign(tile.userData, {
-          inputAction: 'pictureRecentPlace',
-          recentId: entry.id,
-          helpText: `Put ${entry.name} in the frame`,
-        });
+        setAction(tile, { type: 'pictureRecentPlace', recentId: entry.id });
+        tile.userData.helpText = `Put ${entry.name} in the frame`;
         tile.position.set(x, y, 0);
-        const remove = createLabelButton('×', 0.12, 0.12, {
-          inputAction: 'pictureRecentRemove',
-          recentId: entry.id,
-        });
+        const remove = createLabelButton(
+          '×',
+          0.12,
+          0.12,
+          actionData({ type: 'pictureRecentRemove', recentId: entry.id }),
+        );
         remove.name = 'xr-recent-remove';
         remove.userData.helpText = `Remove ${entry.name} from Recent`;
         // Centred on the thumbnail's top-right corner: pinch-sized (0.12 is 46 mm) while covering
@@ -59,27 +59,33 @@ export const pictureGalleryPanel: PanelModule = {
         root.add(tile, remove);
       });
       if (pages > 1) {
-        const caption = createLabelButton(`${ctx.recentPage + 1} / ${pages}`, 0.3, 0.09, {
-          inputAction: 'noop',
-        });
+        const caption = createLabelButton(
+          `${ctx.recentPage + 1} / ${pages}`,
+          0.3,
+          0.09,
+          actionData({ type: 'noop' }),
+        );
         caption.position.y = -0.3;
         root.add(caption);
         for (const [label, delta, x] of [
           ['Prev', -1, -0.5],
           ['Next', 1, 0.5],
         ] as const) {
-          const page = createLabelButton(label, 0.34, 0.12, {
-            inputAction: (delta < 0 ? ctx.recentPage > 0 : ctx.recentPage < pages - 1)
-              ? 'pictureRecentPage'
-              : 'noop',
-            delta,
-          });
+          const enabled = delta < 0 ? ctx.recentPage > 0 : ctx.recentPage < pages - 1;
+          const page = createLabelButton(
+            label,
+            0.34,
+            0.12,
+            actionData(enabled ? { type: 'pictureRecentPage', delta } : { type: 'noop' }, {
+              delta,
+            }),
+          );
           page.position.set(x, -0.3, 0);
           root.add(page);
         }
       }
     }
-    const enterUrl = createLabelButton('Enter URL', 0.5, 0.12, { inputAction: 'pictureUrl' });
+    const enterUrl = createLabelButton('Enter URL', 0.5, 0.12, actionData({ type: 'pictureUrl' }));
     // Shares the bottom row with Close, keeping the panel short and clear of the HUD bar.
     enterUrl.position.set(-0.3, -0.46, 0);
     root.add(enterUrl);

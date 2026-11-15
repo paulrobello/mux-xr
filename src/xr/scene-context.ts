@@ -66,6 +66,7 @@ export interface SceneContext {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
   readonly mutableState: WorkspaceSceneState;
+  readonly maxAnisotropy: number;
   readonly actions: WorkspaceActions;
   readonly panels: ReadonlyMap<string, TerminalPanel>;
   readonly widgets: ReadonlyMap<WidgetKey, Widget>;
@@ -200,17 +201,13 @@ export interface PanelModule {
   build(root: THREE.Group, ctx: SceneContext): void;
   /**
    * Claims the panel's actions the shared chain processes before the radial-animation swallow.
-   * Return true when the action belongs to this panel.
+   * Return true when the action belongs to this panel; every other type returns false.
    */
-  handleEarly?(action: string | undefined, hit: THREE.Object3D, ctx: SceneContext): boolean;
+  handleActionEarly?(action: PanelAction, hit: THREE.Object3D, ctx: SceneContext): boolean;
   /**
-   * Claims the panel's actions processed after that swallow (and after the shared fallback
+   * Claims the panel's actions processed after that swallow (and after the shared early chain
    * declined). Return true when the action belongs to this panel.
    */
-  handle?(action: string | undefined, hit: THREE.Object3D, ctx: SceneContext): boolean;
-  /** Typed variant of handleEarly for panels migrated to the PanelAction union. */
-  handleActionEarly?(action: PanelAction, hit: THREE.Object3D, ctx: SceneContext): boolean;
-  /** Typed variant of handle for panels migrated to the PanelAction union. */
   handleAction?(action: PanelAction, hit: THREE.Object3D, ctx: SceneContext): boolean;
   /** The drag-handle label text. */
   title(ctx: SceneContext): string;

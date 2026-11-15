@@ -54,7 +54,8 @@ import type {
   TerminalSurface,
   WorkspaceActions,
 } from '../contracts';
-import { getControlHelp } from '../control-help';
+import { getControlHelp, getControlHelpFor } from '../control-help';
+import { validPose } from '../pose-validation';
 import {
   copyCommand,
   isSharedCommand,
@@ -192,7 +193,6 @@ import {
   NOMINAL_VIEWER_HEIGHT,
   type SavedUIPose,
   type UIPoseName,
-  validPose,
 } from './ui-poses';
 import { updateVisibleMatrixWorld } from './visible-matrix-world';
 import { intersectVisible } from './visible-raycast';
@@ -302,6 +302,8 @@ export interface WorkspaceScene {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
   readonly state: Readonly<WorkspaceSceneState>;
+  /** The renderer's anisotropic filtering ceiling; 1 without a renderer. */
+  readonly maxAnisotropy: number;
   addTerminal(surface: TerminalSurface): void;
   removeTerminal(id: string): void;
   selectTerminal(id: string | null): void;
@@ -473,6 +475,7 @@ export function routeInput(
   return false;
 }
 
+const CONTEXT_LOST_NOTICE = 'The headset reclaimed graphics memory. Restoring the workspace.';
 const PANEL_WIDTH = 1.42;
 const PANEL_HEIGHT = 0.8;
 const _KEYBORB_DICTATION_COLUMN = 9;
@@ -829,7 +832,7 @@ export function createWorkspaceScene(
   const radialMenu = createRadialMenu();
   radialMenu.root.scale.setScalar(0.8);
   radialMenu.root.traverse((object) => {
-    object.userData.helpText = getControlHelp(object.userData);
+    object.userData.helpText = getControlHelpFor(object.userData);
   });
   scene.add(radialMenu.root);
   const terminalPoseCache = new Map<string, SavedUIPose>();
@@ -847,6 +850,7 @@ export function createWorkspaceScene(
       surface.pane.id,
     ]);
   scene.userData.maxAnisotropy = renderer?.capabilities.getMaxAnisotropy() ?? 1;
+  const maxAnisotropy = (): number => Number(scene.userData.maxAnisotropy ?? 1);
   let widgetRestorePending = true;
   let poseRestorePending = false;
   // Three keeps the XR camera at the origin (or the last session's pose) until a frame reports a
@@ -959,7 +963,12 @@ export function createWorkspaceScene(
     THREE.Group,
     { offset: THREE.Vector3; active: { value: boolean } }
   >();
-  const wristMenuButton = createLabelButton('Menu', 0.052, 0.035, { inputAction: 'wristMenu' });
+  const wristMenuButton = createLabelButton(
+    'Menu',
+    0.052,
+    0.035,
+    actionData({ type: 'wristMenu' }),
+  );
   const wristWatch = createWristMenuWatch(wristMenuButton, uiEnvironment.texture);
   let wristMenuLastPressed = Number.NEGATIVE_INFINITY;
   scene.add(wristWatch.root);
@@ -2224,11 +2233,7 @@ export function createWorkspaceScene(
       visual &&
         keyboardProximity
           .get(source)
-          ?.near(
-            visual.root.userData.indexTip as THREE.Vector3,
-            visual.root.userData.palmPosition as THREE.Vector3,
-            keyboardSurface(),
-          ),
+          ?.near(visual.indexTip, visual.palmPosition, keyboardSurface()),
     );
   };
   const suppressKeyboardRays = (): boolean => {
@@ -2312,8 +2317,8 @@ export function createWorkspaceScene(
       const tipsTracked = visual && (!hand || gesture?.tracked);
       const sample = keyborbInput.sample(
         controller,
-        tipsTracked ? (visual.root.userData.indexTip as THREE.Vector3) : null,
-        tipsTracked ? (visual.root.userData.thumbTip as THREE.Vector3) : null,
+        tipsTracked ? visual.indexTip : null,
+        tipsTracked ? visual.thumbTip : null,
         rayKey,
         Boolean(
           keyboard &&
@@ -2322,7 +2327,7 @@ export function createWorkspaceScene(
             !priorityHandActions.has(String(ray?.object?.userData.inputAction)),
         ),
         deltaSeconds,
-        visual?.root.userData.keyborbPoint as THREE.Vector3 | undefined,
+        visual?.keyborbPoint,
       );
       if (sample.released && pokeSources.delete(controller)) modifierPresses.delete(controller);
       const key = sample.pressed?.userData.modifier ? sample.pressed : sample.committed;
@@ -2391,8 +2396,8 @@ export function createWorkspaceScene(
       const free = visual && !gesture?.pinching && !dragStates.has(controller);
       const sample = hierarchyTouch.sample(
         controller,
-        free ? (visual.root.userData.indexTip as THREE.Vector3) : null,
-        free ? (visual.root.userData.thumbTip as THREE.Vector3) : null,
+        free ? visual.indexTip : null,
+        free ? visual.thumbTip : null,
         targets,
       );
       marked ??= sample.hovered;
@@ -2446,7 +2451,7 @@ export function createWorkspaceScene(
     }
     const visual = contactVisual(controller);
     if (!visual) return none;
-    const thumb = visual.root.userData.thumbTip as THREE.Vector3;
+    const thumb = visual.thumbTip;
     const pane = hierarchyTouch.nearest(thumb, hierarchyTargets(root, true), HIERARCHY_NEAR_ENTER);
     if (pane) return { pane: pulling(pane) ? null : pane, tree: false };
     return {
@@ -2567,12 +2572,12 @@ export function createWorkspaceScene(
         );
     return query.grip(
       [
-        { point: visual.root.userData.palmPosition as THREE.Vector3, radius: 0.045 },
-        { point: visual.root.userData.indexTip as THREE.Vector3, radius: 0.022 },
-        { point: visual.root.userData.thumbTip as THREE.Vector3, radius: 0.024 },
-        { point: visual.root.userData.middleTip as THREE.Vector3, radius: 0.022 },
-        { point: visual.root.userData.outerTip as THREE.Vector3, radius: 0.024 },
-        { point: visual.root.userData.wristPosition as THREE.Vector3, radius: 0.03 },
+        { point: visual.palmPosition, radius: 0.045 },
+        { point: visual.indexTip, radius: 0.022 },
+        { point: visual.thumbTip, radius: 0.024 },
+        { point: visual.middleTip, radius: 0.022 },
+        { point: visual.outerTip, radius: 0.024 },
+        { point: visual.wristPosition, radius: 0.03 },
       ],
       roots,
     );
@@ -3575,6 +3580,23 @@ export function createWorkspaceScene(
   canvas.addEventListener('pointerup', onPointerUp);
   canvas.addEventListener('pointercancel', onPointerUp);
   canvas.addEventListener('lostpointercapture', onPointerUp);
+  // three.js rebuilds its own GL state on restore only when the lost event was default-prevented.
+  // The focus quad layer holds a raw texture and framebuffer outside three.js, so it is rebuilt here.
+  const onContextLost = (event: Event): void => {
+    event.preventDefault();
+    focusQuadLayer?.dispose();
+    focusQuadLayer = null;
+    setNotice(CONTEXT_LOST_NOTICE);
+  };
+  const onContextRestored = (): void => {
+    if (mutableState.notice === CONTEXT_LOST_NOTICE) setNotice(null);
+    for (const panel of panels.values()) panel.texture.needsUpdate = true;
+    syncFocusQuadLayer();
+  };
+  if (renderer) {
+    canvas.addEventListener('webglcontextlost', onContextLost);
+    canvas.addEventListener('webglcontextrestored', onContextRestored);
+  }
 
   const setSelectedVisual = (): void => {
     for (const panel of panels.values()) {
@@ -3833,7 +3855,7 @@ export function createWorkspaceScene(
     );
   };
   const pictureAnisotropy = (): number =>
-    Math.min(mutableState.filtering.anisotropy, Number(scene.userData.maxAnisotropy ?? 1));
+    Math.min(mutableState.filtering.anisotropy, maxAnisotropy());
   const showPicture = (
     id: string,
     image: PictureImage,
@@ -4279,7 +4301,7 @@ export function createWorkspaceScene(
       backing.material.depthWrite = false;
     }
     setAction(backing, { type: 'grabInput' });
-    backing.userData.helpText = getControlHelp({ inputAction: 'grabInput' });
+    backing.userData.helpText = getControlHelp({ type: 'grabInput' });
     inputRoot.add(backing);
     if (keyboardRadians) curveKeyboardContent(inputRoot, size.x + 0.12, keyboardRadians);
     const walls = createRaisedButtonWalls(inputRoot, BUTTON_WALL_COLOR);
@@ -4310,16 +4332,18 @@ export function createWorkspaceScene(
     hudRoot.position.set(0, 0.78, -1.35);
     hudRoot.scale.setScalar(0.62);
     const totalWidth = 1.6;
-    activePaneLabel = createLabelButton('No active pane', 1.1, 0.09, { inputAction: 'noop' });
+    activePaneLabel = createLabelButton('No active pane', 1.1, 0.09, actionData({ type: 'noop' }));
     activePaneLabel.name = 'xr-active-pane';
     activePaneLabel.position.x = -0.2;
-    const exit = createLabelButton('Exit', 0.27, 0.09, { inputAction: 'exit' });
+    const exit = createLabelButton('Exit', 0.27, 0.09, actionData({ type: 'exit' }));
     exit.position.x = 0.57;
     hudRoot.add(activePaneLabel, exit);
-    toastLabel = createLabelButton(mutableState.toast ?? '', 1.4, 0.09, {
-      inputAction: 'noop',
-      wrap: true,
-    });
+    toastLabel = createLabelButton(
+      mutableState.toast ?? '',
+      1.4,
+      0.09,
+      actionData({ type: 'noop' }, { wrap: true }),
+    );
     toastLabel.name = 'xr-clipboard-toast';
     toastLabel.raycast = () => undefined;
     toastLabel.position.set(0, 0.45, 0);
@@ -4352,16 +4376,16 @@ export function createWorkspaceScene(
       new THREE.MeshBasicMaterial({ color: 0x0d1720 }),
     );
     backing.position.z = -0.015;
-    backing.userData.inputAction = 'grabInput';
+    setAction(backing, { type: 'grabInput' });
 
     hudRoot.add(backing);
-    fpsLabel = createLabelButton('FPS --', 0.24, 0.055, { inputAction: 'noop' });
+    fpsLabel = createLabelButton('FPS --', 0.24, 0.055, actionData({ type: 'noop' }));
     (fpsLabel.material as THREE.MeshBasicMaterial).opacity = 0;
     (fpsLabel.material as THREE.MeshBasicMaterial).depthWrite = false;
     fpsLabel.name = 'xr-fps-counter';
     fpsLabel.position.set(0.6, 0.13, 0);
     hudRoot.add(fpsLabel);
-    keyLabel = createLabelButton('', 0.6, 0.075, { inputAction: 'noop' });
+    keyLabel = createLabelButton('', 0.6, 0.075, actionData({ type: 'noop' }));
     keyLabel.name = 'xr-last-key';
     keyLabel.raycast = () => undefined;
     keyLabel.position.set(0, -0.12, 0);
@@ -4522,8 +4546,7 @@ export function createWorkspaceScene(
     if (panel) resizePanel(panel, direction);
   };
   const handleInputTarget = (hit: THREE.Object3D): boolean => {
-    console.log('[hit-entry]', hit.userData.inputAction, hit.userData.action?.type);
-    const action = hit.userData.inputAction as string | undefined;
+    const action = getAction(hit)?.type;
     const keepArmed =
       !action ||
       action === 'noop' ||
@@ -4538,7 +4561,7 @@ export function createWorkspaceScene(
   };
   function sharedEarlyAction(
     action: PanelAction,
-    _hit: THREE.Object3D,
+    hit: THREE.Object3D,
     _ctx: SceneContext,
   ): boolean {
     switch (action.type) {
@@ -4556,6 +4579,10 @@ export function createWorkspaceScene(
       case 'environmentAccentColor':
         setEnvironmentAccentColor(String(action.environmentAccentColor ?? '') || null);
         return true;
+      case 'close':
+        commandDraft = null;
+        hideInput();
+        return true;
       case 'closePane':
         if (action.terminalId) actions.closePane(action.terminalId);
         return true;
@@ -4570,16 +4597,86 @@ export function createWorkspaceScene(
         return true;
       case 'grabInput':
         return true;
+      case 'pictureUrl':
+      case 'pictureRecent': {
+        const owner = widgetOwning(hit)?.[1].root;
+        const choices = owner?.getObjectByName('picture-change-choices');
+        if (choices) choices.visible = false;
+        const id = owner?.userData.pictureId;
+        openPicturePanel(
+          action.type === 'pictureUrl' ? 'picture-url' : 'picture-gallery',
+          typeof id === 'string' ? id : pictureTarget,
+        );
+        return true;
+      }
+      case 'pictureChange': {
+        const choices = widgetOwning(hit)?.[1].root.getObjectByName('picture-change-choices');
+        if (choices) choices.visible = !choices.visible;
+        return true;
+      }
+      case 'pictureRecentPage':
+        recentPage += Number(action.delta) || 0;
+        refreshInputRoot('picture-gallery');
+        return true;
+      case 'pictureRecentPlace':
+        placeRecentPicture(String(action.recentId));
+        return true;
+      case 'pictureRecentRemove': {
+        const id = String(action.recentId);
+        const picker = options.pictures;
+        if (!picker) return true;
+        void picker.removeRecent(id).then((removed) => {
+          if (disposed || !inputRoot || inputMode !== 'picture-gallery') return;
+          if (removed && Array.isArray(recentPictures)) {
+            for (const entry of recentPictures)
+              if (entry.id === id) releaseThumbnail(entry.thumbnail);
+            recentPictures = recentPictures.filter((entry) => entry.id !== id);
+            showToast('Removed from Recent.');
+          } else if (!removed) picturePanelMessage = 'Could not remove that picture from Recent';
+          refreshInputRoot('picture-gallery');
+        });
+        return true;
+      }
+      case 'hierarchyNode':
+        if (hierarchyNavigator?.transitioning) return true;
+        hierarchyNavigation = {
+          path: Array.isArray(action.hierarchyPath)
+            ? action.hierarchyPath.filter(
+                (part: unknown): part is string => typeof part === 'string',
+              )
+            : [],
+          page: Number(action.hierarchyPage) || 0,
+        };
+        if (hierarchyNavigator) {
+          hierarchyNavigator.navigate(hierarchyNavigation);
+          hierarchyNavigator.root.userData.transitioning = hierarchyNavigator.transitioning;
+        } else refreshInputRoot('panes');
+        return true;
+      case 'pasteClipboard':
+        if (!renderer?.xr.isPresenting) void pasteClipboard();
+        return true;
+      case 'pasteHostClipboard':
+        void pasteHostClipboard();
+        return true;
       default:
         return false;
     }
   }
-  function sharedLateAction(
-    action: PanelAction,
-    _hit: THREE.Object3D,
-    _ctx: SceneContext,
-  ): boolean {
+  function sharedLateAction(action: PanelAction, hit: THREE.Object3D, _ctx: SceneContext): boolean {
     switch (action.type) {
+      case 'radialAction': {
+        const choice = action.radialAction as RadialMenuAction;
+        radialMenu.close();
+        mutableState.radialOpen = false;
+        if (choice === 'keyboard') toggleKeyboard();
+        else if (choice === 'focus') toggleFocusMode(radialTargetId ?? undefined);
+        else if (choice === 'warp') {
+          if (radialController && activeHand(radialController)) showInput('warp', radialController);
+          else startWarp(radialTargetId, radialController);
+        } else if (choice !== 'cancel') showInput(choice === 'layout' ? 'arrange' : choice);
+        notify();
+        return true;
+      }
       case 'dismissNotice':
         setNotice(null);
         return true;
@@ -4588,6 +4685,9 @@ export function createWorkspaceScene(
         if (typeof id === 'string' && messageToasts.dismiss(id)) options.onToastDismissed?.(id);
         return true;
       }
+      case 'openInput':
+        showInput(action.mode as InputMode);
+        return true;
       case 'reloadUpdate': {
         if (radialMenu.root.visible) {
           radialMenu.close();
@@ -4603,252 +4703,101 @@ export function createWorkspaceScene(
         else actions.exitPreview?.();
         return true;
       }
+      case 'closeWidget': {
+        const kind = widgetOwning(hit)?.[0];
+        if (kind) removeWidget(kind);
+        return true;
+      }
+      case 'widgetControl':
+      case 'readStickyNote':
+        widgetOwning(hit)?.[1].activate?.(hit);
+        return true;
+      case 'grabWidget':
+        return true;
+      case 'createPane':
+        if (hierarchyNavigator?.transitioning) return true;
+        if (!action.createAvailable) {
+          setNotice(
+            typeof action.helpText === 'string'
+              ? action.helpText
+              : 'Terminal creation is unavailable.',
+          );
+          return true;
+        }
+        if (typeof action.sessionId === 'string') actions.createPane?.(action.sessionId);
+        return true;
+      case 'selectAgentPane': {
+        const paneId = action.agentPaneId;
+        if (typeof paneId === 'string' && availablePanes.some((pane) => pane.id === paneId))
+          actions.selectPane(paneId);
+        else setNotice('That agent pane is no longer open');
+        return true;
+      }
+      case 'selectBellPane': {
+        const paneId = action.bellPaneId;
+        if (typeof paneId !== 'string') return true;
+        bellFeed.clearPane(paneId);
+        if (availablePanes.some((pane) => pane.id === paneId)) actions.selectPane(paneId);
+        else setNotice('That bell pane is no longer open');
+        return true;
+      }
+      case 'pane': {
+        if (hierarchyNavigator?.transitioning) return true;
+        const paneId = action.paneId as string;
+        if (availablePanes.some((pane) => pane.id === paneId)) {
+          actions.selectPane(paneId);
+          hideInput();
+        }
+        return true;
+      }
       default:
         return false;
     }
   }
+  /** Package widgets and keys that only set `inputAction` reach here through getAction's adapter. */
   const handleInputTargetAction = (hit: THREE.Object3D): boolean => {
-    const typed = getAction(hit);
-    if (typed) {
-      console.log('[typed-stage]', typed.type, 'inputMode=', inputMode);
-      if (typed.type === 'noop') return false;
-      const ctx = buildContext();
-      if (PANELS[inputMode].handleActionEarly?.(typed, hit, ctx)) return true;
-      if (sharedEarlyAction(typed, hit, ctx)) return true;
-      if (radialMenu.root.visible && !radialMenu.interactive) return true;
-      if (PANELS[inputMode].handleAction?.(typed, hit, ctx)) return true;
-      if (sharedLateAction(typed, hit, ctx)) return true;
-    }
-    const action = typed?.type ?? (hit.userData.inputAction as string | undefined);
-    if (action === 'scrollStrip') return true;
-    if (PANELS[inputMode]?.handleEarly?.(action, hit, buildContext())) return true;
-    if (action === 'handColor') {
-      setHandColor(String(hit.userData.handColor ?? '') || null);
-      return true;
-    }
-    if (action === 'armColor') {
-      setArmColor(String(hit.userData.armColor ?? '') || null);
-      return true;
-    }
-    if (action === 'accentColor') {
-      setAccentColor(String(hit.userData.accentColor ?? '') || null);
-      return true;
-    }
-    if (action === 'environmentAccentColor') {
-      setEnvironmentAccentColor(String(hit.userData.environmentAccentColor ?? '') || null);
-      return true;
-    }
-    if (!action || action === 'noop') return false;
-    if (action === 'close') {
-      commandDraft = null;
-      hideInput();
-      return true;
-    }
-    if (action === 'closePane') {
-      const paneId = hit.userData.terminalId as string | undefined;
-      if (paneId) actions.closePane(paneId);
-      return true;
-    }
-    if (action === 'toggleConnection') {
-      const paneId = hit.userData.terminalId as string | undefined;
-      if (paneId) actions.togglePaneConnection?.(paneId);
-      return true;
-    }
-    if (action === 'bringHere') {
-      const paneId = hit.userData.terminalId as string | undefined;
-      if (paneId) bringTerminalHere(paneId);
-      return true;
-    }
-    if (action === 'keepHere') {
-      keepFocusPlacement();
-      return true;
-    }
-    if (action === 'grabInput') return true;
-    if (action === 'pictureUrl' || action === 'pictureRecent') {
-      const owner = widgetOwning(hit)?.[1].root;
-      const choices = owner?.getObjectByName('picture-change-choices');
-      if (choices) choices.visible = false;
-      const id = owner?.userData.pictureId;
-      openPicturePanel(
-        action === 'pictureUrl' ? 'picture-url' : 'picture-gallery',
-        typeof id === 'string' ? id : pictureTarget,
-      );
-      return true;
-    }
-    if (action === 'pictureChange') {
-      const choices = widgetOwning(hit)?.[1].root.getObjectByName('picture-change-choices');
-      if (choices) choices.visible = !choices.visible;
-      return true;
-    }
-    if (action === 'pictureRecentPage') {
-      recentPage += Number(hit.userData.delta) || 0;
-      refreshInputRoot('picture-gallery');
-      return true;
-    }
-    if (action === 'pictureRecentPlace') {
-      placeRecentPicture(String(hit.userData.recentId));
-      return true;
-    }
-    if (action === 'pictureRecentRemove') {
-      const id = String(hit.userData.recentId);
-      const picker = options.pictures;
-      if (!picker) return true;
-      void picker.removeRecent(id).then((removed) => {
-        if (disposed || !inputRoot || inputMode !== 'picture-gallery') return;
-        if (removed && Array.isArray(recentPictures)) {
-          for (const entry of recentPictures)
-            if (entry.id === id) releaseThumbnail(entry.thumbnail);
-          recentPictures = recentPictures.filter((entry) => entry.id !== id);
-          showToast('Removed from Recent.');
-        } else if (!removed) picturePanelMessage = 'Could not remove that picture from Recent';
-        refreshInputRoot('picture-gallery');
-      });
-      return true;
-    }
-    if (action === 'hierarchyNode') {
-      if (hierarchyNavigator?.transitioning) return true;
-      hierarchyNavigation = {
-        path: Array.isArray(hit.userData.hierarchyPath)
-          ? hit.userData.hierarchyPath.filter(
-              (part: unknown): part is string => typeof part === 'string',
-            )
-          : [],
-        page: Number(hit.userData.hierarchyPage) || 0,
-      };
-      if (hierarchyNavigator) {
-        hierarchyNavigator.navigate(hierarchyNavigation);
-        hierarchyNavigator.root.userData.transitioning = hierarchyNavigator.transitioning;
-      } else refreshInputRoot('panes');
-      return true;
-    }
-    if (action === 'mode') {
-      const mode = hit.userData.mode as 'commands' | 'keyboard';
-      if (renderer?.xr.isPresenting) refreshInputRoot(mode);
-      else showInput(mode);
-      return true;
-    }
-    if (action === 'pasteClipboard') {
-      if (!renderer?.xr.isPresenting) void pasteClipboard();
-      return true;
-    }
-    if (action === 'pasteHostClipboard') {
-      void pasteHostClipboard();
-      return true;
-    }
+    const action = getAction(hit);
+    if (!action || action.type === 'noop') return false;
+    const ctx = buildContext();
+    const panel = PANELS[inputMode];
+    if (panel.handleActionEarly?.(action, hit, ctx)) return true;
+    if (sharedEarlyAction(action, hit, ctx)) return true;
     if (radialMenu.root.visible && !radialMenu.interactive) return true;
-    if (PANELS[inputMode]?.handle?.(action, hit, buildContext())) return true;
-    if (action === 'radialAction') {
-      const choice = hit.userData.radialAction as RadialMenuAction;
-      radialMenu.close();
-      mutableState.radialOpen = false;
-      if (choice === 'keyboard') toggleKeyboard();
-      else if (choice === 'focus') toggleFocusMode(radialTargetId ?? undefined);
-      else if (choice === 'warp') {
-        if (radialController && activeHand(radialController)) showInput('warp', radialController);
-        else startWarp(radialTargetId, radialController);
-      } else if (choice !== 'cancel') showInput(choice === 'layout' ? 'arrange' : choice);
-      notify();
-      return true;
-    }
-    if (action === 'dismissNotice') {
-      setNotice(null);
-      return true;
-    }
-    if (action === 'dismissToast') {
-      const id = hit.userData.toastId;
-      if (typeof id === 'string' && messageToasts.dismiss(id)) options.onToastDismissed?.(id);
-      return true;
-    }
-    if (action === 'openInput') {
-      showInput(hit.userData.mode as InputMode);
-      return true;
-    }
-    if (action === 'exit') {
-      if (!confirmControl('exit')) return true;
-      hideInput();
-      if (activeSession) void activeSession.end();
-      else actions.exitPreview?.();
-      return true;
-    }
-    if (action === 'closeWidget') {
-      const kind = widgetOwning(hit)?.[0];
-      if (kind) removeWidget(kind);
-      return true;
-    }
-    if (action === 'widgetControl' || action === 'readStickyNote') {
-      widgetOwning(hit)?.[1].activate?.(hit);
-      return true;
-    }
-    if (action === 'grabWidget') return true;
-    if (action === 'reloadUpdate') {
-      if (radialMenu.root.visible) {
-        radialMenu.close();
-        mutableState.radialOpen = false;
-      }
-      actions.reloadApp?.();
-      return true;
-    }
-    if (action === 'createPane') {
-      if (hierarchyNavigator?.transitioning) return true;
-      if (!hit.userData.createAvailable) {
-        setNotice(
-          typeof hit.userData.helpText === 'string'
-            ? hit.userData.helpText
-            : 'Terminal creation is unavailable.',
-        );
-        return true;
-      }
-      if (typeof hit.userData.sessionId === 'string') actions.createPane?.(hit.userData.sessionId);
-      return true;
-    }
-    if (action === 'selectAgentPane') {
-      const paneId = hit.userData.agentPaneId;
-      if (typeof paneId === 'string' && availablePanes.some((pane) => pane.id === paneId))
-        actions.selectPane(paneId);
-      else setNotice('That agent pane is no longer open');
-      return true;
-    }
-    if (action === 'selectBellPane') {
-      const paneId = hit.userData.bellPaneId;
-      if (typeof paneId !== 'string') return true;
-      bellFeed.clearPane(paneId);
-      if (availablePanes.some((pane) => pane.id === paneId)) actions.selectPane(paneId);
-      else setNotice('That bell pane is no longer open');
-      return true;
-    }
-    if (action === 'pane') {
-      if (hierarchyNavigator?.transitioning) return true;
-      const paneId = hit.userData.paneId as string;
-      if (availablePanes.some((pane) => pane.id === paneId)) {
-        actions.selectPane(paneId);
-        hideInput();
-      }
-      return true;
-    }
+    if (panel.handleAction?.(action, hit, ctx)) return true;
+    if (sharedLateAction(action, hit, ctx)) return true;
     const paneId = mutableState.inputTargetId;
     if (!paneId) return true;
-    if (action === 'key') {
-      actions.selectPane(paneId);
-      const modifier = hit.userData.modifier as keyof KeyModifiers | undefined;
-      if (modifier) {
-        modifierState.tap(modifier);
-        syncModifierVisuals();
-        setModifierVisual(hit, Boolean(modifierState.active[modifier]));
-        if (modifier === 'shift') refreshInputRoot(inputMode);
-        return true;
+    switch (action.type) {
+      case 'key': {
+        actions.selectPane(paneId);
+        const modifier = action.modifier;
+        if (modifier) {
+          modifierState.tap(modifier);
+          syncModifierVisuals();
+          setModifierVisual(hit, Boolean(modifierState.active[modifier]));
+          if (modifier === 'shift') refreshInputRoot(inputMode);
+          return true;
+        }
+        const modifiers = Object.keys(modifierState.active).length
+          ? { ...modifierState.active }
+          : undefined;
+        actions.sendKey(action.key as string, modifiers);
+        consumeArmedModifiers();
+        if (inputMode === 'keyboard') refreshInputRoot(inputMode);
+        break;
       }
-      const modifiers = Object.keys(modifierState.active).length
-        ? { ...modifierState.active }
-        : undefined;
-      actions.sendKey(hit.userData.key as string, modifiers);
-      consumeArmedModifiers();
-      if (inputMode === 'keyboard') refreshInputRoot(inputMode);
-    } else if (action === 'command') {
-      const command = menuCommands.find((item) => item.id === hit.userData.commandId);
-      if (command) activateCommand(command, paneId, action);
-    } else if (action === 'stripCommand') {
-      const command = stripCommands.find((item) => item.id === hit.userData.commandId);
-      if (command) activateCommand(command, paneId, action);
+      case 'command': {
+        const command = menuCommands.find((item) => item.id === action.commandId);
+        if (command) activateCommand(command, paneId, action.type);
+        break;
+      }
+      case 'stripCommand': {
+        const command = stripCommands.find((item) => item.id === action.commandId);
+        if (command) activateCommand(command, paneId, action.type);
+        break;
+      }
+      default:
+        break;
     }
     return true;
   };
@@ -5464,7 +5413,6 @@ export function createWorkspaceScene(
       createTerminalMaterial(texture),
     );
     screen.name = 'terminal-surface';
-    screen.userData.helpText = getControlHelp({ terminalTitle: true });
     root.add(screen);
     const frame = new THREE.Mesh(
       createTerminalFrameGeometry(
@@ -5523,11 +5471,11 @@ export function createWorkspaceScene(
         }),
       );
       strip.name = name;
+      setAction(strip, { type: 'scrollStrip' });
       Object.assign(strip.userData, {
-        inputAction: 'scrollStrip',
         terminalId: surface.pane.id,
         excludeFromBounds: true,
-        helpText: getControlHelp({ inputAction: 'scrollStrip' }),
+        helpText: getControlHelp({ type: 'scrollStrip' }),
       });
       // The three grip marks share one mesh, one draw instead of three.
       const marks = [-0.025, 0, 0.025].map((offset) =>
@@ -5580,21 +5528,24 @@ export function createWorkspaceScene(
       ['connected', 'connecting'].includes(String(surface.status)) ? 'Disconnect' : 'Reconnect',
       0.46,
       0.08,
-      {
-        inputAction: 'toggleConnection',
+      actionData({
+        type: 'toggleConnection',
         terminalId: surface.pane.id,
         status: surface.status,
-      },
+      }),
     );
-    const closeButton = createLabelButton('Close view', 0.38, 0.08, {
-      inputAction: 'closePane',
-      terminalId: surface.pane.id,
-    });
-    const bringButton = createLabelButton('Bring here', 0.36, 0.08, {
-      inputAction: 'bringHere',
-      terminalId: surface.pane.id,
-      excludeFromBounds: true,
-    });
+    const closeButton = createLabelButton(
+      'Close view',
+      0.38,
+      0.08,
+      actionData({ type: 'closePane', terminalId: surface.pane.id }),
+    );
+    const bringButton = createLabelButton(
+      'Bring here',
+      0.36,
+      0.08,
+      actionData({ type: 'bringHere', terminalId: surface.pane.id }, { excludeFromBounds: true }),
+    );
     root.add(titleLabel, bellLabel, connectionButton, closeButton, bringButton);
     const panel: TerminalPanel = {
       id: surface.pane.id,
@@ -5661,7 +5612,9 @@ export function createWorkspaceScene(
       if (statusChanged) {
         panel.status = status;
         panel.connectionButton.userData.status = status;
-        panel.connectionButton.userData.helpText = getControlHelp(panel.connectionButton.userData);
+        panel.connectionButton.userData.helpText = getControlHelpFor(
+          panel.connectionButton.userData,
+        );
         updateLabel(
           panel.connectionButton,
           ['connected', 'connecting'].includes(status) ? 'Disconnect' : 'Reconnect',
@@ -5678,8 +5631,7 @@ export function createWorkspaceScene(
       }
       if (errorChanged) {
         panel.error = surface.error;
-        panel.titleLabel.userData.helpText =
-          surface.error ?? getControlHelp({ terminalTitle: true });
+        panel.titleLabel.userData.helpText = surface.error;
       }
     });
     panels.set(panel.id, panel);
@@ -5962,7 +5914,7 @@ export function createWorkspaceScene(
     scrollDue.clear();
     stripScrolls.clear();
     warpReadout = createScalableLabel('', 1.4, 0.15, { wrap: true, fontSize: 0.048 });
-    warpReadout.userData.inputAction = 'noop';
+    setAction(warpReadout, { type: 'noop' });
     warpReadout.name = 'xr-warp-readout';
     warpReadout.position.set(0, panel.height / 2 + 0.22, 0.04);
     warpReadout.traverse((object) => {
@@ -6102,7 +6054,7 @@ export function createWorkspaceScene(
   const setTerminalFiltering = (filtering: TerminalFiltering): void => {
     const next = validateTerminalFiltering({
       ...filtering,
-      anisotropy: Math.min(filtering.anisotropy, Number(scene.userData.maxAnisotropy ?? 1)),
+      anisotropy: Math.min(filtering.anisotropy, maxAnisotropy()),
     });
     if (JSON.stringify(next) === JSON.stringify(mutableState.filtering)) return;
     mutableState.filtering = next;
@@ -6648,8 +6600,8 @@ export function createWorkspaceScene(
       const keep = panel.id === paneFocus.activeId;
       const action = keep ? 'keepHere' : 'bringHere';
       if (panel.bringButton.userData.inputAction === action) continue;
-      panel.bringButton.userData.inputAction = action;
-      panel.bringButton.userData.helpText = getControlHelp(panel.bringButton.userData);
+      setAction(panel.bringButton, { type: action, terminalId: panel.id });
+      panel.bringButton.userData.helpText = getControlHelpFor(panel.bringButton.userData);
       updateLabel(panel.bringButton, keep ? 'Keep here' : 'Bring here');
     }
   };
@@ -7040,6 +6992,8 @@ export function createWorkspaceScene(
     canvas.removeEventListener('pointerup', onPointerUp);
     canvas.removeEventListener('pointercancel', onPointerUp);
     canvas.removeEventListener('lostpointercapture', onPointerUp);
+    canvas.removeEventListener('webglcontextlost', onContextLost);
+    canvas.removeEventListener('webglcontextrestored', onContextRestored);
     renderer?.setAnimationLoop(null);
     focusQuadLayer?.dispose();
     focusQuadLayer = null;
@@ -7132,6 +7086,9 @@ export function createWorkspaceScene(
       scene,
       camera,
       mutableState,
+      get maxAnisotropy() {
+        return maxAnisotropy();
+      },
       actions,
       panels,
       widgets,
@@ -7375,6 +7332,9 @@ export function createWorkspaceScene(
     scene,
     camera,
     state: mutableState,
+    get maxAnisotropy() {
+      return maxAnisotropy();
+    },
     addTerminal,
     removeTerminal,
     selectTerminal,

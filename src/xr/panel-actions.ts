@@ -16,6 +16,12 @@ export interface ArmedConfirm {
   armed: boolean;
 }
 
+/** The hover help and original title a hierarchy control carries beside its action. */
+interface NodeCopy {
+  helpText?: string;
+  originalTitle?: string;
+}
+
 export type PanelAction =
   | { type: 'scrollStrip' }
   | { type: 'noop' }
@@ -31,7 +37,7 @@ export type PanelAction =
   | { type: 'accentColor'; accentColor: string }
   | { type: 'environmentAccentColor'; environmentAccentColor: string }
   | { type: 'closePane'; terminalId?: string }
-  | { type: 'toggleConnection'; terminalId?: string }
+  | { type: 'toggleConnection'; terminalId?: string; status?: string }
   | { type: 'bringHere'; terminalId?: string }
   | { type: 'keepHere' }
   | { type: 'pasteClipboard' }
@@ -40,11 +46,16 @@ export type PanelAction =
   | { type: 'pictureUrl' }
   | { type: 'pictureRecent' }
   | { type: 'pictureChange' }
-  | { type: 'hierarchyNode'; hierarchyPath?: unknown[]; hierarchyPage?: number }
-  | { type: 'createPane'; sessionId?: string; createAvailable?: boolean; helpText?: string }
+  | ({ type: 'hierarchyNode'; hierarchyPath?: string[]; hierarchyPage?: number } & NodeCopy)
+  | ({ type: 'createPane'; sessionId?: string; createAvailable?: boolean } & NodeCopy)
   | { type: 'selectAgentPane'; agentPaneId?: string }
   | { type: 'selectBellPane'; bellPaneId?: string }
-  | { type: 'pane'; paneId?: string }
+  | ({
+      type: 'pane';
+      paneId?: string;
+      hierarchyPath?: string[];
+      hierarchyPage?: number;
+    } & NodeCopy)
   | { type: 'radialAction'; radialAction?: RadialMenuAction }
   | { type: 'wristMenu' }
   | { type: 'grabRadial' }
@@ -119,8 +130,8 @@ export type PanelAction =
 /**
  * Stores the action and spreads its payload onto `userData`, so handler code reading
  * `hit.userData.delta` keeps working while `getAction` serves the typed object. The
- * `inputAction` string mirror is temporary; QA-004 removes it once `src/control-help.ts`
- * is keyed off the union.
+ * `inputAction` string mirror is permanent: package widgets, hand contact, `getControlHints`,
+ * the check scripts and the controller tests all identify controls by it.
  */
 export function setAction(object: THREE.Object3D, action: PanelAction): void {
   Object.assign(object.userData, action, { inputAction: action.type, action });
@@ -134,9 +145,22 @@ export function actionData(
   return { ...style, ...action, inputAction: action.type, action };
 }
 
+/**
+ * Reads the typed action out of a `userData` bag. Package widgets, spatial keyboard keys and
+ * picture-frame buttons only set the `inputAction` string and its payload keys, so a bag without
+ * a stored action is read as `{ ...bag, type: inputAction }`. A type outside the union (a
+ * package-defined id) reaches handlers as-is and falls through every typed switch.
+ */
+export function actionOf(data: Record<string, unknown>): PanelAction | undefined {
+  if (data.action) return data.action as PanelAction;
+  return typeof data.inputAction === 'string'
+    ? ({ ...data, type: data.inputAction } as PanelAction)
+    : undefined;
+}
+
 /** Reads back the typed action `setAction` (or a package widget's plain object) stored. */
 export function getAction(object: THREE.Object3D): PanelAction | undefined {
-  return object.userData.action as PanelAction | undefined;
+  return actionOf(object.userData);
 }
 
 /** Exhaustiveness guard for `switch (action.type)` dispatch sites. */

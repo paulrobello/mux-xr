@@ -135,6 +135,9 @@ warp-radial-check: ## Browser check: radial Warp editing
 	bun run scripts/warp-radial-check.ts
 xr-visual-check: ## Native GPU rendering of the spatial keyboard
 	bun run scripts/xr-visual-check.ts
+.PHONY: context-loss-check
+context-loss-check:
+	bun run scripts/context-loss-check.ts
 .PHONY: help
 help: ## List the targets and what they do
 	@grep -E '^[a-z0-9-]+:.*## ' Makefile | awk -F':.*## ' '{printf "%-28s %s\n", $$1, $$2}'
