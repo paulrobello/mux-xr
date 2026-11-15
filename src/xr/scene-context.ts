@@ -18,6 +18,7 @@ import type { WindowPreferences } from '../workspace/window-preferences';
 import type { CommandDraft } from './command-editor';
 import type { HierarchyNavigation, HierarchyNavigator } from './hierarchy-navigator';
 import type { CommandTool, ConfirmAction } from './panel-ui';
+import type { PictureImage } from './picture-image';
 import type {
   RecentPictureEntry,
   ScenePicturePicker,
@@ -154,11 +155,16 @@ export interface SceneContext {
   setBackground(mode: BackgroundMode): void;
   backgroundThumbnail(mode: BackgroundMode): THREE.Texture | null;
   exitXR(): Promise<void>;
+  get warpPanelEdit(): { id: string; original: number; touched: boolean } | null;
   openDeskWindow(): void;
   removeWidget(kind: WidgetKey, persist?: boolean): void;
   get activeSession(): XrSessionLike | null;
   submitPictureUrl(): void;
   placeRecentPicture(id: string): void;
+  setRecentPictures(pictures: RecentPictures): void;
+  releaseThumbnail(image: PictureImage): void;
+  get disposed(): boolean;
+  get lastSelectSource(): THREE.Group | null;
   dictationCaption(): string;
   dictationReview(): boolean;
   editDictationKey(key: string): void;
@@ -166,6 +172,9 @@ export interface SceneContext {
   isArmed(id: string, action: string): boolean;
   armedPreview(action: string): string | null;
   consumeArmedModifiers(): void;
+  clearArmedModifiers(): void;
+  snapshotMenuCommands(): void;
+  commandButtonLabel(command: QuickCommand, action: string): string;
   get modifierState(): ModifierState;
 }
 

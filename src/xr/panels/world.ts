@@ -55,7 +55,7 @@ export const worldPanel: PanelModule = {
     accentButton.position.set(0.39, -0.37, 0);
     root.add(zip, accentButton);
   },
-  handleEarly(action, hit, ctx) {
+  handleEarly(action, _hit, ctx) {
     if (action === 'backgroundSelect') {
       ctx.backgroundRow = backgroundPickerRowShowing(ctx.mutableState.background, 0);
       ctx.showInput('backgrounds');

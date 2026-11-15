@@ -71,7 +71,6 @@ import type { DictationAction, DictationState } from '../speech-input';
 import {
   DEFAULT_TERMINAL_FILTERING,
   type TerminalFiltering,
-  type TerminalFilterMode,
   validateTerminalFiltering,
 } from '../terminal/filtering';
 import { paneHeading, processBadge } from '../terminal/lifecycle';
@@ -84,15 +83,7 @@ import {
   agentRowsSignature,
   DEFAULT_AGENT_ROSTER_LAYOUT,
 } from '../workspace/agent-roster';
-import {
-  BUTTON_FUNCTION_LABELS,
-  type ButtonFunction,
-  CONTROLLER_BUTTON_LABELS,
-  CONTROLLER_BUTTONS,
-  type ControllerButton,
-  DEFAULT_BUTTON_MAP,
-  nextButtonFunction,
-} from '../workspace/controller-buttons';
+import type { ButtonFunction, ControllerButton } from '../workspace/controller-buttons';
 import {
   DEFAULT_HIERARCHY_STYLE,
   type HierarchyStyle,
@@ -114,8 +105,6 @@ import { accent } from './accent-state';
 import { calculateArrangement } from './arrangements';
 import {
   BACKGROUND_LABELS,
-  BACKGROUND_TILE_HEIGHT,
-  BACKGROUND_TILE_WIDTH,
   backgroundPickerRowShowing,
   backgroundThumbnailUrl,
   layoutBackgroundPicker,
@@ -137,7 +126,7 @@ import {
   projectDeskPointer,
   setEnvironmentWindowMask,
 } from './desk-window';
-import { XR_ENTRY_LABELS, type XrEntryMode } from './entry';
+import type { XrEntryMode } from './entry';
 import {
   keepLayoutAboveFloor,
   keepLayoutInsideRadius,
@@ -164,7 +153,6 @@ import { createPaneFocus } from './pane-focus';
 import { measurePanelBounds } from './panel-bounds';
 import {
   ARMED_STYLE,
-  addColorSwatchRows,
   COMMAND_TOOL_HINTS,
   COMMAND_TOOLS,
   CONFIRM_LABELS,
@@ -181,6 +169,8 @@ import { PANELS } from './panels';
 import { accentPanel } from './panels/accent';
 import { backgroundsPanel } from './panels/backgrounds';
 import { buttonsPanel } from './panels/buttons';
+import { filteringPanel } from './panels/filtering';
+import { settingsPanel } from './panels/settings';
 import { weatherZipPanel } from './panels/weather-zip';
 import { worldPanel } from './panels/world';
 import { createPictureFrameWidget, PICTURE_KIND } from './picture-frame';
@@ -4503,49 +4493,7 @@ export function createWorkspaceScene(
       inputRoot.add(message);
     }
     if (mode === 'settings') {
-      for (const [index, [label, destination]] of (
-        [
-          ['Display', 'display'],
-          ['World', 'world'],
-          ['Selected terminal', 'terminal'],
-          ['Controller buttons', 'buttons'],
-        ] as const
-      ).entries()) {
-        const button = createLabelButton(label, 1.15, 0.13, {
-          inputAction: 'openInput',
-          mode: destination,
-        });
-        button.position.set(0, 0.36 - index * 0.17, 0);
-        inputRoot.add(button);
-      }
-      const caption = createLabelButton('Keyborb keyboard', 1.15, 0.1, { inputAction: 'noop' });
-      caption.position.y = -0.3;
-      inputRoot.add(caption);
-      for (const [index, keyborbMode] of (['off', 'on', 'auto'] as const).entries()) {
-        const button = createLabelButton(
-          keyborbMode[0].toUpperCase() + keyborbMode.slice(1),
-          0.34,
-          0.12,
-          { inputAction: 'keyborbMode', keyborbMode },
-        );
-        button.position.set((index - 1) * 0.4, -0.44, 0);
-        setModifierVisual(button, mutableState.keyborbMode === keyborbMode);
-        inputRoot.add(button);
-      }
-      const help = createLabelButton('Auto: Keyborb with hand tracking', 1.6, 0.07, {
-        inputAction: 'noop',
-      });
-      help.position.y = -0.56;
-      inputRoot.add(help);
-      const sounds = createLabelButton(
-        `UI sounds: ${mutableState.uiSounds ? 'on' : 'off'}`,
-        0.7,
-        0.1,
-        { inputAction: 'uiSounds' },
-      );
-      sounds.position.y = -0.71;
-      setModifierVisual(sounds, mutableState.uiSounds);
-      inputRoot.add(sounds);
+      settingsPanel.build(inputRoot, buildContext());
     } else if (mode === 'backgrounds') {
       backgroundsPanel.build(inputRoot, buildContext());
     } else if (mode === 'world') {
@@ -5027,67 +4975,7 @@ export function createWorkspaceScene(
         }
       }
     } else if (mode === 'filtering') {
-      const modes: Array<[string, TerminalFilterMode]> = [
-        ['Nearest', 'nearest'],
-        ['Linear sharp', 'linear'],
-        ['Mipmap bilinear', 'mipmap-nearest'],
-        ['Mipmap smooth', 'mipmap-linear'],
-      ];
-      modes.forEach(([label, filterMode], index) => {
-        const button = createLabelButton(label, 0.74, 0.12, {
-          inputAction: 'filterMode',
-          filterMode,
-        });
-        button.position.set(index % 2 ? 0.4 : -0.4, 0.3 - Math.floor(index / 2) * 0.16, 0);
-        setModifierVisual(button, mutableState.filtering.mode === filterMode);
-        inputRoot?.add(button);
-      });
-      const mipMode = mutableState.filtering.mode.startsWith('mipmap-');
-      const maximum = Number(scene.userData.maxAnisotropy ?? 1);
-      if (mipMode) {
-        const levels = ([1, 2, 4, 8, 16] as const).filter((value) => value <= maximum);
-        levels.forEach((anisotropy, index) => {
-          const button = createLabelButton(anisotropy === 1 ? 'Off' : `${anisotropy}x`, 0.26, 0.1, {
-            inputAction: 'filterAnisotropy',
-            anisotropy,
-          });
-          button.position.set((index - (levels.length - 1) / 2) * 0.3, -0.1, 0);
-          setModifierVisual(button, mutableState.filtering.anisotropy === anisotropy);
-          inputRoot?.add(button);
-        });
-        const hint = createLabelButton(`Oblique smoothing · device max ${maximum}x`, 1.45, 0.055, {
-          inputAction: 'noop',
-        });
-        hint.position.y = -0.19;
-        inputRoot.add(hint);
-      }
-      const gaze = createLabelButton(
-        `Sharper gaze: ${mutableState.filtering.gazeClarity ? 'on' : 'off'}`,
-        1.2,
-        0.1,
-        { inputAction: 'filterGaze' },
-      );
-      gaze.position.y = -0.28;
-      setModifierVisual(gaze, mutableState.filtering.gazeClarity);
-      inputRoot.add(gaze);
-      if (mipMode && mutableState.filtering.gazeClarity) {
-        const distance = createLabelButton(
-          `Sharpen within ${mutableState.filtering.gazeMaxDistance.toFixed(2)} m`,
-          1.08,
-          0.08,
-          { inputAction: 'noop' },
-        );
-        distance.position.y = -0.42;
-        inputRoot.add(distance);
-        for (const [index, delta] of [-0.25, 0.25].entries()) {
-          const button = createLabelButton(delta < 0 ? '−' : '+', 0.15, 0.1, {
-            inputAction: 'filterDistance',
-            delta,
-          });
-          button.position.set(index ? 0.7 : -0.7, -0.42, 0);
-          inputRoot.add(button);
-        }
-      }
+      filteringPanel.build(inputRoot, buildContext());
     } else {
       const unit = KEYBOARD_UNIT;
       addKeyboardKeys(
@@ -5530,10 +5418,6 @@ export function createWorkspaceScene(
     const action = hit.userData.inputAction as string | undefined;
     if (action === 'scrollStrip') return true;
     if (PANELS[inputMode]?.handleEarly?.(action, hit, buildContext())) return true;
-    if (action === 'keyborbMode') {
-      setKeyborbMode(validateKeyborbMode(hit.userData.keyborbMode));
-      return true;
-    }
     if (action === 'handColor') {
       setHandColor(String(hit.userData.handColor ?? '') || null);
       return true;
@@ -5548,10 +5432,6 @@ export function createWorkspaceScene(
     }
     if (action === 'environmentAccentColor') {
       setEnvironmentAccentColor(String(hit.userData.environmentAccentColor ?? '') || null);
-      return true;
-    }
-    if (action === 'uiSounds') {
-      setUISounds(!mutableState.uiSounds);
       return true;
     }
     if (!action || action === 'noop') return false;
@@ -5872,24 +5752,6 @@ export function createWorkspaceScene(
     if (action === 'warpDone' || action === 'warpCancel') {
       settleWarpPanel(action === 'warpDone');
       hideInput();
-      return true;
-    }
-    if (action === 'filterDistance') {
-      setTerminalFiltering({
-        ...mutableState.filtering,
-        gazeMaxDistance: mutableState.filtering.gazeMaxDistance + Number(hit.userData.delta),
-      });
-      return true;
-    }
-    if (action === 'filterMode' || action === 'filterAnisotropy' || action === 'filterGaze') {
-      setTerminalFiltering({
-        ...mutableState.filtering,
-        ...(action === 'filterMode' ? { mode: hit.userData.filterMode as TerminalFilterMode } : {}),
-        ...(action === 'filterAnisotropy'
-          ? { anisotropy: Number(hit.userData.anisotropy) as TerminalFiltering['anisotropy'] }
-          : {}),
-        ...(action === 'filterGaze' ? { gazeClarity: !mutableState.filtering.gazeClarity } : {}),
-      });
       return true;
     }
     if (action === 'layoutDepth') {
@@ -8606,6 +8468,9 @@ export function createWorkspaceScene(
       setBackground,
       backgroundThumbnail,
       exitXR,
+      get warpPanelEdit() {
+        return warpPanelEdit;
+      },
       openDeskWindow,
       removeWidget,
       get activeSession() {
@@ -8613,11 +8478,24 @@ export function createWorkspaceScene(
       },
       submitPictureUrl,
       placeRecentPicture,
+      setRecentPictures: (pictures) => {
+        recentPictures = pictures;
+      },
+      releaseThumbnail,
+      get disposed() {
+        return disposed;
+      },
+      get lastSelectSource() {
+        return lastSelectSource;
+      },
       dictationCaption,
       editDictationKey,
       pinNote,
       isArmed,
       armedPreview,
+      clearArmedModifiers,
+      commandButtonLabel,
+      snapshotMenuCommands,
       consumeArmedModifiers,
       get modifierState() {
         return modifierState;
