@@ -1,5 +1,5 @@
 /**
- * The shared paired-route handshake behind every dictation-server WebSocket: one WebSocketServer,
+ * The shared paired-route handshake behind every host-service WebSocket: one WebSocketServer,
  * nonce, auth timer, HMAC and constant-time MAC comparison per route. Failure classification is
  * unified: a binary or out-of-phase frame fails as `protocol`, a JSON parse failure parses as
  * `{}` and fails `auth`, and the auth and session timeouts are options on every route.

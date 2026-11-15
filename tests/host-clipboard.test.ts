@@ -11,7 +11,7 @@ import {
   type HostClipboardSocket,
 } from '../src/host-clipboard';
 import type { ClipboardHost, ClipboardSecret } from '../src/server/clipboard-server';
-import { attachDictationServer } from '../src/server/dictation-server';
+import { attachHostService } from '../src/server/host-service';
 
 const PAIRING = 'not-a-real-pairing-value-for-tests-only';
 const ORIGIN = 'https://allowed.test';
@@ -19,7 +19,7 @@ const servers: Array<{ server: Server; close: () => Promise<void> }> = [];
 
 const start = async (loadSecret: () => ClipboardSecret, host: ClipboardHost) => {
   const server = createServer();
-  const attached = attachDictationServer(server, {
+  const attached = attachHostService(server, {
     allowedOrigins: [ORIGIN],
     transcribe: async () => 'unused',
     clipboard: { loadSecret, host },

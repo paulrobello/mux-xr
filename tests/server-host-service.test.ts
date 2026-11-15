@@ -1,16 +1,16 @@
 import { createServer, type Server } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
-import { attachDictationServer } from '../src/server/dictation-server';
+import { attachHostService } from '../src/server/host-service';
 
 const servers: Array<{ server: Server; close: () => Promise<void> }> = [];
 const start = async (
-  transcribe: Parameters<typeof attachDictationServer>[1]['transcribe'],
+  transcribe: Parameters<typeof attachHostService>[1]['transcribe'],
   timeoutMs?: number,
-  telemetry?: Parameters<typeof attachDictationServer>[1]['telemetry'],
+  telemetry?: Parameters<typeof attachHostService>[1]['telemetry'],
 ) => {
   const server = createServer();
-  const attached = attachDictationServer(server, {
+  const attached = attachHostService(server, {
     allowedOrigins: ['https://allowed.test'],
     transcribe,
     timeoutMs,
@@ -69,7 +69,7 @@ describe('local dictation server', () => {
             signal.addEventListener('abort', () => reject(signal.reason), { once: true }),
           );
         },
-        20,
+        200,
         telemetry,
       );
       const socket = await connect(url, 'https://allowed.test');

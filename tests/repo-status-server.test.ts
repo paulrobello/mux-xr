@@ -17,7 +17,7 @@ import WebSocket from 'ws';
 import type { HostClipboardSocket } from '../src/host-clipboard';
 import { createRepoStatusClient } from '../src/host-repo-status';
 import { type ClipboardSecret, createFailureLimiter } from '../src/server/clipboard-server';
-import { attachDictationServer } from '../src/server/dictation-server';
+import { attachHostService } from '../src/server/host-service';
 import {
   ciState,
   composeRepoStatus,
@@ -592,7 +592,7 @@ const start = async (
   } = {},
 ) => {
   const server = createServer();
-  const attached = attachDictationServer(server, {
+  const attached = attachHostService(server, {
     allowedOrigins: [ORIGIN],
     transcribe: async () => 'unused',
     clipboard:

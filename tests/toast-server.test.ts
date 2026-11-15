@@ -12,7 +12,7 @@ import WebSocket from 'ws';
 import type { HostClipboardSocket } from '../src/host-clipboard';
 import { createToastSubscription, type ToastSubscriptionState } from '../src/host-toasts';
 import type { ClipboardSecret } from '../src/server/clipboard-server';
-import { attachDictationServer } from '../src/server/dictation-server';
+import { attachHostService } from '../src/server/host-service';
 import {
   bearerMatches,
   createToastHub,
@@ -30,14 +30,14 @@ const enabled = (): ClipboardSecret => ({ enabled: true, key: Buffer.from(PAIRIN
 const servers: Array<{ server: Server; close: () => Promise<void> }> = [];
 const start = async (options: { loadSecret?: () => ClipboardSecret } = {}) => {
   const events: ToastEvent[] = [];
-  let attached: ReturnType<typeof attachDictationServer> | undefined;
+  let attached: ReturnType<typeof attachHostService> | undefined;
   const server = createServer((request, response) => {
     if (attached?.handleRequest(request, response)) return;
     response.writeHead(404);
     response.end();
   });
   let next = 0;
-  attached = attachDictationServer(server, {
+  attached = attachHostService(server, {
     allowedOrigins: [ORIGIN],
     transcribe: async () => 'unused',
     clipboard: { loadSecret: options.loadSecret ?? enabled },

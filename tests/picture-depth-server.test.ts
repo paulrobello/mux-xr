@@ -13,7 +13,7 @@ import {
   depthInputSize,
   normalizeDepth,
 } from '../src/server/depth-estimator';
-import { attachDictationServer } from '../src/server/dictation-server';
+import { attachHostService } from '../src/server/host-service';
 import { pictureDepthMac } from '../src/server/picture-depth-server';
 
 const PAIRING = 'not-a-real-pairing-value-for-tests-only';
@@ -38,7 +38,7 @@ const start = async (
   options: { enabled?: boolean; estimator?: DepthEstimator; maxBytes?: number } = {},
 ) => {
   const server = createServer();
-  const attached = attachDictationServer(server, {
+  const attached = attachHostService(server, {
     allowedOrigins: [ORIGIN],
     transcribe: async () => 'unused',
     clipboard: {

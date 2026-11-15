@@ -5,11 +5,8 @@ import WebSocket from 'ws';
 import type { HostClipboardSocket } from '../../src/host-clipboard';
 import { createHostFeedClient, type HostFeedResult } from '../../src/host-feed';
 import { type ClipboardSecret, createFailureLimiter } from '../../src/server/clipboard-server';
-import {
-  attachDictationServer,
-  type DictationServerOptions,
-} from '../../src/server/dictation-server';
 import { feedMac } from '../../src/server/feed-route';
+import { attachHostService, type DictationServerOptions } from '../../src/server/host-service';
 
 export const PAIRING = 'not-a-real-pairing-value-for-tests-only';
 export const WRONG_PAIRING = 'a-different-pairing-value-for-tests';
@@ -30,7 +27,7 @@ export const startFeedServer = async (
   const server = createServer();
   const limiter = createFailureLimiter();
   const { paired, ...rest } = options;
-  const attached = attachDictationServer(server, {
+  const attached = attachHostService(server, {
     ...rest,
     allowedOrigins: [ORIGIN],
     transcribe: async () => 'unused',

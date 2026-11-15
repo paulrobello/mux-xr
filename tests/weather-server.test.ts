@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import type { HostClipboardSocket } from '../src/host-clipboard';
 import { createWeatherClient, parseWeatherStatus } from '../src/host-weather';
-import { attachDictationServer } from '../src/server/dictation-server';
+import { attachHostService } from '../src/server/host-service';
 import {
   createWeatherProvider,
   localWeekday,
@@ -266,7 +266,7 @@ afterEach(async () => {
 
 const start = async (provider: WeatherProvider, configured = true) => {
   const server = createServer();
-  const attached = attachDictationServer(server, {
+  const attached = attachHostService(server, {
     allowedOrigins: [ORIGIN],
     transcribe: async () => 'unused',
     clipboard: configured

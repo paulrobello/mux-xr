@@ -1,9 +1,15 @@
+/**
+ * The host service composition root: it wires every host route onto one HTTP server and dispatches
+ * WebSocket upgrades by path. Local dictation on `/dictate` is served here too; its origin-only
+ * gate stays until SEC-002 adds authentication.
+ */
 import { execFile as execFileCallback } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Duplex } from 'node:stream';
 import { promisify } from 'node:util';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import {
@@ -19,9 +25,11 @@ import {
 } from './board-feeds';
 import {
   CLIPBOARD_PATH,
+  type ClipboardSecret,
   type ClipboardServerOptions,
   createClipboardRoute,
   createFailureLimiter,
+  type FailureLimiter,
 } from './clipboard-server';
 import type { DictationTelemetry, TranscriptionOutcome } from './dictation-telemetry';
 import { createFeedRoute, type FeedRouteOptions } from './feed-route';
@@ -69,6 +77,8 @@ export type DictationTranscriber = (bytes: Buffer, signal: AbortSignal) => Promi
 
 export type DictationServerOptions = {
   allowedOrigins: string[];
+  /** Clock for the failure limiter and every route's timers; `clipboard.now` stays as a fallback. */
+  now?: () => number;
   transcribe?: DictationTranscriber;
   model?: string;
   ffmpegPath?: string;
@@ -210,13 +220,27 @@ const sendJson = (socket: WebSocket, message: Record<string, string>): void => {
   if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
 };
 
+/** Shared per-service wiring: one clock, one failure budget, one origin allow-list, one secret. */
+export type HostServiceContext = {
+  now: () => number;
+  limiter: FailureLimiter;
+  allowedOrigins: string[];
+  loadSecret: () => ClipboardSecret;
+};
+
+type HostRoute = {
+  path: string;
+  handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void;
+  close(): Promise<void> | void;
+};
+
 export type AttachedDictationServer = {
   /** Answers plain HTTP routes it owns (`/toast`); false leaves the request to the caller. */
   handleRequest: (request: IncomingMessage, response: ServerResponse) => boolean;
   close: () => Promise<void>;
 };
 
-export const attachDictationServer = (
+export const attachHostService = (
   server: Server,
   options: DictationServerOptions,
 ): AttachedDictationServer => {
@@ -239,43 +263,54 @@ export const attachDictationServer = (
   let activeTask: Promise<void> | null = null;
   const sockets = new Set<WebSocket>();
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
-  const authLimiter = options.clipboard?.limiter ?? createFailureLimiter(options.clipboard?.now);
-  const loadSecret =
-    options.clipboard?.loadSecret ??
-    (() => ({ enabled: false, reason: 'no --clipboard-secret-file configured' }) as const);
+  const context: HostServiceContext = {
+    now: options.now ?? options.clipboard?.now ?? Date.now,
+    limiter:
+      options.clipboard?.limiter ?? createFailureLimiter(options.now ?? options.clipboard?.now),
+    allowedOrigins: options.allowedOrigins,
+    loadSecret:
+      options.clipboard?.loadSecret ??
+      (() => ({ enabled: false, reason: 'no --clipboard-secret-file configured' }) as const),
+  };
+  /** A route secret that answers `disabled` until its feature flag turns the route on. */
+  const gatedSecret = (enabled: boolean | undefined, reason: string): (() => ClipboardSecret) =>
+    enabled ? context.loadSecret : () => ({ enabled: false, reason });
   const clipboardRoute = createClipboardRoute({
     ...options.clipboard,
-    loadSecret,
-    limiter: authLimiter,
+    loadSecret: context.loadSecret,
+    limiter: context.limiter,
     allowedOrigins: options.allowedOrigins,
   });
   const hostStatsRoute = createHostStatsRoute({
     ...options.hostStats,
-    loadSecret,
-    limiter: authLimiter,
-    now: options.clipboard?.now,
+    loadSecret: context.loadSecret,
+    limiter: context.limiter,
+    now: context.now,
     allowedOrigins: options.allowedOrigins,
   });
   const repoStatusRoute = createRepoStatusRoute({
     ...options.repoStatus,
-    loadSecret: options.repoStatus?.enabled
-      ? loadSecret
-      : () => ({ enabled: false, reason: 'repo status not enabled (--repo-status on)' }),
-    limiter: authLimiter,
+    loadSecret: gatedSecret(
+      options.repoStatus?.enabled,
+      'repo status not enabled (--repo-status on)',
+    ),
+    limiter: context.limiter,
     allowedOrigins: options.allowedOrigins,
   });
   const pictureFetchRoute = createPictureFetchRoute({
     ...options.pictureProxy,
-    loadSecret: options.pictureProxy?.enabled
-      ? loadSecret
-      : () => ({ enabled: false, reason: 'picture proxy not enabled (--picture-proxy on)' }),
-    limiter: authLimiter,
+    loadSecret: gatedSecret(
+      options.pictureProxy?.enabled,
+      'picture proxy not enabled (--picture-proxy on)',
+    ),
+    limiter: context.limiter,
     allowedOrigins: options.allowedOrigins,
   });
-  const boardSecret = options.boardFeeds?.enabled
-    ? loadSecret
-    : () => ({ enabled: false, reason: 'board feeds not enabled (--board-feeds on)' }) as const;
-  const kanbanCli = options.boardFeeds?.cli ?? createKanbanCli({ now: options.clipboard?.now });
+  const boardSecret = gatedSecret(
+    options.boardFeeds?.enabled,
+    'board feeds not enabled (--board-feeds on)',
+  );
+  const kanbanCli = options.boardFeeds?.cli ?? createKanbanCli({ now: context.now });
   const boardRoute = (
     name: string,
     protocol: string,
@@ -289,8 +324,8 @@ export const attachDictationServer = (
         ? load
         : () => Promise.reject(new Error('board feeds not enabled')),
       loadSecret: boardSecret,
-      limiter: authLimiter,
-      now: options.clipboard?.now,
+      limiter: context.limiter,
+      now: context.now,
       allowedOrigins: options.allowedOrigins,
       onEvent: options.boardFeeds?.onEvent,
       requestLimiter: options.boardFeeds?.requestLimiter,
@@ -303,11 +338,12 @@ export const attachDictationServer = (
     load: serviceHealth?.enabled
       ? createServiceHealthFeed(serviceHealth)
       : () => Promise.reject(new Error('service health not enabled')),
-    loadSecret: serviceHealth?.enabled
-      ? loadSecret
-      : () => ({ enabled: false, reason: 'service health not enabled (--service-health on)' }),
-    limiter: authLimiter,
-    now: options.clipboard?.now,
+    loadSecret: gatedSecret(
+      serviceHealth?.enabled,
+      'service health not enabled (--service-health on)',
+    ),
+    limiter: context.limiter,
+    now: context.now,
     allowedOrigins: options.allowedOrigins,
     onEvent: serviceHealth?.onEvent,
     requestLimiter: serviceHealth?.requestLimiter,
@@ -328,13 +364,11 @@ export const attachDictationServer = (
     name: 'mesh-inbox',
     protocol: MESH_INBOX_PROTOCOL,
     load: meshInbox?.enabled
-      ? createMeshInboxFeed({ now: options.clipboard?.now, ...meshInbox })
+      ? createMeshInboxFeed({ now: context.now, ...meshInbox })
       : () => Promise.reject(new Error('mesh inbox not enabled')),
-    loadSecret: meshInbox?.enabled
-      ? loadSecret
-      : () => ({ enabled: false, reason: 'mesh inbox not enabled (--mesh-inbox on)' }),
-    limiter: authLimiter,
-    now: options.clipboard?.now,
+    loadSecret: gatedSecret(meshInbox?.enabled, 'mesh inbox not enabled (--mesh-inbox on)'),
+    limiter: context.limiter,
+    now: context.now,
     allowedOrigins: options.allowedOrigins,
     onEvent: meshInbox?.onEvent,
     requestLimiter: meshInbox?.requestLimiter,
@@ -342,32 +376,63 @@ export const attachDictationServer = (
   });
   const weatherRoute = createWeatherRoute({
     ...options.weather,
-    loadSecret,
-    limiter: authLimiter,
-    now: options.weather?.now ?? options.clipboard?.now,
+    loadSecret: context.loadSecret,
+    limiter: context.limiter,
+    now: options.weather?.now ?? context.now,
     allowedOrigins: options.allowedOrigins,
   });
   const toastHub = createToastHub({
     ...options.toasts,
-    loadSecret,
-    limiter: authLimiter,
-    now: options.clipboard?.now,
+    loadSecret: context.loadSecret,
+    limiter: context.limiter,
+    now: context.now,
     allowedOrigins: options.allowedOrigins,
   });
   const pictureDepthRoute = createPictureDepthRoute({
     ...options.pictureDepth,
-    loadSecret: options.pictureDepth?.enabled
-      ? loadSecret
-      : () => ({ enabled: false, reason: 'picture depth not enabled (--picture-depth on)' }),
-    limiter: authLimiter,
+    loadSecret: gatedSecret(
+      options.pictureDepth?.enabled,
+      'picture depth not enabled (--picture-depth on)',
+    ),
+    limiter: context.limiter,
     allowedOrigins: options.allowedOrigins,
   });
 
-  const handleUpgrade = (
-    request: import('node:http').IncomingMessage,
-    socket: import('node:stream').Duplex,
-    head: Buffer,
-  ) => {
+  /** `/dictate` keeps its origin-only gate; SEC-002 adds authentication later. */
+  const dictateRoute: HostRoute = {
+    path: '/dictate',
+    handleUpgrade: (request, socket, head) => {
+      const origin = request.headers.origin;
+      if (typeof origin !== 'string' || !context.allowedOrigins.includes(origin)) {
+        observe(() => options.telemetry?.rejected('origin'));
+        socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(request, socket, head, (client) => wss.emit('connection', client, request));
+    },
+    close: () => new Promise<void>((resolve) => wss.close(() => resolve())),
+  };
+  /** Wraps a route object with its path so every map entry is a whole HostRoute. */
+  const withPath = (path: string, route: Omit<HostRoute, 'path'>): HostRoute => ({
+    path,
+    ...route,
+  });
+  const routes = new Map<string, HostRoute>([
+    [CLIPBOARD_PATH, withPath(CLIPBOARD_PATH, clipboardRoute)],
+    [HOST_STATS_PATH, withPath(HOST_STATS_PATH, hostStatsRoute)],
+    [REPO_STATUS_PATH, withPath(REPO_STATUS_PATH, repoStatusRoute)],
+    [PICTURE_FETCH_PATH, withPath(PICTURE_FETCH_PATH, pictureFetchRoute)],
+    [BOOKINGS_PATH, withPath(BOOKINGS_PATH, bookingsRoute)],
+    [MESH_INBOX_PATH, withPath(MESH_INBOX_PATH, meshInboxRoute)],
+    [SERVICE_HEALTH_PATH, withPath(SERVICE_HEALTH_PATH, serviceHealthRoute)],
+    [KANBAN_STRIP_PATH, withPath(KANBAN_STRIP_PATH, kanbanStripRoute)],
+    [WEATHER_PATH, withPath(WEATHER_PATH, weatherRoute)],
+    [PICTURE_DEPTH_PATH, withPath(PICTURE_DEPTH_PATH, pictureDepthRoute)],
+    [TOASTS_PATH, withPath(TOASTS_PATH, toastHub)],
+    ['/dictate', dictateRoute],
+  ]);
+  const handleUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     let requestUrl: URL;
     try {
       requestUrl = new URL(request.url ?? '/', 'http://localhost');
@@ -377,67 +442,14 @@ export const attachDictationServer = (
       socket.destroy();
       return;
     }
-    if (requestUrl.pathname === CLIPBOARD_PATH && !requestUrl.search) {
-      clipboardRoute.handleUpgrade(request, socket, head);
+    const route = requestUrl.search ? undefined : routes.get(requestUrl.pathname);
+    if (route) {
+      route.handleUpgrade(request, socket, head);
       return;
     }
-    if (requestUrl.pathname === HOST_STATS_PATH && !requestUrl.search) {
-      hostStatsRoute.handleUpgrade(request, socket, head);
-      return;
-    }
-    if (requestUrl.pathname === REPO_STATUS_PATH && !requestUrl.search) {
-      repoStatusRoute.handleUpgrade(request, socket, head);
-      return;
-    }
-    if (requestUrl.pathname === PICTURE_FETCH_PATH && !requestUrl.search) {
-      pictureFetchRoute.handleUpgrade(request, socket, head);
-      return;
-    }
-    if (requestUrl.pathname === BOOKINGS_PATH && !requestUrl.search) {
-      bookingsRoute.handleUpgrade(request, socket, head);
-      return;
-    }
-    if (requestUrl.pathname === MESH_INBOX_PATH && !requestUrl.search) {
-      meshInboxRoute.handleUpgrade(request, socket, head);
-      return;
-    }
-    if (requestUrl.pathname === SERVICE_HEALTH_PATH && !requestUrl.search) {
-      serviceHealthRoute.handleUpgrade(request, socket, head);
-      return;
-    }
-    if (requestUrl.pathname === KANBAN_STRIP_PATH && !requestUrl.search) {
-      kanbanStripRoute.handleUpgrade(request, socket, head);
-      return;
-    }
-    if (requestUrl.pathname === WEATHER_PATH && !requestUrl.search) {
-      weatherRoute.handleUpgrade(request, socket, head);
-      return;
-    }
-    if (requestUrl.pathname === PICTURE_DEPTH_PATH && !requestUrl.search) {
-      pictureDepthRoute.handleUpgrade(request, socket, head);
-      return;
-    }
-    if (requestUrl.pathname === TOASTS_PATH && !requestUrl.search) {
-      toastHub.handleUpgrade(request, socket, head);
-      return;
-    }
-    const origin = request.headers.origin;
-    if (
-      requestUrl.pathname !== '/dictate' ||
-      requestUrl.search ||
-      typeof origin !== 'string' ||
-      !options.allowedOrigins.includes(origin)
-    ) {
-      observe(() =>
-        options.telemetry?.rejected(
-          requestUrl.pathname !== '/dictate' || requestUrl.search ? 'path' : 'origin',
-        ),
-      );
-      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-    wss.handleUpgrade(request, socket, head, (client) => wss.emit('connection', client, request));
+    observe(() => options.telemetry?.rejected('path'));
+    socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+    socket.destroy();
   };
   server.on('upgrade', handleUpgrade);
 
@@ -545,18 +557,7 @@ export const attachDictationServer = (
       if (activeTask) {
         await Promise.race([activeTask, new Promise((resolve) => setTimeout(resolve, 1_000))]);
       }
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
-      await clipboardRoute.close();
-      await hostStatsRoute.close();
-      await repoStatusRoute.close();
-      await pictureFetchRoute.close();
-      await pictureDepthRoute.close();
-      await weatherRoute.close();
-      await kanbanStripRoute.close();
-      await bookingsRoute.close();
-      await serviceHealthRoute.close();
-      await meshInboxRoute.close();
-      await toastHub.close();
+      for (const route of routes.values()) await route.close();
     },
   };
 };

@@ -6,7 +6,7 @@ import WebSocket from 'ws';
 import type { HostClipboardSocket } from '../src/host-clipboard';
 import { createPictureProxyClient, type PictureProxyFailure } from '../src/host-picture-fetch';
 import type { ClipboardSecret } from '../src/server/clipboard-server';
-import { attachDictationServer } from '../src/server/dictation-server';
+import { attachHostService } from '../src/server/host-service';
 import {
   defaultResolver,
   defaultTransport,
@@ -573,7 +573,7 @@ const start = async (
   } = {},
 ) => {
   const server = createServer();
-  const attached = attachDictationServer(server, {
+  const attached = attachHostService(server, {
     allowedOrigins: [ORIGIN],
     transcribe: async () => 'unused',
     clipboard:

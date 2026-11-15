@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { loadClipboardSecret } from '../src/server/clipboard-server';
 import { createOnnxDepthEstimator } from '../src/server/depth-estimator';
 import { readHostConfig } from '../src/server/dictation-launchd';
-import { attachDictationServer } from '../src/server/dictation-server';
 import { createDictationTelemetry } from '../src/server/dictation-telemetry';
+import { attachHostService } from '../src/server/host-service';
 
 const required = (args: Map<string, string>, name: string): string => {
   const value = args.get(name);
@@ -113,7 +113,7 @@ console.log(
     ? 'Clipboard sync enabled.'
     : `Clipboard sync disabled: ${clipboardAtStart.reason}.`,
 );
-const attached = attachDictationServer(server, {
+const attached = attachHostService(server, {
   allowedOrigins: origins,
   model,
   telemetry,

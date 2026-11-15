@@ -10,7 +10,7 @@ import {
   clipboardMac,
   createFailureLimiter,
 } from '../src/server/clipboard-server';
-import { attachDictationServer } from '../src/server/dictation-server';
+import { attachHostService } from '../src/server/host-service';
 import {
   cpuPercent,
   createHostStatsSampler,
@@ -42,7 +42,7 @@ const start = async (
   const limiter = createFailureLimiter();
   const events: HostStatsEvent[] = [];
   const host: ClipboardHost = { read: async () => 'host text', write: async () => undefined };
-  const attached = attachDictationServer(server, {
+  const attached = attachHostService(server, {
     allowedOrigins: [ORIGIN],
     transcribe: async () => 'unused',
     clipboard:

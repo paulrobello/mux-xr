@@ -16,7 +16,7 @@ import {
   decodeClipboardText,
   loadClipboardSecret,
 } from '../src/server/clipboard-server';
-import { attachDictationServer } from '../src/server/dictation-server';
+import { attachHostService } from '../src/server/host-service';
 
 const PAIRING = 'not-a-real-pairing-value-for-tests-only';
 const ORIGIN = 'https://allowed.test';
@@ -34,7 +34,7 @@ const start = async (
   } = {},
 ) => {
   const server = createServer();
-  const attached = attachDictationServer(server, {
+  const attached = attachHostService(server, {
     allowedOrigins: [ORIGIN],
     transcribe: async () => 'unused',
     clipboard:
@@ -486,7 +486,7 @@ describe('security review fixes', () => {
     const limiter = { ...real, blocked: (key: string) => blockedNow || real.blocked(key) };
     const { host } = fakeHost();
     const server = createServer();
-    const attached = attachDictationServer(server, {
+    const attached = attachHostService(server, {
       allowedOrigins: [ORIGIN],
       transcribe: async () => 'unused',
       clipboard: { loadSecret: enabled, host, limiter },
@@ -506,7 +506,7 @@ describe('security review fixes', () => {
 
   it('F4: caps concurrent clipboard connections', async () => {
     const server = createServer();
-    const attached = attachDictationServer(server, {
+    const attached = attachHostService(server, {
       allowedOrigins: [ORIGIN],
       transcribe: async () => 'unused',
       clipboard: { loadSecret: enabled, maxConnections: 2, authTimeoutMs: 2_000 },
