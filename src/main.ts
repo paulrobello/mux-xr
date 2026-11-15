@@ -13,7 +13,7 @@ import { createDesktopPanels, type DesktopPanels } from './desktop/panels';
 import { createEnvironmentManager, loadObservatory } from './environment';
 import { createHostClipboardClient, createHostClipboardSecretStore } from './host-clipboard';
 import { createDefaultPictureDepth } from './host-picture-depth';
-import { dictationServiceUrl } from './host-stats';
+import { hostServiceUrl } from './host-service';
 import { createToastSubscription } from './host-toasts';
 import { createKeyFlash, formatKeyIndicator, mountPageKeyIndicator } from './key-indicator';
 import { installKeyboardRouter } from './keyboard-router';
@@ -470,14 +470,7 @@ async function connect(nextEndpoint: string): Promise<void> {
 
 const hostClipboardSecret = createHostClipboardSecretStore();
 const hostClipboard = createHostClipboardClient({
-  url: () => {
-    const url = new URL('/clipboard', window.location.href);
-    url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    url.port = '4242';
-    url.search = '';
-    url.hash = '';
-    return url.href;
-  },
+  url: () => hostServiceUrl('/clipboard', window.location),
   secret: () => hostClipboardSecret.get(),
 });
 const actions: WorkspaceActions = {
@@ -600,7 +593,7 @@ scene = createWorkspaceScene(ui.sceneHost, actions, {
 });
 // Toasts outside programs post to the host service; it needs the host clipboard pairing secret.
 const toastSubscription = createToastSubscription({
-  url: () => dictationServiceUrl('/toasts', window.location),
+  url: () => hostServiceUrl('/toasts', window.location),
   secret: () => hostClipboardSecret.get(),
   onEnvelope: (envelope) => scene.receiveToast(envelope),
 });
@@ -633,10 +626,7 @@ agentRoster.subscribe(syncAgentRoster);
 speechInput = createSpeechInput({
   recognitionFactory: isLocalSpeechSupported()
     ? () => {
-        const url = new URL('/dictate', window.location.href);
-        url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        url.port = '4242';
-        return createLocalSpeechRecognition(url.href);
+        return createLocalSpeechRecognition(hostServiceUrl('/dictate', window.location));
       }
     : undefined,
   getTargetPaneId: () => selectedId,

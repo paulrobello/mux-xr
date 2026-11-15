@@ -1,6 +1,7 @@
 /** One authenticated depth estimate per connection to the dictation server's `/picture-depth`. */
 
 import { createHostClipboardSecretStore, type HostClipboardSocket } from './host-clipboard';
+import { hostServiceUrl } from './host-service';
 
 const PROTOCOL = 'mux-xr-picture-depth-v1';
 /** Covers the upload and an inference queued behind another frame's. */
@@ -198,18 +199,11 @@ export function createPictureDepthClient(
   };
 }
 
-/** The production client: port 4242 on the page's host, paired by the host clipboard secret. */
+/** The production client: the host service port on the page's host, paired by the host clipboard secret. */
 export function createDefaultPictureDepth(): PictureDepthEstimator {
   const secret = createHostClipboardSecretStore();
   return createPictureDepthClient({
-    url: () => {
-      const url = new URL('/picture-depth', window.location.href);
-      url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      url.port = '4242';
-      url.search = '';
-      url.hash = '';
-      return url.href;
-    },
+    url: () => hostServiceUrl('/picture-depth', window.location),
     secret: () => secret.get(),
   });
 }

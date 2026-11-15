@@ -1,5 +1,7 @@
 /** Explicit, one-request-per-connection clipboard transfers with the host's dictation server. */
 
+import { HOST_SERVICE_PORT } from './host-service';
+
 export const HOST_CLIPBOARD_SECRET_KEY = 'mux-xr.host-clipboard-secret';
 export const HOST_CLIPBOARD_MAX_BYTES = 256 * 1024;
 const PROTOCOL = 'mux-xr-clipboard-v1';
@@ -53,8 +55,7 @@ export const HOST_CLIPBOARD_MESSAGES: Record<HostClipboardFailure, string> = {
   'too-large': 'Clipboard text is over the 256 KiB limit.',
   'invalid-text': 'Only plain UTF-8 text without NUL bytes can be transferred.',
   'host-failed': 'The Mac could not access its clipboard.',
-  unavailable:
-    'The host clipboard service is unreachable. Check the dictation server on port 4242 is running and updated.',
+  unavailable: `The host clipboard service is unreachable. Check the dictation server on port ${HOST_SERVICE_PORT} is running and updated.`,
   timeout: 'The host clipboard did not answer in time.',
 };
 

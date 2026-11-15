@@ -1,6 +1,7 @@
 /** One authenticated weather query per connection to the dictation server's `/weather`. */
 
 import { createHostClipboardSecretStore, type HostClipboardSocket } from './host-clipboard';
+import { hostServiceUrl } from './host-service';
 
 const PROTOCOL = 'mux-xr-weather-v1';
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -179,18 +180,11 @@ export function createWeatherClient(options: WeatherClientOptions): WeatherFetch
   };
 }
 
-/** The production client: port 4242 on the page's host, paired by the host clipboard secret. */
+/** The production client: the host service port on the page's host, paired by the host clipboard secret. */
 export function createDefaultWeatherFetcher(): WeatherFetcher {
   const secret = createHostClipboardSecretStore();
   return createWeatherClient({
-    url: () => {
-      const url = new URL('/weather', window.location.href);
-      url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      url.port = '4242';
-      url.search = '';
-      url.hash = '';
-      return url.href;
-    },
+    url: () => hostServiceUrl('/weather', window.location),
     secret: () => secret.get(),
   });
 }

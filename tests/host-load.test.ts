@@ -15,12 +15,8 @@ vi.mock('troika-three-text', () => ({
 }));
 
 import type { HostClipboardSocket } from '../src/host-clipboard';
-import {
-  createHostStatsClient,
-  dictationServiceUrl,
-  type HostStatsResult,
-  parseHostStats,
-} from '../src/host-stats';
+import { hostServiceUrl } from '../src/host-service';
+import { createHostStatsClient, type HostStatsResult, parseHostStats } from '../src/host-stats';
 import { hostStatsMac } from '../src/server/host-stats-server';
 import {
   cpuTone,
@@ -450,13 +446,13 @@ describe('host stats client', () => {
 
   it('builds the dictation server URL like the clipboard client', () => {
     expect(
-      dictationServiceUrl('/host-stats', {
+      hostServiceUrl('/host-stats', {
         href: 'https://10.0.0.5:4240/app/?x=1#y',
         protocol: 'https:',
       }),
     ).toBe('wss://10.0.0.5:4242/host-stats');
     expect(
-      dictationServiceUrl('/host-stats', { href: 'http://localhost:4240/', protocol: 'http:' }),
+      hostServiceUrl('/host-stats', { href: 'http://localhost:4240/', protocol: 'http:' }),
     ).toBe('ws://localhost:4242/host-stats');
   });
 });

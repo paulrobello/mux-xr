@@ -1,6 +1,7 @@
 /** One authenticated git and CI status query per connection to the dictation server's `/repo-status`. */
 
 import { createHostClipboardSecretStore, type HostClipboardSocket } from './host-clipboard';
+import { hostServiceUrl } from './host-service';
 
 const PROTOCOL = 'mux-xr-repo-status-v1';
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -201,18 +202,11 @@ export function createRepoStatusClient(options: RepoStatusClientOptions): RepoSt
   };
 }
 
-/** The production client: port 4242 on the page's host, paired by the host clipboard secret. */
+/** The production client: the host service port on the page's host, paired by the host clipboard secret. */
 export function createDefaultRepoStatusFetcher(): RepoStatusFetcher {
   const secret = createHostClipboardSecretStore();
   return createRepoStatusClient({
-    url: () => {
-      const url = new URL('/repo-status', window.location.href);
-      url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      url.port = '4242';
-      url.search = '';
-      url.hash = '';
-      return url.href;
-    },
+    url: () => hostServiceUrl('/repo-status', window.location),
     secret: () => secret.get(),
   });
 }
