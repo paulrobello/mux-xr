@@ -63,6 +63,10 @@ frame-critical tick.
   damage-scoped repaints first, then upload-shape work measured separately).
 - Tier flips: keep the GPU texture allocated at full size across tiers (resize the upload, not the
   texture), removing the reallocation + full re-upload on each promotion.
+  **Tested 2026-11-15 (commit 19d073b): landed and insufficient** — see the follow-up section.
+  The reallocation is not the dominant flip cost; the remaining candidates are upload-shape work
+  (avoid the full-canvas getImageData + full re-upload round trip on promotion) and eliminating the
+  canvas resize itself.
 
 ## Evidence binding
 
@@ -70,3 +74,32 @@ Raw traces (20.9-33.2 MB), capacity reports, and classification JSONs are retain
 .local/evidence/trace-2026-11-14/ (static/ and sweep/), captured on MiniMac in booked windows
 (23:31-23:43Z staging, 03:45-04:35Z captures, holder claude-dbl@macdaddy:mux-xr). Host: MiniMac
 serial workload identical to the 2026-11-02 accepted fixtures.
+
+## Follow-up 2026-11-15: texture-reuse A/B and the damage arm
+
+Re-captured both decisive arms on MiniMac (booked 05:17-06:05Z, load 1.2-1.7 vs guard 15, zero
+page errors) after the tier-resize texture-reuse fix (commit 19d073b) landed. The generated
+fixture embeds repo source at run time, and the bundled quest-main.js was verified to contain the
+fixed makeTexture (`data.length < required`), so the fix was exercised.
+
+Sweep A/B (BEFORE = trace-2026-11-14 sweep, AFTER = trace-2026-11-15/sweep-after): 31 gaps >30 ms
+vs 33, 12 >50 ms vs 13, worst 210.4 ms vs 215.4 — unchanged within run-to-run noise, and the
+tier-flip gaps are still 83.5-104.5 ms with paired MinorGC. Verdict: the DataTexture + Uint8Array
+reallocation is NOT the dominant tier-flip cost. What remains per flip: the 2D canvas resize
+itself, the full-canvas getImageData readback (~749 MiB per sweep run) and the full GPU re-upload,
+plus GPU-side stalls (ReadbackImagePixels / WaitForToken, 14-24 ms each, also visible in static
+gaps). Next candidates: upload-shape work (strip or per-tier uploads avoiding the full-canvas
+round trip) and avoiding the canvas resize on promotion; the earlier strip-swap attempt f384af6
+failed on Quest and was reverted, so this is a measured, separate step.
+
+Production-shape static evidence (MUX_XR_DAMAGE=1, trace-2026-11-15/static-damage): 22 gaps >30 ms
+vs 33 in the fixture-shaped static18 run, 7 >50 ms vs 10, worst 212.5 ms vs 212.9. Damage hints
+shrink steady-state work as designed: background panes scanned only 131 dirty rows per output
+(vs full canvas), with the scrolling log pane correctly full-scanning via the scrolled fallback
+(scrolled: 7). The two early ~200 ms gaps (GPU readback stalls during the first full paints)
+persist. Damage hints are therefore confirmed as production-real behavior that reduces, but does
+not eliminate, the 1 Hz static outliers.
+
+Evidence retained under .local/evidence/trace-2026-11-15/ (static-damage/ and sweep-after/, traces
+30.4 and 32.7 MB plus capacity reports and classification JSONs), minimac booked window
+05:17-06:05Z, holder claude-dbl@macdaddy:mux-xr.
