@@ -1,5 +1,7 @@
 # Authored hand source and rig
 
+> **Retired 2026-11-07.** Kept as provenance. The runtime uses the standard hand in `assets-source/xr-hands/`.
+
 The runtime no longer uses the authored hand. Since 2026-11-07 it renders the standard WebXR generic-hand meshes (`../xr-hands/PROVENANCE.md`), and `public/assets/hand.glb`, `src/xr/rigged-hand.ts` and its tests were removed. This folder is kept as the record of the authored hands; a later slim-v1 attempt lives on the unmerged `hand-slim-v1` branch.
 
 ## long-fingers-v1 (last served)

@@ -21,7 +21,7 @@ flowchart LR
 - [XR entry](../src/xr/entry.ts) coordinates session startup and browser activation. The [Three.js scene](../src/xr/scene.ts) owns native panels, controller and hand input, manipulation, rendering, and session cleanup. VR uses an immersive VR session. Full passthrough and Desk Window use immersive AR. Desk Window requires alpha blending and reveals passthrough within its frame.
 - [Keyboard routing](../src/keyboard-router.ts) and [quick commands](../src/quick-commands.ts) use the same target selection as the UI. [Dictation](../src/speech-input.ts) captures the target when recording starts and requires explicit insertion of the reviewed transcript. Changing the target clears keyboard modifiers and cancels pane-bound dictation. Gaze-based keyboard targeting is opt-in and independent of gaze-based rendering.
 
-The private [XR Workspace package](../packages/xr-workspace/README.md) owns reusable environments, tracked hand visuals, spatial menus, clock, timer, sticky note, picture, and performance widgets, and both 3D keyboard styles. Mux XR adapts these components to its session, input targets, and device settings.
+The private [XR Workspace package](../packages/xr-workspace/README.md) owns reusable environments, tracked hand visuals, spatial menus, clock, timer, sticky note, picture, and performance widgets, and both 3D keyboard styles. Mux XR imports it through its public entry, `@par/xr-workspace`, and the `keyboard-types`, `weather` and `stage-assets` subpaths, and adapts these components to its session, input targets, and device settings.
 
 ## Streamer and terminal lifecycle
 
@@ -41,7 +41,7 @@ After the pane settles in immersive VR Focus, the [Focus renderer](../src/xr/foc
 
 [Distance-based detail](../src/xr/terminal-lod.ts) reduces raster resolution and paint cadence for distant panes. The looked-at pane returns to full quality. Hidden panes keep parsing output, and desktop views return to full raster quality. The [terminal material](../src/xr/terminal-material.ts) owns sampling and glass treatment. The PTY grid, input target, and native UI labels stay independent of those rendering choices.
 
-[XR labels](../src/xr/labels.ts) use self-hosted Noto fonts through Troika SDF, with main-thread typesetting under the streamer's CSP. The [widget registry](../src/xr/widget-registry.ts) defines widget types and default placement. The [environment manager](../src/environment.ts) loads and disposes scene backgrounds.
+[XR labels](../packages/xr-workspace/src/labels.ts) use self-hosted Noto fonts through Troika SDF, with main-thread typesetting under the streamer's CSP. The [widget registry](../src/xr/widget-registry.ts) defines widget types and default placement. The [environment manager](../src/environment.ts) loads and disposes scene backgrounds.
 
 ## Persistence and updates
 
@@ -53,7 +53,7 @@ Vite builds the static frontend into `dist/`. The [build plugin](../scripts/buil
 
 ## Optional host service
 
-[scripts/dictation-server.ts](../scripts/dictation-server.ts) starts an HTTPS service, conventionally on port 4242. Its [route dispatcher](../src/server/dictation-server.ts) handles local Whisper dictation and the optional companion features. Terminal streams stay on the streamer even when the companion is running.
+[scripts/dictation-server.ts](../scripts/dictation-server.ts) starts an HTTPS service, conventionally on port 4242. Its [route dispatcher](../src/server/host-service.ts) handles local Whisper dictation and the optional companion features. Terminal streams stay on the streamer even when the companion is running.
 
 | Feature | Host boundary |
 | --- | --- |

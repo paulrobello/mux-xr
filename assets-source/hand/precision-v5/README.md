@@ -1,5 +1,7 @@
 # Narrower finger spacing and a smooth outer root
 
+> **Retired 2026-11-07.** Kept as provenance. The runtime uses the standard hand in `assets-source/xr-hands/`.
+
 This candidate answers the owner's November 6 headset review of precision-v4: "the outside finger still has a lump in it and the fingers are still too far apart". The third point of that review, the thumb tip on a closed hand, was a runtime fix in `src/xr/hand-pose-constraints.ts`, not a mesh change.
 
 `pre-edit.blend` is a byte copy of `precision-v4/candidate.blend`. The owner's open `XR_hand.blend` is not touched.

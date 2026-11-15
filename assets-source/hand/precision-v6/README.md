@@ -1,5 +1,7 @@
 # Thumb re-bound along the tracked neutral thumb
 
+> **Retired 2026-11-07.** Kept as provenance. The runtime uses the standard hand in `assets-source/xr-hands/`.
+
 This candidate answers the owner's November 6 headset report: "where the thumb meets the palm crimps" while the thumb slides down the closed fingers on the palm side or across the open palm.
 
 `pre-edit.blend` is a byte copy of `precision-v5/candidate.blend`. The owner's open `XR_hand.blend` is not touched.

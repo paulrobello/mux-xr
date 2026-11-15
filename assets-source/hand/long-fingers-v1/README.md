@@ -1,5 +1,7 @@
 # long-fingers-v1
 
+> **Retired 2026-11-07.** Kept as provenance. The runtime uses the standard hand in `assets-source/xr-hands/`.
+
 The active runtime hand. It is the first authored hand's pipeline (`rig_hand.py` and `animate_hand.py`, first shipped at commit d4ebf2f) run on the owner's edited source, which has longer fingers and thumb and narrower tips. See the long-fingers-v1 section of `../PROVENANCE.md` for the reason, hashes and measurements.
 
 | File | Role |

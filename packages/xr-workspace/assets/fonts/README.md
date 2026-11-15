@@ -11,7 +11,7 @@ runtime CDN requests.
 Both fonts are licensed under the SIL Open Font License 1.1. The corresponding
 license texts are `OFL.txt` and `NotoSansSymbols2-OFL.txt`.
 
-`src/xr/glyph-ranges.ts` records the compact cmap ranges generated from these
+`packages/xr-workspace/src/glyph-ranges.ts` records the compact cmap ranges generated from these
 files with `fc-query --format '%{charset}\\n'`. Before Troika sync, unsupported
 visual code points are replaced with `?` while the original label remains in
 `userData.labelText`; this prevents an unsupported title from reaching Troika's
