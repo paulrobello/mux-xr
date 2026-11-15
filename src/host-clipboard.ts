@@ -1,10 +1,10 @@
 /** Explicit, one-request-per-connection clipboard transfers with the host's dictation server. */
+import { openPairedSocket, type PairedOutcome } from './host-pairing';
 
 export const HOST_CLIPBOARD_SECRET_KEY = 'mux-xr.host-clipboard-secret';
 export const HOST_CLIPBOARD_MAX_BYTES = 256 * 1024;
 const PROTOCOL = 'mux-xr-clipboard-v1';
 const DEFAULT_TIMEOUT_MS = 10_000;
-const NONCE_FORMAT = /^[A-Za-z0-9+/]{43}=$/;
 
 export const HOST_CLIPBOARD_SETUP =
   'On the Mac run: mkdir -p .local && (umask 077; openssl rand -base64 32 > .local/clipboard-secret), then paste that value (at least 32 characters) in Settings → Host clipboard.';
@@ -82,12 +82,6 @@ export const checkHostClipboardText = (
   return { ok: true, bytes };
 };
 
-const base64 = (bytes: ArrayBuffer): string => {
-  let binary = '';
-  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
-  return btoa(binary);
-};
-
 const toBytes = (data: unknown): Uint8Array | null => {
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   if (ArrayBuffer.isView(data))
@@ -99,9 +93,6 @@ export function createHostClipboardClient(options: HostClipboardOptions): HostCl
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const subtle = (): Pick<SubtleCrypto, 'importKey' | 'sign'> | undefined =>
     options.subtle ?? globalThis.crypto?.subtle;
-  const factory =
-    options.socketFactory ??
-    ((url: string) => new WebSocket(url) as unknown as HostClipboardSocket);
 
   const transfer = <T>(
     op: 'read' | 'write',
@@ -112,86 +103,42 @@ export function createHostClipboardClient(options: HostClipboardOptions): HostCl
     if (!secret) return Promise.resolve(failure('no-secret'));
     const crypto = subtle();
     if (!crypto) return Promise.resolve(failure('unavailable'));
-    return new Promise((resolve) => {
-      let settled = false;
-      let challenged = false;
-      let socket: HostClipboardSocket | undefined;
-      const finish = (result: HostClipboardResult<T>): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        try {
-          socket?.close(1000, 'done');
-        } catch {
-          /* Already closed. */
+    return openPairedSocket<T, HostClipboardFailure>({
+      url: options.url(),
+      secret,
+      protocol: PROTOCOL,
+      material: op,
+      authFields: { op },
+      binaryType: 'arraybuffer',
+      timeoutMs,
+      onTimeout: () => 'timeout',
+      socketFactory: options.socketFactory,
+      subtle: crypto,
+      onOpenError: () => 'unavailable',
+      onServerError: (code) => SERVER_CODES[String(code)] ?? 'unavailable',
+      onClose: (info) => (info.closeCode === 1009 ? 'too-large' : 'unavailable'),
+      onMessage: (message, socket) => {
+        if (message instanceof ArrayBuffer || ArrayBuffer.isView(message)) {
+          const bytes = toBytes(message);
+          return op === 'read' && bytes ? onBinary(bytes) : failure('unavailable');
         }
-        resolve(result);
-      };
-      const timer = setTimeout(() => finish(failure('timeout')), timeoutMs);
-      try {
-        socket = factory(options.url());
-      } catch {
-        finish(failure('unavailable'));
-        return;
-      }
-      const active = socket;
-      active.binaryType = 'arraybuffer';
-      active.onerror = () => undefined;
-      active.onclose = (event) =>
-        finish(failure(event.code === 1009 ? 'too-large' : 'unavailable'));
-      active.onmessage = (event) => {
-        if (typeof event.data !== 'string') {
-          const bytes = toBytes(event.data);
-          finish(op === 'read' && bytes ? onBinary(bytes) : failure('unavailable'));
-          return;
+        const frame = message as { type?: unknown; bytes?: unknown };
+        if (frame.type === 'ready' && op === 'write' && payload) {
+          socket.send(payload);
+          return null;
         }
-        let message: { type?: unknown; code?: unknown; nonce?: unknown; bytes?: unknown };
-        try {
-          message = JSON.parse(event.data);
-        } catch {
-          finish(failure('unavailable'));
-          return;
+        if (frame.type === 'ok' && op === 'write') {
+          return { ok: true, value: Number(frame.bytes) || 0 } as PairedOutcome<
+            T,
+            HostClipboardFailure
+          >;
         }
-        if (message.type === 'error') {
-          finish(failure(SERVER_CODES[String(message.code)] ?? 'unavailable'));
-        } else if (message.type === 'challenge') {
-          // The server sends exactly one 32-byte base64 nonce per connection.
-          if (
-            challenged ||
-            typeof message.nonce !== 'string' ||
-            !NONCE_FORMAT.test(message.nonce)
-          ) {
-            finish(failure('unavailable'));
-            return;
-          }
-          challenged = true;
-          const nonce = message.nonce;
-          void (async () => {
-            try {
-              const key = await crypto.importKey(
-                'raw',
-                new TextEncoder().encode(secret),
-                { name: 'HMAC', hash: 'SHA-256' },
-                false,
-                ['sign'],
-              );
-              const mac = await crypto.sign(
-                'HMAC',
-                key,
-                new TextEncoder().encode(`${PROTOCOL}\n${nonce}\n${op}`),
-              );
-              if (!settled) active.send(JSON.stringify({ type: 'auth', op, mac: base64(mac) }));
-            } catch {
-              finish(failure('unavailable'));
-            }
-          })();
-        } else if (message.type === 'ready' && op === 'write' && payload) {
-          active.send(payload);
-        } else if (message.type === 'ok' && op === 'write') {
-          finish({ ok: true, value: Number(message.bytes) || 0 } as HostClipboardResult<T>);
-        } else finish(failure('unavailable'));
-      };
-    });
+        return failure('unavailable');
+      },
+    }).then(
+      (outcome: PairedOutcome<T, HostClipboardFailure>): HostClipboardResult<T> =>
+        outcome.ok ? { ok: true, value: outcome.value } : failure(outcome.code),
+    );
   };
 
   return {

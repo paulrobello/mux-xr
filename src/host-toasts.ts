@@ -1,9 +1,9 @@
 /** A long-lived subscription to toasts that outside programs post to the host service's `/toast`. */
 import type { HostClipboardSocket } from './host-clipboard';
+import { openPairedSocket } from './host-pairing';
 import { parseToastEnvelope, type ToastEnvelope } from './toast-contract';
 
 const PROTOCOL = 'mux-xr-toasts-v1';
-const NONCE_FORMAT = /^[A-Za-z0-9+/]{43}=$/;
 const RETRY_MIN_MS = 2_000;
 const RETRY_MAX_MS = 60_000;
 /** How often a subscription without a secret checks whether one has been paired since. */
@@ -29,16 +29,7 @@ export interface ToastSubscription {
   dismiss(id: string): boolean;
 }
 
-const base64 = (bytes: ArrayBuffer): string => {
-  let binary = '';
-  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
-  return btoa(binary);
-};
-
 export function createToastSubscription(options: ToastSubscriptionOptions): ToastSubscription {
-  const factory =
-    options.socketFactory ??
-    ((url: string) => new WebSocket(url) as unknown as HostClipboardSocket);
   const setTimer = options.setTimer ?? ((callback, ms) => setTimeout(callback, ms));
   const clearTimer =
     options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
@@ -74,78 +65,60 @@ export function createToastSubscription(options: ToastSubscriptionOptions): Toas
       return;
     }
     setState('connecting');
-    let active: HostClipboardSocket;
-    try {
-      active = factory(options.url());
-    } catch {
-      retry();
-      return;
-    }
-    socket = active;
-    let challenged = false;
     let refused = false;
+    let opened = false;
     const drop = (): void => {
       try {
-        active.close(1000, 'done');
+        socket?.close(1000, 'done');
       } catch {
         /* Already closed. */
       }
     };
-    active.onerror = () => undefined;
-    active.onclose = () => {
-      if (socket !== active) return;
-      socket = null;
-      if (!running) return;
-      // An auth refusal or a disabled server will not fix itself quickly; back off to the maximum.
-      if (refused) {
-        setState('refused');
-        retryMs = RETRY_MAX_MS;
-      } else setState('connecting');
-      retry();
-    };
-    active.onmessage = (event) => {
-      let message: { type?: unknown; nonce?: unknown };
-      try {
-        message = typeof event.data === 'string' ? JSON.parse(event.data) : {};
-      } catch {
-        message = {};
-      }
-      if (message.type === 'challenge') {
-        if (challenged || typeof message.nonce !== 'string' || !NONCE_FORMAT.test(message.nonce)) {
-          drop();
-          return;
-        }
-        challenged = true;
-        const nonce = message.nonce;
-        void (async () => {
-          try {
-            const key = await crypto.importKey(
-              'raw',
-              new TextEncoder().encode(secret),
-              { name: 'HMAC', hash: 'SHA-256' },
-              false,
-              ['sign'],
-            );
-            const mac = await crypto.sign(
-              'HMAC',
-              key,
-              new TextEncoder().encode(`${PROTOCOL}\n${nonce}\nsubscribe`),
-            );
-            if (socket === active) active.send(JSON.stringify({ type: 'auth', mac: base64(mac) }));
-          } catch {
-            drop();
-          }
-        })();
-      } else if (message.type === 'ready') {
-        retryMs = RETRY_MIN_MS;
-        setState('subscribed');
-      } else if (message.type === 'error') {
+    void openPairedSocket<void, string>({
+      url: options.url(),
+      secret,
+      protocol: PROTOCOL,
+      material: 'subscribe',
+      socketFactory: options.socketFactory,
+      subtle: crypto,
+      onSocket: (active) => {
+        socket = active;
+        opened = true;
+      },
+      onOpenError: () => {
+        if (opened) drop();
+        else retry();
+        return null;
+      },
+      onServerError: () => {
         refused = true;
-      } else if (state === 'subscribed') {
-        const envelope = parseToastEnvelope(message);
-        if (envelope) options.onEnvelope(envelope);
-      }
-    };
+        return null;
+      },
+      onClose: (info) => {
+        if (socket !== info.socket) return null;
+        socket = null;
+        if (!running) return null;
+        // An auth refusal or a disabled server will not fix itself quickly; back off to the maximum.
+        if (refused) {
+          setState('refused');
+          retryMs = RETRY_MAX_MS;
+        } else setState('connecting');
+        retry();
+        return null;
+      },
+      onTimeout: () => 'timeout',
+      onMessage: (message) => {
+        const frame = message as { type?: unknown };
+        if (frame.type === 'ready') {
+          retryMs = RETRY_MIN_MS;
+          setState('subscribed');
+        } else if (state === 'subscribed') {
+          const envelope = parseToastEnvelope(message);
+          if (envelope) options.onEnvelope(envelope);
+        }
+        return null;
+      },
+    });
   };
   return {
     start() {

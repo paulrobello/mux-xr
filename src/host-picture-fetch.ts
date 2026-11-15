@@ -1,10 +1,10 @@
 /** One authenticated image fetch per connection to the dictation server's `/picture-fetch`. */
 
 import { createHostClipboardSecretStore, type HostClipboardSocket } from './host-clipboard';
+import { openPairedSocket } from './host-pairing';
 
 const PROTOCOL = 'mux-xr-picture-fetch-v1';
 const DEFAULT_TIMEOUT_MS = 15_000;
-const NONCE_FORMAT = /^[A-Za-z0-9+/]{43}=$/;
 const CONTROL_CHARS = /\p{Cc}/u;
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/heif'];
 
@@ -47,123 +47,55 @@ const SERVER_CODES: Record<string, PictureProxyFailure> = {
   failed: 'failed',
 };
 
-const base64 = (bytes: ArrayBuffer): string => {
-  let binary = '';
-  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
-  return btoa(binary);
-};
-
 export function createPictureProxyClient(options: PictureProxyClientOptions): PictureProxyFetcher {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const factory =
-    options.socketFactory ??
-    ((url: string) => new WebSocket(url) as unknown as HostClipboardSocket);
   return (target) => {
     if (CONTROL_CHARS.test(target)) return Promise.resolve({ ok: false, code: 'bad-url' });
     const secret = options.secret();
     if (!secret) return Promise.resolve({ ok: false, code: 'no-secret' });
     const crypto = options.subtle ?? globalThis.crypto?.subtle;
     if (!crypto) return Promise.resolve({ ok: false, code: 'unavailable' });
-    return new Promise((resolve) => {
-      let settled = false;
-      let challenged = false;
-      let header: { type: string; size: number } | null = null;
-      let socket: HostClipboardSocket | undefined;
-      const finish = (result: PictureProxyResult): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        try {
-          socket?.close(1000, 'done');
-        } catch {
-          /* Already closed. */
-        }
-        resolve(result);
-      };
-      const failure = (code: PictureProxyFailure): void => finish({ ok: false, code });
-      const timer = setTimeout(() => failure('timeout'), timeoutMs);
-      try {
-        socket = factory(options.url());
-      } catch {
-        failure('unavailable');
-        return;
-      }
-      const active = socket;
-      active.binaryType = 'arraybuffer';
-      active.onerror = () => undefined;
-      active.onclose = () => failure('unavailable');
-      active.onmessage = (event) => {
+    let header: { type: string; size: number } | null = null;
+    return openPairedSocket<{ blob: Blob }, PictureProxyFailure>({
+      url: options.url(),
+      secret,
+      protocol: PROTOCOL,
+      material: target,
+      authFields: { url: target },
+      binaryType: 'arraybuffer',
+      timeoutMs,
+      onTimeout: () => 'timeout',
+      socketFactory: options.socketFactory,
+      subtle: crypto,
+      onOpenError: () => 'unavailable',
+      onServerError: (code) => SERVER_CODES[String(code)] ?? 'unavailable',
+      onClose: () => 'unavailable',
+      onMessage: (message) => {
         if (header) {
-          const data = event.data;
-          if (!(data instanceof ArrayBuffer) || data.byteLength !== header.size) {
-            failure('unavailable');
-            return;
+          if (!(message instanceof ArrayBuffer) || message.byteLength !== header.size) {
+            return { ok: false, code: 'unavailable' };
           }
-          finish({ ok: true, blob: new Blob([data], { type: header.type }) });
-          return;
+          return { ok: true, value: { blob: new Blob([message], { type: header.type }) } };
         }
-        if (typeof event.data !== 'string') {
-          failure('unavailable');
-          return;
-        }
-        let message: {
+        const frame = message as {
           type?: unknown;
-          code?: unknown;
-          nonce?: unknown;
           contentType?: unknown;
           size?: unknown;
         };
-        try {
-          message = JSON.parse(event.data);
-        } catch {
-          failure('unavailable');
-          return;
-        }
-        if (message.type === 'error') {
-          failure(SERVER_CODES[String(message.code)] ?? 'unavailable');
-        } else if (message.type === 'challenge') {
-          if (
-            challenged ||
-            typeof message.nonce !== 'string' ||
-            !NONCE_FORMAT.test(message.nonce)
-          ) {
-            failure('unavailable');
-            return;
-          }
-          challenged = true;
-          const nonce = message.nonce;
-          void (async () => {
-            try {
-              const key = await crypto.importKey(
-                'raw',
-                new TextEncoder().encode(secret),
-                { name: 'HMAC', hash: 'SHA-256' },
-                false,
-                ['sign'],
-              );
-              const mac = await crypto.sign(
-                'HMAC',
-                key,
-                new TextEncoder().encode(`${PROTOCOL}\n${nonce}\n${target}`),
-              );
-              if (!settled)
-                active.send(JSON.stringify({ type: 'auth', url: target, mac: base64(mac) }));
-            } catch {
-              failure('unavailable');
-            }
-          })();
-        } else if (
-          message.type === 'image' &&
-          typeof message.contentType === 'string' &&
-          IMAGE_TYPES.includes(message.contentType) &&
-          typeof message.size === 'number' &&
-          Number.isInteger(message.size) &&
-          message.size > 0
+        if (
+          frame.type === 'image' &&
+          typeof frame.contentType === 'string' &&
+          IMAGE_TYPES.includes(frame.contentType) &&
+          typeof frame.size === 'number' &&
+          Number.isInteger(frame.size) &&
+          frame.size > 0
         ) {
-          header = { type: message.contentType, size: message.size };
-        } else failure('unavailable');
-      };
-    });
+          header = { type: frame.contentType, size: frame.size };
+          return null;
+        }
+        return { ok: false, code: 'unavailable' };
+      },
+    }).then((outcome) => (outcome.ok ? { ok: true, blob: outcome.value.blob } : outcome));
   };
 }
 

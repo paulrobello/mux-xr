@@ -1,14 +1,10 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import type { IncomingMessage } from 'node:http';
 import { cpus as osCpus, loadavg as osLoadavg } from 'node:os';
-import type { Duplex } from 'node:stream';
-import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import {
   type ClipboardSecret,
-  clientKey,
   createFailureLimiter,
   type FailureLimiter,
 } from './clipboard-server';
+import { createPairedRoute, type PairedRoute, pairedHmac } from './paired-route';
 
 export const HOST_STATS_PATH = '/host-stats';
 export const HOST_STATS_PROTOCOL = 'mux-xr-host-stats-v1';
@@ -151,7 +147,7 @@ export const createHostStatsSampler = (probe: Partial<HostStatsProbe> = {}) => {
 };
 
 export const hostStatsMac = (key: Buffer, nonce: string): Buffer =>
-  createHmac('sha256', key).update(`${HOST_STATS_PROTOCOL}\n${nonce}\nstats`).digest();
+  pairedHmac(key, HOST_STATS_PROTOCOL, nonce, 'stats');
 
 export type HostStatsRouteOptions = {
   allowedOrigins: string[];
@@ -171,10 +167,7 @@ export type HostStatsRouteOptions = {
   onEvent?: (event: HostStatsEvent) => void;
 };
 
-export type HostStatsRoute = {
-  handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void;
-  close(): Promise<void>;
-};
+export type HostStatsRoute = PairedRoute;
 
 const ERROR_MESSAGES: Record<HostStatsErrorCode, string> = {
   disabled: 'Host stats need the host clipboard pairing secret on the host.',
@@ -183,23 +176,10 @@ const ERROR_MESSAGES: Record<HostStatsErrorCode, string> = {
   protocol: 'Unexpected host stats message.',
 };
 
-const rawText = (data: RawData): string =>
-  (Buffer.isBuffer(data)
-    ? data
-    : Buffer.concat(Array.isArray(data) ? data : [Buffer.from(data as ArrayBuffer)])
-  ).toString('utf8');
-
 export const createHostStatsRoute = (options: HostStatsRouteOptions): HostStatsRoute => {
   const limiter = options.limiter ?? createFailureLimiter(options.now);
   const requests = options.requestLimiter ?? createRequestLimiter(options.now);
   const sampler = options.sampler ?? createHostStatsSampler();
-  const authTimeoutMs = options.authTimeoutMs ?? AUTH_TIMEOUT_MS;
-  const maxConnections = options.maxConnections ?? MAX_CONNECTIONS;
-  const maxPerClient = options.maxConnectionsPerClient ?? MAX_CONNECTIONS_PER_CLIENT;
-  const sockets = new Set<WebSocket>();
-  let upgrading = 0;
-  // Reserved from upgrade until the socket closes, so it covers handshakes in progress too.
-  const perClient = new Map<string, number>();
   const emit = (code: HostStatsEvent['code']): void => {
     try {
       options.onEvent?.({ kind: 'refused', code });
@@ -207,149 +187,37 @@ export const createHostStatsRoute = (options: HostStatsRouteOptions): HostStatsR
       /* Observability must not interrupt the route. */
     }
   };
-  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
-  const refuseHttp = (socket: Duplex, status: string): void => {
-    socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
-    socket.destroy();
-  };
-
-  const handleUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
-    const origin = request.headers.origin;
-    if (typeof origin !== 'string' || !options.allowedOrigins.includes(origin)) {
-      emit('origin');
-      refuseHttp(socket, '403 Forbidden');
-      return;
-    }
-    const ip = clientKey(request.socket.remoteAddress);
-    if (limiter.saturated(ip) || requests.blocked(ip)) {
-      emit('rate_limited');
-      refuseHttp(socket, '429 Too Many Requests');
-      return;
-    }
-    if (sockets.size + upgrading >= maxConnections || (perClient.get(ip) ?? 0) >= maxPerClient) {
-      emit('busy');
-      refuseHttp(socket, '503 Service Unavailable');
-      return;
-    }
-    perClient.set(ip, (perClient.get(ip) ?? 0) + 1);
-    let held = true;
-    const releaseClient = (): void => {
-      if (!held) return;
-      held = false;
-      const left = (perClient.get(ip) ?? 1) - 1;
-      if (left > 0) perClient.set(ip, left);
-      else perClient.delete(ip);
-    };
-    const attempt = limiter.begin(ip);
-    let reserved = true;
-    const release = (): void => {
-      if (!reserved) return;
-      reserved = false;
-      upgrading -= 1;
-    };
-    upgrading += 1;
-    // A failed handshake never reaches the callback, so the raw socket's close releases both.
-    socket.once('close', () => {
-      release();
-      releaseClient();
-      attempt();
-    });
-    wss.handleUpgrade(request, socket, head, (client) => {
-      release();
-      client.once('close', releaseClient);
-      serve(client, ip, attempt);
-    });
-  };
-
-  const serve = (socket: WebSocket, ip: string, attempt: () => void): void => {
-    sockets.add(socket);
-    let finished = false;
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    const finish = (code: number, reason: string): void => {
-      if (finished) return;
-      finished = true;
-      for (const timer of timers) clearTimeout(timer);
-      socket.close(code, reason);
-    };
-    const fail = (code: HostStatsErrorCode): void => {
-      if (code === 'auth') limiter.fail(ip);
-      if (code !== 'protocol') emit(code);
-      attempt();
-      if (socket.readyState === WebSocket.OPEN)
-        socket.send(JSON.stringify({ type: 'error', code, message: ERROR_MESSAGES[code] }));
-      finish(1008, code);
-    };
-    socket.on('close', () => {
-      attempt();
-      finished = true;
-      for (const timer of timers) clearTimeout(timer);
-      sockets.delete(socket);
-    });
-    socket.on('error', () => undefined);
-
-    const secret = options.loadSecret();
-    if (!secret.enabled) {
-      fail('disabled');
-      return;
-    }
-    const nonce = randomBytes(32).toString('base64');
-    let phase: 'auth' | 'busy' = 'auth';
-    timers.push(
-      setTimeout(() => {
-        if (phase === 'auth') fail('auth');
-      }, authTimeoutMs),
-      setTimeout(
-        () => finish(1000, 'session timeout'),
-        options.sessionTimeoutMs ?? SESSION_TIMEOUT_MS,
-      ),
-    );
-    socket.send(JSON.stringify({ type: 'challenge', nonce, protocol: HOST_STATS_PROTOCOL }));
-
-    socket.on('message', async (data, isBinary) => {
-      if (finished) return;
-      if (phase !== 'auth' || isBinary) {
-        fail('protocol');
-        return;
-      }
-      phase = 'busy';
-      let message: { type?: unknown; mac?: unknown };
-      try {
-        message = JSON.parse(rawText(data));
-      } catch {
-        message = {};
-      }
-      if (message?.type !== 'auth' || typeof message.mac !== 'string' || limiter.blocked(ip)) {
-        fail('auth');
-        return;
-      }
-      const provided = Buffer.from(message.mac, 'base64');
-      const expected = hostStatsMac(secret.key, nonce);
-      if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-        fail('auth');
-        return;
-      }
-      attempt();
-      if (requests.blocked(ip)) {
-        fail('rate_limited');
-        return;
-      }
-      requests.record(ip);
-      try {
-        const stats = await sampler.sample();
-        if (finished) return;
-        socket.send(JSON.stringify(stats));
-        finish(1000, 'complete');
-      } catch {
-        finish(1011, 'sample failed');
-      }
-    });
-  };
-
-  return {
-    handleUpgrade,
-    close: async () => {
-      for (const socket of sockets) socket.terminate();
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
+  return createPairedRoute({
+    protocol: HOST_STATS_PROTOCOL,
+    allowedOrigins: options.allowedOrigins,
+    loadSecret: options.loadSecret,
+    limiter,
+    requestLimiter: { blocked: requests.blocked, charge: requests.record },
+    maxPayloadBytes: MAX_MESSAGE_BYTES,
+    maxConnections: options.maxConnections ?? MAX_CONNECTIONS,
+    perClient: {
+      cap: options.maxConnectionsPerClient ?? MAX_CONNECTIONS_PER_CLIENT,
+      gate: 'busy',
+      release: 'close',
     },
-  };
+    reportGates: true,
+    reportFailures: 'except-protocol',
+    emit: (event) => emit(event.code as HostStatsEvent['code']),
+    authTimeoutMs: options.authTimeoutMs ?? AUTH_TIMEOUT_MS,
+    sessionTimeoutMs: options.sessionTimeoutMs ?? SESSION_TIMEOUT_MS,
+    macMaterial: () => 'stats',
+    errorMessage: (code) => ERROR_MESSAGES[code as HostStatsErrorCode],
+    onAuthenticated: (connection) => {
+      void (async () => {
+        try {
+          const stats = await sampler.sample();
+          if (connection.finished()) return;
+          connection.sendJson(stats);
+          connection.finish(1000, 'complete');
+        } catch {
+          connection.finish(1011, 'sample failed');
+        }
+      })();
+    },
+  });
 };

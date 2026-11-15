@@ -1,9 +1,9 @@
 /** One-request-per-connection host load stats from the dictation server's `/host-stats`. */
 import type { HostClipboardSocket } from './host-clipboard';
+import { openPairedSocket } from './host-pairing';
 
 const PROTOCOL = 'mux-xr-host-stats-v1';
 const DEFAULT_TIMEOUT_MS = 4_000;
-const NONCE_FORMAT = /^[A-Za-z0-9+/]{43}=$/;
 
 export interface HostStatsSnapshot {
   load: [number, number, number];
@@ -34,12 +34,6 @@ export interface HostStatsClientOptions {
   timeoutMs?: number;
 }
 
-const base64 = (bytes: ArrayBuffer): string => {
-  let binary = '';
-  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
-  return btoa(binary);
-};
-
 const finite = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0;
 
@@ -59,9 +53,6 @@ export function parseHostStats(message: unknown): HostStatsSnapshot | null {
 
 export function createHostStatsClient(options: HostStatsClientOptions): HostStatsSource {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const factory =
-    options.socketFactory ??
-    ((url: string) => new WebSocket(url) as unknown as HostClipboardSocket);
   // A browser cannot read the 429 status, so once this server has answered before, a close before
   // its challenge is most likely a rate-limit refusal rather than a server that went away.
   let answeredBefore = false;
@@ -70,86 +61,32 @@ export function createHostStatsClient(options: HostStatsClientOptions): HostStat
     if (!secret) return Promise.resolve({ ok: false, code: 'no-secret' });
     const crypto = options.subtle ?? globalThis.crypto?.subtle;
     if (!crypto) return Promise.resolve({ ok: false, code: 'unavailable' });
-    return new Promise((resolve) => {
-      let settled = false;
-      let challenged = false;
-      let socket: HostClipboardSocket | undefined;
-      const finish = (result: HostStatsResult): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        try {
-          socket?.close(1000, 'done');
-        } catch {
-          /* Already closed. */
-        }
-        resolve(result);
-      };
-      const fail = (code: HostStatsFailure) => finish({ ok: false, code });
-      const timer = setTimeout(() => fail('timeout'), timeoutMs);
-      try {
-        socket = factory(options.url());
-      } catch {
-        fail('unavailable');
-        return;
-      }
-      const active = socket;
-      active.onerror = () => undefined;
-      active.onclose = () => fail(!challenged && answeredBefore ? 'rate-limited' : 'unavailable');
-      active.onmessage = (event) => {
-        let message: { type?: unknown; code?: unknown; nonce?: unknown };
-        try {
-          message = typeof event.data === 'string' ? JSON.parse(event.data) : {};
-        } catch {
-          message = {};
-        }
-        if (message.type === 'error') {
-          fail(
-            message.code === 'disabled'
-              ? 'disabled'
-              : message.code === 'auth'
-                ? 'auth'
-                : message.code === 'rate_limited'
-                  ? 'rate-limited'
-                  : 'unavailable',
-          );
-        } else if (message.type === 'challenge') {
-          if (
-            challenged ||
-            typeof message.nonce !== 'string' ||
-            !NONCE_FORMAT.test(message.nonce)
-          ) {
-            fail('unavailable');
-            return;
-          }
-          challenged = true;
-          answeredBefore = true;
-          const nonce = message.nonce;
-          void (async () => {
-            try {
-              const key = await crypto.importKey(
-                'raw',
-                new TextEncoder().encode(secret),
-                { name: 'HMAC', hash: 'SHA-256' },
-                false,
-                ['sign'],
-              );
-              const mac = await crypto.sign(
-                'HMAC',
-                key,
-                new TextEncoder().encode(`${PROTOCOL}\n${nonce}\nstats`),
-              );
-              if (!settled) active.send(JSON.stringify({ type: 'auth', mac: base64(mac) }));
-            } catch {
-              fail('unavailable');
-            }
-          })();
-        } else {
-          const value = challenged ? parseHostStats(message) : null;
-          if (value) finish({ ok: true, value });
-          else fail('unavailable');
-        }
-      };
+    return openPairedSocket<HostStatsSnapshot, HostStatsFailure>({
+      url: options.url(),
+      secret,
+      protocol: PROTOCOL,
+      material: 'stats',
+      timeoutMs,
+      onTimeout: () => 'timeout',
+      socketFactory: options.socketFactory,
+      subtle: crypto,
+      onChallenge: () => {
+        answeredBefore = true;
+      },
+      onOpenError: () => 'unavailable',
+      onServerError: (code) =>
+        code === 'disabled'
+          ? 'disabled'
+          : code === 'auth'
+            ? 'auth'
+            : code === 'rate_limited'
+              ? 'rate-limited'
+              : 'unavailable',
+      onClose: (info) => (!info.challenged && answeredBefore ? 'rate-limited' : 'unavailable'),
+      onMessage: (message, _socket, challenged) => {
+        const value = challenged ? parseHostStats(message) : null;
+        return value ? { ok: true, value } : { ok: false, code: 'unavailable' };
+      },
     });
   };
 }
