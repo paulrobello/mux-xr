@@ -165,16 +165,8 @@ export function createTerminalTexture(
     context = surface.canvas.getContext('2d');
     if (context && typeof context.getImageData === 'function') {
       const image = context.getImageData(0, 0, canvasWidth, canvasHeight);
-      const required = canvasWidth * canvasHeight * 4;
-      if (!data || data.length < required) data = new Uint8Array(required);
+      data = new Uint8Array(image.data.length);
       copyFlipped(image.data, data, canvasWidth, canvasHeight);
-      if (texture instanceof THREE.DataTexture) {
-        texture.image = { data, width: canvasWidth, height: canvasHeight };
-        configureTexture(texture, currentFiltering, renderer);
-        texture.clearUpdateRanges();
-        texture.needsUpdate = true;
-        return;
-      }
       const next = new THREE.DataTexture(data, canvasWidth, canvasHeight, THREE.RGBAFormat);
       next.flipY = false;
       texture = next;

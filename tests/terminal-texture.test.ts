@@ -189,23 +189,20 @@ describe('terminal texture', () => {
     expect(texture.version).toBe(version);
   });
 
-  it('reuses the texture and buffer on resize while preserving UV settings', () => {
+  it('recreates on resize while preserving UV settings and disposing the old texture', () => {
     const f = fixture();
     const owned = createTerminalTexture({ canvas: f.canvas, dirtyRows: f.dirtyRows });
     const previous = owned.texture;
-    const previousData = (previous as THREE.DataTexture).image.data as Uint8Array;
     const dispose = vi.spyOn(previous, 'dispose');
     previous.repeat.set(0.5, 0.25);
     previous.offset.set(0.1, 0.2);
     previous.wrapS = THREE.RepeatWrapping;
-    f.canvas.width = 2;
+    f.canvas.width = 4;
     f.canvas.height = 1;
     owned.update();
-    expect(owned.texture).toBe(previous);
-    expect(dispose).not.toHaveBeenCalled();
-    expect((owned.texture as THREE.DataTexture).image.width).toBe(2);
-    expect((owned.texture as THREE.DataTexture).image.height).toBe(1);
-    expect((owned.texture as THREE.DataTexture).image.data).toBe(previousData);
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(owned.texture).not.toBe(previous);
+    expect((owned.texture as THREE.DataTexture).image.width).toBe(4);
     expect(owned.texture.repeat.x).toBe(0.5);
     expect(owned.texture.repeat.y).toBe(0.25);
     expect(owned.texture.offset.x).toBe(0.1);
@@ -214,57 +211,6 @@ describe('terminal texture', () => {
     expect(owned.texture.minFilter).toBe(THREE.LinearMipmapLinearFilter);
     expect(owned.texture.generateMipmaps).toBe(true);
     expect(owned.texture.anisotropy).toBe(1);
-    owned.dispose();
-  });
-
-  it('reallocates the buffer only when the canvas grows beyond it', () => {
-    const f = fixture();
-    const owned = createTerminalTexture({ canvas: f.canvas, dirtyRows: f.dirtyRows });
-    const previous = owned.texture;
-    const previousData = (previous as THREE.DataTexture).image.data as Uint8Array;
-    f.canvas.width = 8;
-    f.canvas.height = 4;
-    const grown = new Uint8ClampedArray(8 * 4 * 4).map((_value, index) => (index % 255) + 1);
-    vi.mocked(f.canvas.getContext).mockReturnValue({
-      getImageData: vi.fn((x: number, y: number, w: number, h: number) => ({
-        data: grown.slice((y * 8 + x) * 4, (y * 8 + x + w * h) * 4),
-        width: w,
-        height: h,
-      })),
-    } as unknown as CanvasRenderingContext2D);
-    owned.update();
-    expect(owned.texture).toBe(previous);
-    const image = (owned.texture as THREE.DataTexture).image;
-    expect(image.width).toBe(8);
-    expect(image.height).toBe(4);
-    const nextData = image.data as Uint8Array;
-    expect(nextData).not.toBe(previousData);
-    expect(nextData.length).toBe(128);
-    expect(Array.from(nextData.slice(96, 128))).toEqual(Array.from(grown.slice(0, 32)));
-    owned.dispose();
-  });
-
-  it('keeps the same texture object and shared buffer for the copyRegion path after resize', () => {
-    const f = fixture();
-    const copyTextureToTexture = vi.fn();
-    const owned = createTerminalTexture(f, {
-      copyTextureToTexture,
-      capabilities: { getMaxAnisotropy: () => 16 },
-    });
-    const previous = owned.texture;
-    f.canvas.width = 2;
-    f.canvas.height = 1;
-    owned.update();
-    expect(owned.texture).toBe(previous);
-    expect(copyTextureToTexture).not.toHaveBeenCalled();
-    f.dirtyRows[0] = 1;
-    owned.update();
-    expect(copyTextureToTexture).toHaveBeenCalledOnce();
-    const [source, destination] = copyTextureToTexture.mock.calls[0];
-    expect(source.image.data).toBe((owned.texture as THREE.DataTexture).image.data);
-    expect(destination).toBe(owned.texture);
-    expect(owned.texture.updateRanges).toEqual([]);
-    owned.dispose();
   });
 
   it('falls back to CanvasTexture when a context cannot read pixels', () => {
