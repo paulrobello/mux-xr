@@ -80,6 +80,74 @@ Text is limited to 256 KiB of valid UTF-8 without NUL bytes in both directions. 
 
 The read-only `/host-stats` route for the Host load widget uses the same secret and the same challenge-response under its own protocol string (`mux-xr-host-stats-v1`), so a clipboard proof never passes for stats or the reverse. It shares the clipboard route's failure limit, so failed proofs on either route count toward the same five a minute. It allows 4 open connections in all, 2 per client, and 30 successful requests a minute per client, and returns only the three load averages, the CPU percentage and the core count, never the hostname, CPU model or uptime. CPU usage is sampled from `os.cpus()` only when a request arrives. The server logs each refusal as `Host stats refused: <code>` (origin, rate_limited, busy, auth or disabled) and never logs a successful request.
 
+## Configuration reference
+
+The host service is `scripts/dictation-server.ts`. It takes `--name value` pairs, repeated `--origin` for each frontend origin, and answers `GET /health` with `{"ready": true, "engine": "whisper.cpp"}`. The LaunchAgent and LaunchDaemon installers build its arguments, so you set most of these only when you run the server directly.
+
+### Host service flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--host` | required | Address to bind. The installers use `0.0.0.0`. |
+| `--port` | required | Port to bind, 1 to 65535. The installers use 4242. |
+| `--origin` | required, repeatable | Frontend origin allowed to connect. |
+| `--cert`, `--key` | required | TLS certificate and key PEM paths. |
+| `--model` | required | Whisper model path. The server refuses to start if it cannot read it. |
+| `--ffmpeg` | `/opt/homebrew/bin/ffmpeg` | FFmpeg binary for audio conversion. |
+| `--whisper` | `/opt/homebrew/bin/whisper-cli` | `whisper-cli` binary for transcription. |
+| `--otel-env-file` | `.local/whisper-otel.env` | OpenTelemetry settings file. See [Telemetry](#telemetry). |
+| `--clipboard-secret-file` | none | Pairing secret file. Without it every paired route stays off. |
+| `--dictate-auth` | `off` | `on` requires the pairing proof on `/dictate`. |
+| `--repo-status` | `off` | `on` enables `/repo-status`. |
+| `--picture-proxy` | `off` | `on` enables `/picture-fetch`. |
+| `--picture-depth` | `off` | `on` enables `/picture-depth`. The server refuses to start if the model is missing. |
+| `--depth-model` | `.local/models/depth-anything-v2-small.onnx` | ONNX model for picture depth. |
+| `--board-feeds` | `off` | `on` enables `/kanban-strip` and `/bookings`. |
+| `--service-health` | `off` | `on` enables `/service-health`. |
+| `--service-health-env-file` | `.local/par-obs-query.env` in the checkout | Service token file. It must be mode 600. |
+| `--mesh-inbox` | `off` | `on` enables `/mesh-inbox`. |
+| `--toast-lan` | `off` | `on` accepts `/toast` senders from the LAN as well as this Mac. |
+| `--toast-token-file` | none | Dedicated toast sender token. A valid token replaces the pairing secret as the accepted bearer. |
+
+Every `on`/`off` flag rejects any other value at startup. The installer exposes the same switches without a value, as in `--install --agent --repo-status`, and has no `--toast-token-file` option.
+
+### Installer flags
+
+`bun run scripts/install-dictation-service.ts` chooses one action: `--print` (the default), `--install` or `--uninstall`.
+
+| Flag | Purpose |
+| --- | --- |
+| `--agent` | Target the per-user LaunchAgent instead of the LaunchDaemon. Every feature flag below requires it, and so does `--uninstall`. |
+| `--migrate-running-listener` | Let the LaunchDaemon install drain a recognized existing listener. Refused with `--agent`. |
+| `--repo <path>` | Absolute path to the stable checkout. A path under `.codex/worktrees` is refused. |
+| `--user <name>` | Non-root macOS user the service runs as. |
+| `--repo-status`, `--picture-proxy`, `--picture-depth`, `--board-feeds`, `--service-health`, `--mesh-inbox`, `--toast-lan`, `--dictate-auth` | Turn on the matching host service flag. |
+
+### Local host configuration keys
+
+`.local/host-config.json` is optional. `repository` and `user` set the installer defaults that `--repo` and `--user` override. The remaining keys have no flag.
+
+| Key | Type | Purpose |
+| --- | --- | --- |
+| `repository` | string | Absolute path to the stable checkout. |
+| `user` | string | macOS user for the service. |
+| `origins` | non-empty string array | HTTPS frontend origins. The default is `https://localhost:4240`. |
+| `launchdLabel` | string | launchd job label. The default is `org.mux-xr.whisper`. |
+| `grafanaUrl` | string | HTTPS Grafana origin, read when `--service-health` is on. |
+| `handSource` | string | Editable Blender hand file that the hand scripts verify before they write. |
+
+### Page and tooling settings
+
+| Name | Where | Purpose |
+| --- | --- | --- |
+| `host-port` query parameter | Browser page URL | Integer 1 to 65535 that moves the page's host service connections off port 4242 for a private fixture. Any other value falls back to 4242. |
+| `MUX_XR_TLS_CERT`, `MUX_XR_TLS_KEY` | Environment of `make dev` | PEM paths. Vite serves HTTPS only when both are set. |
+| `MUX_XR_SECRET_FILE` | Environment of `scripts/send-toast.ts` | Pairing secret path. `--secret-file` wins and the default is `.local/clipboard-secret`. |
+| `PAR_MUX_PANE_ID` | Environment of `scripts/send-toast.ts` | Pane id that `--pane current` targets. par-mux sets it in each pane. |
+| `PW_GPU` | Environment of `scripts/background-thumbnails.ts` and `scripts/pane-frame-sheet.ts` | `swiftshader` renders on the CPU. Any other value uses the Metal GPU. |
+
+The test and check variables (`MUX_XR_*` and `KEYBORB_PERF_*`) are listed in the [testing guide](TESTING.md#environment-variables).
+
 ## Optional host routes
 
 The LaunchAgent installer accepts the flags below after `--install --agent`. Pass all flags for the features you intend to keep enabled when reinstalling. Direct invocation of the server takes `on` after each listed flag. Configure the pairing secret first.

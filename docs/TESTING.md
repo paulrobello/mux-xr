@@ -65,6 +65,36 @@ Parentheses show a default. The last column is the evidence caveat: what a pass 
 
 The streamer's CSP blocks blob workers. Troika typesets native labels on the main thread with bundled fonts. Check actual glyph pixels in the production build when changing that path.
 
+## Environment variables
+
+Every variable that the checks read. Host service flags and page settings are in the [configuration reference](HOST-SETUP.md#configuration-reference).
+
+| Variable | Read by | Purpose |
+| --- | --- | --- |
+| `MUX_XR_PRIVATE_TEST` | Every private check | Set to `1` to confirm the target is an isolated fixture. |
+| `MUX_XR_BASE_URL` | Most browser checks | Origin of the app under test. Loopback only for private checks. `real-app-check`, `pane-create-app-check`, `agent-roster-app-check`, `terminal-shimmer-check`, `terminal-opacity-check`, `terminal-texture-check` and `xr-visual-check` default to `http://127.0.0.1:4241`, and `live-check` defaults to `http://127.0.0.1:4240`. |
+| `MUX_XR_TEST_ROOT` | Checks that serve or prepare a build | Owned temporary directory that holds a copy of `dist`. |
+| `MUX_XR_UPDATE_TEST_ROOT` | `update-notice-check` | Owned root for the two fixture builds. |
+| `MUX_XR_MUX_SOCKET` | `agent-roster-app-check`, `damage-audit-check` | Private par-mux socket. The default socket is refused. |
+| `MUX_XR_PAR_MUX` | `damage-audit-check` | `par-mux` binary. |
+| `MUX_XR_PAR_MUX_BIN`, `MUX_XR_STREAMER_BIN` | `pane-lifecycle-check` | `par-mux` and `par-term-streamer` binaries. |
+| `MUX_XR_STREAMER` | `live-check`, `pane-create-check` | Streamer address. |
+| `MUX_XR_STREAMER_ARGV` | `pane-create-app-check` | JSON argv array for the private streamer, required for the `reconnect` outcome. |
+| `MUX_XR_PANES` | `live-check` | Exactly two pane ids, comma separated. The check types marker commands whose text starts with `MUX_XR_LIVE_`. |
+| `MUX_XR_EXPECT` | `pane-create-check`, `pane-create-app-check` | Expected creation outcome. |
+| `MUX_XR_EVIDENCE` | `pane-create-app-check`, `agent-roster-app-check` | Directory for evidence files. The default is under `.local/evidence`. |
+| `MUX_XR_REASON_ONLY` | `agent-roster-app-check` | Set to `1` to check the reason shown after a fresh streamer start. |
+| `MUX_XR_BUILD`, `MUX_XR_CORE_SHA`, `MUX_XR_BINARY_SHA` | `real-app-check` | Labels recorded in its result. Each defaults to `unknown`. |
+| `MUX_XR_SHOTS` | `perf-gauge-check`, `host-load-check` | Screenshot directory. |
+| `MUX_XR_ITERATIONS` | `perf-gauge-check` | Update iterations. The default is 400. |
+| `MUX_XR_MODE` | `hand-visual-check` | `ar` for passthrough, otherwise VR. |
+| `MUX_XR_SPEECH_SAMPLE`, `MUX_XR_SPEECH_URL` | `local-dictation-check` | Absolute path of the audio sample, and the `wss://` speech service URL. |
+| `MUX_XR_SCREENSHOT_DIR` | `stream-lifecycle-check` | Screenshot directory. The default is `.impeccable/review`. |
+| `MUX_XR_SKIP_LIFECYCLE`, `MUX_XR_BASELINE` | `stream-lifecycle-check`, `terminal-capacity-check` | Skip the lifecycle section, or run against an older build. |
+| `MUX_XR_COUNTS`, `MUX_XR_BACKGROUND`, `MUX_XR_WORKLOAD`, `MUX_XR_PERF_GAUGE`, `MUX_XR_DAMAGE`, `MUX_XR_GAZE_SWEEP`, `MUX_XR_TRACE` | `terminal-capacity-check` | Workload shape and instrumentation. Defaults are `6,12,18`, `black` and `mixed`, with the rest off. |
+| `KEYBORB_PERF_THROTTLE`, `KEYBORB_PERF_EYES`, `KEYBORB_PERF_STATES`, `KEYBORB_PERF_LEFT`, `KEYBORB_PERF_ABLATE` | `keyborb-perf-check` | CPU throttle (4), renders per frame (2), keyboard states, left-hand placement and ablated parts. |
+| `PW_GPU` | `background-thumbnails`, `pane-frame-sheet` | `swiftshader` renders on the CPU. Only these two scripts accept it. |
+
 ### Private real-streamer checks
 
 Use an isolated daemon socket, streamer, and test panes. The prepared LAN preview uses the shared default daemon. Restrict live delivery verification to static frontend files and normal application startup. `make real-app-check` issues two harmless marker commands, so use isolated test panes. The targets that create panes, resize panes or report agent state refuse to run without `MUX_XR_PRIVATE_TEST=1`.
