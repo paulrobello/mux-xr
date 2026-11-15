@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createStarSpriteTexture } from './star-sprite';
 
 export interface DesertNightEnvironment {
   root: THREE.Group;
@@ -12,7 +13,6 @@ export const DESERT_NIGHT_FLOOR_Y = 0.035;
 const SKY_RADIUS = 84;
 const STAR_RADIUS = 80;
 const STAR_COUNT = 900;
-const STAR_SPRITE_SIZE = 32;
 const MOON_DISTANCE = 78;
 const MOON_RADIUS = 1.5;
 const PLATEAU_FLAT_RADIUS = 18;
@@ -346,29 +346,6 @@ function createSkyDome(): THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMateri
   sky.name = 'desert-night-sky';
   sky.renderOrder = -1000;
   return sky;
-}
-
-function createStarSpriteTexture(): THREE.DataTexture {
-  const data = new Uint8Array(STAR_SPRITE_SIZE * STAR_SPRITE_SIZE * 4);
-  const center = (STAR_SPRITE_SIZE - 1) / 2;
-  const radius = STAR_SPRITE_SIZE / 2;
-  for (let y = 0; y < STAR_SPRITE_SIZE; y += 1) {
-    for (let x = 0; x < STAR_SPRITE_SIZE; x += 1) {
-      const distance = Math.hypot(x - center, y - center) / radius;
-      const alpha = distance >= 0.94 ? 0 : Math.min(1, Math.max(0, 1 - distance * distance) ** 1.6);
-      const offset = (y * STAR_SPRITE_SIZE + x) * 4;
-      data[offset] = 255;
-      data[offset + 1] = 255;
-      data[offset + 2] = 255;
-      data[offset + 3] = Math.round(alpha * 255);
-    }
-  }
-  const texture = new THREE.DataTexture(data, STAR_SPRITE_SIZE, STAR_SPRITE_SIZE, THREE.RGBAFormat);
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.generateMipmaps = true;
-  texture.needsUpdate = true;
-  return texture;
 }
 
 function createStars(): THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial> {

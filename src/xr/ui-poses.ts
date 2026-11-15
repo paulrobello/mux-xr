@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { validPose } from '../pose-validation';
 
 export type UIPoseName = 'keyboard' | 'hud';
 
@@ -18,26 +19,6 @@ export const NOMINAL_VIEWER_HEIGHT = 1.52;
 interface PoseDocument {
   version: 2;
   poses: Partial<Record<UIPoseName, SavedUIPose>>;
-}
-
-export function validPose(value: unknown, maxDistance = 20): value is SavedUIPose {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as Partial<SavedUIPose>;
-  if (!Array.isArray(candidate.position) || candidate.position.length !== 3) return false;
-  if (!candidate.position.every((part) => typeof part === 'number' && Number.isFinite(part)))
-    return false;
-  if (Math.hypot(...candidate.position) > maxDistance) return false;
-  if (!Array.isArray(candidate.quaternion) || candidate.quaternion.length !== 4) return false;
-  if (!candidate.quaternion.every((part) => typeof part === 'number' && Number.isFinite(part)))
-    return false;
-  const quaternionLength = Math.hypot(...candidate.quaternion);
-  if (quaternionLength < 1e-8 || Math.abs(quaternionLength - 1) > 1e-4) return false;
-  return (
-    typeof candidate.scale === 'number' &&
-    Number.isFinite(candidate.scale) &&
-    candidate.scale >= 0.2 &&
-    candidate.scale <= 3
-  );
 }
 
 function copyPose(pose: SavedUIPose): SavedUIPose {

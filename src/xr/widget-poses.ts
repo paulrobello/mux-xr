@@ -1,3 +1,4 @@
+import { validPose } from '../pose-validation';
 import { legacyPoseToWorld, type SavedUIPose } from './ui-poses';
 import { type WidgetKey, widgetKeyKind } from './widget-registry';
 
@@ -21,28 +22,6 @@ export type WidgetPoses = Partial<Record<WidgetKey, WidgetPose>>;
 interface PoseDocument {
   version: 2;
   poses: WidgetPoses;
-}
-
-function validPose(value: unknown): value is SavedUIPose {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as Partial<SavedUIPose>;
-  if (!Array.isArray(candidate.position) || candidate.position.length !== 3) return false;
-  if (!candidate.position.every((part) => typeof part === 'number' && Number.isFinite(part))) {
-    return false;
-  }
-  if (Math.hypot(...candidate.position) > 20) return false;
-  if (!Array.isArray(candidate.quaternion) || candidate.quaternion.length !== 4) return false;
-  if (!candidate.quaternion.every((part) => typeof part === 'number' && Number.isFinite(part))) {
-    return false;
-  }
-  const quaternionLength = Math.hypot(...candidate.quaternion);
-  if (quaternionLength < 1e-8 || Math.abs(quaternionLength - 1) > 1e-4) return false;
-  return (
-    typeof candidate.scale === 'number' &&
-    Number.isFinite(candidate.scale) &&
-    candidate.scale >= 0.2 &&
-    candidate.scale <= 3
-  );
 }
 
 function clonePose(pose: WidgetPose): WidgetPose {

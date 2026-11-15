@@ -55,6 +55,7 @@ import type {
   WorkspaceActions,
 } from '../contracts';
 import { getControlHelp, getControlHelpFor } from '../control-help';
+import { validPose } from '../pose-validation';
 import {
   copyCommand,
   isSharedCommand,
@@ -192,7 +193,6 @@ import {
   NOMINAL_VIEWER_HEIGHT,
   type SavedUIPose,
   type UIPoseName,
-  validPose,
 } from './ui-poses';
 import { updateVisibleMatrixWorld } from './visible-matrix-world';
 import { intersectVisible } from './visible-raycast';
