@@ -23,6 +23,7 @@ import type {
   ScenePicturePicker,
   TerminalPanel,
   WorkspaceSceneState,
+  XrSessionLike,
 } from './scene';
 import type { UICue } from './ui-feedback';
 import type { WidgetEntry, WidgetKey, WidgetKind } from './widget-registry';
@@ -152,6 +153,10 @@ export interface SceneContext {
   toggleWidget(kind: WidgetKind): void;
   setBackground(mode: BackgroundMode): void;
   backgroundThumbnail(mode: BackgroundMode): THREE.Texture | null;
+  exitXR(): Promise<void>;
+  openDeskWindow(): void;
+  removeWidget(kind: WidgetKey, persist?: boolean): void;
+  get activeSession(): XrSessionLike | null;
   submitPictureUrl(): void;
   placeRecentPicture(id: string): void;
   dictationCaption(): string;

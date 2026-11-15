@@ -182,6 +182,7 @@ import { accentPanel } from './panels/accent';
 import { backgroundsPanel } from './panels/backgrounds';
 import { buttonsPanel } from './panels/buttons';
 import { weatherZipPanel } from './panels/weather-zip';
+import { worldPanel } from './panels/world';
 import { createPictureFrameWidget, PICTURE_KIND } from './picture-frame';
 import type { PictureImage } from './picture-image';
 import {
@@ -547,7 +548,7 @@ const GAZE_FULL_HOLD_MS = 2000;
 
 type ScrollStripMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
 
-interface XrSessionLike {
+export interface XrSessionLike {
   readonly environmentBlendMode?: XRSession['environmentBlendMode'];
   addEventListener(type: string, listener: () => void): void;
   readonly frameRate?: number;
@@ -4548,45 +4549,7 @@ export function createWorkspaceScene(
     } else if (mode === 'backgrounds') {
       backgroundsPanel.build(inputRoot, buildContext());
     } else if (mode === 'world') {
-      const backgroundSelect = createBackgroundSelect(mutableState.background);
-      backgroundSelect.position.y = 0.42;
-      inputRoot.add(backgroundSelect);
-      const activeMode = widgets.has(DESK_WINDOW_KIND)
-        ? 'desk'
-        : mutableState.xrMode === 'ar' && !mutableState.fullPassthrough
-          ? 'vr'
-          : mutableState.xrMode;
-      for (const [index, [label, xrMode]] of (
-        [
-          ['VR', 'vr'],
-          ['Passthrough', 'ar'],
-          ['Desk Window', 'desk'],
-        ] as const
-      ).entries()) {
-        const button = createLabelButton(label, 0.46, 0.12, { inputAction: 'xrMode', xrMode });
-        button.position.set((index - 1) * 0.51, 0.28, 0);
-        setModifierVisual(button, activeMode === xrMode);
-        inputRoot.add(button);
-      }
-      addColorSwatchRows(inputRoot, 0.15, [
-        ['Hand color', 'handColor', mutableState.handColor, 'Default'],
-        ['Arm color', 'armColor', mutableState.armColor, 'Match'],
-      ]);
-      const zip = createLabelButton(
-        `Weather ZIP: ${mutableState.weatherZip || 'not set'}`,
-        0.76,
-        0.1,
-        { inputAction: 'openInput', mode: 'weather-zip' },
-      );
-      zip.name = 'xr-weather-zip-button';
-      zip.position.set(-0.4, -0.37, 0);
-      const accentButton = createLabelButton('Accent colors', 0.6, 0.1, {
-        inputAction: 'openInput',
-        mode: 'accent',
-      });
-      accentButton.name = 'xr-accent-colors-button';
-      accentButton.position.set(0.39, -0.37, 0);
-      inputRoot.add(zip, accentButton);
+      worldPanel.build(inputRoot, buildContext());
     } else if (mode === 'accent') {
       accentPanel.build(inputRoot, buildContext());
     } else if (mode === 'weather-zip') {
@@ -5591,11 +5554,6 @@ export function createWorkspaceScene(
       setUISounds(!mutableState.uiSounds);
       return true;
     }
-    if (action === 'backgroundSelect') {
-      backgroundRow = backgroundPickerRowShowing(mutableState.background, 0);
-      showInput('backgrounds');
-      return true;
-    }
     if (!action || action === 'noop') return false;
     if (action === 'close') {
       commandDraft = null;
@@ -5861,36 +5819,6 @@ export function createWorkspaceScene(
     }
     if (action === 'openInput') {
       showInput(hit.userData.mode as InputMode);
-      return true;
-    }
-    if (action === 'xrMode') {
-      const mode = hit.userData.xrMode as XrEntryMode;
-      if (
-        mutableState.xrMode === 'ar' &&
-        (mode !== 'vr' || activeSession?.environmentBlendMode === 'alpha-blend')
-      ) {
-        if (mode === 'desk') openDeskWindow();
-        else {
-          mutableState.fullPassthrough = mode === 'ar';
-          if (widgets.has(DESK_WINDOW_KIND)) removeWidget(DESK_WINDOW_KIND);
-          else {
-            setBackground(mutableState.background);
-            refreshInputRoot('world');
-          }
-        }
-        return true;
-      }
-      if (mutableState.xrMode !== mode) {
-        void (async (): Promise<void> => {
-          try {
-            await exitXR();
-            actions.setXREntryMode?.(mode);
-            setNotice(`Press ${XR_ENTRY_LABELS[mode]} to continue`);
-          } catch (error) {
-            setNotice(error instanceof Error ? error.message : 'XR mode could not be changed');
-          }
-        })();
-      }
       return true;
     }
     if (action === 'resetLayout') {
@@ -8677,6 +8605,12 @@ export function createWorkspaceScene(
       toggleWidget,
       setBackground,
       backgroundThumbnail,
+      exitXR,
+      openDeskWindow,
+      removeWidget,
+      get activeSession() {
+        return activeSession;
+      },
       submitPictureUrl,
       placeRecentPicture,
       dictationCaption,
