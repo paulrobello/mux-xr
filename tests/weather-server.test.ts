@@ -1,9 +1,10 @@
 import { createServer, type Server } from 'node:http';
-import { createDirectWeatherFetcher } from '@par/xr-workspace/internal/weather-provider';
+import { validateWeatherZip } from '@par/xr-workspace';
+import { createDirectWeatherFetcher } from '@par/xr-workspace/weather';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import type { HostClipboardSocket } from '../src/host-clipboard';
-import { createWeatherClient, parseWeatherStatus, validateWeatherZip } from '../src/host-weather';
+import { createWeatherClient, parseWeatherStatus } from '../src/host-weather';
 import { attachDictationServer } from '../src/server/dictation-server';
 import {
   createWeatherProvider,

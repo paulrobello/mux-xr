@@ -1,9 +1,9 @@
+import { waitForLabelSync } from '@par/xr-workspace';
 import * as THREE from 'three';
 import type { PaneDescriptor, PanelArrangement, TerminalSurface } from '../src/contracts';
 import { createDemoSurface } from '../src/demo';
 import { createWorkspaceScene } from '../src/xr';
 import { workspaceFloorY } from '../src/xr/floor-layout';
-import { waitForLabelSync } from '../src/xr/labels';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
 
 const patterns: readonly PanelArrangement[] = ['row', 'grid', 'arc', 'sphere'];

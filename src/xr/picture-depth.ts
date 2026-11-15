@@ -1,5 +1,3 @@
-export * from '@par/xr-workspace/internal/picture-depth';
-
 /** Why a depth map could not be made, as the frame's notice reads it. */
 export function depthFailureNotice(code: string): string {
   switch (code) {

@@ -13,9 +13,7 @@ import {
   type WeatherFetcher,
   type WeatherResult,
   type WeatherStatus,
-} from '@par/xr-workspace/internal/weather-data';
-
-export * from '@par/xr-workspace/internal/weather-data';
+} from '@par/xr-workspace/weather';
 
 export interface WeatherClientOptions {
   url: () => string;

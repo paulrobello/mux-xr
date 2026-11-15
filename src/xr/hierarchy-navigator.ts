@@ -1,3 +1,4 @@
+import { applyUIEnvironment, createScalableLabel, disposeScalableLabel } from '@par/xr-workspace';
 import * as THREE from 'three';
 import type { PaneDescriptor } from '../contracts';
 import {
@@ -12,8 +13,6 @@ import {
 } from '../workspace/agent-roster';
 import type { HierarchyStyle } from '../workspace/hierarchy-style';
 import type { PaneCreationState } from '../workspace/pane-create';
-import { createScalableLabel, disposeScalableLabel } from './labels';
-import { applyUIEnvironment } from './ui-environment';
 
 const PAGE_SIZE = 6;
 const AMBER = '#e4a84a';

@@ -1,14 +1,12 @@
+import { createHangarDeckEnvironment, HANGAR_DECK_PANE_SAFE_RADIUS } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  createHangarDeckEnvironment,
-  HANGAR_DECK_PANE_SAFE_RADIUS,
-} from '../src/xr/environments/hangar-deck';
 
 const backgroundDeltas = vi.hoisted(() => [] as number[]);
 
-vi.mock('@par/xr-workspace/internal/space-background', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../src/xr/space-background')>();
+vi.mock('../packages/xr-workspace/src/space-background', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../packages/xr-workspace/src/space-background')>();
   return {
     ...original,
     createSpaceBackground: () => {

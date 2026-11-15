@@ -1,7 +1,6 @@
+import { createCartoonHand, dimHandColor } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
-import { createCartoonHand } from '../src/xr/cartoon-hand';
-import { dimHandColor } from '../src/xr/hand-colors';
 
 const dim = (color: THREE.ColorRepresentation): number =>
   dimHandColor(new THREE.Color(), color).getHex();

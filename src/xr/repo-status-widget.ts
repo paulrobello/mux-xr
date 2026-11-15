@@ -1,3 +1,4 @@
+import { applyUIEnvironment, createScalableLabel, updateScalableLabel } from '@par/xr-workspace';
 import * as THREE from 'three';
 import {
   createDefaultRepoStatusFetcher,
@@ -7,8 +8,6 @@ import {
   type RepoStatusReport,
 } from '../host-repo-status';
 import { formatAge } from '../workspace/agent-roster';
-import { createScalableLabel, updateScalableLabel } from './labels';
-import { applyUIEnvironment } from './ui-environment';
 import { disposeOwned, type Widget } from './widgets';
 
 export const REPO_STATUS_KIND = 'repo-status';

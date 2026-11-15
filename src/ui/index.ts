@@ -1,3 +1,10 @@
+import {
+  createModifierState,
+  keyboardDimensions,
+  keyboardKeys,
+  validateHandColor,
+  validateWeatherZip,
+} from '@par/xr-workspace';
 import type {
   BackgroundMode,
   KeyModifiers,
@@ -13,8 +20,6 @@ import type {
 import { isBackgroundMode } from '../contracts';
 import { getKeyHelp } from '../control-help';
 import { HOST_CLIPBOARD_SETUP } from '../host-clipboard';
-import { validateWeatherZip } from '../host-weather';
-import { createModifierState, keyboardDimensions, keyboardKeys } from '../keyboard';
 import {
   commandServerKey,
   copyCommand,
@@ -68,7 +73,6 @@ import { validateKeyboardCurvature } from '../workspace/keyboard-curvature';
 import type { KeyborbMode } from '../workspace/keyborb';
 import { validateKeyborbMode } from '../workspace/keyborb';
 import { XR_ENTRY_LABELS, type XrEntryMode } from '../xr/entry';
-import { validateHandColor } from '../xr/hand-colors';
 
 export { validateHandColor };
 
@@ -80,13 +84,13 @@ import {
   type WindowPreferences,
 } from '../workspace/window-preferences';
 
-export type { SemanticKey } from '../keyboard';
+export type { SemanticKey } from '@par/xr-workspace';
 export {
   createModifierState,
   keyboardDimensions,
   keyboardKeys,
   semanticKeyboardLayout,
-} from '../keyboard';
+} from '@par/xr-workspace';
 
 export interface UICallbacks {
   onConnect(endpoint: string): void;

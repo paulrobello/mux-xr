@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('@par/xr-workspace/internal/labels', () => import('./helpers/labels'));
+vi.mock('../packages/xr-workspace/src/labels', () => import('./helpers/labels'));
 
-import type { HandContactProbe } from '../src/xr/hand-contact';
-import { createScalableLabel } from '../src/xr/labels';
-import { UI_ENV_MAP_INTENSITY } from '../src/xr/ui-environment';
-import { createWristMenuWatch, WRIST_WATCH_EXTENT } from '../src/xr/wrist-menu-watch';
+import type { HandContactProbe } from '@par/xr-workspace';
+import {
+  createScalableLabel,
+  createWristMenuWatch,
+  UI_ENV_MAP_INTENSITY,
+  WRIST_WATCH_EXTENT,
+} from '@par/xr-workspace';
 
 function makeWatch(): ReturnType<typeof createWristMenuWatch> {
   return createWristMenuWatch(createScalableLabel('Menu', 0.052, 0.035));

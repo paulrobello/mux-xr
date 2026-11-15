@@ -1,5 +1,27 @@
 const handPoses = vi.hoisted(() => ({ count: 0, probeReads: 0 }));
-vi.mock('@par/xr-workspace/internal/labels', () => import('./helpers/labels'));
+vi.mock('@par/xr-workspace', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@par/xr-workspace')>();
+  const { createCartoonHand } = actual;
+  return {
+    ...actual,
+    ...(await import('./helpers/labels')),
+    createStandardHand: (...args: Parameters<typeof createCartoonHand>) => {
+      const hand = createCartoonHand(...args);
+      const update = hand.update.bind(hand);
+      hand.update = (...pose: Parameters<typeof hand.update>) => {
+        handPoses.count++;
+        update(...pose);
+      };
+      const probes = hand.contactProbes;
+      return Object.defineProperty(hand, 'contactProbes', {
+        get: () => {
+          handPoses.probeReads++;
+          return probes;
+        },
+      });
+    },
+  };
+});
 const focusedDirectories = vi.hoisted(() => ({ git: vi.fn(), kanban: vi.fn() }));
 vi.mock('../src/xr/repo-status-widget', async (original) => {
   const actual = await original<typeof import('../src/xr/repo-status-widget')>();
@@ -19,26 +41,6 @@ vi.mock('../src/xr/kanban-strip', async (original) => {
       ...actual.createKanbanStripWidget(texture),
       setFocusedPane: focusedDirectories.kanban,
     }),
-  };
-});
-vi.mock('../src/xr/standard-hand', async () => {
-  const { createCartoonHand } = await import('../src/xr/cartoon-hand');
-  return {
-    createStandardHand: (...args: Parameters<typeof createCartoonHand>) => {
-      const hand = createCartoonHand(...args);
-      const update = hand.update.bind(hand);
-      hand.update = (...pose: Parameters<typeof hand.update>) => {
-        handPoses.count++;
-        update(...pose);
-      };
-      const probes = hand.contactProbes;
-      return Object.defineProperty(hand, 'contactProbes', {
-        get: () => {
-          handPoses.probeReads++;
-          return probes;
-        },
-      });
-    },
   };
 });
 
@@ -85,6 +87,12 @@ vi.mock('three', async (importOriginal) => {
   return { ...actual, WebGLRenderer: FakeRenderer };
 });
 
+import {
+  createHandContact,
+  dimHandColor,
+  HAND_COLOR_PRESETS,
+  ON_TOP_LAYER,
+} from '@par/xr-workspace';
 import * as THREE from 'three';
 import {
   BACKGROUND_MODES,
@@ -96,8 +104,6 @@ import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
 import { createPictureController, type PictureLoaders } from '../src/workspace/pictures';
 import { BACKGROUND_LABELS } from '../src/xr/background-picker';
 import type { DeskWindowIntersection } from '../src/xr/desk-window';
-import { dimHandColor, HAND_COLOR_PRESETS } from '../src/xr/hand-colors';
-import { createHandContact } from '../src/xr/hand-contact';
 import { measurePanelBounds } from '../src/xr/panel-bounds';
 import { PictureLoadError, pictureErrorNotice } from '../src/xr/picture-sizing';
 import {
@@ -106,7 +112,6 @@ import {
   createPictureLibrary,
   createRecentPictureLibrary,
 } from '../src/xr/picture-store';
-import { ON_TOP_LAYER } from '../src/xr/render-layers';
 import { createWorkspaceScene } from '../src/xr/scene';
 import { terminalWarpPoint } from '../src/xr/terminal-warp';
 import { NOMINAL_VIEWER_HEIGHT } from '../src/xr/ui-poses';

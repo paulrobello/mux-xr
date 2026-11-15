@@ -1,3 +1,8 @@
+import {
+  createPerfGaugeWidget,
+  createStickyNoteWidget,
+  createTimerWidget,
+} from '@par/xr-workspace';
 import type * as THREE from 'three';
 import { createAgentBoardWidget } from './agent-board';
 import { createBellFeedWidget } from './bell-feed';
@@ -6,13 +11,10 @@ import { createDeskWindow, DESK_WINDOW_KIND } from './desk-window';
 import { createHostLoadWidget } from './host-load';
 import { createKanbanStripWidget } from './kanban-strip';
 import { createMeshInboxWidget } from './mesh-inbox';
-import { createPerfGaugeWidget } from './perf-gauge';
 import { createPictureFrameWidget } from './picture-frame';
 import { createRepoStatusWidget } from './repo-status-widget';
 import { createServiceHealthWidget } from './service-health';
-import { createStickyNoteWidget } from './sticky-note';
 import { createStreamHealthWidget } from './stream-health';
-import { createTimerWidget } from './timer-widget';
 import { createWeatherWidget } from './weather-widget';
 import { createClockWidget, type Widget } from './widgets';
 

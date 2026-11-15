@@ -1,6 +1,6 @@
+import { HANGAR_DECK_PANE_SAFE_RADIUS } from '@par/xr-workspace';
 import * as THREE from 'three';
 import type { BackgroundMode } from '../contracts';
-import { HANGAR_DECK_PANE_SAFE_RADIUS } from './environments/hangar-deck';
 import { measurePanelBounds } from './panel-bounds';
 
 const BACKGROUND_FLOOR_Y: Partial<Record<BackgroundMode, number>> = {

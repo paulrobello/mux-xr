@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import {
+  createStandardHand,
+  dimHandColor,
+  STANDARD_HAND_ASSET_URLS,
+  STANDARD_HAND_JOINTS,
+} from '@par/xr-workspace';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { describe, expect, it, vi } from 'vitest';
-import { dimHandColor } from '../src/xr/hand-colors';
-import {
-  createStandardHand,
-  STANDARD_HAND_ASSET_URLS,
-  STANDARD_HAND_JOINTS,
-} from '../src/xr/standard-hand';
 
 const dim = (color: THREE.ColorRepresentation): number =>
   dimHandColor(new THREE.Color(), color).getHex();
@@ -17,7 +17,7 @@ import {
   WRIST_WATCH_EXTENT,
   WRIST_WATCH_NEAR_EXIT_GAP,
   WRIST_WATCH_PROBE_REACH,
-} from '../src/xr/wrist-menu-watch';
+} from '@par/xr-workspace';
 
 type Side = 'left' | 'right';
 type Capture = { side: Side; joints: Record<string, { matrix: number[] }> };

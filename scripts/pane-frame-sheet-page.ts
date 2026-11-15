@@ -1,3 +1,4 @@
+import { applyUIEnvironment, createUIEnvironment } from '@par/xr-workspace';
 import * as THREE from 'three';
 import {
   createCurvedTerminalGeometry,
@@ -5,7 +6,6 @@ import {
   createTerminalFrameGeometry,
   type TerminalWarpSpan,
 } from '../src/xr/terminal-warp';
-import { applyUIEnvironment, createUIEnvironment } from '../src/xr/ui-environment';
 
 interface FrameShot {
   width: number;

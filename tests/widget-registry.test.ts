@@ -2,20 +2,25 @@ import * as THREE from 'three';
 import { OBB } from 'three/examples/jsm/math/OBB.js';
 import { describe, expect, it, vi } from 'vitest';
 
-// Picture-placement geometry sweeps exceed fast-core budgets; keep them viable on x86 gate hosts.
-vi.setConfig({ testTimeout: 20000 });
+// Picture-placement geometry sweeps exceed fast-core budgets; keep them viable on x86 gate hosts
+// and on a busy shared host, where a full sweep passes 20 s.
+vi.setConfig({ testTimeout: 45000 });
 
-vi.mock('troika-three-text', () => ({
-  Text: class MockText extends THREE.Mesh {
-    sync(callback?: () => void): void {
-      callback?.();
-    }
-    dispose(): void {
-      /* test double */
-    }
-  },
-  configureTextBuilder: vi.fn(),
-}));
+vi.mock('troika-three-text', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('troika-three-text')>();
+  return {
+    ...actual,
+    Text: class MockText extends THREE.Mesh {
+      sync(callback?: () => void): void {
+        callback?.();
+      }
+      dispose(): void {
+        /* test double */
+      }
+    },
+    configureTextBuilder: vi.fn(),
+  };
+});
 
 import { createPictureFrameWidget } from '../src/xr/picture-frame';
 import {

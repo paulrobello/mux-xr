@@ -1,5 +1,5 @@
+import { tagAccentMaterial } from '@par/xr-workspace';
 import * as THREE from 'three';
-import { tagAccentMaterial } from './accent-colors';
 import { disposeOwned, type Widget } from './widgets';
 
 export const DESK_WINDOW_KIND = 'desk-window';

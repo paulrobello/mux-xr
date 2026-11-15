@@ -21,7 +21,7 @@ export type { ClientMessage, ServerMessage } from './vendor/terminal_pb';
 const MAX_DECOMPRESSED_SIZE = 9 * 1024 * 1024;
 const MAX_COMPRESSED_SIZE = MAX_DECOMPRESSED_SIZE;
 
-export { keyboardKeyLabel as terminalKeyLabel } from '@par/xr-workspace/internal/keyboard';
+export { keyboardKeyLabel as terminalKeyLabel } from '@par/xr-workspace/keyboard-types';
 
 export function encodeClientMessage(message: ClientMessage): ArrayBuffer {
   const payload = toBinary(ClientMessageSchema, message);

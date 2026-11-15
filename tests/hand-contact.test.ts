@@ -1,7 +1,6 @@
+import { createHandContact, curveKeyboardContent } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { createHandContact } from '../src/xr/hand-contact';
-import { curveKeyboardContent } from '../src/xr/keyboard-surface';
 import { createCurvedTerminalGeometry } from '../src/xr/terminal-warp';
 
 function keyboard(name = 'keyboard'): THREE.Group {

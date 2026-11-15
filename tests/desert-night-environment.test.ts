@@ -1,9 +1,6 @@
+import { createDesertNightEnvironment, DESERT_NIGHT_MOON_AZIMUTH_DEGREES } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  createDesertNightEnvironment,
-  DESERT_NIGHT_MOON_AZIMUTH_DEGREES,
-} from '../src/xr/environments/desert-night';
 
 const CAMERA_FAR = 100;
 

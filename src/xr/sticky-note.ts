@@ -1,5 +1,3 @@
-export * from '@par/xr-workspace/internal/sticky-note';
-
 /**
  * Where Pin as note puts a new note, from the viewer's heading: in view, up and right of the
  * keyboard panel's transcript. The note counts as placed there, so recenter leaves it.

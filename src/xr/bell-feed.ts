@@ -1,7 +1,6 @@
+import { applyUIEnvironment, createScalableLabel, updateScalableLabel } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { formatAge } from '../workspace/agent-roster';
-import { createScalableLabel, updateScalableLabel } from './labels';
-import { applyUIEnvironment } from './ui-environment';
 import { disposeOwned, type Widget } from './widgets';
 
 /** Rows shown before the "+N more" line. */

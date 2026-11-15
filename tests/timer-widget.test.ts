@@ -1,28 +1,31 @@
 import * as THREE from 'three';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('troika-three-text', () => ({
-  Text: class MockText extends THREE.Mesh {
-    text = '';
-    anchorX: number | string = 0;
-    textAlign = '';
-    sync(callback?: () => void): void {
-      callback?.();
-    }
-    dispose(): void {
-      /* test double */
-    }
-  },
-  configureTextBuilder: vi.fn(),
-}));
+vi.mock('troika-three-text', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('troika-three-text')>();
+  return {
+    ...actual,
+    Text: class MockText extends THREE.Mesh {
+      text = '';
+      anchorX: number | string = 0;
+      textAlign = '';
+      sync(callback?: () => void): void {
+        callback?.();
+      }
+      dispose(): void {
+        /* test double */
+      }
+    },
+    configureTextBuilder: vi.fn(),
+  };
+});
 
-vi.mock('@par/xr-workspace/internal/timer-state', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../src/xr/timer-state')>();
+vi.mock('@par/xr-workspace', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@par/xr-workspace')>();
   return { ...original, readout: vi.fn(original.readout) };
 });
 
-import { readout } from '../src/xr/timer-state';
-import { createTimerWidget, TIMER_HEIGHT } from '../src/xr/timer-widget';
+import { createTimerWidget, readout, TIMER_HEIGHT } from '@par/xr-workspace';
 
 const NOW = 1_800_000_000_000;
 const DEFAULT_MS = 5 * 60_000;

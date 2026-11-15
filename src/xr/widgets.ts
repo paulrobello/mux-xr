@@ -1,12 +1,10 @@
-import type { SpatialWidget } from '@par/xr-workspace/internal/widget';
+import type { PerfSample, SpatialWidget } from '@par/xr-workspace';
 import type { AgentRosterRow } from '../workspace/agent-roster';
 import type { BellFeedEntry } from './bell-feed';
-import type { PerfSample } from './perf-gauge';
 import type { PictureImage } from './picture-image';
 import type { StreamLinkInput } from './stream-health';
 
-export { type ClockKind, createClockWidget } from '@par/xr-workspace/internal/clock-widget';
-export { disposeOwned } from '@par/xr-workspace/internal/widget';
+export { type ClockKind, createClockWidget, disposeOwned } from '@par/xr-workspace';
 
 export interface Widget extends SpatialWidget {
   /** Receives every roster change; widgets that do not show agents omit it. */

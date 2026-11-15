@@ -1,6 +1,3 @@
-import * as THREE from 'three';
-import { describe, expect, it, vi } from 'vitest';
-import { linearLuminance } from '../src/xr/accent-colors';
 import {
   CLOUD_SUMMIT_BIRD_ARC_DEGREES,
   CLOUD_SUMMIT_BIRD_COUNT,
@@ -9,7 +6,10 @@ import {
   CLOUD_SUMMIT_SUN_AZIMUTH_DEGREES,
   type CloudSummitFlockState,
   createCloudSummitEnvironment,
-} from '../src/xr/environments/cloud-summit';
+  linearLuminance,
+} from '@par/xr-workspace';
+import * as THREE from 'three';
+import { describe, expect, it, vi } from 'vitest';
 
 const CAMERA_FAR = 100;
 const EYE_HEIGHT = 1.6;

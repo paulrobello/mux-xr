@@ -1,6 +1,6 @@
+import { linearLuminance, tintToLuminance } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
-import { linearLuminance, tintToLuminance } from '../src/xr/accent-colors';
 
 // Geometry-heavy environment tests exceed fast-core budgets; keep them viable on x86 gate hosts.
 vi.setConfig({ testTimeout: 20000 });
@@ -14,7 +14,7 @@ import {
   AURORA_TUNDRA_SNOW_COUNT,
   AURORA_TUNDRA_SNOW_FRONT_CLEARANCE,
   createAuroraTundraEnvironment,
-} from '../src/xr/environments/aurora-tundra';
+} from '@par/xr-workspace';
 
 const CAMERA_FAR = 100;
 const EYE_HEIGHT = 1.6;

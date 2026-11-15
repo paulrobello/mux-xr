@@ -1,17 +1,21 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('troika-three-text', () => ({
-  Text: class MockText extends THREE.Mesh {
-    sync(callback?: () => void): void {
-      callback?.();
-    }
-    dispose(): void {
-      /* test double */
-    }
-  },
-  configureTextBuilder: vi.fn(),
-}));
+vi.mock('troika-three-text', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('troika-three-text')>();
+  return {
+    ...actual,
+    Text: class MockText extends THREE.Mesh {
+      sync(callback?: () => void): void {
+        callback?.();
+      }
+      dispose(): void {
+        /* test double */
+      }
+    },
+    configureTextBuilder: vi.fn(),
+  };
+});
 
 import {
   countsAsFrame,
@@ -25,7 +29,7 @@ import {
   PERF_HISTORY,
   PERF_TONE_COLORS,
   sparklineHeights,
-} from '../src/xr/perf-gauge';
+} from '@par/xr-workspace';
 
 describe('perf gauge math', () => {
   it('tones FPS against the XR target', () => {

@@ -1,11 +1,11 @@
-import type { PictureDepthEstimator } from '../host-picture-depth';
 import {
   DEFAULT_DEPTH_VIEW,
-  depthFailureNotice,
   normalizeDepthView,
   type PictureDepthView,
   usesDepthMap,
-} from '../xr/picture-depth';
+} from '@par/xr-workspace';
+import type { PictureDepthEstimator } from '../host-picture-depth';
+import { depthFailureNotice } from '../xr/picture-depth';
 import {
   createPictureThumbnail,
   loadPictureFile,

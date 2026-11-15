@@ -1,7 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { WEATHER_ZIP_FORMAT, type WeatherStatus } from '@par/xr-workspace/internal/weather-data';
 import {
   createWeatherProvider as createProvider,
   localWeekday,
@@ -9,16 +8,18 @@ import {
   parseDays,
   parseNow,
   parseWindMph,
+  WEATHER_ZIP_FORMAT,
   type WeatherFetch,
   type WeatherProvider,
   type WeatherProviderOptions,
-} from '@par/xr-workspace/internal/weather-provider';
+  type WeatherStatus,
+} from '@par/xr-workspace/weather';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
 
 export type {
   WeatherProvider,
   WeatherProviderOptions,
-} from '@par/xr-workspace/internal/weather-provider';
+} from '@par/xr-workspace/weather';
 
 import {
   type ClipboardSecret,

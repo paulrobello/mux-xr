@@ -1,4 +1,4 @@
-import type { KeyModifiers } from '@par/xr-workspace/internal/keyboard';
+import type { KeyModifiers } from '@par/xr-workspace/keyboard-types';
 import type { PaneProcess } from './terminal/lifecycle';
 import type { TerminalLinkStats } from './terminal/link-stats';
 import type { XrEntryMode } from './xr/entry';
@@ -32,7 +32,7 @@ export type TerminalStatus =
 export type TerminalColorMode = 'comfort' | 'original' | 'monochrome';
 export type TerminalRenderQuality = 'full' | 'medium' | 'low' | 'hidden';
 
-export type { KeyModifiers } from '@par/xr-workspace/internal/keyboard';
+export type { KeyModifiers } from '@par/xr-workspace/keyboard-types';
 
 export type TerminalMouseButton = 0 | 1 | 2 | 64 | 65;
 export type TerminalMouseEventType = 'press' | 'release' | 'move' | 'scroll';

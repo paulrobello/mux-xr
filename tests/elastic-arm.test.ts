@@ -1,6 +1,6 @@
+import { createElasticArm } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
-import { createElasticArm } from '../src/xr/elastic-arm';
 
 function center(positions: THREE.BufferAttribute, segment: number, side = 0): THREE.Vector3 {
   const result = new THREE.Vector3();

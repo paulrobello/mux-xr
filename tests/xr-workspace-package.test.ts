@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import type { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('@par/xr-workspace/internal/labels', () => import('./helpers/labels'));
+vi.mock('../packages/xr-workspace/src/labels', () => import('./helpers/labels'));
 
 describe('private XR workspace package', () => {
   it('mounts, retints, updates, and releases worlds in an app-owned scene', () => {

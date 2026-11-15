@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./internal/*": "./src/*.ts"
+    "./keyboard-types": "./src/keyboard-types.ts",
+    "./weather": "./src/weather.ts"
   },
   "peerDependencies": {
     "three": "0.186.1"

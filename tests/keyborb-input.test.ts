@@ -1,6 +1,6 @@
+import { createKeyborbInput } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { createKeyborbInput } from '../src/xr/keyborb-input';
 
 function fixture(): {
   root: THREE.Group;

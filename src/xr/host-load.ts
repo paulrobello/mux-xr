@@ -1,3 +1,9 @@
+import {
+  applyUIEnvironment,
+  createScalableLabel,
+  PERF_TONE_COLORS,
+  updateScalableLabel,
+} from '@par/xr-workspace';
 import * as THREE from 'three';
 import { createHostClipboardSecretStore } from '../host-clipboard';
 import { HOST_SERVICE_PORT, hostServiceUrl } from '../host-service';
@@ -8,9 +14,6 @@ import {
   type HostStatsSnapshot,
   type HostStatsSource,
 } from '../host-stats';
-import { createScalableLabel, updateScalableLabel } from './labels';
-import { PERF_TONE_COLORS } from './perf-gauge';
-import { applyUIEnvironment } from './ui-environment';
 import { disposeOwned, type Widget } from './widgets';
 
 export type HostLoadTone = 'ok' | 'warn' | 'critical' | 'unknown';

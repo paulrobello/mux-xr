@@ -1,9 +1,12 @@
+import {
+  applyUIEnvironment,
+  createScalableLabel,
+  PERF_TONE_COLORS,
+  updateScalableLabel,
+} from '@par/xr-workspace';
 import * as THREE from 'three';
 import { defaultHostFeedSource, type HostFeedFailure, type HostFeedSource } from '../host-feed';
 import { createFeedPoller, FEED_FAILURE_TEXT, isWidgetShown } from './feed-poller';
-import { createScalableLabel, updateScalableLabel } from './labels';
-import { PERF_TONE_COLORS } from './perf-gauge';
-import { applyUIEnvironment } from './ui-environment';
 import { disposeOwned, type Widget } from './widgets';
 
 export const KANBAN_STRIP_KIND = 'kanban-strip';

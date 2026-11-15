@@ -2,6 +2,8 @@
  * Cards for toasts that outside programs post through the host service. Each placement owns a
  * small pool of cards built once, so a new toast only retypes text and recolors the accent.
  */
+
+import { createScalableLabel, updateScalableLabel } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { getControlHelp } from '../control-help';
 import {
@@ -10,7 +12,6 @@ import {
   type ToastLevel,
   type ToastPlacement,
 } from '../toast-contract';
-import { createScalableLabel, updateScalableLabel } from './labels';
 import { createToastQueue, type QueuedToast, toastSlots } from './toast-queue';
 import { disposeOwned } from './widgets';
 
