@@ -1,4 +1,3 @@
-// @vitest-environment node
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
