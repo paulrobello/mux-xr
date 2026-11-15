@@ -13,9 +13,16 @@ import { createKeyborbGlyphs, createKeyborbKey, createKeyborbShells } from './ke
 import { createScalableLabel, updateScalableLabel } from './labels';
 import { disposeOwned } from './widget';
 
+/** `panel` is the flat key panel and `keyborb` the spherical-key keyboard. */
 export type KeyboardStyle = 'panel' | 'keyborb';
+/** The pitch of one key cell in metres at root scale 1. */
 export const KEYBOARD_UNIT = 0.13;
 
+/**
+ * Adds one mesh per key to `root`, laid out in the shared key positions, and returns them in key
+ * order. `shift` selects the shifted labels for single-character keys. `decorate` runs on each
+ * mesh before it is added, so a caller can tag it.
+ */
 export function addKeyboardKeys(
   root: THREE.Group,
   style: KeyboardStyle,
@@ -50,6 +57,11 @@ export function addKeyboardKeys(
   });
 }
 
+/**
+ * Draws every Keyborb orb on `root` as one instanced shell mesh and one batched glyph text. The
+ * per-orb meshes stay as invisible hit and state proxies, and the batches are stored on
+ * `root.userData` so `update` can refresh them.
+ */
 export function addKeyborbBatches(root: THREE.Group): void {
   const orbs = root.children.filter(
     (child): child is THREE.Mesh => child.userData.keyborb === true,

@@ -66,6 +66,7 @@ function visible(object: THREE.Object3D): boolean {
   return true;
 }
 
+/** Creates the contact tracker for one hand. Its state is private to the returned object. */
 export function createHandContact(): HandContact {
   const inverse = new THREE.Matrix4();
   const normalMatrix = new THREE.Matrix3();

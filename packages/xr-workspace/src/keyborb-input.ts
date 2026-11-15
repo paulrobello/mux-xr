@@ -22,7 +22,9 @@ interface Orb {
   lift: number;
 }
 
+/** The result of one `sample` call for one hand. The object is reused, so read it before the next call. */
 export interface KeyborbPinchSample {
+  /** The orb the hand is near, lifted toward the fingertips. */
   hovered: THREE.Mesh | null;
   /**
    * The orb a closing pinch took hold of. A modifier acts now so a long hold can lock it; any
@@ -31,6 +33,7 @@ export interface KeyborbPinchSample {
   pressed: THREE.Mesh | null;
   /** The held orb, typed when its pinch opens. */
   committed: THREE.Mesh | null;
+  /** The pinch opened this frame. */
   released: boolean;
 }
 

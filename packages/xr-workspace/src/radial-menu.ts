@@ -133,6 +133,11 @@ interface Target<Action extends string> {
   stackPosition: THREE.Vector3;
 }
 
+/**
+ * Builds a closed radial menu. Throws `RangeError` for fewer than two or more than eight items, a
+ * duplicate id, or the reserved id `cancel`. The centre disc is always Cancel. The menu opens in
+ * about 640 ms and is interactive only once that animation settles.
+ */
 export function createRadialMenu<Action extends string>(
   options: RadialMenuOptions<Action>,
 ): RadialMenu<Action> {
