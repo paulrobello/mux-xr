@@ -9,7 +9,7 @@ import {
   workspaceScope,
 } from '../src/commands/transfer';
 import type { QuickCommand } from '../src/contracts';
-import { validateSettings } from '../src/settings/store';
+import { createSettingsStore, validateSettings } from '../src/settings/store';
 import { mountWorkspaceUI, validateHandColor } from '../src/ui';
 import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
 
@@ -235,6 +235,29 @@ describe('mux XR local UI state', () => {
     expect(changes).toEqual([false, true]);
     ui.destroy();
     localStorage.clear();
+  });
+
+  it('tells the user when a setting cannot be saved', () => {
+    const storage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('quota');
+      },
+    } as unknown as Storage;
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const root = document.createElement('div');
+    const ui = mountWorkspaceUI(
+      root,
+      { onConnect: () => undefined },
+      { settings: createSettingsStore(storage) },
+    );
+    ui.setUISounds(false, true);
+    expect(ui.getSettings().uiSounds).toBe(false);
+    expect(query<HTMLElement>(root, '[data-detail]').textContent).toBe(
+      'Settings could not be saved on this device.',
+    );
+    ui.destroy();
+    debug.mockRestore();
   });
 
   it('lists every background in table order with its label', () => {

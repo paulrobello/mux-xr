@@ -16,7 +16,6 @@ import {
   browserStorage,
   createSettingsStore,
   type SettingsStore,
-  settingChanged,
   type WorkspaceSettings,
 } from '../settings/store';
 import type { DictationAction, DictationState } from '../speech-input';
@@ -30,6 +29,7 @@ import { forwardedActions, mountHostClipboardControls } from './actions';
 import { mountAgentRoster } from './agent-roster';
 import { mountCommandLibrary } from './input-drawer';
 import { mountKeyboard } from './keyboard';
+import { createSettingsBinding } from './settings-binding';
 import { mountSettingsControls } from './settings-controls';
 import { mountSettingsPanel } from './settings-panel';
 import { createSettingsSetters } from './settings-setters';
@@ -146,11 +146,6 @@ export interface WorkspaceUI {
   setKeyboardCurvature(degrees: number, persist?: boolean): void;
 }
 
-// The swatch the color picker shows while the hands keep their default color.
-const _DEFAULT_HAND_SWATCH = '#b4b4b4';
-// The swatch the accent pickers show while the XR accent stays the default cyan.
-const _DEFAULT_ACCENT_SWATCH = '#68d6ff';
-
 export interface WorkspaceUIOptions {
   /** The settings both presenters share; a private store over `localStorage` when omitted. */
   settings?: SettingsStore;
@@ -165,33 +160,14 @@ export function mountWorkspaceUI(
   const settingsStore = options.settings ?? createSettingsStore(storage);
   if (!settingsStore.get().endpoint && typeof location !== 'undefined')
     settingsStore.update({ endpoint: location.origin }, { persist: false });
-  let settings = settingsStore.get();
-  // Each control registers the settings it shows, so a change from XR or another presenter
-  // re-renders exactly the controls whose fields moved.
-  const settingsViews: Array<{ keys: Array<keyof WorkspaceSettings>; refresh: () => void }> = [];
-  const bindSettings = (keys: Array<keyof WorkspaceSettings>, refresh: () => void): void => {
-    settingsViews.push({ keys, refresh });
-  };
-  const refreshSettingsViews = (changed: (key: keyof WorkspaceSettings) => boolean): void => {
-    for (const view of settingsViews) if (view.keys.some(changed)) view.refresh();
-  };
-  // Re-renders the patched controls even when the store ignored the patch, because a control may
-  // hold a raw typed value that validation changed back to the stored one.
-  const saveSettings = (
-    patch: Partial<WorkspaceSettings>,
-    saveOptions?: { persist?: boolean },
-  ): void => {
-    const saved = settingsStore.update(patch, saveOptions);
-    settings = settingsStore.get();
-    refreshSettingsViews((key) => key in patch);
-    if (!saved)
+  const binding = createSettingsBinding({
+    store: settingsStore,
+    onChange: (next) => callbacks.onSettingsChange?.(next),
+    onSaveError: () => {
       qs<HTMLElement>('[data-detail]').textContent = 'Settings could not be saved on this device.';
-  };
-  const stopSettings = settingsStore.subscribe((next, previous) => {
-    settings = settingsStore.get();
-    refreshSettingsViews((key) => settingChanged(next, previous, key));
-    callbacks.onSettingsChange?.(next);
+    },
   });
+  const { bind: bindSettings, save: saveSettings, current: currentSettings } = binding;
   let snapshot: WorkspaceSnapshot = { panes: [] };
   let activePaneId: string | undefined;
   let attachedPaneIds: string[] = [];
@@ -207,7 +183,6 @@ export function mountWorkspaceUI(
     onWidgets: () => callbacks.onWidgets?.(),
   });
   root.querySelector('[data-gaze]')?.parentElement?.remove();
-  const _settingsPanel = root.querySelector<HTMLElement>('[data-settings]');
   const keyboard = mountKeyboard({
     root,
     capturedTarget: () => capturedTarget,
@@ -225,7 +200,7 @@ export function mountWorkspaceUI(
         panel: settingsPanel,
         root,
         callbacks,
-        current: () => settings,
+        current: currentSettings,
         saveSettings,
         bindSettings,
         activePaneId: () => activePaneId,
@@ -269,7 +244,7 @@ export function mountWorkspaceUI(
     ?.setAttribute('title', 'Append Enter after the command text to execute it');
   const agentRoster = mountAgentRoster({
     root,
-    current: () => settings,
+    current: currentSettings,
     activePaneId: () => activePaneId,
   });
   const sidebar = mountSidebar({
@@ -286,7 +261,7 @@ export function mountWorkspaceUI(
   const commandLibrary = mountCommandLibrary({
     root,
     storage,
-    current: () => settings,
+    current: currentSettings,
     snapshot: () => snapshot,
     activePaneId: () => activePaneId,
     capturedTarget: () => capturedTarget,
@@ -384,7 +359,9 @@ export function mountWorkspaceUI(
     switch (button.dataset.action) {
       case 'agents-sort': {
         const next =
-          AGENTS_SORTS[(AGENTS_SORTS.indexOf(settings.agentsSort) + 1) % AGENTS_SORTS.length];
+          AGENTS_SORTS[
+            (AGENTS_SORTS.indexOf(currentSettings().agentsSort) + 1) % AGENTS_SORTS.length
+          ];
         saveSettings({ agentsSort: next });
         agentRoster.render();
         break;
@@ -435,14 +412,14 @@ export function mountWorkspaceUI(
       }
     }
   });
-  mountSettingsControls({ root, current: () => settings, saveSettings, bindSettings });
+  mountSettingsControls({ root, current: currentSettings, saveSettings, bindSettings });
   keyboard.setDictationState({
     supported: false,
     status: 'idle',
     transcript: '',
     error: null,
   });
-  const settingsSetters = createSettingsSetters({ root, current: () => settings, saveSettings });
+  const settingsSetters = createSettingsSetters({ root, current: currentSettings, saveSettings });
   const sceneHost = qs<HTMLElement>('[data-scene-host]');
   return {
     sceneHost,
@@ -551,7 +528,7 @@ export function mountWorkspaceUI(
       toast.textContent = message ?? '';
       toast.hidden = message === null;
     },
-    getSettings: () => ({ ...settings }),
+    getSettings: () => ({ ...currentSettings() }),
     getCommands: () => [...commandLibrary.commands()],
     addCommand: (command) => commandLibrary.writeCommand(command),
     updateCommand: (command) => commandLibrary.writeCommand(command),
@@ -560,7 +537,7 @@ export function mountWorkspaceUI(
     reorderCommands: (from, to) => commandLibrary.reorder(from, to),
     captureCommandTarget: () => capturedTarget,
     destroy() {
-      stopSettings();
+      binding.stop();
       keyboard.clearModifiers();
       agentRoster.destroy();
       root.remove();
