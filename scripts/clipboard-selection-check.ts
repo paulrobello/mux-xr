@@ -340,6 +340,33 @@ try {
     controller.dispatchEvent({ type: 'selectend' } as never);
   });
   await page.waitForFunction(
+    () => (window as unknown as FixtureWindow).__selectionScene.state.pastePrompt !== null,
+  );
+  await page.screenshot({ path: join(root, 'clipboard-paste-armed.png') });
+  if (messages.some((message) => message === 'paste'))
+    throw new Error(`Armed paste prompt sent terminal traffic: ${JSON.stringify(messages)}`);
+  await page.waitForTimeout(450);
+  await page.evaluate(() => {
+    const w = window as unknown as FixtureWindow;
+    const scene = w.__selectionScene;
+    scene.showInput('keyboard');
+    scene.scene.updateMatrixWorld(true);
+    let paste: THREE.Object3D | undefined;
+    scene.scene.traverse((object) => {
+      if (!paste && object.userData.inputAction === 'pasteClipboard') paste = object;
+    });
+    if (!paste) throw new Error('Native Paste button missing on confirm');
+    const controller = w.__questControllers[0];
+    const rotation = paste.getWorldQuaternion(new w.__questThree.Quaternion());
+    controller.position
+      .copy(paste.getWorldPosition(new w.__questThree.Vector3()))
+      .add(new w.__questThree.Vector3(0, 0, 0.3).applyQuaternion(rotation));
+    controller.quaternion.copy(rotation);
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    controller.dispatchEvent({ type: 'select' } as never);
+    controller.dispatchEvent({ type: 'selectend' } as never);
+  });
+  await page.waitForFunction(
     () => (window as unknown as FixtureWindow).__selectionScene.state.toast === 'Pasted.',
   );
   await page.waitForTimeout(50);
@@ -353,9 +380,51 @@ try {
   await page.screenshot({ path: join(root, 'clipboard-paste.png') });
   await page.evaluate(() => (window as unknown as FixtureWindow).__selectionScene.hideInput());
   messages.length = 0;
+  pastedInputs.splice(0);
   await page.evaluate(() => {
     navigator.clipboard.writeText = (window as unknown as FixtureWindow).__clipboardWrite;
   });
+
+  await page.evaluate(() => {
+    navigator.clipboard.writeText('pasted single line');
+  });
+  await page.evaluate(() => {
+    const w = window as unknown as FixtureWindow;
+    const scene = w.__selectionScene;
+    scene.showInput('keyboard');
+    scene.scene.updateMatrixWorld(true);
+    let paste: THREE.Object3D | undefined;
+    scene.scene.traverse((object) => {
+      if (!paste && object.userData.inputAction === 'pasteClipboard') paste = object;
+    });
+    if (!paste) throw new Error('Native Paste button missing');
+    const controller = w.__questControllers[0];
+    const rotation = paste.getWorldQuaternion(new w.__questThree.Quaternion());
+    controller.position
+      .copy(paste.getWorldPosition(new w.__questThree.Vector3()))
+      .add(new w.__questThree.Vector3(0, 0, 0.3).applyQuaternion(rotation));
+    controller.quaternion.copy(rotation);
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    controller.dispatchEvent({ type: 'select' } as never);
+    controller.dispatchEvent({ type: 'selectend' } as never);
+  });
+  await page.waitForFunction(
+    () => (window as unknown as FixtureWindow).__selectionScene.state.toast === 'Pasted.',
+  );
+  await page.waitForTimeout(50);
+  const singlePasted: string | undefined = pastedInputs[0];
+  if (
+    pastedInputs.length !== 1 ||
+    singlePasted !== 'pasted single line' ||
+    messages.filter((message) => message === 'paste').length !== 1 ||
+    messages.includes('input')
+  )
+    throw new Error(
+      `Single-line paste did not send on first press: ${JSON.stringify(pastedInputs)}`,
+    );
+  await page.screenshot({ path: join(root, 'clipboard-paste-single.png') });
+  await page.evaluate(() => (window as unknown as FixtureWindow).__selectionScene.hideInput());
+  messages.length = 0;
 
   await begin(6, 0);
   await drag(9, 1);
