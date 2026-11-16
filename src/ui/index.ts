@@ -37,7 +37,6 @@ import {
   toSharedCommands,
 } from '../quick-commands';
 import {
-  agentRosterLayout,
   browserStorage,
   createSettingsStore,
   type SettingsStore,
@@ -48,20 +47,13 @@ import type { DictationAction, DictationState } from '../speech-input';
 import { type TerminalFiltering, validateTerminalFiltering } from '../terminal/filtering';
 import { type PaneProcess, processBadge } from '../terminal/lifecycle';
 import { terminalKeyLabel } from '../terminal/protocol';
-import {
-  AGE_TOKENS,
-  AGENTS_SORTS,
-  type AgentRosterRow,
-  agentRowLines,
-  agentRowParts,
-  agentRowsSignature,
-  agentStateTone,
-  agentTokenText,
-} from '../workspace/agent-roster';
+import { AGENTS_SORTS, type AgentRosterRow } from '../workspace/agent-roster';
 import { type HierarchyStyle, validateHierarchyStyle } from '../workspace/hierarchy-style';
 import type { KeyborbMode } from '../workspace/keyborb';
 import { validateKeyborbMode } from '../workspace/keyborb';
 import { XR_ENTRY_LABELS, type XrEntryMode } from '../xr/entry';
+import { mountAgentRoster } from './agent-roster';
+import { escapeHtml } from './html';
 import { mountSettingsPanel } from './settings-panel';
 
 export { validateHandColor };
@@ -180,7 +172,6 @@ export interface WorkspaceUI {
 const _DEFAULT_HAND_SWATCH = '#b4b4b4';
 // The swatch the accent pickers show while the XR accent stays the default cyan.
 const _DEFAULT_ACCENT_SWATCH = '#68d6ff';
-const AGENT_AGE_REFRESH_MS = 15_000;
 
 function icon(name: 'close' | 'link' | 'xr' | 'send' | 'plus' | 'settings'): string {
   const paths: Record<string, string> = {
@@ -252,11 +243,6 @@ export function mountWorkspaceUI(
   let activePaneId: string | undefined;
   let attachedPaneIds: string[] = [];
   let paneCreation: PaneCreationState = { available: true, pending: false };
-  let agentRows: AgentRosterRow[] = [];
-  let agentSignature = '';
-  let agentRenderDeferred = false;
-  let agentRenderedOrder = '';
-  let agentRenderedAges = '';
   const paneStatuses = new Map<string, TerminalStatus>();
   const paneProcesses = new Map<string, PaneProcess>();
   const paneBadge = (paneId: string): string | null =>
@@ -418,7 +404,7 @@ export function mountWorkspaceUI(
         terminalCurvature,
         terminalOpacity,
         qs: (selector) => qs(selector),
-        renderAgents: () => renderAgents(),
+        renderAgents: () => agentRoster.render(),
       })
     : null;
   const editor = document.createElement('div');
@@ -493,69 +479,17 @@ export function mountWorkspaceUI(
   root
     .querySelector('[data-command-newline]')
     ?.setAttribute('title', 'Append Enter after the command text to execute it');
-  const renderAgents = (): void => {
-    const section = qs<HTMLElement>('[data-agents-section]');
-    section.hidden = agentRows.length === 0;
-    qs<HTMLElement>('[data-agent-count]').textContent = agentRows.length
-      ? String(agentRows.length)
-      : '';
-    const layout = agentRosterLayout(settings);
-    const sortButton = qs<HTMLButtonElement>('[data-action="agents-sort"]');
-    sortButton.textContent = layout.sort;
-    sortButton.title = `Agent order: ${layout.sort}. Change the agent order`;
-    const list = qs<HTMLElement>('[data-agents]');
-    // A reorder waits while the pointer is over the list; other updates render in place.
-    const order = agentRows.map((row) => row.paneId).join(' ');
-    if (order !== agentRenderedOrder && agentRenderedOrder && list.matches(':hover')) {
-      agentRenderDeferred = true;
-      return;
-    }
-    agentRenderDeferred = false;
-    agentRenderedOrder = order;
-    agentRenderedAges = agentAgesKey();
-    const now = Date.now();
-    list.innerHTML = agentRows
-      .map((row) => {
-        const tone = agentStateTone(row.state);
-        const state = agentTokenText(row, 'state', now);
-        const lines = agentRowParts(row, layout.rows, now);
-        const content = (lines.length ? lines : [[{ token: 'agent' as const, text: row.agent }]])
-          .map((line, index) => {
-            const parts = line
-              .map(
-                (part) =>
-                  `<span class="agent-token" data-token="${part.token}">${escapeHtml(part.text)}</span>`,
-              )
-              .join('<span class="agent-sep"> · </span>');
-            return index === 0 ? `<b>${parts}</b>` : `<small>${parts}</small>`;
-          })
-          .join('');
-        return `<button class="tree-pane agent-row ${row.paneId === activePaneId ? 'selected' : ''}" data-pane="${escapeHtml(row.paneId)}" data-agent-tone="${tone}" title="${escapeHtml(`Open ${row.agent} in ${row.paneId}`)}" aria-label="${escapeHtml(`${row.agent} ${state} in ${row.workspaceName || 'unknown workspace'}, pane ${row.paneId}${row.project ? `, project ${row.project}` : ''}${row.reason ? `, ${row.reason}` : ''}`)}"><span class="agent-lines">${content}</span></button>`;
-      })
-      .join('');
-  };
-  /** The age texts the rows would show now; empty when the layout has no age token. */
-  function agentAgesKey(): string {
-    const { rows } = agentRosterLayout(settings);
-    const ages = rows.map((line) => line.filter((token) => AGE_TOKENS.has(token)));
-    if (!ages.some((line) => line.length)) return '';
-    const now = Date.now();
-    return agentRows.map((row) => agentRowLines(row, ages, now).join('|')).join('\u0000');
-  }
-  qs<HTMLElement>('[data-agents]').addEventListener('pointerleave', () => {
-    if (agentRenderDeferred) renderAgents();
+  const agentRoster = mountAgentRoster({
+    root,
+    current: () => settings,
+    activePaneId: () => activePaneId,
   });
-  const agentAgeTimer = setInterval(() => {
-    // Also resumes a deferred reorder where pointerleave never fired (touch).
-    if (agentRenderDeferred || (agentRows.length && agentAgesKey() !== agentRenderedAges))
-      renderAgents();
-  }, AGENT_AGE_REFRESH_MS);
   const exitBadge = (paneId: string): string => {
     const badge = paneBadge(paneId);
     return badge ? `<small class="pane-exit-badge">${escapeHtml(badge)}</small>` : '';
   };
   const renderTree = (): void => {
-    renderAgents();
+    agentRoster.render();
     const tree = qs<HTMLElement>('[data-tree]');
     if (!snapshot.panes.length) {
       tree.innerHTML = '<div class="empty-tree">No panes reported</div>';
@@ -865,7 +799,7 @@ export function mountWorkspaceUI(
         const next =
           AGENTS_SORTS[(AGENTS_SORTS.indexOf(settings.agentsSort) + 1) % AGENTS_SORTS.length];
         saveSettings({ agentsSort: next });
-        renderAgents();
+        agentRoster.render();
         break;
       }
       case 'connect': {
@@ -1294,12 +1228,7 @@ export function mountWorkspaceUI(
       renderTree();
     },
     setAgentRoster(rows) {
-      const layout = agentRosterLayout(settings);
-      const signature = `${layout.sort}\u0002${agentRowsSignature(rows, layout)}`;
-      agentRows = [...rows];
-      if (signature === agentSignature) return;
-      agentSignature = signature;
-      renderAgents();
+      agentRoster.setRows(rows);
     },
     setDemoMode(enabled) {
       qs<HTMLElement>('.demo-badge').hidden = !enabled;
@@ -1483,17 +1412,8 @@ export function mountWorkspaceUI(
     destroy() {
       stopSettings();
       clearModifiers();
-      clearInterval(agentAgeTimer);
+      agentRoster.destroy();
       root.remove();
     },
   };
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(
-    /[&<>"']/g,
-    (character) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ??
-      character,
-  );
 }
