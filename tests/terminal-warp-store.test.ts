@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createTerminalWarpStore } from '../src/xr/terminal-warp-store';
+import { createTerminalWarpStore } from '../src/stores/terminal-warp-store';
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();

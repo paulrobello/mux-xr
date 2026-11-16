@@ -376,7 +376,7 @@ Widget grab and close resolve the widget by root ancestry, so nodes a widget add
 
 Picture frames are the one multi-instance widget: the registry entry sets `multiInstance`, the scene widget map and the pose store key each frame as `picture:<id>` (singleton kinds keep their bare kind key, and a bare `picture` key is refused), and the Widgets menu always reads Add Picture. The picker lives on the browser page because a file dialog cannot open inside immersive WebXR.
 
-`src/xr/picture-image.ts` decodes with `createImageBitmap`, draws into a canvas no larger than 2048 px on its long edge (three ignores `flipY` for an `ImageBitmap`, so the canvas is the texture source), closes the bitmap and re-encodes WebP for storage.
+`src/pictures/picture-image.ts` decodes with `createImageBitmap`, draws into a canvas no larger than 2048 px on its long edge (three ignores `flipY` for an `ImageBitmap`, so the canvas is the texture source), closes the bitmap and re-encodes WebP for storage.
 
 URLs use `fetch` in CORS mode without credentials first. When that fails as CORS and the opt-in `/picture-fetch` host fallback is enabled and paired, the Mac fetches the image instead. A fetch `TypeError` is reported as CORS or unreachable because the browser does not distinguish them.
 
@@ -384,7 +384,7 @@ Before decoding, `probeImageSize` reads the width and height from the first 256 
 
 The frame uploads one sRGB, mipmapped `CanvasTexture` with anisotropy capped like the terminals (`min(filtering.anisotropy, renderer max)`) and disposes it and empties its canvas on close.
 
-`src/xr/picture-store.ts` keeps the blobs in IndexedDB behind a storage seam (an in-memory adapter in tests), bounded at 8 frames and 32 MB with oldest-first eviction. Restore is driven by those records: saved picture poses with no stored image are dropped, a record that no longer decodes is deleted with a notice, and session teardown keeps both.
+`src/pictures/picture-store.ts` keeps the blobs in IndexedDB behind a storage seam (an in-memory adapter in tests), bounded at 8 frames and 32 MB with oldest-first eviction. Restore is driven by those records: saved picture poses with no stored image are dropped, a record that no longer decodes is deleted with a notice, and session teardown keeps both.
 
 The menu's placeholder frame has no blob and at most one is open. Its pose persists under `picture:placeholder-<n>` so a reload during the exit-to-pick flow (for example the update auto-reload when XR exits) restores it on the first frame, `restorePictures` never drops that key, and filling or closing it removes the key. It spawns at (-0.67, -0.17, -1.05) and 0.6 scale, inside 45 degrees of straight ahead. The next pick takes its pose and no slot.
 

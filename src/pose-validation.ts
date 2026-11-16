@@ -1,4 +1,4 @@
-import type { SavedUIPose } from './xr/ui-poses';
+import type { SavedUIPose } from './stores/ui-poses';
 
 /** The default farthest a saved pose may sit from the origin, in metres. */
 export const DEFAULT_MAX_POSE_DISTANCE = 20;

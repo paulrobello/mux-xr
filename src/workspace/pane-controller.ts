@@ -5,7 +5,7 @@ import type {
   WorkspaceSnapshot,
 } from '../contracts';
 import { reportSwallowed } from '../diagnostics';
-import type { SavedUIPose } from '../xr/ui-poses';
+import type { SavedUIPose } from '../stores/ui-poses';
 import { initialPaneSelection } from './initial';
 import { normalizeOpenViewsServer, type OpenViewsProfile, resolveOpenViews } from './open-views';
 

@@ -48,10 +48,10 @@ import {
   RECENT_PICTURE_LIMITS,
   type RecentPictureRecord,
 } from '../src/pictures/picture-store';
+import type { SavedUIPose } from '../src/stores/ui-poses';
 import { mountPicturePicker } from '../src/ui/pictures';
 import { createPictureController, type PictureLoaders } from '../src/workspace/pictures';
 import { createPictureFrameWidget, PICTURE_PLACEHOLDER_TEXT } from '../src/xr/picture-frame';
-import type { SavedUIPose } from '../src/xr/ui-poses';
 import { createWidgetPoseStore } from '../src/xr/widget-poses';
 import { widgetKey, widgetKeyKind } from '../src/xr/widget-registry';
 

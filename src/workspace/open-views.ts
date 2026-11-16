@@ -1,6 +1,6 @@
 import type { PaneDescriptor } from '../contracts';
 import { validPose } from '../pose-validation';
-import { legacyPoseToWorld, type SavedUIPose } from '../xr/ui-poses';
+import { legacyPoseToWorld, type SavedUIPose } from '../stores/ui-poses';
 
 export interface SavedOpenView {
   paneId: string;

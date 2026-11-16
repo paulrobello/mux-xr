@@ -24,13 +24,13 @@ import {
   STICKY_NOTE_WIDTH,
   stickyNotePages,
 } from '@par/xr-workspace';
-import { stickyNoteSpawnOffset } from '../src/xr/sticky-note';
 import {
   createStickyNoteStore,
   isStickyNoteId,
   newStickyNoteId,
   normalizeStickyNoteText,
-} from '../src/xr/sticky-note-store';
+} from '../src/stores/sticky-note-store';
+import { stickyNoteSpawnOffset } from '../src/xr/sticky-note';
 import { widgetKey, widgetKeyKind } from '../src/xr/widget-registry';
 
 function memoryStorage(initial: Record<string, string> = {}): Storage {

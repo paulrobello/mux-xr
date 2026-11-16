@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { applyUIPose, captureUIPose, createUIPoseStore } from '../src/xr/ui-poses';
+import { applyUIPose, captureUIPose, createUIPoseStore } from '../src/stores/ui-poses';
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();

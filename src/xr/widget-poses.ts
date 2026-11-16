@@ -1,5 +1,5 @@
 import { validPose } from '../pose-validation';
-import { legacyPoseToWorld, type SavedUIPose } from './ui-poses';
+import { legacyPoseToWorld, type SavedUIPose } from '../stores/ui-poses';
 import { type WidgetKey, widgetKeyKind } from './widget-registry';
 
 const STORAGE_KEY = 'mux-xr:widget-poses:v2';

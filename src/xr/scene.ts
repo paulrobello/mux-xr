@@ -74,6 +74,20 @@ import {
 } from '../quick-commands';
 import { createSettingsStore, type SettingsStore } from '../settings/store';
 import type { DictationState } from '../speech-input';
+import {
+  createStickyNoteStore,
+  newStickyNoteId,
+  normalizeStickyNoteText,
+} from '../stores/sticky-note-store';
+import { createTerminalWarpStore } from '../stores/terminal-warp-store';
+import {
+  applyUIPose,
+  captureUIPose,
+  createUIPoseStore,
+  NOMINAL_VIEWER_HEIGHT,
+  type SavedUIPose,
+  type UIPoseName,
+} from '../stores/ui-poses';
 import { type TerminalFiltering, validateTerminalFiltering } from '../terminal/filtering';
 import { paneHeading, processBadge } from '../terminal/lifecycle';
 import { terminalKeyLabel } from '../terminal/protocol';
@@ -155,11 +169,6 @@ import { PICTURE_KIND } from './picture-frame';
 import { createRadialMenu, type RadialMenuAction } from './radial-menu';
 import type { SceneContext } from './scene-context';
 import { STICKY_NOTE_PIN_OFFSET, stickyNoteSpawnOffset } from './sticky-note';
-import {
-  createStickyNoteStore,
-  newStickyNoteId,
-  normalizeStickyNoteText,
-} from './sticky-note-store';
 import { STREAM_HEALTH_SAMPLE_MS, type StreamLinkInput } from './stream-health';
 import { terminalQualityAtDistance } from './terminal-lod';
 import {
@@ -175,16 +184,7 @@ import {
   getTerminalWarpBounds,
   terminalWarpPoint,
 } from './terminal-warp';
-import { createTerminalWarpStore } from './terminal-warp-store';
 import { createUIFeedback, type UICue, type UIFeedback } from './ui-feedback';
-import {
-  applyUIPose,
-  captureUIPose,
-  createUIPoseStore,
-  NOMINAL_VIEWER_HEIGHT,
-  type SavedUIPose,
-  type UIPoseName,
-} from './ui-poses';
 import { updateVisibleMatrixWorld } from './visible-matrix-world';
 import { intersectVisible } from './visible-raycast';
 import { createBrowserHost } from './widget-host';

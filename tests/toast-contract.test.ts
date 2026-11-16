@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createToastQueue,
+  TOAST_QUEUE_LIMIT,
+  TOASTS_PER_PLACEMENT,
+} from '../src/stores/toast-queue';
+import {
   parseToastEnvelope,
   parseToastRequest,
   TOAST_MESSAGE_MAX,
   type Toast,
 } from '../src/toast-contract';
-import { createToastQueue, TOAST_QUEUE_LIMIT, TOASTS_PER_PLACEMENT } from '../src/xr/toast-queue';
 
 const id = () => 'generated';
 

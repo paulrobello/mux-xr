@@ -6,6 +6,7 @@
 import { createScalableLabel, updateScalableLabel } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { getControlHelp } from '../control-help';
+import { createToastQueue, type QueuedToast, toastSlots } from '../stores/toast-queue';
 import {
   TOAST_PLACEMENTS,
   type ToastEnvelope,
@@ -13,7 +14,6 @@ import {
   type ToastPlacement,
 } from '../toast-contract';
 import { setAction } from './panel-actions';
-import { createToastQueue, type QueuedToast, toastSlots } from './toast-queue';
 import { disposeOwned } from './widgets';
 
 export const TOAST_CARD_WIDTH = 0.86;
