@@ -2,7 +2,6 @@ import {
   accentColorOrNull,
   createEnvironmentController,
   createSpaceBackground,
-  ENVIRONMENT_LOADERS,
   type EnvironmentFactory,
   type EnvironmentSource,
   resolveEnvironmentAccent,
@@ -10,6 +9,7 @@ import {
 } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { BACKGROUNDS } from './backgrounds';
 import type { BackgroundMode } from './contracts';
 import type { WorkspaceScene } from './xr';
 import { DESK_WINDOW_KIND, setEnvironmentWindowMask } from './xr/desk-window';
@@ -19,9 +19,13 @@ export type {
   EnvironmentInstance,
 } from '@par/xr-workspace';
 export type EnvironmentFactories = Partial<Record<BackgroundMode, EnvironmentFactory>>;
-/** Each world fetched as its own chunk on first use. */
+/** Each world fetched as its own chunk on first use, from the loaders in the `BACKGROUNDS` table. */
 export type EnvironmentSources = Partial<Record<BackgroundMode, EnvironmentSource>>;
-export const ENVIRONMENT_SOURCES: EnvironmentSources = ENVIRONMENT_LOADERS;
+export const ENVIRONMENT_SOURCES: EnvironmentSources = Object.fromEntries(
+  BACKGROUNDS.flatMap((background) =>
+    'load' in background ? [[background.id, { load: background.load }]] : [],
+  ),
+);
 
 export function createEnvironmentManager(
   workspace: WorkspaceScene,

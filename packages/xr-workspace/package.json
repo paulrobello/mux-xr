@@ -8,6 +8,7 @@
     "./keyboard-types": "./src/keyboard-types.ts",
     "./weather": "./src/weather.ts",
     "./hangar-deck-layout": "./src/environments/hangar-deck-layout.ts",
+    "./environments/*": "./src/environments/*.ts",
     "./stage-assets": "./stage-assets.ts"
   },
   "bin": {

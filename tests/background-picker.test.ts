@@ -35,6 +35,19 @@ describe('background picker layout', () => {
     }
   });
 
+  it('holds each procedural world loader in the table, one per non-plain background', async () => {
+    const withLoader = BACKGROUNDS.filter((background) => 'load' in background);
+    expect(withLoader.map((background) => background.id).sort()).toEqual(
+      ['aurora', 'deep-water', 'desert', 'hangar', 'koi', 'rooftop', 'studio', 'summit'].sort(),
+    );
+    for (const background of withLoader) {
+      const factory = await (background as { load(): Promise<unknown> }).load();
+      expect(factory, background.id).toBeTypeOf('function');
+    }
+    const plain = BACKGROUNDS.filter((background) => !('load' in background));
+    expect(plain.map((background) => background.id)).toEqual(['black', 'gradient', 'observatory']);
+  });
+
   it('offers every table entry, with its label, in the browser settings select', () => {
     const root = document.createElement('div');
     mountWorkspaceUI(root, { onConnect: () => undefined, onSelectPane: () => undefined });
