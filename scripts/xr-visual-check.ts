@@ -26,7 +26,7 @@ type VisualMetrics = {
   pairGrip: { scaleBefore: number; scaleAfter: number; moved: number };
 };
 
-type FixtureWindow = Window & {
+type VisualFixturePage = Window & {
   __muxXRVisualFixture?: {
     metrics: () => VisualMetrics;
     highlightController: () => void;
@@ -260,7 +260,7 @@ async function createFixture(page: Page): Promise<void> {
 
     let pairStartPosition: import('three').Vector3 | null = null;
     let pairStartScale = 0;
-    const fixtureWindow = window as FixtureWindow;
+    const fixtureWindow = window as VisualFixturePage;
     fixtureWindow.__muxXRVisualFixture = {
       metrics: () => {
         const THREE = (window as unknown as { __muxXRVisualThree: VisualThree }).__muxXRVisualThree;
@@ -497,21 +497,21 @@ async function main(): Promise<void> {
     await createFixture(page);
     await page.waitForTimeout(500);
     await page.waitForFunction(
-      () => ((window as FixtureWindow).__muxXRVisualFixture?.metrics().fps ?? 0) > 0,
+      () => ((window as VisualFixturePage).__muxXRVisualFixture?.metrics().fps ?? 0) > 0,
     );
     const metrics = await page.evaluate(() => {
-      const fixture = (window as FixtureWindow).__muxXRVisualFixture;
+      const fixture = (window as VisualFixturePage).__muxXRVisualFixture;
       if (!fixture) throw new Error('XR visual fixture did not initialize');
       return fixture.metrics();
     });
     await page.evaluate(() => {
-      const fixture = (window as FixtureWindow).__muxXRVisualFixture;
+      const fixture = (window as VisualFixturePage).__muxXRVisualFixture;
       if (!fixture) throw new Error('XR visual fixture did not initialize');
       fixture.simulatePairGrip();
     });
     await page.waitForFunction(
       () => {
-        const metric = (window as FixtureWindow).__muxXRVisualFixture?.metrics();
+        const metric = (window as VisualFixturePage).__muxXRVisualFixture?.metrics();
         return (
           metric &&
           metric.pairGrip.scaleAfter > metric.pairGrip.scaleBefore &&
@@ -522,7 +522,7 @@ async function main(): Promise<void> {
       { timeout: 5000 },
     );
     const gripped = await page.evaluate(() => {
-      const fixture = (window as FixtureWindow).__muxXRVisualFixture;
+      const fixture = (window as VisualFixturePage).__muxXRVisualFixture;
       if (!fixture) throw new Error('XR visual fixture did not initialize');
       return fixture.metrics();
     });
@@ -559,17 +559,19 @@ async function main(): Promise<void> {
       `SwiftShader renderer detected: ${metrics.renderer}`,
     );
     await page.screenshot({ path: join(REVIEW_DIR, 'quest-keyboard-gripped.png') });
-    await page.evaluate(() => (window as FixtureWindow).__muxXRVisualFixture?.releasePairGrip());
+    await page.evaluate(() =>
+      (window as VisualFixturePage).__muxXRVisualFixture?.releasePairGrip(),
+    );
     await page.waitForTimeout(100);
     await page.screenshot({ path: KEYBOARD_SCREENSHOT });
     await page.evaluate(() => {
-      const fixture = (window as FixtureWindow).__muxXRVisualFixture;
+      const fixture = (window as VisualFixturePage).__muxXRVisualFixture;
       if (!fixture) throw new Error('XR visual fixture did not initialize');
       fixture.highlightController();
     });
     await page.waitForTimeout(250);
     const highlighted = await page.evaluate(() => {
-      const fixture = (window as FixtureWindow).__muxXRVisualFixture;
+      const fixture = (window as VisualFixturePage).__muxXRVisualFixture;
       if (!fixture) throw new Error('XR visual fixture did not initialize');
       return fixture.metrics();
     });
@@ -589,7 +591,7 @@ async function main(): Promise<void> {
     ] as const) {
       await page.evaluate(
         async ({ distance, yaw }) => {
-          await (window as FixtureWindow).__muxXRVisualFixture?.setView(distance, yaw);
+          await (window as VisualFixturePage).__muxXRVisualFixture?.setView(distance, yaw);
         },
         { distance, yaw },
       );
@@ -597,8 +599,8 @@ async function main(): Promise<void> {
       await page.screenshot({ path: join(REVIEW_DIR, `quest-keyboard-sdf-${name}.png`) });
     }
     await page.evaluate(async () => {
-      await (window as FixtureWindow).__muxXRVisualFixture?.setView(1.15, 0);
-      await (window as FixtureWindow).__muxXRVisualFixture?.setBacking(false);
+      await (window as VisualFixturePage).__muxXRVisualFixture?.setView(1.15, 0);
+      await (window as VisualFixturePage).__muxXRVisualFixture?.setBacking(false);
     });
     await page.screenshot({ path: join(REVIEW_DIR, 'quest-keyboard-buttons-only.png') });
     assert(pageErrors.length === 0, `Page errors: ${pageErrors.join('; ')}`);
@@ -635,7 +637,7 @@ async function main(): Promise<void> {
     console.error(
       'XR fixture state:',
       await page
-        .evaluate(() => (window as FixtureWindow).__muxXRVisualFixture?.metrics())
+        .evaluate(() => (window as VisualFixturePage).__muxXRVisualFixture?.metrics())
         .catch(() => null),
     );
     await page

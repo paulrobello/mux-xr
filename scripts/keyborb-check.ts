@@ -13,6 +13,7 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import type { FixtureWindow } from './lib/fixture-window';
 import { requirePrivateTest, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 import { pressWristMenu } from './wrist-menu-fixture';
@@ -25,17 +26,6 @@ if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(baseUrl).hostname))
   throw new Error('Loopback only');
 const checkedBaseUrl = baseUrl;
 const checkedTestRoot = testRoot;
-
-type FixtureWindow = Window & {
-  __muxXR: {
-    getState(): { attached: string[]; scene: { xrMode: string; keyborbMode: string } };
-  };
-  __questScene: import('three').Scene;
-  __questThree: typeof import('three');
-  __questControllers: import('three').Group[];
-  __questHands: Array<import('three').Group & { joints: Record<string, import('three').Group> }>;
-  __questRenderer: import('three').WebGLRenderer;
-};
 
 const frame = (message: ServerMessage): Buffer =>
   Buffer.from([0, ...toBinary(ServerMessageSchema, message)]);

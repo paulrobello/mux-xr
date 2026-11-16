@@ -14,6 +14,7 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import type { FixtureWindow } from './lib/fixture-window';
 import { requirePrivateTest, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 import { pressWristMenu } from './wrist-menu-fixture';
@@ -41,24 +42,6 @@ const LEFT_HAND = (process.env.KEYBORB_PERF_LEFT ?? 'far') as 'far' | 'watch' | 
 const STATES = (process.env.KEYBORB_PERF_STATES ?? 'closed,standard,keyborb').split(',') as Array<
   'closed' | 'standard' | 'keyborb'
 >;
-
-type FixtureWindow = Window & {
-  __muxXR: { getState(): { attached: string[]; scene: { xrMode: string } } };
-  __questScene: import('three').Scene;
-  __questThree: typeof import('three');
-  __questControllers: import('three').Group[];
-  __questHands: Array<import('three').Group & { joints: Record<string, import('three').Group> }>;
-  __questRenderer: import('three').WebGLRenderer;
-  __perf?: {
-    renders: number;
-    renderMs: number;
-    calls: number;
-    triangles: number;
-    uploads: number;
-    syncs: number;
-    draws: Record<string, number>;
-  };
-};
 
 const frame = (message: ServerMessage): Buffer =>
   Buffer.from([0, ...toBinary(ServerMessageSchema, message)]);

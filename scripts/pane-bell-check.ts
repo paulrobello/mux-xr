@@ -5,8 +5,6 @@ import { loadavg } from 'node:os';
 import { extname, join, resolve } from 'node:path';
 import { create, toBinary } from '@bufbuild/protobuf';
 import { chromium, type Page, type WebSocketRoute } from 'playwright';
-import type * as THREE from 'three';
-import type { TerminalSurface } from '../src/contracts';
 import {
   BellSchema,
   ConnectedSchema,
@@ -20,18 +18,9 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
-import type { WorkspaceScene } from '../src/xr/scene';
+import type { FixtureWindow } from './lib/fixture-window';
 import { assert } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
-
-type FixtureWindow = Window & {
-  __bellScene: WorkspaceScene;
-  __bellSurfaces: Map<string, TerminalSurface>;
-  __bellSelect(id: string): void;
-  __questRenderer: THREE.WebGLRenderer;
-  __questCamera: THREE.PerspectiveCamera;
-  __questThree: typeof THREE;
-};
 
 const root = process.env.MUX_XR_TEST_ROOT;
 assert(root && process.env.MUX_XR_PRIVATE_TEST === '1', 'Explicit private fixture root required');

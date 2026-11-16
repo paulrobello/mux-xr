@@ -6,21 +6,9 @@ import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import type * as THREE from 'three';
-import type { TerminalSurface } from '../src/contracts';
-import type { SpeechInput } from '../src/speech-input';
-import type { WorkspaceScene } from '../src/xr/scene';
+import type { FixtureWindow } from './lib/fixture-window';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
-type FixtureWindow = Window & {
-  __speechScene: WorkspaceScene;
-  __speechInput: SpeechInput;
-  __speechSurfaces: Map<string, TerminalSurface>;
-  __questThree: typeof THREE;
-  __questRenderer: THREE.WebGLRenderer;
-  __questControllers: THREE.Group[];
-  __speechStreams: MediaStream[];
-  __sent: Array<{ id: string; text: string }>;
-};
 const rootPath = process.env.MUX_XR_TEST_ROOT;
 const sample = process.env.MUX_XR_SPEECH_SAMPLE;
 const speechUrl = process.env.MUX_XR_SPEECH_URL;

@@ -14,6 +14,7 @@ import {
   MuxTreeWorkspaceSchema,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import type { FixtureWindow } from './lib/fixture-window';
 import { assert, requirePrivateTest, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
@@ -24,21 +25,6 @@ const { MUX_XR_BASE_URL: baseUrl, MUX_XR_TEST_ROOT: testRoot } = requirePrivateT
 const parsedBase = new URL(baseUrl);
 if (!['127.0.0.1', 'localhost', '[::1]'].includes(parsedBase.hostname))
   throw new Error('radial-live-check only accepts a loopback BASE_URL');
-
-type FixtureWindow = Window & {
-  __muxXR: { getState(): { attached: string[]; scene: { xrMode: string; radialOpen: boolean } } };
-  __questScene: import('three').Scene;
-  __questControllers: import('three').Group[];
-  __questThree: typeof import('three');
-  __questRenderer: {
-    getContext(): WebGLRenderingContext | WebGL2RenderingContext;
-    render(scene: import('three').Scene, camera: import('three').Camera): void;
-  };
-  __designScene: import('../src/xr/scene').WorkspaceScene;
-  __testRadialMenu: import('../src/xr/radial-menu').RadialMenu;
-  __radialFreeze?: boolean;
-  __radialPad: { buttons: Array<{ pressed: boolean }> };
-};
 
 const frame = (message: unknown): Buffer =>
   Buffer.from([0, ...toBinary(ServerMessageSchema, message as never)]);

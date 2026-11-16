@@ -18,6 +18,7 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import type { BrowserMetrics, FixtureWindow } from './lib/fixture-window';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
 const BASE_URL = process.env.MUX_XR_BASE_URL;
@@ -59,38 +60,6 @@ type WireState = {
   outputBytes: number;
   sendTimes: number[];
   errors: string[];
-};
-
-type BrowserMetrics = {
-  frameCpuMs: number[];
-  frameTimes: number[];
-  fillTextCount: number;
-  imageDataBytes: number;
-  textureUploadBytes: number;
-  textureUploadCount: number;
-};
-type CapacityStream = {
-  id: string;
-  status: string;
-  cols?: number;
-  rows?: number;
-  renderQuality?: string;
-};
-type AppState = {
-  attached: string[];
-  selectedId: string | null;
-  streams: CapacityStream[];
-  scene: { xrMode: string };
-};
-type FixtureWindow = Window & {
-  __capacityMetrics: BrowserMetrics;
-  __capacityResetMetrics: () => void;
-  __questScene: THREE.Scene;
-  __questThree: typeof THREE;
-  __questControllers: THREE.Group[];
-  __questCamera: THREE.PerspectiveCamera;
-  __questRenderer: THREE.WebGLRenderer;
-  __muxXR: { getState(): AppState; selectPane(id: string): void };
 };
 
 function assert(condition: unknown, message: string): asserts condition {

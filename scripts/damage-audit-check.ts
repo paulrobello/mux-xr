@@ -4,6 +4,7 @@ import { loadavg } from 'node:os';
 import { join } from 'node:path';
 import { chromium, type Page } from 'playwright';
 import { decodeServerMessage } from '../src/terminal/protocol';
+import type { FixtureWindow } from './lib/fixture-window';
 import { assert, waitForMatch } from './lib/harness';
 
 // Drives real programs through a PRIVATE par-mux daemon and a core 0.77+ mux streamer that serves
@@ -19,9 +20,6 @@ type StreamDamage = {
   auditMisses: number;
 };
 type StreamState = { id: string; status: string; rows: number; damage: StreamDamage | null };
-type FixtureWindow = Window & {
-  __muxXR: { getState: () => { streams: StreamState[] } };
-};
 
 const BASE_URL = process.env.MUX_XR_BASE_URL;
 const TEST_ROOT = process.env.MUX_XR_TEST_ROOT;

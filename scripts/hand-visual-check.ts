@@ -13,6 +13,7 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import type { FixtureWindow } from './lib/fixture-window';
 import { requirePrivateTest } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
@@ -26,14 +27,6 @@ const xrMode = process.env.MUX_XR_MODE === 'ar' ? 'ar' : 'vr';
 if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(baseUrl).hostname))
   throw new Error('Loopback only');
 
-type FixtureWindow = Window & {
-  __questThree: typeof import('three');
-  __questScene: import('three').Scene;
-  __questCamera: import('three').PerspectiveCamera;
-  __questRenderer: import('three').WebGLRenderer;
-  __questControllers: import('three').Group[];
-  __questHands: Array<import('three').Group & { joints: Record<string, import('three').Group> }>;
-};
 const frame = (message: ServerMessage): Buffer =>
   Buffer.from([0, ...toBinary(ServerMessageSchema, message)]);
 const snapshot = (): Buffer => {

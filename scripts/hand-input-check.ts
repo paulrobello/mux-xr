@@ -14,27 +14,12 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
+import type { FixtureWindow } from './lib/fixture-window';
 import { assert, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 import { pressWristMenu } from './wrist-menu-fixture';
 
 type Frame = { paneId: string; kind: string; data?: string };
-type FixtureWindow = Window & {
-  __muxXR: {
-    getState(): {
-      attached: string[];
-      selectedId: string | null;
-      scene: { xrMode: string; focusModeTerminalId: string | null };
-    };
-    selectPane(id: string): void;
-  };
-  __questScene: import('three').Scene;
-  __questControllers: import('three').Group[];
-  __questThree: typeof import('three');
-  __questCamera: import('three').PerspectiveCamera;
-  __questRenderer: import('three').WebGLRenderer;
-  __questHands: Array<import('three').Group & { joints: Record<string, import('three').Group> }>;
-};
 const BASE_URL = process.env.MUX_XR_BASE_URL;
 const TEST_ROOT = process.env.MUX_XR_TEST_ROOT;
 if (!BASE_URL || !TEST_ROOT || process.env.MUX_XR_PRIVATE_TEST !== '1')
