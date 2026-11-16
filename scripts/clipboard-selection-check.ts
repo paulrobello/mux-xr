@@ -96,7 +96,9 @@ const context = await browser.newContext({
 });
 const page = await context.newPage();
 const errors: string[] = [];
+const consoleLines: string[] = [];
 page.on('pageerror', (error) => errors.push(error.message));
+page.on('console', (entry) => consoleLines.push(`${entry.type()}: ${entry.text()}`));
 await page.routeWebSocket('**/ws**', (socket) => {
   const id = new URL(socket.url()).searchParams.get('session')?.replace('pane-', '%');
   socket.onMessage((raw) => {
@@ -141,10 +143,17 @@ const setup = async (): Promise<void> => {
   await page.goto(`${base}/__quest-controls.html?server=${encodeURIComponent(base)}`, {
     waitUntil: 'load',
   });
-  await page.waitForFunction(
-    () =>
-      (window as unknown as FixtureWindow).__selectionSurfaces?.get('%1')?.status === 'connected',
-  );
+  try {
+    await page.waitForFunction(
+      () =>
+        (window as unknown as FixtureWindow).__selectionSurfaces?.get('%1')?.status === 'connected',
+    );
+  } catch (error) {
+    throw new Error(
+      `Fixture pane never connected. Page errors: ${JSON.stringify(errors)} Console: ${JSON.stringify(consoleLines.slice(-10))}`,
+      { cause: error },
+    );
+  }
   await page.locator('[data-action="xr"]').click();
   await page.waitForFunction(
     () => (window as unknown as FixtureWindow).__selectionScene.state.xrMode === 'vr',
