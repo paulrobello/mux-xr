@@ -7,10 +7,11 @@ import {
   reorderCommands,
   workspaceScope,
 } from '../src/commands/transfer';
-import type { QuickCommand } from '../src/contracts';
+import { BACKGROUND_MODES, type QuickCommand } from '../src/contracts';
 import { validateSettings } from '../src/settings/store';
 import { mountWorkspaceUI, validateHandColor } from '../src/ui';
 import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
+import { BACKGROUND_LABELS } from '../src/xr/background-picker';
 
 const command = (id: string, workspaceId?: string): QuickCommand => ({
   id,
@@ -234,6 +235,17 @@ describe('mux XR local UI state', () => {
     expect(changes).toEqual([false, true]);
     ui.destroy();
     localStorage.clear();
+  });
+
+  it('lists every background mode in picker order with the XR picker labels', () => {
+    const root = document.createElement('div');
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    const options = [...query<HTMLSelectElement>(root, '[data-background]').options];
+    expect(options.map((option) => option.value)).toEqual([...BACKGROUND_MODES]);
+    expect(options.map((option) => option.textContent)).toEqual(
+      BACKGROUND_MODES.map((mode) => BACKGROUND_LABELS[mode]),
+    );
+    ui.destroy();
   });
 
   it('keeps a background chosen in XR through later settings changes', () => {
