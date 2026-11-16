@@ -2,9 +2,33 @@
 
 All notable changes to Mux XR are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 0.2.0 - 2026-11-15
 
+Audit remediation wave from the 2026-11-15 audit: 53 of 55 findings fixed across security, architecture, code quality and documentation. The remaining two are by design: one waits on headset measurements, one belongs to the performance card.
+
+### Added
+
+- Opt-in dictation authentication: `--dictate-auth on` moves `/dictate` onto a paired route with per-client and global 503 caps. Off by default; today's behavior unchanged.
+- Optional toast bearer token: `--toast-token-file` accepts a token file, with the pairing secret as fallback; `--insecure` refuses non-loopback binds (exit 2) and empty tokens are rejected.
+- Lazy-loaded environments: each procedural world builds its own chunk, so entry JavaScript fell from 1.88 MB to 679 kB and update reloads parse less.
 - `@par/xr-workspace` 0.2.0 adds APIs asked for by its first outside consumer: elastic-arm visibility, glow and a near-eye fade; a public label text update; `keepAbove` for single-pass scenes; stable control ids; a menu panel; optional pointer, button and session helpers; and the fonts and hand models inside the package with a staging command. The arm's near-eye fade is on by default, in Mux XR as well.
+
+### Changed
+
+- Device settings live in one store (`src/settings/store.ts`) shared by the browser presenter and the XR scene; scene-made changes persist through the same store.
+- `src/main.ts` is a bootstrap; app wiring lives in `src/app.ts` behind a tested pane controller, and a pane that fails to attach shows a notice instead of throwing.
+- The browser UI is decomposed into per-region mounts (`mountWorkspaceUI` 1,811 → 393 lines) and its stylesheet moved to `src/ui/styles.css`.
+- Widgets receive a `WidgetContext` (host and typed channels) instead of optional push methods; slow data replays to widgets that attach late.
+- Accent state is per scene, and every `WorkspaceActions` member is required with test helpers providing full sets.
+- Picture and store modules moved out of `src/xr` into `src/pictures/` and `src/stores/`; `contracts.ts` and `src/workspace` no longer import from the XR layer.
+- `?server=` links no longer auto-connect to cross-origin streamer names; the endpoint is prefilled and waits for an explicit connect.
+- TypeScript compiles as four strict projects and Vitest runs node and dom projects, with `protocol-check` leading the fast gate.
+- Backgrounds, labels and loaders come from one `BACKGROUNDS` descriptor table, and the scene exposes `registerFrameUpdater` instead of a `scene.userData` hook.
+
+### Fixed
+
+- Timing-test pins raised so gates stay green while the fleet runs parallel builds (picture frames 5s → 20s).
+- e2e coverage caught that the styles.css extraction initially dropped the keyboard layout, dictation, clipboard, toast and notice styles; restored and pinned by tests.
 
 ## 0.1.0 - 2026-11-15
 
