@@ -606,3 +606,96 @@ h1 {
     padding-right: 8px;
   }
 }
+.dictation-controls:not([hidden]) {
+  display: grid;
+  gap: 8px;
+}
+.dictation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dictation-controls textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  background: #0b1016;
+  color: #dce7ed;
+  border: 1px solid #3a5363;
+  border-radius: 4px;
+  padding: 8px;
+  font: inherit;
+}
+.dictation-controls textarea:focus-visible {
+  outline: 2px solid #8be0ea;
+  outline-offset: 2px;
+}
+[data-host-clipboard] {
+  display: grid;
+  gap: 8px;
+}
+[data-host-clipboard] input {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 6px;
+  background: #0b1016;
+  border: 1px solid #293746;
+  border-radius: 5px;
+  color: #edf4f8;
+  padding: 9px;
+  font:
+    12px ui-monospace,
+    SFMono-Regular,
+    monospace;
+}
+[data-host-clipboard-status] {
+  color: #9aabb6;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.mux-clipboard-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  max-width: min(28rem, calc(100vw - 40px));
+  z-index: 100;
+  pointer-events: none;
+  padding: 12px 16px;
+  border: 1px solid #3a5363;
+  border-radius: 8px;
+  background: #17212d;
+  color: #dce7ed;
+  font-size: 14px;
+}
+.keyboard {
+  position: relative;
+  display: block;
+  width: min(100%, calc(var(--keyboard-width) * 1em));
+  aspect-ratio: var(--keyboard-width) / var(--keyboard-height);
+  min-height: 170px;
+}
+.key {
+  position: absolute;
+  left: calc(var(--key-x) / var(--keyboard-width) * 100%);
+  top: calc(var(--key-y) / var(--keyboard-height) * 100%);
+  width: calc(var(--key-width) / var(--keyboard-width) * 100%);
+  height: calc(var(--key-height) / var(--keyboard-height) * 100%);
+  min-height: 0;
+}
+.workspace-notice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: -8px 0 16px;
+  padding: 8px 10px;
+  background: #17212ddd;
+  border: 1px solid #38505e;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+}
+.workspace-notice span {
+  flex: 1;
+}

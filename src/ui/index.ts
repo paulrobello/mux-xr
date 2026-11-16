@@ -261,13 +261,6 @@ export function mountWorkspaceUI(
     .join('');
   root.innerHTML = `<header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><section class="agents" data-agents-section hidden aria-label="Agent roster"><div class="side-heading"><span>Agents <span data-agent-count></span></span><button data-action="agents-sort" class="mini-text" aria-label="Agent order" title="Change the agent order"></button></div><div class="agent-list" data-agents></div></section><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. Creates default-shell terminals only when the streamer allows it.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="update-notice" data-update-notice hidden role="status"><span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button></div><div class="workspace-notice" data-notice hidden role="status"><span data-notice-text></span><button data-action="dismiss-notice" class="icon-btn" aria-label="Dismiss notice" title="Dismiss notice">×</button></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button><button data-action="pin-command" class="text-btn" title="Pin or unpin the selected quick command in XR">Pin / unpin</button><button data-action="export-commands" class="text-btn" title="Download every quick command for this server as JSON">Export</button><button data-action="import-commands" class="text-btn" title="Merge quick commands from an exported JSON file">Import</button><input type="file" accept="application/json,.json" data-command-import hidden></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${keyboardMarkup}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background>${backgroundOptions}</select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Highlight the pane at the center of your view.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="desk-window" class="secondary">${XR_ENTRY_LABELS.desk}</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
   const keyboardElement = root.querySelector<HTMLElement>('[data-keyboard]');
-  root
-    .querySelector('style')
-    ?.append(
-      document.createTextNode(
-        '.dictation-controls:not([hidden]){display:grid;gap:8px}.dictation-actions{display:flex;flex-wrap:wrap;gap:8px}.dictation-controls textarea{box-sizing:border-box;width:100%;min-height:72px;resize:vertical;background:#0b1016;color:#dce7ed;border:1px solid #3a5363;border-radius:4px;padding:8px;font:inherit}.dictation-controls textarea:focus-visible{outline:2px solid #8be0ea;outline-offset:2px}[data-host-clipboard]{display:grid;gap:8px}[data-host-clipboard] input{box-sizing:border-box;width:100%;margin-top:6px;background:#0b1016;border:1px solid #293746;border-radius:5px;color:#edf4f8;padding:9px;font:12px ui-monospace,SFMono-Regular,monospace}[data-host-clipboard-status]{color:#9aabb6;font-size:11px;line-height:1.5;overflow-wrap:anywhere}',
-      ),
-    );
   const drawer = root.querySelector<HTMLElement>('[data-drawer]');
   const toast = document.createElement('div');
   toast.className = 'mux-clipboard-toast';
@@ -276,13 +269,6 @@ export function mountWorkspaceUI(
   toast.setAttribute('aria-live', 'polite');
   toast.hidden = true;
   root.append(toast);
-  root
-    .querySelector('style')
-    ?.append(
-      document.createTextNode(
-        '.mux-clipboard-toast{position:fixed;right:20px;bottom:20px;max-width:min(28rem,calc(100vw - 40px));z-index:100;pointer-events:none;padding:12px 16px;border:1px solid #3a5363;border-radius:8px;background:#17212d;color:#dce7ed;font-size:14px}',
-      ),
-    );
   const dictationControls = document.createElement('div');
   dictationControls.dataset.keyboardControls = 'true';
   dictationControls.className = 'dictation-controls';
@@ -317,22 +303,12 @@ export function mountWorkspaceUI(
   if (keyboardElement) {
     keyboardElement.style.setProperty('--keyboard-width', String(keyboardDimensions.width));
     keyboardElement.style.setProperty('--keyboard-height', String(keyboardDimensions.height));
-    root
-      .querySelector('style')
-      ?.append(
-        '.keyboard{position:relative;display:block;width:min(100%,calc(var(--keyboard-width)*1em));aspect-ratio:var(--keyboard-width)/var(--keyboard-height);min-height:170px}.key{position:absolute;left:calc(var(--key-x)/var(--keyboard-width)*100%);top:calc(var(--key-y)/var(--keyboard-height)*100%);width:calc(var(--key-width)/var(--keyboard-width)*100%);height:calc(var(--key-height)/var(--keyboard-height)*100%);min-height:0}',
-      );
   }
   container.replaceChildren(root);
   const updateNotice =
     root.querySelector<HTMLElement>('[data-update-notice]') ?? document.createElement('div');
   updateNotice.style.cssText =
     'align-items:center;gap:10px;margin:-8px 0 18px;color:var(--muted);font-size:12px';
-  root
-    .querySelector('style')
-    ?.append(
-      '.workspace-notice{display:flex;align-items:center;gap:9px;margin:-8px 0 16px;padding:8px 10px;background:#17212ddd;border:1px solid #38505e;border-radius:6px;color:var(--text);font-size:12px}.workspace-notice span{flex:1}',
-    );
   if (!updateNotice.parentElement) {
     updateNotice.className = 'update-notice';
     updateNotice.hidden = true;
