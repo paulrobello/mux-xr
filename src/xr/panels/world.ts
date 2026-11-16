@@ -90,7 +90,7 @@ export const worldPanel: PanelModule = {
       void (async (): Promise<void> => {
         try {
           await ctx.exitXR();
-          ctx.actions.setXREntryMode?.(mode);
+          ctx.actions.setXREntryMode(mode);
           ctx.setNotice(`Press ${XR_ENTRY_LABELS[mode]} to continue`);
         } catch (error) {
           ctx.setNotice(error instanceof Error ? error.message : 'XR mode could not be changed');

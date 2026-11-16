@@ -104,7 +104,7 @@ export const commandEditorPanel: PanelModule = {
         ctx.commandEditorMessage = '';
         const command = commandFromDraft(draft, ctx.commandWorkspaceId);
         if (!command) ctx.commandEditorMessage = 'Enter a name and command';
-        else if (!ctx.actions.saveCommand?.(command))
+        else if (!ctx.actions.saveCommand(command))
           ctx.commandEditorMessage = 'Could not save on this device';
         else {
           ctx.commandDraft = null;

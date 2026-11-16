@@ -8,7 +8,7 @@ vi.mock('../packages/xr-workspace/src/ui-environment', async (importOriginal) =>
 import { createUIEnvironment, UI_ENV_MAP_INTENSITY } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
-import type { TerminalStatus, TerminalSurface, WorkspaceActions } from '../src/contracts';
+import type { TerminalStatus, TerminalSurface } from '../src/contracts';
 import type { GazeState } from '../src/xr/scene';
 import {
   applyPanelTransform,
@@ -19,6 +19,7 @@ import {
   routeInput,
   updateGaze,
 } from '../src/xr/scene';
+import { createTestActions } from './helpers/actions';
 
 describe('XR scene interaction helpers', () => {
   it('clamps physical panel scale without touching terminal grid dimensions', () => {
@@ -40,15 +41,7 @@ describe('XR scene interaction helpers', () => {
   });
 
   it('routes explicit key targets through sendKey, not sendText', () => {
-    const actions: WorkspaceActions = {
-      selectPane: vi.fn(),
-      closePane: vi.fn(),
-      sendText: vi.fn(),
-      sendKey: vi.fn(),
-      runCommand: vi.fn(),
-      openKeyboard: vi.fn(),
-      openCommands: vi.fn(),
-    };
+    const actions = createTestActions();
     expect(routeInput({ terminalId: 'pane-a', kind: 'key' }, 'Control', actions)).toBe(true);
     expect(actions.sendKey).toHaveBeenCalledWith('Control');
     expect(actions.sendText).not.toHaveBeenCalled();
@@ -106,15 +99,7 @@ describe('XR scene interaction helpers', () => {
         return () => undefined;
       },
     };
-    const actions: WorkspaceActions = {
-      selectPane: vi.fn(),
-      closePane: vi.fn(),
-      sendText: vi.fn(),
-      sendKey: vi.fn(),
-      runCommand: vi.fn(),
-      openKeyboard: vi.fn(),
-      openCommands: vi.fn(),
-    };
+    const actions = createTestActions();
     const workspace = createWorkspaceScene(container, actions);
     try {
       workspace.addTerminal(surface);
@@ -191,15 +176,7 @@ describe('XR scene interaction helpers', () => {
         return () => undefined;
       },
     };
-    const actions: WorkspaceActions = {
-      selectPane: vi.fn(),
-      closePane: vi.fn(),
-      sendText: vi.fn(),
-      sendKey: vi.fn(),
-      runCommand: vi.fn(),
-      openKeyboard: vi.fn(),
-      openCommands: vi.fn(),
-    };
+    const actions = createTestActions();
     const workspace = createWorkspaceScene(container, actions);
     try {
       workspace.addTerminal(surface);
@@ -270,15 +247,7 @@ describe('XR scene interaction helpers', () => {
       dispose() {},
       subscribe: () => () => undefined,
     });
-    const actions: WorkspaceActions = {
-      selectPane: vi.fn(),
-      closePane: vi.fn(),
-      sendText: vi.fn(),
-      sendKey: vi.fn(),
-      runCommand: vi.fn(),
-      openKeyboard: vi.fn(),
-      openCommands: vi.fn(),
-    };
+    const actions = createTestActions();
     const workspace = createWorkspaceScene(container, actions);
     expect(warmPrograms).toHaveBeenCalledOnce();
     expect(warmPrograms.mock.calls[0]?.[0]).toBe(workspace.scene);

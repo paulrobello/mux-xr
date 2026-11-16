@@ -50,13 +50,9 @@ vi.mock('three', async (importOriginal) => {
 });
 
 import * as THREE from 'three';
-import type {
-  PaneDescriptor,
-  QuickCommandEntry,
-  TerminalSurface,
-  WorkspaceActions,
-} from '../src/contracts';
+import type { PaneDescriptor, QuickCommandEntry, TerminalSurface } from '../src/contracts';
 import { createWorkspaceScene } from '../src/xr/scene';
+import { createTestActions } from './helpers/actions';
 
 type Workspace = ReturnType<typeof createWorkspaceScene>;
 
@@ -99,17 +95,7 @@ function surface(descriptor: PaneDescriptor): TerminalSurface {
 const cleanups: Array<() => void> = [];
 
 function fixture() {
-  const actions: WorkspaceActions = {
-    selectPane: vi.fn(),
-    closePane: vi.fn(),
-    sendText: vi.fn(),
-    sendKey: vi.fn(),
-    runCommand: vi.fn(),
-    openKeyboard: vi.fn(),
-    openCommands: vi.fn(),
-    saveCommand: vi.fn(() => true),
-    removeCommand: vi.fn(() => true),
-  };
+  const actions = createTestActions();
   const container = document.createElement('div');
   const workspace = createWorkspaceScene(container, actions);
   fakeXR.camera = workspace.camera;

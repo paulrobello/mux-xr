@@ -1,5 +1,7 @@
 import type { KeyModifiers } from '@par/xr-workspace/keyboard-types';
 import { BACKGROUNDS, type BackgroundId } from './backgrounds';
+import type { HostClipboardResult } from './host-clipboard';
+import type { DictationAction } from './speech-input';
 import type { PaneProcess } from './terminal/lifecycle';
 import type { TerminalLinkStats } from './terminal/link-stats';
 import type { XrEntryMode } from './xr/entry';
@@ -223,29 +225,27 @@ export interface WorkspaceActions {
   selectPane(id: string): void;
   closePane(id: string): void;
   /** Ask the streamer for one new default-shell terminal in a mux session. */
-  createPane?(sessionId: string): void;
+  createPane(sessionId: string): void;
   sendText(text: string): void;
   sendKey(key: string, modifiers?: KeyModifiers): void;
-  sendMouse?(paneId: string, input: TerminalMouseInput): boolean;
-  scrollTerminal?(paneId: string, lines: number, cell?: { col: number; row: number }): boolean;
+  sendMouse(paneId: string, input: TerminalMouseInput): boolean;
+  scrollTerminal(paneId: string, lines: number, cell?: { col: number; row: number }): boolean;
   runCommand(command: QuickCommand, paneId: string): void;
   openKeyboard(): void;
   openCommands(): void;
-  setXREntryMode?(mode: XrEntryMode): void;
-  exitPreview?(): void;
-  resizeGrid?(paneId: string, cols: number, rows: number): boolean;
-  setTerminalColorMode?(mode: TerminalColorMode): void;
-  setKeyboardBackground?(enabled: boolean): void;
-  reloadApp?(): void;
-  saveCommand?(command: QuickCommand): boolean;
-  removeCommand?(id: string): boolean;
-  togglePaneConnection?(id: string): void;
-  dictationAction?(action: import('./speech-input').DictationAction): void;
-  editDictation?(text: string): void;
+  setXREntryMode(mode: XrEntryMode): void;
+  exitPreview(): void;
+  resizeGrid(paneId: string, cols: number, rows: number): boolean;
+  setTerminalColorMode(mode: TerminalColorMode): void;
+  setKeyboardBackground(enabled: boolean): void;
+  reloadApp(): void;
+  saveCommand(command: QuickCommand): boolean;
+  removeCommand(id: string): boolean;
+  togglePaneConnection(id: string): void;
+  dictationAction(action: DictationAction): void;
+  editDictation(text: string): void;
   /** One explicit host clipboard read through the dictation server's `/clipboard` route. */
-  readHostClipboard?(): Promise<import('./host-clipboard').HostClipboardResult<string>>;
+  readHostClipboard(): Promise<HostClipboardResult<string>>;
   /** One explicit host clipboard write through the dictation server's `/clipboard` route. */
-  writeHostClipboard?(
-    text: string,
-  ): Promise<import('./host-clipboard').HostClipboardResult<number>>;
+  writeHostClipboard(text: string): Promise<HostClipboardResult<number>>;
 }

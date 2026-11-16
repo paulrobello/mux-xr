@@ -231,6 +231,22 @@ async function createFixture(page: Page): Promise<void> {
       runCommand: () => undefined,
       openKeyboard: () => undefined,
       openCommands: () => undefined,
+      createPane: () => undefined,
+      sendMouse: () => true,
+      scrollTerminal: () => false,
+      setXREntryMode: () => undefined,
+      exitPreview: () => undefined,
+      resizeGrid: () => true,
+      setTerminalColorMode: () => undefined,
+      setKeyboardBackground: () => undefined,
+      reloadApp: () => undefined,
+      saveCommand: () => true,
+      removeCommand: () => true,
+      togglePaneConnection: () => undefined,
+      dictationAction: () => undefined,
+      editDictation: () => undefined,
+      readHostClipboard: async () => ({ ok: true, value: '' }),
+      writeHostClipboard: async () => ({ ok: true, value: 0 }),
     });
     for (const surface of surfaces) scene.addTerminal(surface);
     scene.setAvailablePanes(surfaces.map((surface) => surface.pane));

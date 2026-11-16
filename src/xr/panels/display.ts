@@ -161,7 +161,7 @@ export const displayPanel: PanelModule = {
         return true;
       case 'terminalColors': {
         const mode = action.colorMode as TerminalColorMode;
-        ctx.actions.setTerminalColorMode?.(mode);
+        ctx.actions.setTerminalColorMode(mode);
         ctx.setTerminalColorMode(mode);
         return true;
       }

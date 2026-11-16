@@ -1,8 +1,9 @@
 /** Shared scene fixture and controller helpers for the native XR controller tests (tests/xr/). */
 import * as THREE from 'three';
 import { vi } from 'vitest';
-import type { PaneDescriptor, TerminalSurface, WorkspaceActions } from '../../src/contracts';
+import type { PaneDescriptor, TerminalSurface } from '../../src/contracts';
 import { createWorkspaceScene } from '../../src/xr/scene';
+import { createTestActions } from './actions';
 import { createFakeHost } from './widget-context';
 import { fakeXR } from './xr-mocks';
 
@@ -45,22 +46,7 @@ export function surface(descriptor: PaneDescriptor): TerminalSurface {
 }
 
 export function fixture(options?: Parameters<typeof createWorkspaceScene>[2]) {
-  const actions: WorkspaceActions = {
-    selectPane: vi.fn(),
-    closePane: vi.fn(),
-    togglePaneConnection: vi.fn(),
-    sendText: vi.fn(),
-    sendKey: vi.fn(),
-    sendMouse: vi.fn(() => true),
-    runCommand: vi.fn(),
-    openKeyboard: vi.fn(),
-    openCommands: vi.fn(),
-    resizeGrid: vi.fn(() => true),
-    setTerminalColorMode: vi.fn(),
-    setKeyboardBackground: vi.fn(),
-    reloadApp: vi.fn(),
-    saveCommand: vi.fn(() => true),
-  };
+  const actions = createTestActions();
   const container = document.createElement('div');
   const fakeHost = createFakeHost();
   const workspace = createWorkspaceScene(container, actions, { host: fakeHost.host, ...options });

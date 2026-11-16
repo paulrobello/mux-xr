@@ -174,7 +174,7 @@ export const terminalPanel: PanelModule = {
       case 'gridApply': {
         const draft = ctx.gridDraft;
         if (draft)
-          ctx.gridRequestStatus = ctx.actions.resizeGrid?.(draft.target, draft.cols, draft.rows)
+          ctx.gridRequestStatus = ctx.actions.resizeGrid(draft.target, draft.cols, draft.rows)
             ? 'Grid requested'
             : 'Grid unavailable';
         ctx.refreshInputRoot('terminal');

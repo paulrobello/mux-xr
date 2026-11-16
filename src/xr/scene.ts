@@ -1578,7 +1578,7 @@ export function createWorkspaceScene(
     mouseCaptures.delete(source);
     const panel = panels.get(capture.id);
     if (panel)
-      actions.sendMouse?.(capture.id, {
+      actions.sendMouse(capture.id, {
         ...capture,
         col: Math.min(capture.col, panel.surface.cols - 1),
         row: Math.min(capture.row, panel.surface.rows - 1),
@@ -1744,7 +1744,7 @@ export function createWorkspaceScene(
         continue;
       }
       drag.anchor += lines * line;
-      actions.scrollTerminal?.(panel.id, lines);
+      actions.scrollTerminal(panel.id, lines);
       cue('tick', source);
     }
   };
@@ -1966,7 +1966,7 @@ export function createWorkspaceScene(
       eventType: 'press',
       modifiers,
     };
-    if (!actions.sendMouse?.(panel.id, input)) return false;
+    if (!actions.sendMouse(panel.id, input)) return false;
     mouseCaptures.set(source, { ...input, id: panel.id });
     if (typeof source === 'object')
       mousePresses.set(source, {
@@ -1999,7 +1999,7 @@ export function createWorkspaceScene(
     }
     capture.col = cell.col;
     capture.row = cell.row;
-    actions.sendMouse?.(capture.id, { ...capture, eventType: 'move' });
+    actions.sendMouse(capture.id, { ...capture, eventType: 'move' });
   };
 
   const notify = (): void => {
@@ -3125,7 +3125,7 @@ export function createWorkspaceScene(
         }
         const panel = target?.terminalId ? panels.get(target.terminalId) : undefined;
         if (panel && target?.uv && target.object === panel.screen) {
-          actions.scrollTerminal?.(panel.id, Math.sign(axis) * 3, cellAtUV(panel, target.uv));
+          actions.scrollTerminal(panel.id, Math.sign(axis) * 3, cellAtUV(panel, target.uv));
           scrollDue.set(controller, time + 160 / Math.abs(axis));
         }
       }
@@ -3589,8 +3589,7 @@ export function createWorkspaceScene(
     if (!panel || target?.object !== panel.screen || !target.uv) return;
     const unit = event.deltaMode === 1 ? 1 : event.deltaMode === 2 ? panel.surface.rows : 1 / 40;
     const lines = Math.sign(event.deltaY) * Math.max(1, Math.round(Math.abs(event.deltaY) * unit));
-    if (actions.scrollTerminal?.(panel.id, lines, cellAtUV(panel, target.uv)))
-      event.preventDefault();
+    if (actions.scrollTerminal(panel.id, lines, cellAtUV(panel, target.uv))) event.preventDefault();
   };
   canvas.addEventListener('wheel', onWheel, { passive: false });
   canvas.addEventListener('pointerdown', onPointerDown);
@@ -3956,7 +3955,7 @@ export function createWorkspaceScene(
       return;
     }
     showInput('keyboard');
-    if (status !== 'listening' && status !== 'transcribing') actions.dictationAction?.('startNote');
+    if (status !== 'listening' && status !== 'transcribing') actions.dictationAction('startNote');
   };
   const pinNote = (): void => {
     const text = normalizeStickyNoteText(mutableState.dictation.transcript);
@@ -3978,7 +3977,7 @@ export function createWorkspaceScene(
     placeWidget(key, widget, STICKY_NOTE_PIN_OFFSET);
     widget.root.userData.picturePlaced = true;
     saveWidgetPose(key, widget);
-    actions.dictationAction?.('cancel');
+    actions.dictationAction('cancel');
     mutableState.widgets = [...widgets.keys()];
     setNotice('Pinned the note');
     notify();
@@ -4198,7 +4197,7 @@ export function createWorkspaceScene(
       mode !== 'keyboard' &&
       ['listening', 'transcribing'].includes(mutableState.dictation.status)
     )
-      actions.dictationAction?.('cancel');
+      actions.dictationAction('cancel');
     const previousRoot = inputRoot;
     const previousPair = previousRoot ? pairGrabs.get(previousRoot) : undefined;
     if (previousRoot) pairGrabs.delete(previousRoot);
@@ -4444,11 +4443,11 @@ export function createWorkspaceScene(
   const editDictationKey = (key: string): void => {
     if (key === 'Enter') {
       if (mutableState.dictation.forNote) pinNote();
-      else actions.dictationAction?.('insert');
+      else actions.dictationAction('insert');
       return;
     }
     if (key === 'Escape') {
-      actions.dictationAction?.('cancel');
+      actions.dictationAction('cancel');
       return;
     }
     const characters = Array.from(mutableState.dictation.transcript);
@@ -4471,13 +4470,13 @@ export function createWorkspaceScene(
       );
       consumeArmedModifiers();
     }
-    actions.editDictation?.(characters.join(''));
+    actions.editDictation(characters.join(''));
   };
   const typeTextEntryKey = (key: string): boolean => {
     if (!inputRoot) return false;
     if (inputMode === 'keyboard' && mutableState.dictation.forNote) {
       if (dictationReview()) editDictationKey(key);
-      else if (key === 'Escape') actions.dictationAction?.('cancel');
+      else if (key === 'Escape') actions.dictationAction('cancel');
       return true;
     }
     if (inputMode !== 'picture-url') return false;
@@ -4603,7 +4602,7 @@ export function createWorkspaceScene(
         if (action.terminalId) actions.closePane(action.terminalId);
         return true;
       case 'toggleConnection':
-        if (action.terminalId) actions.togglePaneConnection?.(action.terminalId);
+        if (action.terminalId) actions.togglePaneConnection(action.terminalId);
         return true;
       case 'bringHere':
         if (action.terminalId) bringTerminalHere(action.terminalId);
@@ -4709,14 +4708,14 @@ export function createWorkspaceScene(
           radialMenu.close();
           mutableState.radialOpen = false;
         }
-        actions.reloadApp?.();
+        actions.reloadApp();
         return true;
       }
       case 'exit': {
         if (!confirmControl('exit')) return true;
         hideInput();
         if (activeSession) void activeSession.end();
-        else actions.exitPreview?.();
+        else actions.exitPreview();
         return true;
       }
       case 'closeWidget': {
@@ -4740,7 +4739,7 @@ export function createWorkspaceScene(
           );
           return true;
         }
-        if (typeof action.sessionId === 'string') actions.createPane?.(action.sessionId);
+        if (typeof action.sessionId === 'string') actions.createPane(action.sessionId);
         return true;
       case 'selectAgentPane': {
         const paneId = action.agentPaneId;
@@ -4821,7 +4820,7 @@ export function createWorkspaceScene(
     commandsMessage = '';
     if (isSharedCommand(command)) commandsMessage = 'Shared commands are read-only';
     else if (commandTool === 'pin') {
-      if (actions.saveCommand?.({ ...copyCommand(command), pinned: !command.pinned }))
+      if (actions.saveCommand({ ...copyCommand(command), pinned: !command.pinned }))
         snapshotMenuCommands();
       else commandsMessage = 'Could not save on this device';
     } else if (commandTool === 'edit') {
@@ -4841,7 +4840,7 @@ export function createWorkspaceScene(
       }
       if (confirmTooSoon()) return;
       disarmCommand();
-      if (actions.removeCommand?.(command.id)) {
+      if (actions.removeCommand(command.id)) {
         snapshotMenuCommands();
         commandPage = Math.min(commandPage, Math.max(0, Math.ceil(menuCommands.length / 8) - 1));
         commandsMessage = `Removed ${command.label}`;
@@ -6390,7 +6389,7 @@ export function createWorkspaceScene(
       inputMode === 'keyboard' &&
       ['listening', 'transcribing'].includes(mutableState.dictation.status)
     )
-      actions.dictationAction?.('cancel');
+      actions.dictationAction('cancel');
     clearInputCapture();
     notify();
   };
