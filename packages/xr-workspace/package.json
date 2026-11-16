@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./keyboard-types": "./src/keyboard-types.ts",
     "./weather": "./src/weather.ts",
+    "./hangar-deck-layout": "./src/environments/hangar-deck-layout.ts",
     "./stage-assets": "./stage-assets.ts"
   },
   "bin": {
@@ -17,5 +18,8 @@
   },
   "dependencies": {
     "troika-three-text": "0.52.5"
-  }
+  },
+  "sideEffects": [
+    "./src/labels.ts"
+  ]
 }

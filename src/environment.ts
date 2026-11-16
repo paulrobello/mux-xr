@@ -1,9 +1,10 @@
 import {
   accentColorOrNull,
-  ENVIRONMENT_FACTORIES as BUILT_IN_ENVIRONMENTS,
   createEnvironmentController,
   createSpaceBackground,
+  ENVIRONMENT_LOADERS,
   type EnvironmentFactory,
+  type EnvironmentSource,
   registerEnvironmentUpdater,
   resolveEnvironmentAccent,
   tintToLuminance,
@@ -20,16 +21,30 @@ export type {
 } from '@par/xr-workspace';
 export { registerEnvironmentUpdater };
 export type EnvironmentFactories = Partial<Record<BackgroundMode, EnvironmentFactory>>;
-export const ENVIRONMENT_FACTORIES: EnvironmentFactories = BUILT_IN_ENVIRONMENTS;
+/** Each world fetched as its own chunk on first use. */
+export type EnvironmentSources = Partial<Record<BackgroundMode, EnvironmentSource>>;
+export const ENVIRONMENT_SOURCES: EnvironmentSources = ENVIRONMENT_LOADERS;
 
 export function createEnvironmentManager(
   workspace: WorkspaceScene,
-  factories: EnvironmentFactories = ENVIRONMENT_FACTORIES,
+  sources: EnvironmentSources = ENVIRONMENT_SOURCES,
 ): () => void {
-  const controller = createEnvironmentController(workspace.scene, factories);
+  const deskWindowOpen = (): boolean => {
+    const state = workspace.state;
+    return state.xrMode === 'ar' && state.widgets.includes(DESK_WINDOW_KIND);
+  };
+  const controller = createEnvironmentController(
+    workspace.scene,
+    sources,
+    (id, error) => {
+      console.warn(`Environment ${id} unavailable.`, error);
+      workspace.setNotice(`Could not load the ${id} background. Keeping the current one.`);
+    },
+    (instance) => setEnvironmentWindowMask(instance.root, deskWindowOpen()),
+  );
   const sync = (): void => {
     const state = workspace.state;
-    const deskWindow = state.xrMode === 'ar' && state.widgets.includes(DESK_WINDOW_KIND);
+    const deskWindow = deskWindowOpen();
     const active = controller.select(state.background, {
       enabled: !state.fullPassthrough,
       accentColor: state.accentColor,

@@ -1,10 +1,10 @@
+import { ENVIRONMENT_FACTORIES } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { BACKGROUND_MODES, type BackgroundMode, isBackgroundMode } from '../src/contracts';
 import {
   createEnvironmentManager,
   createObservatoryAccent,
-  ENVIRONMENT_FACTORIES,
   type EnvironmentInstance,
   registerEnvironmentUpdater,
 } from '../src/environment';
@@ -52,9 +52,11 @@ function harness() {
     fullPassthrough: false,
   };
   const listeners = new Set<() => void>();
+  const setNotice = vi.fn();
   const workspace = {
     scene,
     state,
+    setNotice,
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -87,7 +89,7 @@ function harness() {
       },
     ]),
   );
-  return { scene, workspace, set, created, factories };
+  return { scene, workspace, set, created, factories, setNotice };
 }
 
 const liveRoots = (scene: THREE.Scene): string[] =>
@@ -299,5 +301,114 @@ describe('background modes', () => {
     for (const bad of ['laser', '', 42, null, 'Hangar']) {
       expect(validateSettings({ background: bad }).background).toBe('observatory');
     }
+  });
+});
+
+describe('lazy environments', () => {
+  const instance = (name: string) => {
+    const root = new THREE.Group();
+    root.name = name;
+    return { root, floorY: 0, update: vi.fn(), dispose: vi.fn() };
+  };
+  /** A loader the test settles by hand, so it can interleave selections with a pending fetch. */
+  const deferred = () => {
+    let resolve!: (factory: (accent: THREE.Color | null) => EnvironmentInstance) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<(accent: THREE.Color | null) => EnvironmentInstance>((ok, no) => {
+      resolve = ok;
+      reject = no;
+    });
+    return { load: vi.fn(() => promise), resolve, reject };
+  };
+  const flush = (): Promise<void> => new Promise((done) => setTimeout(done, 0));
+
+  it('keeps the current world mounted until the next one has loaded, then swaps and disposes', async () => {
+    const { scene, workspace, set } = harness();
+    const first = instance('first-environment');
+    const second = instance('second-environment');
+    const slow = deferred();
+    const stop = createEnvironmentManager(workspace, {
+      hangar: () => first,
+      studio: slow,
+    });
+    set({ background: 'hangar' });
+    expect(liveRoots(scene)).toEqual(['first-environment']);
+    set({ background: 'studio' });
+    expect(liveRoots(scene)).toEqual(['first-environment']);
+    expect(first.dispose).not.toHaveBeenCalled();
+    slow.resolve(() => second);
+    await flush();
+    expect(liveRoots(scene)).toEqual(['second-environment']);
+    expect(first.dispose).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('drops a load that a later selection superseded, and fetches each world once', async () => {
+    const { scene, workspace, set } = harness();
+    const stale = deferred();
+    const live = instance('live-environment');
+    const stop = createEnvironmentManager(workspace, {
+      hangar: stale,
+      studio: () => live,
+    });
+    set({ background: 'hangar' });
+    set({ background: 'studio' });
+    expect(liveRoots(scene)).toEqual(['live-environment']);
+    stale.resolve(() => instance('stale-environment'));
+    await flush();
+    expect(liveRoots(scene)).toEqual(['live-environment']);
+    set({ background: 'hangar' });
+    expect(liveRoots(scene)).toEqual(['stale-environment']);
+    expect(stale.load).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('keeps the current world and raises a notice when a chunk fails to load', async () => {
+    const { scene, workspace, set, setNotice } = harness();
+    const current = instance('current-environment');
+    const broken = deferred();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const stop = createEnvironmentManager(workspace, {
+      hangar: () => current,
+      studio: broken,
+    });
+    set({ background: 'hangar' });
+    set({ background: 'studio' });
+    broken.reject(new Error('chunk failed'));
+    await flush();
+    expect(liveRoots(scene)).toEqual(['current-environment']);
+    expect(current.dispose).not.toHaveBeenCalled();
+    expect(setNotice).toHaveBeenCalledTimes(1);
+    // The failure is not retried until the mode changes.
+    set({ xrMode: 'vr' });
+    expect(broken.load).toHaveBeenCalledTimes(1);
+    stop();
+    warn.mockRestore();
+  });
+
+  it('does not mount a world that finishes loading after the manager stopped', async () => {
+    const { scene, workspace, set } = harness();
+    const late = deferred();
+    const stop = createEnvironmentManager(workspace, { hangar: late });
+    set({ background: 'hangar' });
+    stop();
+    late.resolve(() => instance('late-environment'));
+    await flush();
+    expect(liveRoots(scene)).toEqual([]);
+  });
+
+  it('applies the desk window mask to a world that mounts after loading', async () => {
+    const { scene, workspace, set } = harness();
+    const lazy = deferred();
+    const world = instance('masked-environment');
+    const material = new THREE.MeshBasicMaterial();
+    world.root.add(new THREE.Mesh(new THREE.BoxGeometry(), material));
+    const stop = createEnvironmentManager(workspace, { studio: lazy });
+    set({ background: 'studio', xrMode: 'ar', widgets: [DESK_WINDOW_KIND] });
+    lazy.resolve(() => world);
+    await flush();
+    expect(liveRoots(scene)).toEqual(['masked-environment']);
+    expect(material.stencilWrite).toBe(true);
+    stop();
   });
 });

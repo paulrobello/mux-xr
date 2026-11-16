@@ -1,6 +1,7 @@
+import { ENVIRONMENT_FACTORIES, type EnvironmentFactory } from '@par/xr-workspace';
 import * as THREE from 'three';
 import type { BackgroundMode } from '../src/contracts';
-import { ENVIRONMENT_FACTORIES, loadObservatory } from '../src/environment';
+import { loadObservatory } from '../src/environment';
 import type { WorkspaceScene } from '../src/xr';
 import { createGradientTexture } from '../src/xr/scene';
 
@@ -63,7 +64,9 @@ async function render(mode: BackgroundMode): Promise<string> {
   const scene = freshScene();
   if (mode === 'black') scene.background = new THREE.Color(0x000000);
   if (mode === 'gradient') scene.background = createGradientTexture();
-  const factory = ENVIRONMENT_FACTORIES[mode];
+  const factory = (ENVIRONMENT_FACTORIES as Partial<Record<BackgroundMode, EnvironmentFactory>>)[
+    mode
+  ];
   const environment = factory?.(null);
   if (environment) {
     scene.add(environment.root);

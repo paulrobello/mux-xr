@@ -37,15 +37,21 @@ export {
 } from './elastic-arm';
 export {
   createEnvironmentController,
-  ENVIRONMENT_FACTORIES,
-  ENVIRONMENT_FACTORIES as BUILT_IN_ENVIRONMENTS,
+  ENVIRONMENT_LOADERS,
   type EnvironmentController,
   type EnvironmentFactories,
   type EnvironmentFactory,
   type EnvironmentInstance,
   type EnvironmentSelection,
+  type EnvironmentSource,
+  type EnvironmentSources,
+  type LazyEnvironment,
   registerEnvironmentUpdater,
 } from './environment';
+export {
+  ENVIRONMENT_FACTORIES,
+  ENVIRONMENT_FACTORIES as BUILT_IN_ENVIRONMENTS,
+} from './environment-factories';
 export * from './environments/aurora-tundra';
 export * from './environments/cloud-summit';
 export * from './environments/deep-water';
