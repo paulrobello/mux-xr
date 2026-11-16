@@ -66,7 +66,7 @@ export const commandsPanel: PanelModule = {
         actionData({ type: 'commandTool', tool }),
       );
       button.position.set((index - (COMMAND_TOOLS.length - 1) / 2) * 0.4, -0.22, 0);
-      setModifierVisual(button, ctx.commandTool === tool);
+      setModifierVisual(button, ctx.commandTool === tool, ctx.accent.hex);
       root.add(button);
     });
     const preview = ctx.armedPreview('command');

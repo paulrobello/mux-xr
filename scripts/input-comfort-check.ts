@@ -380,7 +380,7 @@ async function main(): Promise<void> {
       const meteor = w.__questScene.getObjectByName('observatory-exterior-shooting-star') as
         | import('three').Line<import('three').BufferGeometry, import('three').LineBasicMaterial>
         | undefined;
-      const update = w.__questScene.userData.updateEnvironment as
+      const update = w.__questScene.userData.stepFrameUpdaters as
         | ((delta: number) => void)
         | undefined;
       if (!pivot || !meteor || !update) throw new Error('Environment motion missing');

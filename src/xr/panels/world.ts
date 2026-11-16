@@ -33,7 +33,7 @@ export const worldPanel: PanelModule = {
     ).entries()) {
       const button = createLabelButton(label, 0.46, 0.12, actionData({ type: 'xrMode', xrMode }));
       button.position.set((index - 1) * 0.51, 0.28, 0);
-      setModifierVisual(button, activeMode === xrMode);
+      setModifierVisual(button, activeMode === xrMode, ctx.accent.hex);
       root.add(button);
     }
     addColorSwatchRows(root, 0.15, [
@@ -90,7 +90,7 @@ export const worldPanel: PanelModule = {
       void (async (): Promise<void> => {
         try {
           await ctx.exitXR();
-          ctx.actions.setXREntryMode?.(mode);
+          ctx.actions.setXREntryMode(mode);
           ctx.setNotice(`Press ${XR_ENTRY_LABELS[mode]} to continue`);
         } catch (error) {
           ctx.setNotice(error instanceof Error ? error.message : 'XR mode could not be changed');

@@ -30,6 +30,8 @@ export interface HostStatsClientOptions {
   url: () => string;
   secret: () => string | null;
   socketFactory?: (url: string) => HostClipboardSocket;
+  /** Replaces the paired-socket session, so a host fake can answer without a socket. */
+  openPaired?: typeof openPairedSocket;
   subtle?: Pick<SubtleCrypto, 'importKey' | 'sign'>;
   timeoutMs?: number;
 }
@@ -61,7 +63,7 @@ export function createHostStatsClient(options: HostStatsClientOptions): HostStat
     if (!secret) return Promise.resolve({ ok: false, code: 'no-secret' });
     const crypto = options.subtle ?? globalThis.crypto?.subtle;
     if (!crypto) return Promise.resolve({ ok: false, code: 'unavailable' });
-    return openPairedSocket<HostStatsSnapshot, HostStatsFailure>({
+    return (options.openPaired ?? openPairedSocket)<HostStatsSnapshot, HostStatsFailure>({
       url: options.url(),
       secret,
       protocol: PROTOCOL,

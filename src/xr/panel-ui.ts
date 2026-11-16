@@ -2,7 +2,6 @@ import { createScalableLabel, HAND_COLOR_PRESETS } from '@par/xr-workspace';
 import * as THREE from 'three';
 import type { BackgroundMode } from '../contracts';
 import { getControlHelpFor } from '../control-help';
-import { accent } from './accent-state';
 import { BACKGROUND_LABELS } from './background-picker';
 import { actionData, type PanelAction } from './panel-actions';
 
@@ -168,8 +167,9 @@ export function createBackgroundSelect(mode: BackgroundMode): THREE.Group {
   return root;
 }
 
-export function setModifierVisual(object: THREE.Object3D, armed: boolean): void {
+/** Colours `object` as armed (the scene's `accentHex`) or idle (white). */
+export function setModifierVisual(object: THREE.Object3D, armed: boolean, accentHex: number): void {
   object.userData.activeState = armed;
   const material = (object as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
-  if (material?.color) material.color.setHex(armed ? accent.hex : 0xffffff);
+  if (material?.color) material.color.setHex(armed ? accentHex : 0xffffff);
 }

@@ -47,7 +47,7 @@ export const settingsPanel: PanelModule = {
         actionData({ type: 'keyborbMode', keyborbMode }),
       );
       button.position.set((index - 1) * 0.4, -0.44, 0);
-      setModifierVisual(button, ctx.mutableState.keyborbMode === keyborbMode);
+      setModifierVisual(button, ctx.mutableState.keyborbMode === keyborbMode, ctx.accent.hex);
       root.add(button);
     }
     const help = createLabelButton(
@@ -65,7 +65,7 @@ export const settingsPanel: PanelModule = {
       actionData({ type: 'uiSounds' }),
     );
     sounds.position.y = -0.71;
-    setModifierVisual(sounds, ctx.mutableState.uiSounds);
+    setModifierVisual(sounds, ctx.mutableState.uiSounds, ctx.accent.hex);
     root.add(sounds);
   },
   handleActionEarly(action, _hit, ctx) {

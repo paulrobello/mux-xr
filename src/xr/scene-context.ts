@@ -15,6 +15,7 @@ import type { HierarchyStyle } from '../workspace/hierarchy-style';
 import type { KeyborbMode } from '../workspace/keyborb';
 import type { PaneCreationState } from '../workspace/pane-create';
 import type { WindowPreferences } from '../workspace/window-preferences';
+import type { AccentState } from './accent-state';
 import type { BellFeedStore } from './bell-feed';
 import type { CommandDraft } from './command-editor';
 import type { HierarchyNavigation, HierarchyNavigator } from './hierarchy-navigator';
@@ -67,6 +68,8 @@ export interface SceneContext {
   readonly camera: THREE.PerspectiveCamera;
   readonly mutableState: WorkspaceSceneState;
   readonly maxAnisotropy: number;
+  /** This scene's live accent colours. */
+  readonly accent: Readonly<AccentState>;
   readonly actions: WorkspaceActions;
   readonly panels: ReadonlyMap<string, TerminalPanel>;
   readonly widgets: ReadonlyMap<WidgetKey, Widget>;

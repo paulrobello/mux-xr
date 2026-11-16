@@ -5,16 +5,6 @@ vi.mock('@par/xr-workspace', async (importOriginal) =>
     await importOriginal<typeof import('@par/xr-workspace')>(),
   ),
 );
-vi.mock('../../src/xr/repo-status-widget', async (original) =>
-  (await import('../helpers/xr-mocks')).withSpiedRepoStatus(
-    await original<typeof import('../../src/xr/repo-status-widget')>(),
-  ),
-);
-vi.mock('../../src/xr/kanban-strip', async (original) =>
-  (await import('../helpers/xr-mocks')).withSpiedKanbanStrip(
-    await original<typeof import('../../src/xr/kanban-strip')>(),
-  ),
-);
 vi.mock('three', async (importOriginal) =>
   (await import('../helpers/xr-mocks')).createThreeMock(
     await importOriginal<typeof import('three')>(),
@@ -32,7 +22,6 @@ import {
   connectController,
   fakeXR,
   fixture,
-  focusedDirectories,
   hit,
   objectWithData,
   pane,
@@ -904,7 +893,15 @@ describe('native XR controller event routing', () => {
       windowName: 'W',
     });
     it('uses the focused agent project when its shell sends no directory', () => {
-      const { workspace, left, container } = fixture();
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      const { workspace, left, container, hostRequests } = fixture();
+      const asked = (protocol: string): string[] =>
+        hostRequests.filter((request) => request.protocol === protocol).map((r) => r.material);
+      const frame = (afterMs: number): void => {
+        vi.advanceTimersByTime(afterMs);
+        fakeXR.frame?.(Date.now());
+      };
       try {
         for (const kind of ['repo-status', 'kanban-strip']) {
           workspace.showInput('widgets');
@@ -915,21 +912,33 @@ describe('native XR controller event routing', () => {
           { ...rosterRow('pane-a'), project: 'alpha' },
           { ...rosterRow('pane-b'), project: 'beta' },
         ]);
-        fakeXR.frame?.(0);
-        for (const probe of Object.values(focusedDirectories))
-          expect(probe).toHaveBeenLastCalledWith('pane-a', '~/Repos/alpha', null);
+        frame(0);
+        frame(1500);
+        expect(asked('mux-xr-repo-status-v1').at(-1)).toBe('\n~/Repos/alpha');
+        expect(asked('mux-xr-kanban-strip-v1').at(-1)).toBe(
+          JSON.stringify({ cwd: '~/Repos/alpha', host: null }),
+        );
         Object.assign(left, { cwd: '/actual/worktree', cwdHost: 'other-mac' });
-        fakeXR.frame?.(16);
-        for (const probe of Object.values(focusedDirectories))
-          expect(probe).toHaveBeenLastCalledWith('pane-a', '/actual/worktree', 'other-mac');
+        frame(16);
+        frame(1500);
+        expect(asked('mux-xr-repo-status-v1').at(-1)).toBe('other-mac\n/actual/worktree');
+        expect(asked('mux-xr-kanban-strip-v1').at(-1)).toBe(
+          JSON.stringify({ cwd: '/actual/worktree', host: 'other-mac' }),
+        );
+        // With no directory from the shell or the roster, neither widget asks about the old one.
+        const repoAsks = asked('mux-xr-repo-status-v1').length;
+        const kanbanAsks = asked('mux-xr-kanban-strip-v1').length;
         Object.assign(left, { cwd: null, cwdHost: null });
         workspace.setAgentRoster([{ ...rosterRow('pane-b'), project: 'beta' }]);
-        fakeXR.frame?.(32);
-        for (const probe of Object.values(focusedDirectories))
-          expect(probe).toHaveBeenLastCalledWith('pane-a', null, null);
+        frame(32);
+        frame(70_000);
+        expect(asked('mux-xr-repo-status-v1')).toHaveLength(repoAsks);
+        expect(asked('mux-xr-kanban-strip-v1')).toHaveLength(kanbanAsks);
       } finally {
         workspace.dispose();
         container.remove();
+        vi.useRealTimers();
+        vi.restoreAllMocks();
       }
     });
 

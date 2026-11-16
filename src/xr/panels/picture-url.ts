@@ -38,7 +38,7 @@ export const pictureUrlPanel: PanelModule = {
     );
     field.name = 'xr-picture-url-field';
     field.position.y = 0.7;
-    setModifierVisual(field, true);
+    setModifierVisual(field, true, ctx.accent.hex);
     root.add(field);
     // Every action sits in one row above the field, so the panel ends at the keyboard's last
     // row and never reaches down over the HUD bar.

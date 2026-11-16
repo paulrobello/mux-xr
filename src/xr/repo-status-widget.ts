@@ -1,13 +1,13 @@
 import { applyUIEnvironment, createScalableLabel, updateScalableLabel } from '@par/xr-workspace';
 import * as THREE from 'three';
-import {
-  createDefaultRepoStatusFetcher,
-  type RepoCiState,
-  type RepoStatusFailure,
-  type RepoStatusFetcher,
-  type RepoStatusReport,
+import type {
+  RepoCiState,
+  RepoStatusFailure,
+  RepoStatusFetcher,
+  RepoStatusReport,
 } from '../host-repo-status';
 import { formatAge } from '../workspace/agent-roster';
+import type { FocusedPaneConsumer } from './widget-types';
 import { disposeOwned, type Widget } from './widgets';
 
 export const REPO_STATUS_KIND = 'repo-status';
@@ -110,7 +110,8 @@ export function repoStatusView(model: RepoStatusModel, nowMs: number): RepoStatu
 }
 
 export interface RepoStatusWidgetOptions {
-  fetchStatus?: RepoStatusFetcher;
+  /** The host's repo status client; the registry builds it from the scene's host connection. */
+  fetchStatus: RepoStatusFetcher;
   pollMs?: number;
   /** Whether the page is hidden; polling pauses while it is. */
   pageHidden?: () => boolean;
@@ -139,11 +140,11 @@ const defaultPageHidden = (): boolean =>
   typeof document !== 'undefined' && document.visibilityState === 'hidden';
 
 export function createRepoStatusWidget(
-  envMap: THREE.Texture | null = null,
-  options: RepoStatusWidgetOptions = {},
-): Widget {
+  envMap: THREE.Texture | null,
+  options: RepoStatusWidgetOptions,
+): Widget & FocusedPaneConsumer {
   const widgetId = `${REPO_STATUS_KIND}-${nextRepoStatusId++}`;
-  let fetchStatus = options.fetchStatus;
+  const { fetchStatus } = options;
   const pollMs = options.pollMs ?? REPO_STATUS_POLL_MS;
   const pageHidden = options.pageHidden ?? defaultPageHidden;
   const root = new THREE.Group();
@@ -233,7 +234,6 @@ export function createRepoStatusWidget(
 
   const poll = (nowMs: number): void => {
     if (!cwd || inFlight || disposed) return;
-    fetchStatus ??= createDefaultRepoStatusFetcher();
     const token = generation;
     inFlight = true;
     lastPollAt = nowMs;

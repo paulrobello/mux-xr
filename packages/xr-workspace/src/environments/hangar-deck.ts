@@ -10,8 +10,7 @@ export interface HangarDeckEnvironment {
 }
 
 export const HANGAR_DECK_FLOOR_Y = 0.035;
-/** Panes anywhere within this horizontal radius of the origin stay inside the deck walls. */
-export const HANGAR_DECK_PANE_SAFE_RADIUS = 6.5;
+export { HANGAR_DECK_PANE_SAFE_RADIUS } from './hangar-deck-layout';
 
 const HALF = 7.2;
 const FAR_Z = -HALF;

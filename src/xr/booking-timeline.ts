@@ -1,6 +1,6 @@
 import { applyUIEnvironment, createScalableLabel, updateScalableLabel } from '@par/xr-workspace';
 import * as THREE from 'three';
-import { defaultHostFeedSource, type HostFeedFailure, type HostFeedSource } from '../host-feed';
+import type { HostFeedFailure, HostFeedSource } from '../host-feed';
 import {
   createFeedPoller,
   FEED_FAILURE_TEXT,
@@ -212,7 +212,8 @@ function setText(label: THREE.Mesh, text: string): void {
 }
 
 export interface BookingTimelineWidgetOptions {
-  source?: HostFeedSource<BookingsFeed>;
+  /** The host feed this widget polls; the registry builds it from the scene's host connection. */
+  source: HostFeedSource<BookingsFeed>;
   pollMs?: number;
   retryStore?: () => Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined;
   now?: () => number;
@@ -220,8 +221,8 @@ export interface BookingTimelineWidgetOptions {
 }
 
 export function createBookingTimelineWidget(
-  envMap: THREE.Texture | null = null,
-  options: BookingTimelineWidgetOptions = {},
+  envMap: THREE.Texture | null,
+  options: BookingTimelineWidgetOptions,
 ): Widget {
   const widgetId = `${BOOKING_TIMELINE_KIND}-${nextTimelineId++}`;
   const clock = options.now ?? Date.now;
@@ -425,8 +426,7 @@ export function createBookingTimelineWidget(
   };
 
   const poller = createFeedPoller<BookingsFeed>({
-    source:
-      options.source ?? defaultHostFeedSource(BOOKINGS_PATH, BOOKINGS_PROTOCOL, parseBookingsFeed),
+    source: options.source,
     pollMs: options.pollMs ?? BOOKING_TIMELINE_POLL_MS,
     retryStore: options.retryStore,
     now: clock,

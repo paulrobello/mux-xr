@@ -5,8 +5,9 @@ import {
   updateScalableLabel,
 } from '@par/xr-workspace';
 import * as THREE from 'three';
-import { defaultHostFeedSource, type HostFeedFailure, type HostFeedSource } from '../host-feed';
+import type { HostFeedFailure, HostFeedSource } from '../host-feed';
 import { createFeedPoller, FEED_FAILURE_TEXT, isWidgetShown } from './feed-poller';
+import type { FocusedPaneConsumer } from './widget-types';
 import { disposeOwned, type Widget } from './widgets';
 
 export const KANBAN_STRIP_KIND = 'kanban-strip';
@@ -210,7 +211,8 @@ interface Slot {
 }
 
 export interface KanbanStripWidgetOptions {
-  source?: HostFeedSource<KanbanStrip>;
+  /** The host feed this widget polls; the registry builds it from the scene's host connection. */
+  source: HostFeedSource<KanbanStrip>;
   pollMs?: number;
   retryStore?: () => Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined;
   now?: () => number;
@@ -218,9 +220,9 @@ export interface KanbanStripWidgetOptions {
 }
 
 export function createKanbanStripWidget(
-  envMap: THREE.Texture | null = null,
-  options: KanbanStripWidgetOptions = {},
-): Widget {
+  envMap: THREE.Texture | null,
+  options: KanbanStripWidgetOptions,
+): Widget & FocusedPaneConsumer {
   const widgetId = `${KANBAN_STRIP_KIND}-${nextKanbanStripId++}`;
   const root = new THREE.Group();
   root.name = widgetId;
@@ -342,9 +344,7 @@ export function createKanbanStripWidget(
   };
 
   const poller = createFeedPoller<KanbanStrip>({
-    source:
-      options.source ??
-      defaultHostFeedSource(KANBAN_STRIP_PATH, KANBAN_STRIP_PROTOCOL, parseKanbanStrip),
+    source: options.source,
     pollMs: options.pollMs ?? KANBAN_STRIP_POLL_MS,
     retryStore: options.retryStore,
     now: options.now,

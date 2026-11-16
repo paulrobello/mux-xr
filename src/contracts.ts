@@ -1,7 +1,9 @@
 import type { KeyModifiers } from '@par/xr-workspace/keyboard-types';
+import { BACKGROUNDS, type BackgroundId } from './backgrounds';
+import type { HostClipboardResult } from './host-clipboard';
+import type { DictationAction } from './speech-input';
 import type { PaneProcess } from './terminal/lifecycle';
 import type { TerminalLinkStats } from './terminal/link-stats';
-import type { XrEntryMode } from './xr/entry';
 
 /**
  * The interfaces between the presenters (browser UI, desktop panels, XR scene) and the transport
@@ -164,27 +166,20 @@ export interface TerminalSurface {
 }
 
 /** Every selectable scene background, in picker order. */
-export const BACKGROUND_MODES = [
-  'black',
-  'gradient',
-  'observatory',
-  'hangar',
-  'deep-water',
-  'studio',
-  'desert',
-  'aurora',
-  'koi',
-  'summit',
-  'rooftop',
-] as const;
+export const BACKGROUND_MODES: readonly BackgroundMode[] = BACKGROUNDS.map(
+  (background) => background.id,
+);
 
-/** One entry of `BACKGROUND_MODES`. */
-export type BackgroundMode = (typeof BACKGROUND_MODES)[number];
+/** One background id from the `BACKGROUNDS` table. */
+export type BackgroundMode = BackgroundId;
 
 /** Narrows a stored value to a `BackgroundMode`, so a mode removed from the list is ignored on load. */
 export function isBackgroundMode(value: unknown): value is BackgroundMode {
   return (BACKGROUND_MODES as readonly unknown[]).includes(value);
 }
+
+/** How an XR session starts: full VR, passthrough (`ar`), or VR around a passthrough desk window. */
+export type XrEntryMode = 'vr' | 'ar' | 'desk';
 
 /** The spatial arrangement presets that place attached terminal panels. */
 export type PanelArrangement = 'row' | 'grid' | 'arc' | 'sphere';
@@ -232,29 +227,27 @@ export interface WorkspaceActions {
   selectPane(id: string): void;
   closePane(id: string): void;
   /** Ask the streamer for one new default-shell terminal in a mux session. */
-  createPane?(sessionId: string): void;
+  createPane(sessionId: string): void;
   sendText(text: string): void;
   sendKey(key: string, modifiers?: KeyModifiers): void;
-  sendMouse?(paneId: string, input: TerminalMouseInput): boolean;
-  scrollTerminal?(paneId: string, lines: number, cell?: { col: number; row: number }): boolean;
+  sendMouse(paneId: string, input: TerminalMouseInput): boolean;
+  scrollTerminal(paneId: string, lines: number, cell?: { col: number; row: number }): boolean;
   runCommand(command: QuickCommand, paneId: string): void;
   openKeyboard(): void;
   openCommands(): void;
-  setXREntryMode?(mode: XrEntryMode): void;
-  exitPreview?(): void;
-  resizeGrid?(paneId: string, cols: number, rows: number): boolean;
-  setTerminalColorMode?(mode: TerminalColorMode): void;
-  setKeyboardBackground?(enabled: boolean): void;
-  reloadApp?(): void;
-  saveCommand?(command: QuickCommand): boolean;
-  removeCommand?(id: string): boolean;
-  togglePaneConnection?(id: string): void;
-  dictationAction?(action: import('./speech-input').DictationAction): void;
-  editDictation?(text: string): void;
+  setXREntryMode(mode: XrEntryMode): void;
+  exitPreview(): void;
+  resizeGrid(paneId: string, cols: number, rows: number): boolean;
+  setTerminalColorMode(mode: TerminalColorMode): void;
+  setKeyboardBackground(enabled: boolean): void;
+  reloadApp(): void;
+  saveCommand(command: QuickCommand): boolean;
+  removeCommand(id: string): boolean;
+  togglePaneConnection(id: string): void;
+  dictationAction(action: DictationAction): void;
+  editDictation(text: string): void;
   /** One explicit host clipboard read through the dictation server's `/clipboard` route. */
-  readHostClipboard?(): Promise<import('./host-clipboard').HostClipboardResult<string>>;
+  readHostClipboard(): Promise<HostClipboardResult<string>>;
   /** One explicit host clipboard write through the dictation server's `/clipboard` route. */
-  writeHostClipboard?(
-    text: string,
-  ): Promise<import('./host-clipboard').HostClipboardResult<number>>;
+  writeHostClipboard(text: string): Promise<HostClipboardResult<number>>;
 }

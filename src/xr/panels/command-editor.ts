@@ -29,7 +29,7 @@ export const commandEditorPanel: PanelModule = {
         actionData({ type: 'commandField', field }, { wrap: true }),
       );
       button.position.y = y;
-      setModifierVisual(button, active);
+      setModifierVisual(button, active, ctx.accent.hex);
       root.add(button);
     }
     const scope = createLabelButton(
@@ -104,7 +104,7 @@ export const commandEditorPanel: PanelModule = {
         ctx.commandEditorMessage = '';
         const command = commandFromDraft(draft, ctx.commandWorkspaceId);
         if (!command) ctx.commandEditorMessage = 'Enter a name and command';
-        else if (!ctx.actions.saveCommand?.(command))
+        else if (!ctx.actions.saveCommand(command))
           ctx.commandEditorMessage = 'Could not save on this device';
         else {
           ctx.commandDraft = null;

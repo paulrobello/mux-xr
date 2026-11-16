@@ -1,7 +1,10 @@
 import { applyUIEnvironment, createScalableLabel, updateScalableLabel } from '@par/xr-workspace';
 import * as THREE from 'three';
 import { formatAge } from '../workspace/agent-roster';
+import type { BellFeedConsumer, BellFeedEntry } from './widget-types';
 import { disposeOwned, type Widget } from './widgets';
+
+export type { BellFeedEntry } from './widget-types';
 
 /** Rows shown before the "+N more" line. */
 export const BELL_FEED_MAX_ROWS = 6;
@@ -11,16 +14,6 @@ export const BELL_FEED_BELL_CAPACITY = 24;
 export const BELL_FEED_NOTICE_CAPACITY = 8;
 /** Notice rows stop showing this long after they were raised. */
 export const BELL_FEED_NOTICE_TTL_MS = 10 * 60_000;
-
-export interface BellFeedEntry {
-  /** `bell:<paneId>` for bells, `notice:<text>` for HUD notices. */
-  id: string;
-  kind: 'bell' | 'notice';
-  /** Pane the entry selects; null for HUD notices, which never select. */
-  paneId: string | null;
-  label: string;
-  at: number;
-}
 
 export interface BellFeedStore {
   pushBell(paneId: string, label: string, at?: number): void;
@@ -159,7 +152,9 @@ function setText(label: THREE.Mesh, text: string): void {
   if (label.userData.labelText !== text) updateScalableLabel(label, text);
 }
 
-export function createBellFeedWidget(envMap: THREE.Texture | null = null): Widget {
+export function createBellFeedWidget(
+  envMap: THREE.Texture | null = null,
+): Widget & BellFeedConsumer {
   const widgetId = `bell-feed-${nextFeedId++}`;
   const root = new THREE.Group();
   root.name = widgetId;

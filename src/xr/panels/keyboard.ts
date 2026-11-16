@@ -254,7 +254,7 @@ export const keyboardPanel: PanelModule = {
         ctx.setKeyboardCurvature(ctx.mutableState.keyboardCurvature + Number(action.delta));
         return true;
       case 'dictation':
-        ctx.actions.dictationAction?.(action.dictationAction as DictationAction);
+        ctx.actions.dictationAction(action.dictationAction as DictationAction);
         return true;
       case 'pinNote':
         ctx.pinNote();
@@ -271,7 +271,7 @@ export const keyboardPanel: PanelModule = {
     switch (action.type) {
       case 'keyboardBackground': {
         const enabled = !ctx.mutableState.keyboardBackgroundEnabled;
-        ctx.actions.setKeyboardBackground?.(enabled);
+        ctx.actions.setKeyboardBackground(enabled);
         ctx.setKeyboardBackgroundEnabled(enabled);
         return true;
       }
