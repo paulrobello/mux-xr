@@ -53,8 +53,9 @@ import type { KeyborbMode } from '../workspace/keyborb';
 import { validateKeyborbMode } from '../workspace/keyborb';
 import { XR_ENTRY_LABELS, type XrEntryMode } from '../xr/entry';
 import { mountAgentRoster } from './agent-roster';
-import { escapeHtml } from './html';
+import { escapeHtml, icon } from './html';
 import { mountSettingsPanel } from './settings-panel';
+import { mountSidebar } from './sidebar';
 
 export { validateHandColor };
 
@@ -172,31 +173,6 @@ export interface WorkspaceUI {
 const _DEFAULT_HAND_SWATCH = '#b4b4b4';
 // The swatch the accent pickers show while the XR accent stays the default cyan.
 const _DEFAULT_ACCENT_SWATCH = '#68d6ff';
-
-function icon(name: 'close' | 'link' | 'xr' | 'send' | 'plus' | 'settings'): string {
-  const paths: Record<string, string> = {
-    close: '<path d="m6 6 12 12M18 6 6 18"/>',
-    link: '<path d="M10 13a5 5 0 0 0 7.1.1l1.4-1.4a5 5 0 0 0-7.1-7.1L10 6"/><path d="M14 11a5 5 0 0 0-7.1-.1L5.5 12.3a5 5 0 0 0 7.1 7.1L14 18"/>',
-    xr: '<path d="M4 9.5A2.5 2.5 0 0 1 6.5 7h11A2.5 2.5 0 0 1 20 9.5v5a2.5 2.5 0 0 1-4.6 1.3L14 14h-4l-1.4 1.8A2.5 2.5 0 0 1 4 14.5v-5Z"/><circle cx="8" cy="11" r="1"/><circle cx="16" cy="11" r="1"/>',
-    send: '<path d="m4 4 16 8-16 8 3-8-3-8Z"/><path d="M7 12h13"/>',
-    plus: '<path d="M12 5v14M5 12h14"/>',
-    settings:
-      '<path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19 13 1.2 1-.9 1.6-1.5-.4a7.8 7.8 0 0 1-1.5 1l-.2 1.5h-1.9l-.5-1.4a7.8 7.8 0 0 1-1.9 0l-.5 1.4h-1.9l-.2-1.5a7.8 7.8 0 0 1-1.5-1l-1.5.4-.9-1.6L6 13a7.8 7.8 0 0 1 0-2L4.8 10l.9-1.6 1.5.4a7.8 7.8 0 0 1 1.5-1l.2-1.5h1.9l.5 1.4a7.8 7.8 0 0 1 1.9 0l.5-1.4h1.9l.2 1.5a7.8 7.8 0 0 1 1.5 1l1.5-.4.9 1.6-1.2 1a7.8 7.8 0 0 1 0 2Z"/>',
-  };
-  return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name]}</svg>`;
-}
-
-function connectionActionLabel(status: TerminalStatus | undefined): string {
-  return status === undefined || status === 'connected' || status === 'connecting'
-    ? 'Disconnect'
-    : 'Reconnect';
-}
-
-function connectionActionTitle(title: string, status: TerminalStatus | undefined): string {
-  return status === undefined || status === 'connected' || status === 'connecting'
-    ? `Disconnect ${title} view without stopping the terminal`
-    : `Reconnect ${title} view to the running terminal`;
-}
 
 export interface WorkspaceUIOptions {
   /** The settings both presenters share; a private store over `localStorage` when omitted. */
@@ -484,90 +460,17 @@ export function mountWorkspaceUI(
     current: () => settings,
     activePaneId: () => activePaneId,
   });
-  const exitBadge = (paneId: string): string => {
-    const badge = paneBadge(paneId);
-    return badge ? `<small class="pane-exit-badge">${escapeHtml(badge)}</small>` : '';
-  };
-  const renderTree = (): void => {
-    agentRoster.render();
-    const tree = qs<HTMLElement>('[data-tree]');
-    if (!snapshot.panes.length) {
-      tree.innerHTML = '<div class="empty-tree">No panes reported</div>';
-      return;
-    }
-    const expanded = new Map(
-      [...tree.querySelectorAll<HTMLDetailsElement>('details[data-branch]')].map((node) => [
-        node.dataset.branch,
-        node.open,
-      ]),
-    );
-    const grouped = (
-      panes: PaneDescriptor[],
-      field: 'workspaceId' | 'sessionId' | 'windowId',
-    ): PaneDescriptor[][] => {
-      const groups = new Map<string, PaneDescriptor[]>();
-      for (const pane of panes) groups.set(pane[field], [...(groups.get(pane[field]) ?? []), pane]);
-      return [...groups.values()];
-    };
-    const createLabel = paneCreation.pending
-      ? 'Creating terminal…'
-      : paneCreation.available
-        ? 'New terminal'
-        : 'Creation unavailable';
-    const createButton = (sessionId: string, sessionName: string): string =>
-      `<button class="tree-create" data-create-session="${escapeHtml(sessionId)}" ${paneCreation.available && !paneCreation.pending ? '' : 'disabled'} aria-label="Create a new default-shell terminal in ${escapeHtml(sessionName)}" title="${escapeHtml(paneCreation.reason ?? `Create a new default-shell terminal in ${sessionName}`)}">${icon('plus')} ${createLabel}</button>`;
-    const createNote =
-      paneCreation.reason && (paneCreation.pending || !paneCreation.available)
-        ? `<div class="tree-create-note" role="status">${escapeHtml(paneCreation.reason)}</div>`
-        : '';
-    const branch = (id: string, label: string, content: string): string =>
-      `<details data-branch="${escapeHtml(id)}" ${expanded.get(id) !== false ? 'open' : ''}><summary>${escapeHtml(label)}</summary>${content}</details>`;
-    tree.innerHTML = `<div class="tree-daemon">Connected computer</div>${createNote}${grouped(
-      snapshot.panes,
-      'workspaceId',
-    )
-      .map((workspace) =>
-        branch(
-          workspace[0].workspaceId,
-          workspace[0].workspaceName,
-          grouped(workspace, 'sessionId')
-            .map((session) =>
-              branch(
-                session[0].sessionId,
-                session[0].sessionName,
-                grouped(session, 'windowId')
-                  .map((window) =>
-                    branch(
-                      window[0].windowId,
-                      window[0].windowName,
-                      window
-                        .map(
-                          (pane) =>
-                            `<button class="tree-pane ${pane.id === activePaneId ? 'selected' : ''}" data-pane="${escapeHtml(pane.id)}"><span class="pane-pip"></span><span><b>${escapeHtml(pane.title)}</b><small>${escapeHtml(pane.id)}</small>${exitBadge(pane.id)}</span></button>`,
-                        )
-                        .join(''),
-                    ),
-                  )
-                  .join('') + createButton(session[0].sessionId, session[0].sessionName),
-              ),
-            )
-            .join(''),
-        ),
-      )
-      .join('')}`;
-  };
-  const renderPanes = (): void => {
-    const host = qs<HTMLElement>('[data-panes]');
-    const attached = snapshot.panes.filter((pane) => attachedPaneIds.includes(pane.id));
-    host.innerHTML = attached.length
-      ? attached
-          .map(
-            (pane) =>
-              `<div class="attached-selector ${pane.id === activePaneId ? 'active' : ''}"><button data-select="${escapeHtml(pane.id)}">${escapeHtml(pane.title)}</button>${exitBadge(pane.id)}<button class="text-btn" data-toggle-connection="${escapeHtml(pane.id)}" aria-label="${escapeHtml(connectionActionLabel(paneStatuses.get(pane.id)))} ${escapeHtml(pane.title)}" title="${escapeHtml(connectionActionTitle(pane.title, paneStatuses.get(pane.id)))}">${escapeHtml(connectionActionLabel(paneStatuses.get(pane.id)))}</button><button class="icon-btn" data-close="${escapeHtml(pane.id)}" aria-label="Close view for ${escapeHtml(pane.title)}" title="Close this viewer and keep the terminal running">${icon('close')}</button></div>`,
-          )
-          .join('')
-      : '<div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div>';
-  };
+  const sidebar = mountSidebar({
+    root,
+    snapshot: () => snapshot,
+    activePaneId: () => activePaneId,
+    attachedPaneIds: () => attachedPaneIds,
+    paneCreation: () => paneCreation,
+    paneBadge,
+    paneStatus: (paneId) => paneStatuses.get(paneId),
+    renderAgents: () => agentRoster.render(),
+  });
+  const { renderTree, renderPanes } = sidebar;
   const commandOption = (command: QuickCommand): string =>
     `<option value="${escapeHtml(command.id)}">${escapeHtml(command.label)}${command.pinned ? ' · pinned' : ''}</option>`;
   const targetWorkspace = (): string =>
