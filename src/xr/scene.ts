@@ -2,6 +2,7 @@ import type { CartoonHand, PictureDepthView } from '@par/xr-workspace';
 import {
   applyUIEnvironment,
   countsAsFrame,
+  createFrameUpdaters,
   createHandContact,
   createKeyborbInput,
   createModifierState,
@@ -310,6 +311,8 @@ export interface WorkspaceScene {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
   readonly state: Readonly<WorkspaceSceneState>;
+  /** Adds a callback the scene runs once per frame with the frame delta in seconds; returns its removal. */
+  registerFrameUpdater(update: (deltaSeconds: number) => void): () => void;
   /** The renderer's anisotropic filtering ceiling; 1 without a renderer. */
   readonly maxAnisotropy: number;
   addTerminal(surface: TerminalSurface): void;
@@ -780,6 +783,9 @@ export function createWorkspaceScene(
 ): WorkspaceScene {
   const feedback = options.feedback ?? createUIFeedback();
   const scene = new THREE.Scene();
+  const frameUpdaters = createFrameUpdaters();
+  // Test seam for scripts/*-check.ts, which reach only the Three scene: runs the frame updaters.
+  scene.userData.stepFrameUpdaters = frameUpdaters.update;
   accent.hex = DEFAULT_ACCENT;
   accent.hover = DEFAULT_ACCENT_HOVER;
   cursorRest.setHex(DEFAULT_ACCENT);
@@ -2827,7 +2833,7 @@ export function createWorkspaceScene(
     );
     if (hierarchyNavigator)
       hierarchyNavigator.root.userData.transitioning = hierarchyNavigator.transitioning;
-    (scene.userData.updateEnvironment as ((delta: number) => void) | undefined)?.(deltaSeconds);
+    frameUpdaters.update(deltaSeconds);
     if (renderer?.xr.isPresenting) {
       let leftController: THREE.Group | null = null;
       let leftVisual: CartoonHand | undefined;
@@ -7390,6 +7396,7 @@ export function createWorkspaceScene(
     enterXR,
     exitXR,
     setUpdateAvailable,
+    registerFrameUpdater: frameUpdaters.register,
     setKeyIndicator,
     isTextEntryActive,
     typeTextEntryKey,

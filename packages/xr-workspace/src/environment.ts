@@ -3,24 +3,26 @@ import { accentColorOrNull, resolveEnvironmentAccent, type WorkspaceColors } fro
 
 type EnvironmentUpdater = (deltaSeconds: number) => void;
 
-/** Adds an updater to the scene's single `updateEnvironment` hook; returns its removal. */
-export function registerEnvironmentUpdater(
-  scene: THREE.Scene,
-  updater: EnvironmentUpdater,
-): () => void {
-  const updaters = (scene.userData.environmentUpdaters ??
-    new Set<EnvironmentUpdater>()) as Set<EnvironmentUpdater>;
-  scene.userData.environmentUpdaters = updaters;
-  updaters.add(updater);
-  scene.userData.updateEnvironment = (deltaSeconds: number): void => {
-    for (const each of [...updaters]) each(deltaSeconds);
-  };
-  return () => {
-    updaters.delete(updater);
-    if (updaters.size === 0 && scene.userData.environmentUpdaters === updaters) {
-      delete scene.userData.updateEnvironment;
-      delete scene.userData.environmentUpdaters;
-    }
+/** The per-frame updaters that one scene's host drives. */
+export interface FrameUpdaters {
+  /** Adds an updater; returns its removal. */
+  register(updater: EnvironmentUpdater): () => void;
+  /** Runs every registered updater, in registration order. */
+  update(deltaSeconds: number): void;
+}
+
+export function createFrameUpdaters(): FrameUpdaters {
+  const updaters = new Set<EnvironmentUpdater>();
+  return {
+    register(updater) {
+      updaters.add(updater);
+      return () => {
+        updaters.delete(updater);
+      };
+    },
+    update(deltaSeconds) {
+      for (const each of [...updaters]) each(deltaSeconds);
+    },
   };
 }
 

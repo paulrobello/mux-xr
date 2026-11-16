@@ -1,4 +1,8 @@
-import { ENVIRONMENT_FACTORIES, type EnvironmentFactory } from '@par/xr-workspace';
+import {
+  createFrameUpdaters,
+  ENVIRONMENT_FACTORIES,
+  type EnvironmentFactory,
+} from '@par/xr-workspace';
 import * as THREE from 'three';
 import type { BackgroundMode } from '../src/contracts';
 import { loadObservatory } from '../src/environment';
@@ -44,15 +48,17 @@ function capture(scene: THREE.Scene): string {
 
 async function renderObservatory(): Promise<string> {
   const scene = freshScene();
+  const frames = createFrameUpdaters();
   const workspace = {
     scene,
     state: { background: 'observatory', xrMode: 'vr', accentColor: '', environmentAccentColor: '' },
     subscribe: () => () => undefined,
+    registerFrameUpdater: frames.register,
   } as unknown as WorkspaceScene;
   const dispose = await loadObservatory(workspace);
   for (let frame = 0; frame < 60 && !scene.getObjectByName('authored-observatory'); frame += 1)
     await new Promise((resolve) => setTimeout(resolve, 50));
-  (scene.userData.updateEnvironment as ((delta: number) => void) | undefined)?.(SETTLE_SECONDS);
+  frames.update(SETTLE_SECONDS);
   const image = capture(scene);
   dispose();
   return image;

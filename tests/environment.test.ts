@@ -5,6 +5,7 @@ import type { BackgroundMode } from '../src/contracts';
 import { loadObservatory, quietObservatoryPlanet } from '../src/environment';
 import type { WorkspaceScene } from '../src/xr';
 import type { WorkspaceSceneState } from '../src/xr/scene';
+import { createTestFrameUpdaters } from './helpers/frame-updaters';
 
 describe('authored observatory display treatment', () => {
   it('dims only the authored distant planet material', () => {
@@ -44,8 +45,10 @@ describe('authored observatory display treatment', () => {
       widgets: [],
       fullPassthrough: false,
     };
+    const frames = createTestFrameUpdaters();
     const workspace = {
       scene,
+      registerFrameUpdater: frames.registerFrameUpdater,
       state,
       subscribe(next: () => void) {
         listener = next;
@@ -80,8 +83,10 @@ describe('authored observatory display treatment', () => {
       widgets: [],
       fullPassthrough: false,
     };
+    const frames = createTestFrameUpdaters();
     const workspace = {
       scene,
+      registerFrameUpdater: frames.registerFrameUpdater,
       state,
       subscribe: () => () => undefined,
     } as unknown as WorkspaceScene;
@@ -112,8 +117,10 @@ describe('authored observatory display treatment', () => {
   it('applies the self-hosted planet texture when available', async () => {
     const scene = new THREE.Scene();
     const state = { background: 'observatory' as BackgroundMode, xrMode: 'desktop' as const };
+    const frames = createTestFrameUpdaters();
     const workspace = {
       scene,
+      registerFrameUpdater: frames.registerFrameUpdater,
       state,
       subscribe: () => () => undefined,
     } as unknown as WorkspaceScene;
@@ -142,8 +149,10 @@ describe('authored observatory display treatment', () => {
   it('rotates the authored planet around its geometry center through the scene callback', async () => {
     const scene = new THREE.Scene();
     const state = { background: 'observatory' as BackgroundMode, xrMode: 'desktop' as const };
+    const frames = createTestFrameUpdaters();
     const workspace = {
       scene,
+      registerFrameUpdater: frames.registerFrameUpdater,
       state,
       subscribe: () => () => undefined,
     } as unknown as WorkspaceScene;
@@ -167,7 +176,7 @@ describe('authored observatory display treatment', () => {
     const sphere = geometry.boundingSphere;
     if (!sphere) throw new Error('Planet bounds missing');
     const centerBefore = planet.localToWorld(sphere.center.clone());
-    const update = scene.userData.updateEnvironment as (deltaSeconds: number) => void;
+    const update = frames.runFrame;
     const pivot = scene.getObjectByName('observatory-planet-rotation-pivot');
     if (!pivot) throw new Error('Planet pivot missing');
     const rotationBefore = pivot.rotation.y;
@@ -183,8 +192,10 @@ describe('authored observatory display treatment', () => {
   it('disposes a late planet texture after abort', async () => {
     const scene = new THREE.Scene();
     const state = { background: 'observatory' as BackgroundMode, xrMode: 'desktop' as const };
+    const frames = createTestFrameUpdaters();
     const workspace = {
       scene,
+      registerFrameUpdater: frames.registerFrameUpdater,
       state,
       subscribe: () => () => undefined,
     } as unknown as WorkspaceScene;

@@ -6,12 +6,12 @@ import {
   createEnvironmentManager,
   createObservatoryAccent,
   type EnvironmentInstance,
-  registerEnvironmentUpdater,
 } from '../src/environment';
 import { loadSettings, validateSettings } from '../src/ui';
 import type { WorkspaceScene } from '../src/xr';
 import { DESK_WINDOW_KIND } from '../src/xr/desk-window';
 import { workspaceFloorY } from '../src/xr/floor-layout';
+import { createTestFrameUpdaters } from './helpers/frame-updaters';
 
 const ENV_MODES = [
   'hangar',
@@ -53,10 +53,12 @@ function harness() {
   };
   const listeners = new Set<() => void>();
   const setNotice = vi.fn();
+  const { registerFrameUpdater, runFrame } = createTestFrameUpdaters();
   const workspace = {
     scene,
     state,
     setNotice,
+    registerFrameUpdater,
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -89,7 +91,7 @@ function harness() {
       },
     ]),
   );
-  return { scene, workspace, set, created, factories, setNotice };
+  return { scene, workspace, set, created, factories, setNotice, runFrame, registerFrameUpdater };
 }
 
 const liveRoots = (scene: THREE.Scene): string[] =>
@@ -124,7 +126,6 @@ describe('environment manager', () => {
     stop();
     expect(created[0].dispose).toHaveBeenCalledTimes(1);
     expect(liveRoots(scene)).toEqual([]);
-    expect(scene.userData.updateEnvironment).toBeUndefined();
   });
 
   it('rebuilds the active environment once per environment accent change', () => {
@@ -236,14 +237,14 @@ describe('environment manager', () => {
     warn.mockRestore();
   });
 
-  it('a repeated unregister cannot remove a newer updater set', () => {
-    const { scene } = harness();
-    const first = registerEnvironmentUpdater(scene, vi.fn());
+  it('a repeated unregister cannot remove a newer updater', () => {
+    const { registerFrameUpdater, runFrame } = harness();
+    const first = registerFrameUpdater(vi.fn());
     first();
     const newer = vi.fn();
-    registerEnvironmentUpdater(scene, newer);
+    registerFrameUpdater(newer);
     first();
-    (scene.userData.updateEnvironment as (delta: number) => void)(0.01);
+    runFrame(0.01);
     expect(newer).toHaveBeenCalledWith(0.01);
   });
 
@@ -255,20 +256,22 @@ describe('environment manager', () => {
     stop();
   });
 
-  it('drives the active update through the shared hook without clobbering other updaters', () => {
-    const { scene, workspace, set, created, factories } = harness();
+  it('drives the active update through the frame hook without clobbering other updaters', () => {
+    const { workspace, set, created, factories, registerFrameUpdater, runFrame } = harness();
     const other = vi.fn();
-    const unregister = registerEnvironmentUpdater(scene, other);
+    const unregister = registerFrameUpdater(other);
     const stop = createEnvironmentManager(workspace, factories);
     set({ background: 'hangar' });
     const update = vi.spyOn(created[0].instance, 'update');
-    (scene.userData.updateEnvironment as (delta: number) => void)(0.016);
+    runFrame(0.016);
     expect(other).toHaveBeenCalledWith(0.016);
     expect(update).toHaveBeenCalledWith(0.016);
     stop();
-    expect(typeof scene.userData.updateEnvironment).toBe('function');
+    update.mockClear();
+    runFrame(0.016);
+    expect(other).toHaveBeenCalledTimes(2);
+    expect(update).not.toHaveBeenCalled();
     unregister();
-    expect(scene.userData.updateEnvironment).toBeUndefined();
   });
 });
 

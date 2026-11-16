@@ -5,7 +5,6 @@ import {
   ENVIRONMENT_LOADERS,
   type EnvironmentFactory,
   type EnvironmentSource,
-  registerEnvironmentUpdater,
   resolveEnvironmentAccent,
   tintToLuminance,
 } from '@par/xr-workspace';
@@ -19,7 +18,6 @@ export type {
   EnvironmentFactory,
   EnvironmentInstance,
 } from '@par/xr-workspace';
-export { registerEnvironmentUpdater };
 export type EnvironmentFactories = Partial<Record<BackgroundMode, EnvironmentFactory>>;
 /** Each world fetched as its own chunk on first use. */
 export type EnvironmentSources = Partial<Record<BackgroundMode, EnvironmentSource>>;
@@ -53,7 +51,7 @@ export function createEnvironmentManager(
     if (active) setEnvironmentWindowMask(active.root, deskWindow);
   };
   const unsubscribe = workspace.subscribe(sync);
-  const unregister = registerEnvironmentUpdater(workspace.scene, controller.update);
+  const unregister = workspace.registerFrameUpdater(controller.update);
   sync();
   return () => {
     unsubscribe();
@@ -233,7 +231,7 @@ export async function loadObservatory(
     return dispose;
   }
   unsubscribe = workspace.subscribe(sync);
-  unregisterUpdater = registerEnvironmentUpdater(workspace.scene, updateEnvironment);
+  unregisterUpdater = workspace.registerFrameUpdater(updateEnvironment);
   signal?.addEventListener('abort', dispose, { once: true });
   sync();
   try {

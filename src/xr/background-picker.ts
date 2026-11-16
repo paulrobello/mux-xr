@@ -1,18 +1,9 @@
+import { BACKGROUNDS, backgroundThumbnail } from '../backgrounds';
 import { BACKGROUND_MODES, type BackgroundMode } from '../contracts';
 
-export const BACKGROUND_LABELS: Record<BackgroundMode, string> = {
-  black: 'Black',
-  gradient: 'Gradient',
-  observatory: 'Observatory',
-  hangar: 'Hangar deck',
-  'deep-water': 'Deep-water station',
-  studio: 'Minimal studio',
-  desert: 'Desert night',
-  aurora: 'Aurora tundra',
-  rooftop: 'Rain rooftop',
-  summit: 'Cloud summit',
-  koi: 'Koi garden',
-};
+export const BACKGROUND_LABELS = Object.fromEntries(
+  BACKGROUNDS.map((background) => [background.id, background.label]),
+) as Record<BackgroundMode, string>;
 
 export const BACKGROUND_PICKER_COLUMNS = 3;
 export const BACKGROUND_PICKER_ROWS = 2;
@@ -24,7 +15,7 @@ const ROW_PITCH = 0.4;
 const FIRST_ROW_Y = 0.26;
 
 export function backgroundThumbnailUrl(mode: BackgroundMode): string {
-  return `/assets/backgrounds/${mode}.webp`;
+  return backgroundThumbnail(mode);
 }
 
 export function backgroundPickerRowCount(count: number = BACKGROUND_MODES.length): number {

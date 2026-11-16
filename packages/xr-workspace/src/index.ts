@@ -37,6 +37,7 @@ export {
 } from './elastic-arm';
 export {
   createEnvironmentController,
+  createFrameUpdaters,
   ENVIRONMENT_LOADERS,
   type EnvironmentController,
   type EnvironmentFactories,
@@ -45,8 +46,8 @@ export {
   type EnvironmentSelection,
   type EnvironmentSource,
   type EnvironmentSources,
+  type FrameUpdaters,
   type LazyEnvironment,
-  registerEnvironmentUpdater,
 } from './environment';
 export {
   ENVIRONMENT_FACTORIES,

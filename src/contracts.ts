@@ -1,4 +1,5 @@
 import type { KeyModifiers } from '@par/xr-workspace/keyboard-types';
+import { BACKGROUNDS, type BackgroundId } from './backgrounds';
 import type { PaneProcess } from './terminal/lifecycle';
 import type { TerminalLinkStats } from './terminal/link-stats';
 import type { XrEntryMode } from './xr/entry';
@@ -164,22 +165,12 @@ export interface TerminalSurface {
 }
 
 /** Every selectable scene background, in picker order. */
-export const BACKGROUND_MODES = [
-  'black',
-  'gradient',
-  'observatory',
-  'hangar',
-  'deep-water',
-  'studio',
-  'desert',
-  'aurora',
-  'koi',
-  'summit',
-  'rooftop',
-] as const;
+export const BACKGROUND_MODES: readonly BackgroundMode[] = BACKGROUNDS.map(
+  (background) => background.id,
+);
 
-/** One entry of `BACKGROUND_MODES`. */
-export type BackgroundMode = (typeof BACKGROUND_MODES)[number];
+/** One background id from the `BACKGROUNDS` table. */
+export type BackgroundMode = BackgroundId;
 
 /** Narrows a stored value to a `BackgroundMode`, so a mode removed from the list is ignored on load. */
 export function isBackgroundMode(value: unknown): value is BackgroundMode {
