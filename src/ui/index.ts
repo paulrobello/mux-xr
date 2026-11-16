@@ -11,7 +11,6 @@ import type {
   TerminalStatus,
   WorkspaceSnapshot,
 } from '../contracts';
-import { HOST_CLIPBOARD_SETUP } from '../host-clipboard';
 import { isSharedCommand } from '../quick-commands';
 import {
   browserStorage,
@@ -27,6 +26,7 @@ import { AGENTS_SORTS, type AgentRosterRow } from '../workspace/agent-roster';
 import type { HierarchyStyle } from '../workspace/hierarchy-style';
 import type { KeyborbMode } from '../workspace/keyborb';
 import { XR_ENTRY_LABELS, type XrEntryMode } from '../xr/entry';
+import { forwardedActions, mountHostClipboardControls } from './actions';
 import { mountAgentRoster } from './agent-roster';
 import { mountCommandLibrary } from './input-drawer';
 import { mountKeyboard } from './keyboard';
@@ -240,16 +240,8 @@ export function mountWorkspaceUI(
     if (!element) throw new Error(`Missing workspace control: ${selector}`);
     return element;
   };
-  const updateHostClipboardStatus = (message: string | null = null): void => {
-    const status = root.querySelector<HTMLElement>('[data-host-clipboard-status]');
-    if (!status) return;
-    status.textContent =
-      message ??
-      (callbacks.isHostClipboardPaired?.()
-        ? 'Paired. The secret is stored only in this browser.'
-        : `Not paired. ${HOST_CLIPBOARD_SETUP}`);
-  };
-  updateHostClipboardStatus();
+  const forwarders = forwardedActions(callbacks);
+  const hostClipboard = mountHostClipboardControls({ root, callbacks });
   const terminalControls = mountTerminalControls({
     root,
     activePaneId: () => activePaneId,
@@ -383,6 +375,12 @@ export function mountWorkspaceUI(
       return;
     }
     if (commandLibrary.handleAction(button.dataset.action ?? '')) return;
+    if (hostClipboard.handleAction(button.dataset.action ?? '')) return;
+    const forwarded = forwarders[button.dataset.action ?? ''];
+    if (forwarded) {
+      forwarded();
+      return;
+    }
     switch (button.dataset.action) {
       case 'agents-sort': {
         const next =
@@ -401,15 +399,6 @@ export function mountWorkspaceUI(
         callbacks.onConnect(endpoint);
         break;
       }
-      case 'refresh':
-        callbacks.onRefresh?.();
-        break;
-      case 'xr':
-        callbacks.onEnterXR?.();
-        break;
-      case 'reload-update':
-        callbacks.onReloadApp?.();
-        break;
       case 'dismiss-notice':
         setNotice(null);
         callbacks.onDismissNotice?.();
@@ -427,59 +416,14 @@ export function mountWorkspaceUI(
       case 'close-drawer':
         closeInput();
         break;
-      case 'dictation-start':
-        callbacks.onDictationAction?.('start');
-        break;
       case 'paste-clipboard':
         callbacks.onPaste?.(capturedTarget ?? activePaneId);
-        break;
-      case 'host-to-quest':
-        callbacks.onHostToQuest?.();
-        break;
-      case 'quest-to-host':
-        callbacks.onQuestToHost?.();
-        break;
-      case 'host-clipboard-save': {
-        const input = qs<HTMLInputElement>('[data-host-clipboard-secret]');
-        const saved = callbacks.onHostClipboardSecret?.(input.value) ?? false;
-        input.value = '';
-        updateHostClipboardStatus(saved ? null : 'Enter the secret before saving.');
-        break;
-      }
-      case 'host-clipboard-forget':
-        callbacks.onHostClipboardSecret?.(null);
-        qs<HTMLInputElement>('[data-host-clipboard-secret]').value = '';
-        updateHostClipboardStatus('Forgotten. Host clipboard transfers are off in this browser.');
-        break;
-      case 'dictation-stop':
-        callbacks.onDictationAction?.('stop');
-        break;
-      case 'dictation-insert':
-        callbacks.onDictationAction?.('insert');
-        break;
-      case 'dictation-clear':
-        callbacks.onDictationAction?.('clear');
-        break;
-      case 'dictation-cancel':
-        callbacks.onDictationAction?.('cancel');
         break;
       case 'settings':
         qs<HTMLElement>('[data-settings]').hidden = false;
         break;
       case 'close-settings':
         qs<HTMLElement>('[data-settings]').hidden = true;
-        break;
-      case 'passthrough':
-        callbacks.onPassthrough?.('ar');
-        break;
-      case 'desk-window':
-        callbacks.onPassthrough?.('desk');
-        break;
-      case 'demo':
-        callbacks.onDemo?.();
-        break;
-      case 'reset':
-        callbacks.onResetLayout?.();
         break;
       case 'send-text': {
         const text = qs<HTMLTextAreaElement>('[data-compose]').value;
