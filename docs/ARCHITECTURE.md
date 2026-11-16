@@ -15,7 +15,7 @@ flowchart LR
 
 ## Workspace and presentation
 
-[main.ts](../src/main.ts) wires up the streamer endpoint, hierarchy snapshot, active input target, and map of attached terminal surfaces. The [shared contracts](../src/contracts.ts) define workspace actions and terminal surfaces. Selecting a pane attaches its surface on demand, updates the active target, and synchronizes both presenters.
+[main.ts](../src/main.ts) mounts [createApp](../src/app.ts), which wires up the presenters, the streamer endpoint and the active input target. The [pane controller](../src/workspace/pane-controller.ts) owns the hierarchy snapshot and the map of attached terminal surfaces. The [shared contracts](../src/contracts.ts) define workspace actions and terminal surfaces. Selecting a pane attaches its surface on demand, updates the active target, and synchronizes both presenters.
 
 - [Browser UI](../src/ui/index.ts) renders the hierarchy, settings, and input drawer. [Desktop panels](../src/desktop/panels.ts) display flat terminal canvases. The 3D preview adds spatial interaction while keeping input in the browser drawer.
 - [XR entry](../src/xr/entry.ts) coordinates session startup and browser activation. The [Three.js scene](../src/xr/scene.ts) owns native panels, controller and hand input, manipulation, rendering, and session cleanup. VR uses an immersive VR session. Full passthrough and Desk Window use immersive AR. Desk Window requires alpha blending and reveals passthrough within its frame.
@@ -45,7 +45,7 @@ After the pane settles in immersive VR Focus, the [Focus renderer](../src/xr/foc
 
 ## Persistence and updates
 
-- [Browser settings](../src/ui/index.ts) validate and persist device preferences. [Open views](../src/workspace/open-views.ts) save the selected pane and open views per streamer. On reconnect or reload, saved pane identities resolve against the live hierarchy before attaching.
+- The [settings store](../src/settings/store.ts) validates and persists device preferences, and both the browser UI and the XR scene read and change them through it. [Open views](../src/workspace/open-views.ts) save the selected pane and open views per streamer. On reconnect or reload, saved pane identities resolve against the live hierarchy before attaching.
 - [Quick commands](../src/quick-commands.ts), [pane appearance](../src/xr/terminal-warp-store.ts), [input panel poses](../src/xr/ui-poses.ts), and [widget poses](../src/xr/widget-poses.ts) have their own local stores. Focus is temporary unless the user explicitly keeps the pane's placement.
 - The [picture controller](../src/workspace/pictures.ts) owns the common browser/XR loading path. [Picture storage](../src/xr/picture-store.ts) keeps current frames and Recent images in separate IndexedDB stores. [HEIF decode](../src/xr/heif-decode.ts) uses a worker. Optional [depth estimation](../src/server/depth-estimator.ts) runs on the Mac, while the [picture frame](../src/xr/picture-frame.ts) renders depth and stereo views.
 

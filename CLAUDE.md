@@ -31,7 +31,7 @@ Use [Testing](docs/TESTING.md) for fixture setup, exact flags, and evidence requ
 
 ## Source entry points
 
-- [src/main.ts](src/main.ts) owns the active streamer, attached surfaces, pane selection and shared workspace actions. [src/contracts.ts](src/contracts.ts) defines the interfaces between views and transport.
+- [src/main.ts](src/main.ts) mounts the app and classifies the `?server=` link. [src/app.ts](src/app.ts) builds the presenters and the shared workspace actions, and [src/workspace/pane-controller.ts](src/workspace/pane-controller.ts) owns the attached surfaces, pane selection and open-view restore. [src/settings/store.ts](src/settings/store.ts) owns the device settings both presenters share. [src/contracts.ts](src/contracts.ts) defines the interfaces between views and transport.
 - [src/terminal/surface.ts](src/terminal/surface.ts) owns each viewer socket and terminal emulator. [src/workspace/hierarchy.ts](src/workspace/hierarchy.ts) handles hierarchy metadata. Keep the vendored protobuf binding and [core-release.json](core-release.json) in sync when upgrading core.
 - [src/ui/index.ts](src/ui/index.ts) and [src/desktop/panels.ts](src/desktop/panels.ts) own the browser presentation. [src/xr/scene.ts](src/xr/scene.ts) orchestrates the Three.js preview and immersive scene.
 - [scripts/dictation-server.ts](scripts/dictation-server.ts) starts the optional macOS companion. [src/server/host-service.ts](src/server/host-service.ts) wires its host routes. See [Host setup](docs/HOST-SETUP.md) for local configuration.
