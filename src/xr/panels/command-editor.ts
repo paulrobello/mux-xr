@@ -29,7 +29,7 @@ export const commandEditorPanel: PanelModule = {
         actionData({ type: 'commandField', field }, { wrap: true }),
       );
       button.position.y = y;
-      setModifierVisual(button, active);
+      setModifierVisual(button, active, ctx.accent.hex);
       root.add(button);
     }
     const scope = createLabelButton(

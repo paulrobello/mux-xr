@@ -13,8 +13,6 @@ import {
   createUIEnvironment,
   createWristMenuWatch,
   curveKeyboardContent,
-  DEFAULT_ACCENT,
-  DEFAULT_ACCENT_HOVER,
   disposeScalableLabel,
   type HandContact,
   type HandContactSample,
@@ -97,7 +95,7 @@ import {
   validateWindowPreferences,
   type WindowPreferences,
 } from '../workspace/window-preferences';
-import { accent } from './accent-state';
+import { createAccentState } from './accent-state';
 import { calculateArrangement } from './arrangements';
 import {
   BACKGROUND_LABELS,
@@ -493,7 +491,6 @@ const _KEYBORB_DICTATION_COLUMN = 9;
 const SCROLL_STRIP_WIDTH = 0.05;
 const SCROLL_STRIP_OPACITY = 0.14;
 const SCROLL_STRIP_ACTIVE_OPACITY = 0.38;
-// The live XR accent; each scene resets it and its setter retints what was built with it.
 const SELECTED_FRAME_GLOW = 0.45;
 const CONTROLLER_RAY_LENGTH = 8;
 // An XR press becomes a drag only once its hit moves past both limits, so hand and controller
@@ -506,7 +503,6 @@ const CURSOR_HALF_ANGLE = Math.tan(THREE.MathUtils.degToRad(0.25));
 const CURSOR_PINCH_OPEN = 0.08;
 const CURSOR_PINCH_CLOSED = 0.02;
 const cursorColor = new THREE.Color();
-const cursorRest = new THREE.Color(DEFAULT_ACCENT);
 const cursorPinched = new THREE.Color(0xffffff);
 const QUALITY_RANK: Record<TerminalRenderQuality, number> = {
   hidden: 0,
@@ -786,9 +782,8 @@ export function createWorkspaceScene(
   const frameUpdaters = createFrameUpdaters();
   // Test seam for scripts/*-check.ts, which reach only the Three scene: runs the frame updaters.
   scene.userData.stepFrameUpdaters = frameUpdaters.update;
-  accent.hex = DEFAULT_ACCENT;
-  accent.hover = DEFAULT_ACCENT_HOVER;
-  cursorRest.setHex(DEFAULT_ACCENT);
+  const accent = createAccentState();
+  const cursorRest = new THREE.Color(accent.hex);
   const camera = new THREE.PerspectiveCamera(58, 1, 0.01, 100);
   camera.position.set(0, 1.52, 0.45);
   camera.lookAt(0, 1.42, -1.05);
@@ -1487,7 +1482,7 @@ export function createWorkspaceScene(
       root.traverse((object) => {
         const modifier = object.userData.modifier as KeyboardModifier | undefined;
         if (!modifier) return;
-        setModifierVisual(object, Boolean(active[modifier]));
+        setModifierVisual(object, Boolean(active[modifier]), accent.hex);
         object.userData.locked = Boolean(locked[modifier]);
         updateLabel(
           object as THREE.Mesh,
@@ -4795,7 +4790,7 @@ export function createWorkspaceScene(
         if (modifier) {
           modifierState.tap(modifier);
           syncModifierVisuals();
-          setModifierVisual(hit, Boolean(modifierState.active[modifier]));
+          setModifierVisual(hit, Boolean(modifierState.active[modifier]), accent.hex);
           if (modifier === 'shift') refreshInputRoot(inputMode);
           return true;
         }
@@ -4979,7 +4974,7 @@ export function createWorkspaceScene(
         if (modifier) {
           modifierState.tap(modifier);
           syncModifierVisuals();
-          if (hit) setModifierVisual(hit, Boolean(modifierState.active[modifier]));
+          if (hit) setModifierVisual(hit, Boolean(modifierState.active[modifier]), accent.hex);
         } else {
           actions.sendKey(
             keyName,
@@ -6104,7 +6099,7 @@ export function createWorkspaceScene(
       if (trigger) updateLabel(trigger, BACKGROUND_LABELS[mode]);
       select?.traverse((child) => {
         if (child.userData.inputAction === 'background')
-          setModifierVisual(child, child.userData.background === mode);
+          setModifierVisual(child, child.userData.background === mode, accent.hex);
       });
     }
     const deskWindow = mutableState.xrMode === 'ar' && widgets.has(DESK_WINDOW_KIND);
@@ -7110,6 +7105,7 @@ export function createWorkspaceScene(
       get maxAnisotropy() {
         return maxAnisotropy();
       },
+      accent,
       actions,
       panels,
       widgets,

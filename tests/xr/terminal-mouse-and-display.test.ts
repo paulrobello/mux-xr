@@ -24,7 +24,9 @@ import {
   fixture,
   hit,
   objectWithData,
+  pane,
   resetXRControllers,
+  surface,
 } from '../helpers/xr-harness';
 
 describe('native XR controller event routing', () => {
@@ -508,6 +510,29 @@ describe('native XR controller event routing', () => {
     for (const material of arms) expect(material.color.getHex()).not.toBe(dim(0x22a55a));
     workspace.dispose();
     container.remove();
+  });
+
+  it('keeps each scene accent separate, so a second scene does not recolor the first', () => {
+    const first = fixture();
+    const second = fixture();
+    first.workspace.setAccentColor('#ff672f');
+    const frame = (workspace: typeof first.workspace, id: string) =>
+      (
+        (workspace.scene.getObjectByName(`terminal-panel-${id}`) as THREE.Group).getObjectByName(
+          'terminal-frame-accent',
+        ) as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>
+      ).material.color.getHex();
+    first.workspace.selectTerminal('pane-a');
+    second.workspace.selectTerminal('pane-a');
+    expect(frame(first.workspace, 'pane-b')).toBe(0xff672f);
+    expect(frame(second.workspace, 'pane-b')).toBe(0x68d6ff);
+    // A pane added to the untouched scene after the first scene changed its accent keeps the default.
+    second.workspace.addTerminal(surface(pane('pane-c')));
+    expect(frame(second.workspace, 'pane-c')).toBe(0x68d6ff);
+    first.workspace.dispose();
+    second.workspace.dispose();
+    first.container.remove();
+    second.container.remove();
   });
 
   it('recolors live XR accents from the Accent colors page and restores the default', () => {

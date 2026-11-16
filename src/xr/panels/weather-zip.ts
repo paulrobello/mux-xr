@@ -20,7 +20,7 @@ export const weatherZipPanel: PanelModule = {
     });
     field.name = 'xr-weather-zip-field';
     field.position.y = 0.4;
-    setModifierVisual(field, true);
+    setModifierVisual(field, true, ctx.accent.hex);
     root.add(field);
     const keys = [
       ['1', '2', '3'],

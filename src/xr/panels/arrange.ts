@@ -32,7 +32,7 @@ export const arrangePanel: PanelModule = {
           actionData({ type: 'arrange', pattern }),
         );
         button.position.set(index % 2 ? 0.38 : -0.38, 0.16 - Math.floor(index / 2) * 0.2, 0);
-        setModifierVisual(button, ctx.mutableState.arrangement === pattern);
+        setModifierVisual(button, ctx.mutableState.arrangement === pattern, ctx.accent.hex);
         root.add(button);
       });
       for (const [label, direction] of [

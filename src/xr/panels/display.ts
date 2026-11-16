@@ -26,7 +26,7 @@ export const displayPanel: PanelModule = {
         actionData({ type: 'terminalColors', colorMode }),
       );
       button.position.set((index - 1) * 0.46, 0.4, 0);
-      setModifierVisual(button, state.terminalColorMode === colorMode);
+      setModifierVisual(button, state.terminalColorMode === colorMode, ctx.accent.hex);
       root.add(button);
     });
     const filteringButton = createLabelButton(
