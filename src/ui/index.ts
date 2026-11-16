@@ -6,6 +6,13 @@ import {
   validateHandColor,
   validateWeatherZip,
 } from '@par/xr-workspace';
+import { createCommandStatsStore, createCommandStore } from '../commands/store';
+import {
+  exportServerCommands,
+  mergeImportedCommands,
+  reorderCommands,
+  workspaceScope,
+} from '../commands/transfer';
 import type {
   BackgroundMode,
   KeyModifiers,
@@ -13,13 +20,11 @@ import type {
   PanelArrangement,
   QuickCommand,
   QuickCommandEntry,
-  QuickCommandStats,
   TerminalColorMode,
   TerminalStatus,
   WorkspaceSnapshot,
 } from '../contracts';
 import { getKeyHelp } from '../control-help';
-import { reportSwallowed } from '../diagnostics';
 import { HOST_CLIPBOARD_SETUP } from '../host-clipboard';
 import {
   commandServerKey,
@@ -71,13 +76,6 @@ import type { KeyborbMode } from '../workspace/keyborb';
 import { validateKeyborbMode } from '../workspace/keyborb';
 import { XR_ENTRY_LABELS, type XrEntryMode } from '../xr/entry';
 
-// The settings moved to ../settings/store; these keep existing importers compiling until ARC-010.
-export {
-  agentRosterLayout,
-  loadSettings,
-  validateSettings,
-  type WorkspaceSettings,
-} from '../settings/store';
 export { validateHandColor };
 
 import type { PaneCreationState } from '../workspace/pane-create';
@@ -191,201 +189,11 @@ export interface WorkspaceUI {
   setKeyboardCurvature(degrees: number, persist?: boolean): void;
 }
 
-export interface CommandStore {
-  get(scopeKey: string): QuickCommand[];
-  set(scopeKey: string, commands: QuickCommand[]): boolean;
-  all(): Record<string, QuickCommand[]>;
-  setAll(values: Record<string, QuickCommand[]>): boolean;
-}
-
 // The swatch the color picker shows while the hands keep their default color.
 const DEFAULT_HAND_SWATCH = '#b4b4b4';
 // The swatch the accent pickers show while the XR accent stays the default cyan.
 const DEFAULT_ACCENT_SWATCH = '#68d6ff';
 const AGENT_AGE_REFRESH_MS = 15_000;
-const COMMANDS_KEY = 'mux-xr:commands:v1';
-const COMMAND_STATS_KEY = 'mux-xr:command-stats:v1';
-
-export interface CommandStatsStore {
-  get(server: string, id: string): QuickCommandStats | undefined;
-  record(server: string, id: string, at: number): boolean;
-}
-
-export function createCommandStatsStore(
-  storage: Storage | undefined = typeof localStorage === 'undefined' ? undefined : localStorage,
-): CommandStatsStore {
-  const read = (): Record<string, QuickCommandStats> => {
-    try {
-      const parsed: unknown = JSON.parse(storage?.getItem(COMMAND_STATS_KEY) ?? '{}');
-      if (!parsed || typeof parsed !== 'object') return {};
-      const result: Record<string, QuickCommandStats> = {};
-      for (const [key, value] of Object.entries(parsed)) {
-        const entry = value as Partial<QuickCommandStats> | null;
-        if (
-          entry &&
-          Number.isFinite(entry.lastRunAt) &&
-          Number.isInteger(entry.runCount) &&
-          Number(entry.runCount) > 0
-        )
-          result[key] = { lastRunAt: Number(entry.lastRunAt), runCount: Number(entry.runCount) };
-      }
-      return result;
-    } catch {
-      return {};
-    }
-  };
-  return {
-    get: (server, id) => read()[`${server}::${id}`],
-    record(server, id, at) {
-      const values = read();
-      const key = `${server}::${id}`;
-      values[key] = { lastRunAt: at, runCount: (values[key]?.runCount ?? 0) + 1 };
-      try {
-        storage?.setItem(COMMAND_STATS_KEY, JSON.stringify(values));
-        return true;
-      } catch (error) {
-        reportSwallowed('ui.command-stats-save', error);
-        return false;
-      }
-    },
-  };
-}
-export function workspaceScope(endpoint: string, workspaceId: string): string {
-  return `${commandServerKey(endpoint)}::${workspaceId}`;
-}
-
-/** Every saved command for one server, with workspaceId restored from its scope key. */
-export function exportServerCommands(
-  values: Record<string, QuickCommand[]>,
-  endpoint: string,
-): QuickCommand[] {
-  const prefix = workspaceScope(endpoint, '');
-  const result: QuickCommand[] = [];
-  for (const [scope, commands] of Object.entries(values)) {
-    if (!scope.startsWith(prefix)) continue;
-    const workspaceId = scope.slice(prefix.length);
-    for (const command of commands) {
-      const { workspaceId: _ignored, ...rest } = copyCommand(command);
-      result.push(workspaceId === '*' ? rest : { ...rest, workspaceId });
-    }
-  }
-  return result;
-}
-
-/** Merges imported commands by id into one server's scopes; an imported command replaces any saved copy. */
-export function mergeImportedCommands(
-  values: Record<string, QuickCommand[]>,
-  endpoint: string,
-  imported: QuickCommand[],
-): { values: Record<string, QuickCommand[]>; added: number; updated: number; skipped: number } {
-  const prefix = workspaceScope(endpoint, '');
-  const next: Record<string, QuickCommand[]> = {};
-  for (const [scope, commands] of Object.entries(values)) next[scope] = [...commands];
-  let added = 0;
-  let updated = 0;
-  let skipped = 0;
-  const seen = new Set<string>();
-  for (const command of imported) {
-    if (isSharedCommand(command) || !isCommand(command) || seen.has(command.id)) {
-      skipped++;
-      continue;
-    }
-    seen.add(command.id);
-    const scope = workspaceScope(endpoint, command.workspaceId ?? '*');
-    let existed = false;
-    for (const [key, commands] of Object.entries(next)) {
-      if (key === scope || !key.startsWith(prefix)) continue;
-      const kept = commands.filter((item) => item.id !== command.id);
-      if (kept.length !== commands.length) existed = true;
-      next[key] = kept;
-    }
-    const list = next[scope] ?? [];
-    const index = list.findIndex((item) => item.id === command.id);
-    if (index >= 0) list[index] = copyCommand(command);
-    else list.push(copyCommand(command));
-    next[scope] = list;
-    if (existed || index >= 0) updated++;
-    else added++;
-  }
-  return { values: next, added, updated, skipped };
-}
-
-function normalizeScopeKey(scope: string): string {
-  const split = scope.lastIndexOf('::');
-  if (split < 0) return scope;
-  return workspaceScope(scope.slice(0, split), scope.slice(split + 2));
-}
-
-export function reorderCommands(
-  commands: QuickCommand[],
-  from: number,
-  to: number,
-): QuickCommand[] {
-  if (from < 0 || from >= commands.length || to < 0 || to >= commands.length || from === to)
-    return [...commands];
-  const result = [...commands];
-  const [command] = result.splice(from, 1);
-  result.splice(to, 0, command);
-  return result;
-}
-
-export function createCommandStore(
-  storage: Storage | undefined = typeof localStorage === 'undefined' ? undefined : localStorage,
-): CommandStore {
-  const read = (): Record<string, QuickCommand[]> => {
-    if (!storage) return {};
-    try {
-      const parsed: unknown = JSON.parse(storage.getItem(COMMANDS_KEY) ?? '{}');
-      if (!parsed || typeof parsed !== 'object') return {};
-      const result: Record<string, QuickCommand[]> = {};
-      let migrated = false;
-      for (const [scope, value] of Object.entries(parsed)) {
-        if (!Array.isArray(value)) continue;
-        const key = normalizeScopeKey(scope);
-        if (key !== scope) migrated = true;
-        const merged = result[key] ?? [];
-        for (const command of value.filter(isCommand).map(copyCommand))
-          if (!merged.some((item) => item.id === command.id)) merged.push(command);
-        result[key] = merged;
-      }
-      if (migrated) write(result);
-      return result;
-    } catch {
-      return {};
-    }
-  };
-  const write = (values: Record<string, QuickCommand[]>): boolean => {
-    try {
-      storage?.setItem(COMMANDS_KEY, JSON.stringify(values));
-      return true;
-    } catch (error) {
-      reportSwallowed('ui.commands-save', error);
-      return false;
-    }
-  };
-  return {
-    get(scopeKey) {
-      return read()[scopeKey] ?? [];
-    },
-    all: read,
-    setAll(values) {
-      const next: Record<string, QuickCommand[]> = {};
-      for (const [scope, commands] of Object.entries(values))
-        if (commands.length) next[scope] = commands.filter(isCommand).map(copyCommand);
-      return write(next);
-    },
-    set(scopeKey, commands) {
-      const values = read();
-      const next = commands.filter(isCommand).map(copyCommand);
-      const previous = values[scopeKey];
-      values[scopeKey] = next;
-      if (write(values)) return true;
-      if (previous) values[scopeKey] = previous;
-      else delete values[scopeKey];
-      return false;
-    },
-  };
-}
 
 function icon(name: 'close' | 'link' | 'xr' | 'send' | 'plus' | 'settings'): string {
   const paths: Record<string, string> = {

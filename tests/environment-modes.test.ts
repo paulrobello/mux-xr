@@ -8,7 +8,7 @@ import {
   type EnvironmentInstance,
   registerEnvironmentUpdater,
 } from '../src/environment';
-import { loadSettings, validateSettings } from '../src/ui';
+import { loadSettings, validateSettings } from '../src/settings/store';
 import type { WorkspaceScene } from '../src/xr';
 import { DESK_WINDOW_KIND } from '../src/xr/desk-window';
 import { workspaceFloorY } from '../src/xr/floor-layout';

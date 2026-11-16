@@ -1,16 +1,15 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import type { QuickCommand } from '../src/contracts';
+import { createCommandStore } from '../src/commands/store';
 import {
-  createCommandStore,
   exportServerCommands,
   mergeImportedCommands,
-  mountWorkspaceUI,
   reorderCommands,
-  validateHandColor,
-  validateSettings,
   workspaceScope,
-} from '../src/ui';
+} from '../src/commands/transfer';
+import type { QuickCommand } from '../src/contracts';
+import { validateSettings } from '../src/settings/store';
+import { mountWorkspaceUI, validateHandColor } from '../src/ui';
 import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
 
 const command = (id: string, workspaceId?: string): QuickCommand => ({

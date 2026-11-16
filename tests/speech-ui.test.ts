@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mountWorkspaceUI, validateSettings } from '../src/ui';
+import { validateSettings } from '../src/settings/store';
+import { mountWorkspaceUI } from '../src/ui';
 
 afterEach(() => localStorage.clear());
 
