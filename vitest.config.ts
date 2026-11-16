@@ -14,6 +14,7 @@ const nodeTests = [
   'tests/host-stats-server.test.ts',
   'tests/kanban-strip-server.test.ts',
   'tests/mesh-inbox.test.ts',
+  'tests/property/paired-route.property.test.ts',
   'tests/paired-route.test.ts',
   'tests/picture-depth-server.test.ts',
   'tests/picture-fetch-server.test.ts',

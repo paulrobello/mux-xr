@@ -15,6 +15,14 @@ Install both hooks once in every clone and every worktree with `pre-commit insta
 
 The hooks are advisory. `git commit --no-verify` and `git push --no-verify` skip them, and a fresh clone or worktree has none until the install command runs. They narrow the gap left by having no remote CI without closing it.
 
+## Property tests
+
+The trust boundaries have property-based tests in `tests/property/`: the terminal frame decoder, the paste sanitizer, the paired-route handshake, and the settings and pose validators. They run with the rest of the unit tests (`bun run test tests/property` selects just the property files) through the same Vitest projects, with the paired-route file in the Node project like every other `src/server` test.
+
+Every property runs 200 generated cases (`numRuns: 200`) with one seed for the whole file: `FC_SEED` when set, otherwise the constant 20261116. A gate failure prints the seed and a shrunk counterexample; rerun it with `FC_SEED=<seed from the log> bun run test tests/property` to reproduce the exact run. The oversize-frame bound property runs 25 cases because each case inflates a real 9 MiB stream.
+
+When a property finds a counterexample in shipped code, the fix adds a named example test covering that exact input, so the regression keeps a permanent, readable witness. Keep the property as the boundary guard.
+
 ## Browser fixtures
 
 Install the Chromium revision pinned by Playwright with `bunx playwright install chromium --no-shell --no-remove`. Run `make e2e` against a local app. Set `MUX_XR_BASE_URL` if the app is on a different port. The suite uses synthetic protocol fixtures across desktop, tablet, and mobile viewports.
