@@ -168,6 +168,8 @@ For TUIs that enable mouse tracking, point at the terminal and press the control
 
 In XR, trigger-drag over ordinary terminal text selects it locally. Releasing a completed drag copies the exact text, clears the highlight immediately and shows a copy toast. Choose **Keyboard → Paste** to insert it into the selected connected terminal without Enter. If browser clipboard access is blocked, the copy stays available inside Mux XR and the toast says so. Paste also reads text copied outside the app when the browser permits it.
 
+With **Paste review** (XR Settings and browser Settings), a paste that spans more than one line, or whose control characters had to be stripped, sends nothing on its first press. The prompt reads "Paste <N> lines, <M> characters to <pane title>? Press Paste again. First line: <preview>" and names any removed control characters. A second Paste press inside three seconds sends exactly the reviewed text without reading the clipboard again; a press within half a second is ignored, and another clipboard action, a pane change, a disconnect or the timeout drops the prompt. The setting offers Always, Multiline or altered (the default) and Off.
+
 A click without a drag only selects the pane. An XR press only becomes a drag once the hit has moved at least 2 cells and 1.5° of ray angle from where it started, so a shaky pinch or trigger stays a click. The same dead zone applies to XR mouse drags in TUIs, while desktop mouse drags stay exact.
 
 Grip cancels an active text drag without copying. Gripping or moving UI after a completed drag preserves a pending clipboard write. Mouse-enabled TUIs keep their mouse behavior. Local text copy also works from a disconnected pane's retained view and never sends clipboard commands to par-mux.

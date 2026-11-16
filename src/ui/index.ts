@@ -123,6 +123,8 @@ export interface WorkspaceUI {
   setSharedCommands(commands: QuickCommand[]): void;
   setUpdateAvailable(available: boolean): void;
   setNotice(message: string | null): void;
+  /** Relabels the drawer Paste button while a paste waits for its confirming press. */
+  setPastePrompt(text: string | null): void;
   setToast(message: string | null): void;
   setArrangement(pattern: PanelArrangement, persist?: boolean): void;
   setTerminalFiltering(filtering: TerminalFiltering, persist?: boolean): void;
@@ -292,6 +294,15 @@ export function mountWorkspaceUI(
     const notice = qs<HTMLElement>('[data-notice]');
     qs<HTMLElement>('[data-notice-text]').textContent = message ?? '';
     notice.hidden = message === null;
+  };
+  const pasteButton = root.querySelector<HTMLButtonElement>('[data-action="paste-clipboard"]');
+  const setPastePrompt = (text: string | null): void => {
+    if (!pasteButton) return;
+    pasteButton.textContent = text === null ? 'Paste' : 'Confirm paste';
+    pasteButton.title =
+      text === null
+        ? 'Paste clipboard text into the selected terminal'
+        : 'Press again to send the reviewed text';
   };
   const closeInput = (): void => {
     callbacks.onDictationAction?.('cancel');
@@ -524,6 +535,7 @@ export function mountWorkspaceUI(
     recordCommandRun: (id, at = Date.now()) => commandLibrary.recordRun(id, at),
     setUpdateAvailable,
     setNotice,
+    setPastePrompt,
     setToast(message) {
       toast.textContent = message ?? '';
       toast.hidden = message === null;

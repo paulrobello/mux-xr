@@ -558,6 +558,7 @@ export function createApp(root: HTMLElement, deps: AppDeps = {}): App {
     if (state.arrangement && state.arrangement !== settingsStore.get().arrangement)
       ui.setArrangement(state.arrangement);
     ui.setNotice(state.notice);
+    ui.setPastePrompt(state.pastePrompt);
     ui.setToast(state.toast);
     if (state.layoutRevision !== lastLayoutRevision) {
       lastLayoutRevision = state.layoutRevision;

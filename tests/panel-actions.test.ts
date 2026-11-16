@@ -50,6 +50,7 @@ function _exhaustivePrefix(action: PanelAction): string {
     case 'key':
     case 'keyborbMode':
     case 'uiSounds':
+    case 'pasteReview':
     case 'zipDigit':
     case 'zipDelete':
     case 'zipClear':

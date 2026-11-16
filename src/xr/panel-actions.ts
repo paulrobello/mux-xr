@@ -66,6 +66,7 @@ export type PanelAction =
   | { type: 'key'; key?: string; modifier?: KeyboardModifier }
   | { type: 'keyborbMode'; keyborbMode: string }
   | { type: 'uiSounds' }
+  | { type: 'pasteReview'; pasteReview: string }
   | { type: 'zipDigit'; zipDigit: string }
   | { type: 'zipDelete' }
   | { type: 'zipClear' }

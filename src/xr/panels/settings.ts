@@ -1,4 +1,5 @@
 import type * as THREE from 'three';
+import { validatePasteReviewMode } from '../../paste-review';
 import { validateKeyborbMode } from '../../workspace/keyborb';
 import { actionData } from '../panel-actions';
 import { createLabelButton, setModifierVisual } from '../panel-ui';
@@ -67,6 +68,20 @@ export const settingsPanel: PanelModule = {
     sounds.position.y = -0.71;
     setModifierVisual(sounds, ctx.mutableState.uiSounds, ctx.accent.hex);
     root.add(sounds);
+    const pasteCaption = createLabelButton('Paste review', 1.15, 0.1, actionData({ type: 'noop' }));
+    pasteCaption.position.y = -0.82;
+    root.add(pasteCaption);
+    for (const [index, pasteReview] of (['always', 'multiline', 'off'] as const).entries()) {
+      const button = createLabelButton(
+        pasteReview[0].toUpperCase() + pasteReview.slice(1),
+        0.34,
+        0.12,
+        actionData({ type: 'pasteReview', pasteReview }),
+      );
+      button.position.set((index - 1) * 0.4, -0.95, 0);
+      setModifierVisual(button, ctx.mutableState.pasteReview === pasteReview, ctx.accent.hex);
+      root.add(button);
+    }
   },
   handleActionEarly(action, _hit, ctx) {
     switch (action.type) {
@@ -75,6 +90,9 @@ export const settingsPanel: PanelModule = {
         return true;
       case 'uiSounds':
         ctx.setUISounds(!ctx.mutableState.uiSounds);
+        return true;
+      case 'pasteReview':
+        ctx.setPasteReview(validatePasteReviewMode(action.pasteReview));
         return true;
       default:
         return false;

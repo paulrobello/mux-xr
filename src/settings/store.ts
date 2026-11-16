@@ -2,6 +2,7 @@ import { validateHandColor, validateWeatherZip } from '@par/xr-workspace';
 import type { BackgroundMode, PanelArrangement, TerminalColorMode } from '../contracts';
 import { isBackgroundMode } from '../contracts';
 import { reportSwallowed } from '../diagnostics';
+import { type PasteReviewMode, validatePasteReviewMode } from '../paste-review';
 import {
   DEFAULT_TERMINAL_FILTERING,
   type TerminalFiltering,
@@ -43,6 +44,8 @@ export interface WorkspaceSettings {
   hierarchyStyle: HierarchyStyle;
   keyborbMode: KeyborbMode;
   uiSounds: boolean;
+  /** When a paste needs a second press: `always`, `multiline` or `off`. */
+  pasteReview: PasteReviewMode;
   /** `#rrggbb` tint for the XR hands and arms, or empty for the default color. */
   handColor: string;
   /** `#rrggbb` arm tint, or empty to match the hands. */
@@ -75,6 +78,7 @@ export const DEFAULT_SETTINGS: WorkspaceSettings = {
   hierarchyStyle: DEFAULT_HIERARCHY_STYLE,
   keyborbMode: 'auto',
   uiSounds: true,
+  pasteReview: 'multiline',
   handColor: '',
   weatherZip: '',
   armColor: '',
@@ -115,6 +119,7 @@ export function validateSettings(value: unknown): WorkspaceSettings {
     hierarchyStyle: validateHierarchyStyle(candidate.hierarchyStyle),
     keyborbMode: validateKeyborbMode(candidate.keyborbMode),
     uiSounds: candidate.uiSounds !== false,
+    pasteReview: validatePasteReviewMode(candidate.pasteReview),
     handColor: validateHandColor(candidate.handColor),
     armColor: validateHandColor(candidate.armColor),
     accentColor: validateHandColor(candidate.accentColor),

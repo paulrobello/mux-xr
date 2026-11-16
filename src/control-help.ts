@@ -67,7 +67,8 @@ export const HELP: { [K in ActionType]: HelpEntry<K> } = {
       : 'Reconnect this terminal view to the running shell',
   bringHere: 'Bring this terminal in front of you at the Focus distance and keep it there',
   keepHere: 'End Focus and leave this terminal where it is now',
-  pasteClipboard: 'Paste copied text into the selected terminal without adding Enter',
+  pasteClipboard:
+    'Paste copied text into the selected terminal without adding Enter; a multiline or altered paste needs a second press to confirm',
   pasteHostClipboard:
     "Type the Mac's clipboard text into the selected terminal without adding Enter",
   copyToHost: "Send the Quest clipboard, or text highlighted in Mux XR, to the Mac's clipboard",
@@ -102,6 +103,12 @@ export const HELP: { [K in ActionType]: HelpEntry<K> } = {
         ? 'Use spherical keys; trigger or pinch to type'
         : 'Use the standard keyboard',
   uiSounds: 'Turn interface clicks and controller pulses on or off',
+  pasteReview: (action) =>
+    action.pasteReview === 'off'
+      ? 'Paste at once, without a confirming press'
+      : action.pasteReview === 'always'
+        ? 'Every paste needs a second press to confirm'
+        : 'Multiline or altered pastes need a second press to confirm',
   zipDigit: (action) => `Type ${String(action.zipDigit ?? 'a number')} into the weather ZIP`,
   zipDelete: 'Delete the last ZIP number',
   zipClear: 'Clear the ZIP field',

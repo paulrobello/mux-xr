@@ -1,5 +1,6 @@
 import { validateHandColor } from '@par/xr-workspace';
 import type { PanelArrangement } from '../contracts';
+import { validatePasteReviewMode } from '../paste-review';
 import type { WorkspaceSettings } from '../settings/store';
 import { validateTerminalFiltering } from '../terminal/filtering';
 import {
@@ -125,6 +126,22 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     keyborbSelect.value = current().keyborbMode;
   });
   keyborbModeSelect.value = current().keyborbMode;
+  const pasteReview = document.createElement('label');
+  pasteReview.innerHTML =
+    '<span>Paste review</span><select data-paste-review aria-label="Paste review"><option value="always">Always</option><option value="multiline">Multiline or altered</option><option value="off">Off</option></select><small>When a paste needs a second press: multiline or altered text by default, every paste, or never.</small>';
+  settingsPanel.insertBefore(
+    pasteReview,
+    settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
+  );
+  const pasteReviewSelect = pasteReview.querySelector<HTMLSelectElement>('[data-paste-review]');
+  if (!pasteReviewSelect) throw new Error('Paste review control missing');
+  bindSettings(['pasteReview'], () => {
+    pasteReviewSelect.value = current().pasteReview;
+  });
+  pasteReviewSelect.value = current().pasteReview;
+  pasteReviewSelect.addEventListener('change', () =>
+    saveSettings({ pasteReview: validatePasteReviewMode(pasteReviewSelect.value) }),
+  );
   const uiSounds = document.createElement('label');
   uiSounds.className = 'check';
   uiSounds.innerHTML =

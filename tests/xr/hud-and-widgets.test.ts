@@ -202,6 +202,10 @@ describe('native XR controller event routing', () => {
       expect(left.clearSelection).toHaveBeenCalledTimes(1);
       expect(workspace.state.toast).toContain('Copied in Mux XR');
       left.paste = vi.fn(() => true);
+      // A multiline paste arms the review prompt instead of pasting.
+      expect(await workspace.pasteClipboard('pane-a')).toBe(false);
+      expect(left.paste).not.toHaveBeenCalled();
+      await new Promise((resolve) => setTimeout(resolve, 360));
       expect(await workspace.pasteClipboard('pane-a')).toBe(true);
       expect(left.paste).toHaveBeenCalledWith('exact text\n界 😀');
     });
@@ -239,6 +243,13 @@ describe('native XR controller event routing', () => {
       workspace.showInput('keyboard');
       hit(workspace, { inputAction: 'pasteClipboard' });
       expect(left.paste).not.toHaveBeenCalled();
+      finish();
+      await Promise.resolve();
+      // The multiline clipboard arms the review prompt; the second press confirms it.
+      expect(left.paste).not.toHaveBeenCalled();
+      expect(workspace.state.pastePrompt).not.toBeNull();
+      await new Promise((resolve) => setTimeout(resolve, 360));
+      hit(workspace, { inputAction: 'pasteClipboard' });
       finish();
       await Promise.resolve();
       expect(left.paste).toHaveBeenCalledExactlyOnceWith('exact text\n界 😀');

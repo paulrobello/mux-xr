@@ -54,6 +54,12 @@ import type {
   WorkspaceActions,
 } from '../contracts';
 import { getControlHelp, getControlHelpFor } from '../control-help';
+import {
+  type PasteReviewMode,
+  type PasteSummary,
+  summarizePaste,
+  validatePasteReviewMode,
+} from '../paste-review';
 import type { PictureImage, RestoredPicture } from '../pictures/picture-image';
 import {
   freePictureSlot,
@@ -261,6 +267,10 @@ export interface WorkspaceSceneState {
   keyborbMode: KeyborbMode;
   keyborbEnabled: boolean;
   uiSounds: boolean;
+  /** When a paste needs a second press: `always`, `multiline` or `off`. */
+  pasteReview: PasteReviewMode;
+  /** Notice shown while a paste waits for its confirming press; null when none is armed. */
+  pastePrompt: string | null;
   /** `#rrggbb` hand and arm tint, or empty for the default color. */
   handColor: string;
   /** `#rrggbb` arm tint, or empty to match the hands. */
@@ -329,6 +339,8 @@ export interface WorkspaceScene {
   setKeyboardCurvature(degrees: number): void;
   setKeyborbMode(mode: KeyborbMode): void;
   setUISounds(enabled: boolean): void;
+  /** Sets when a paste needs a confirming second press. */
+  setPasteReview(mode: PasteReviewMode): void;
   /** Tints both hands and their arms; null restores the default color. */
   setHandColor(color: string | null): void;
   /** Tints both arms; null makes them match the hands. */
@@ -827,6 +839,15 @@ export function createWorkspaceScene(
   const pendingPaste = new Map<THREE.Group, string | null>();
   let clipboardGeneration = 0;
   let hostPasteInFlight = false;
+  /** A multiline or altered paste waiting for its confirming press, held in memory only. */
+  let armedPaste: {
+    paneId: string;
+    summary: PasteSummary;
+    prompt: string;
+    flavor: 'clipboard' | 'host';
+    at: number;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
   let floorCorrectionPending = false;
   let toastDeadline = 0;
   const radialMenu = createRadialMenu();
@@ -905,6 +926,8 @@ export function createWorkspaceScene(
     keyborbMode: device.keyborbMode,
     keyborbEnabled: false,
     uiSounds: device.uiSounds,
+    pasteReview: device.pasteReview,
+    pastePrompt: null,
     handColor: device.handColor,
     armColor: device.armColor,
     accentColor: device.accentColor,
@@ -1769,6 +1792,7 @@ export function createWorkspaceScene(
     }
     selection.phase = 'copying';
     const generation = ++clipboardGeneration;
+    clearArmedPaste();
     const copied = clipboard.copy(text);
     cancelTextSelection();
     showToast('Copied. Paste from Keyboard.');
@@ -1812,6 +1836,7 @@ export function createWorkspaceScene(
     source: THREE.Group | null = lastSelectSource,
   ): Promise<boolean> => {
     const generation = ++clipboardGeneration;
+    clearArmedPaste();
     const result = await readHostText();
     if (disposed) return false;
     if (typeof result !== 'string') {
@@ -1832,6 +1857,7 @@ export function createWorkspaceScene(
     source: THREE.Group | null = lastSelectSource,
   ): Promise<boolean> => {
     clipboardGeneration++;
+    clearArmedPaste();
     // The read starts before any await so the browser still sees the user gesture.
     const pending = clipboard.read({ excludeHost: true, preferLocal: true });
     if (!actions.writeHostClipboard) {
@@ -1857,6 +1883,49 @@ export function createWorkspaceScene(
     }
     showToast('Copied to host clipboard.');
     return true;
+  };
+  /** Drops the armed paste and, if its prompt is on screen, the prompt with it. */
+  const clearArmedPaste = (): void => {
+    if (!armedPaste) return;
+    clearTimeout(armedPaste.timer);
+    const prompt = armedPaste.prompt;
+    armedPaste = null;
+    mutableState.pastePrompt = null;
+    if (mutableState.notice === prompt) setNotice(null);
+    else notify();
+  };
+  /** Arms the review prompt: the paste sends only after a second Paste press in the window. */
+  const armPaste = (
+    paneId: string,
+    summary: PasteSummary,
+    flavor: 'clipboard' | 'host',
+    title: string,
+    source: THREE.Group | null,
+  ): void => {
+    clearArmedPaste();
+    const lines = summary.lines === 1 ? 'line' : 'lines';
+    const characters = summary.characters === 1 ? 'character' : 'characters';
+    const removed =
+      summary.removed > 0
+        ? `, ${summary.removed} control character${summary.removed === 1 ? '' : 's'} removed`
+        : '';
+    const prompt =
+      `Paste ${summary.lines} ${lines}, ${summary.characters} ${characters} to ${title}? ` +
+      `Press Paste again. First line: ${summary.preview}${removed}`;
+    armedPaste = {
+      paneId,
+      summary,
+      prompt,
+      flavor,
+      at: Date.now(),
+      timer: setTimeout(() => {
+        clearArmedPaste();
+        if (!disposed) notify();
+      }, CONFIRM_WINDOW_MS),
+    };
+    mutableState.pastePrompt = prompt;
+    setNotice(prompt);
+    cue('armed', source);
   };
   const pasteFrom = async (
     paneId: string | undefined,
@@ -1907,6 +1976,42 @@ export function createWorkspaceScene(
       cue('error', source);
       return false;
     }
+    // A confirming press pastes the reviewed text without reading the clipboard again.
+    if (armedPaste) {
+      const armed = armedPaste;
+      if (armed.paneId !== id || armed.flavor !== (supersedable ? 'host' : 'clipboard')) {
+        clearArmedPaste();
+      } else {
+        const elapsed = Date.now() - armed.at;
+        if (elapsed < CONFIRM_MIN_MS) return false;
+        if (elapsed > CONFIRM_WINDOW_MS) {
+          clearArmedPaste();
+        } else {
+          if (
+            disposed ||
+            panels.get(id) !== panel ||
+            mutableState.selectedTerminalId !== id ||
+            panel.surface.status !== 'connected'
+          ) {
+            clearArmedPaste();
+            setNotice('The paste target changed. Select it and paste again.');
+            cue('error', source);
+            return false;
+          }
+          const summary = armed.summary;
+          clearArmedPaste();
+          try {
+            if (!panel.surface.paste(summary.text)) throw new Error('Paste rejected');
+            showToast(pastedToast);
+            return true;
+          } catch {
+            setNotice('The terminal rejected the paste. Reconnect and try again.');
+            cue('error', source);
+            return false;
+          }
+        }
+      }
+    }
     const received = await read();
     if (disposed) return false;
     // A slow host read loses to any clipboard action started while it was in flight.
@@ -1929,15 +2034,26 @@ export function createWorkspaceScene(
       cue('error', source);
       return false;
     }
-    try {
-      if (!panel.surface.paste(received)) throw new Error('Paste rejected');
-      showToast(pastedToast);
-      return true;
-    } catch {
-      setNotice('The terminal rejected the paste. Reconnect and try again.');
-      cue('error', source);
-      return false;
+    const summary = summarizePaste(received, mutableState.pasteReview);
+    if (!summary.needsReview) {
+      try {
+        if (!panel.surface.paste(summary.text)) throw new Error('Paste rejected');
+        showToast(pastedToast);
+        return true;
+      } catch {
+        setNotice('The terminal rejected the paste. Reconnect and try again.');
+        cue('error', source);
+        return false;
+      }
     }
+    armPaste(
+      id,
+      summary,
+      supersedable ? 'host' : 'clipboard',
+      availablePanes.find((pane) => pane.id === id)?.title ?? id,
+      source,
+    );
+    return false;
   };
   const startMouse = (
     source: THREE.Group | number,
@@ -5661,6 +5777,7 @@ export function createWorkspaceScene(
     if (!panel) return;
     // The panel unsubscribes from its surface, so its bell's falling edge never arrives.
     bellFeed.clearPane(id);
+    if (armedPaste?.paneId === id) clearArmedPaste();
     cancelTextSelection(id);
     if (warpEdit?.id === id) finishWarp(false);
     terminalScreens.splice(terminalScreens.indexOf(panel.screen), 1);
@@ -5702,6 +5819,7 @@ export function createWorkspaceScene(
     if (!gazeRetargeting) gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
     keyboardResume = null;
     clearArmedModifiers();
+    clearArmedPaste();
     mutableState.selectedTerminalId = nextId;
     mutableState.focusedTerminalId = mutableState.selectedTerminalId;
     if (mutableState.selectedTerminalId) actions.selectPane(mutableState.selectedTerminalId);
@@ -6159,6 +6277,13 @@ export function createWorkspaceScene(
     if (inputRoot && inputMode === 'settings') refreshInputRoot(inputMode);
     notify();
   };
+  const applyPasteReview = (mode: PasteReviewMode): void => {
+    const next = validatePasteReviewMode(mode);
+    if (next === mutableState.pasteReview) return;
+    mutableState.pasteReview = next;
+    if (inputRoot && inputMode === 'settings') refreshInputRoot(inputMode);
+    notify();
+  };
   const applyHandColor = (color: string | null): void => {
     const next = validateHandColor(color);
     if (next === mutableState.handColor) return;
@@ -6250,6 +6375,9 @@ export function createWorkspaceScene(
   const setUISounds = (enabled: boolean): void => {
     updateSettings({ uiSounds: enabled });
   };
+  const setPasteReview = (mode: PasteReviewMode): void => {
+    updateSettings({ pasteReview: mode });
+  };
   const setHandColor = (color: string | null): void => {
     updateSettings({ handColor: color ?? '' });
   };
@@ -6276,6 +6404,7 @@ export function createWorkspaceScene(
     applyKeyboardCurvature(next.keyboardCurvature);
     applyKeyborbMode(next.keyborbMode);
     applyUISounds(next.uiSounds);
+    applyPasteReview(next.pasteReview);
     applyHandColor(next.handColor);
     applyArmColor(next.armColor);
     applyAccentColor(next.accentColor);
@@ -7048,6 +7177,7 @@ export function createWorkspaceScene(
   const dispose = (): void => {
     if (disposed) return;
     disarmCommand();
+    clearArmedPaste();
     messageToasts.dispose();
     clearTimeout(paneCreationRetry);
     clearTimeout(agentRosterRetry);
@@ -7362,6 +7492,7 @@ export function createWorkspaceScene(
       setWeatherZip,
       setKeyborbMode,
       setUISounds,
+      setPasteReview,
       setHierarchyStyle,
       setKeyboardCurvature,
       setKeyboardBackgroundEnabled,
@@ -7450,6 +7581,7 @@ export function createWorkspaceScene(
     setKeyboardCurvature,
     setKeyborbMode,
     setUISounds,
+    setPasteReview,
     setHandColor,
     setArmColor,
     setAccentColor,

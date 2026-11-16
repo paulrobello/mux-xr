@@ -9,6 +9,7 @@ import type {
   TerminalColorMode,
   WorkspaceActions,
 } from '../contracts';
+import type { PasteReviewMode } from '../paste-review';
 import type { PictureImage } from '../pictures/picture-image';
 import type { TerminalFiltering } from '../terminal/filtering';
 import type { AgentRosterRow, AgentRows } from '../workspace/agent-roster';
@@ -153,6 +154,8 @@ export interface SceneContext {
   setWeatherZip(zip: string): void;
   setKeyborbMode(mode: KeyborbMode): void;
   setUISounds(enabled: boolean): void;
+  /** Sets when a paste needs a confirming second press. */
+  setPasteReview(mode: PasteReviewMode): void;
   setHierarchyStyle(style: HierarchyStyle): void;
   setKeyboardCurvature(degrees: number): void;
   setKeyboardBackgroundEnabled(enabled: boolean): void;
