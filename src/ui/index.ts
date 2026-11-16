@@ -1,6 +1,5 @@
 import './styles.css';
 import {
-  createModifierState,
   keyboardDimensions,
   keyboardKeys,
   validateHandColor,
@@ -18,7 +17,6 @@ import type {
   TerminalStatus,
   WorkspaceSnapshot,
 } from '../contracts';
-import { getKeyHelp } from '../control-help';
 import { HOST_CLIPBOARD_SETUP } from '../host-clipboard';
 import { isSharedCommand } from '../quick-commands';
 import {
@@ -31,7 +29,6 @@ import {
 import type { DictationAction, DictationState } from '../speech-input';
 import { type TerminalFiltering, validateTerminalFiltering } from '../terminal/filtering';
 import { type PaneProcess, processBadge } from '../terminal/lifecycle';
-import { terminalKeyLabel } from '../terminal/protocol';
 import { AGENTS_SORTS, type AgentRosterRow } from '../workspace/agent-roster';
 import { type HierarchyStyle, validateHierarchyStyle } from '../workspace/hierarchy-style';
 import type { KeyborbMode } from '../workspace/keyborb';
@@ -40,6 +37,7 @@ import { XR_ENTRY_LABELS, type XrEntryMode } from '../xr/entry';
 import { mountAgentRoster } from './agent-roster';
 import { escapeHtml, icon } from './html';
 import { mountCommandLibrary } from './input-drawer';
+import { keyboardTitle, mountKeyboard } from './keyboard';
 import { mountSettingsPanel } from './settings-panel';
 import { mountSidebar } from './sidebar';
 
@@ -214,39 +212,6 @@ export function mountWorkspaceUI(
   const terminalOpacity = new Map<string, number>();
   const pendingGrid = new Map<string, { cols: number; rows: number }>();
   let inputMode: 'commands' | 'keyboard' = 'commands';
-  let dictationState: DictationState | undefined;
-  const modifierState = createModifierState();
-  const holdTimers = new Map<HTMLButtonElement, number>();
-  const keyboardLabel = (key: string, shift = false): string => {
-    if (key.length === 1 && key !== ' ') return terminalKeyLabel(key, shift);
-    return keyboardKeys.find((entry) => entry.key === key)?.label ?? key;
-  };
-  const keyboardTitle = (key: string): string => getKeyHelp(key) ?? '';
-  const syncModifierVisuals = (): void => {
-    for (const key of root.querySelectorAll<HTMLButtonElement>('.key')) {
-      const modifier = key.dataset.modifier as 'ctrl' | 'alt' | 'shift' | undefined;
-      if (modifier) {
-        const active = Boolean(modifierState.active[modifier]);
-        const locked = Boolean(modifierState.locked[modifier]);
-        key.classList.toggle('active', active);
-        key.classList.toggle('locked', locked);
-        key.setAttribute('aria-pressed', String(active));
-        key.title = locked
-          ? `${key.textContent ?? modifier} locked (click to unlock)`
-          : keyboardTitle(key.dataset.key ?? '');
-      } else {
-        key.textContent = keyboardLabel(key.dataset.key ?? '', Boolean(modifierState.active.shift));
-      }
-    }
-  };
-  const clearModifiers = (): void => {
-    for (const timer of holdTimers.values()) window.clearTimeout(timer);
-    holdTimers.clear();
-    modifierState.clear();
-    for (const key of root.querySelectorAll<HTMLButtonElement>('.key'))
-      delete key.dataset.longPressed;
-    syncModifierVisuals();
-  };
   let capturedTarget: string | undefined;
   const root = document.createElement('section');
   root.className = 'mux-ui';
@@ -324,6 +289,13 @@ export function mountWorkspaceUI(
   widgetsButton.title = 'Open movable clock widgets';
   widgetsButton.addEventListener('click', () => callbacks.onWidgets?.());
   root.querySelector('.stage-tools')?.append(widgetsButton);
+  const keyboard = mountKeyboard({
+    root,
+    capturedTarget: () => capturedTarget,
+    onSendKey: (paneId, key, modifiers) => callbacks.onSendKey?.(paneId, key, modifiers),
+    onDictationAction: (action) => callbacks.onDictationAction?.(action),
+    onDictationDraftChange: (text) => callbacks.onDictationDraftChange?.(text),
+  });
   const settingsPanel = root.querySelector<HTMLElement>('[data-settings]');
   root.querySelector('[data-gaze]')?.parentElement?.remove();
   let filteringMaxAnisotropy = 16;
@@ -399,7 +371,7 @@ export function mountWorkspaceUI(
     qs<HTMLButtonElement>('[data-action="reset-terminal-appearance"]').disabled = !paneId;
     qs<HTMLElement>('[data-terminal-opacity-value]').textContent = `${value}%`;
   };
-  clearModifiers();
+  keyboard.clearModifiers();
   clearGridControls();
   updateArrangementAvailability();
   const actionHelp: Record<string, string> = {
@@ -468,35 +440,10 @@ export function mountWorkspaceUI(
     qs<HTMLElement>('[data-notice-text]').textContent = message ?? '';
     notice.hidden = message === null;
   };
-  const setDictationState = (state: DictationState): void => {
-    dictationState = { ...state };
-    const start = qs<HTMLButtonElement>('[data-action="dictation-start"]');
-    const stop = qs<HTMLButtonElement>('[data-action="dictation-stop"]');
-    const insert = qs<HTMLButtonElement>('[data-action="dictation-insert"]');
-    const clear = qs<HTMLButtonElement>('[data-action="dictation-clear"]');
-    const draft = qs<HTMLTextAreaElement>('[data-dictation-draft]');
-    const status = qs<HTMLElement>('[data-dictation-status]');
-    start.disabled = !state.supported || ['listening', 'transcribing'].includes(state.status);
-    start.textContent = state.status === 'transcribing' ? 'Transcribing…' : 'Dictate';
-    stop.hidden = state.status !== 'listening';
-    insert.hidden = Boolean(state.forNote);
-    insert.disabled =
-      Boolean(state.forNote) ||
-      !['review', 'error'].includes(state.status) ||
-      !state.transcript.trim();
-    clear.hidden = !['review', 'error'].includes(state.status) || !state.transcript.trim();
-    draft.disabled =
-      state.status === 'idle' ||
-      state.status === 'listening' ||
-      state.status === 'transcribing' ||
-      (state.status === 'error' && !state.transcript.trim());
-    if (draft.value !== state.transcript) draft.value = state.transcript;
-    status.textContent = state.error ?? `Speech input is ${state.status}.`;
-  };
   const closeInput = (): void => {
     callbacks.onDictationAction?.('cancel');
     capturedTarget = undefined;
-    clearModifiers();
+    keyboard.clearModifiers();
     qs<HTMLElement>('[data-drawer]').hidden = true;
     updateTargetCaption();
   };
@@ -508,44 +455,12 @@ export function mountWorkspaceUI(
     renderPanes();
     if (!qs<HTMLElement>('[data-drawer]').hidden) {
       capturedTarget = id;
-      clearModifiers();
+      keyboard.clearModifiers();
       commandLibrary.load();
     }
     updateTargetCaption();
     if (notify) callbacks.onSelectPane?.(pane);
   };
-  const cancelModifierHold = (button: HTMLButtonElement): void => {
-    const timer = holdTimers.get(button);
-    if (timer !== undefined) window.clearTimeout(timer);
-    holdTimers.delete(button);
-  };
-  root.addEventListener('pointerdown', (event) => {
-    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-modifier]');
-    if (!button) return;
-    const modifier = button.dataset.modifier as 'ctrl' | 'alt' | 'shift' | undefined;
-    if (!modifier) return;
-    delete button.dataset.longPressed;
-    cancelModifierHold(button);
-    button.setPointerCapture?.(event.pointerId);
-    holdTimers.set(
-      button,
-      window.setTimeout(() => {
-        modifierState.lock(modifier);
-        button.dataset.longPressed = 'true';
-        syncModifierVisuals();
-        holdTimers.delete(button);
-      }, 550),
-    );
-  });
-  for (const eventName of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) {
-    root.addEventListener(eventName, (event) => {
-      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-modifier]');
-      if (button) {
-        cancelModifierHold(button);
-        if (eventName === 'pointercancel') delete button.dataset.longPressed;
-      }
-    });
-  }
   root.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
     const button = target.closest<HTMLElement>('button');
@@ -571,60 +486,7 @@ export function mountWorkspaceUI(
       if (pane) callbacks.onTogglePaneConnection?.(pane);
       return;
     }
-    if (button.dataset.key) {
-      const key = button.dataset.key;
-      const modifier = button.dataset.modifier as 'ctrl' | 'alt' | 'shift' | '';
-      if (modifier) {
-        if (button.dataset.longPressed) {
-          delete button.dataset.longPressed;
-          return;
-        }
-        modifierState.tap(modifier);
-        syncModifierVisuals();
-        return;
-      }
-      if (['listening', 'transcribing'].includes(dictationState?.status ?? '')) return;
-      if (
-        dictationState?.status === 'review' ||
-        (dictationState?.status === 'error' && dictationState.transcript)
-      ) {
-        const draft = qs<HTMLTextAreaElement>('[data-dictation-draft]');
-        let start = draft.selectionStart;
-        let end = draft.selectionEnd;
-        if (key === 'Enter') {
-          if (!dictationState.forNote) callbacks.onDictationAction?.('insert');
-        } else if (key === 'Escape') callbacks.onDictationAction?.('cancel');
-        else {
-          if (key === 'ArrowLeft')
-            start = end =
-              draft.value.slice(0, start).length -
-              (Array.from(draft.value.slice(0, start)).at(-1)?.length ?? 0);
-          else if (key === 'ArrowRight')
-            start = end = end + (Array.from(draft.value.slice(end))[0]?.length ?? 0);
-          else if (key === 'Home') start = end = 0;
-          else if (key === 'End') start = end = draft.value.length;
-          else if (key === 'Backspace' || key === 'Delete' || key.length === 1) {
-            if (key === 'Backspace' && start === end)
-              start -= Array.from(draft.value.slice(0, start)).at(-1)?.length ?? 0;
-            if (key === 'Delete' && start === end)
-              end += Array.from(draft.value.slice(end))[0]?.length ?? 0;
-            const text =
-              key.length === 1 ? terminalKeyLabel(key, Boolean(modifierState.active.shift)) : '';
-            draft.setRangeText(text, start, end, 'end');
-            start = end = draft.selectionEnd;
-            callbacks.onDictationDraftChange?.(draft.value);
-          }
-          draft.setSelectionRange(start, end);
-        }
-        modifierState.consume();
-        syncModifierVisuals();
-        return;
-      }
-      if (capturedTarget) callbacks.onSendKey?.(capturedTarget, key, { ...modifierState.active });
-      modifierState.consume();
-      syncModifierVisuals();
-      return;
-    }
+    if (keyboard.handleKeyClick(button)) return;
     if (
       ['move-up', 'move-down', 'pin-command', 'remove-command'].includes(
         button.dataset.action ?? '',
@@ -646,7 +508,7 @@ export function mountWorkspaceUI(
       case 'connect': {
         const endpoint = qs<HTMLInputElement>('#endpoint').value.trim();
         capturedTarget = undefined;
-        clearModifiers();
+        keyboard.clearModifiers();
         qs<HTMLElement>('[data-drawer]').hidden = true;
         saveSettings({ endpoint });
         commandLibrary.load();
@@ -670,7 +532,7 @@ export function mountWorkspaceUI(
       case 'keyboard':
         inputMode = button.dataset.action as 'commands' | 'keyboard';
         if (qs<HTMLElement>('[data-drawer]').hidden) capturedTarget = activePaneId;
-        clearModifiers();
+        keyboard.clearModifiers();
         qs<HTMLElement>('[data-drawer]').hidden = false;
         updateInputMode();
         updateTargetCaption();
@@ -751,7 +613,7 @@ export function mountWorkspaceUI(
   qs<HTMLInputElement>('[data-keyboard-background]').checked = settings.keyboardBackground;
   qs<HTMLInputElement>('[data-gaze-input]').checked = settings.gazeInput;
   qs<HTMLInputElement>('[data-ui-sounds]').checked = settings.uiSounds;
-  setDictationState({
+  keyboard.setDictationState({
     supported: false,
     status: 'idle',
     transcript: '',
@@ -805,9 +667,6 @@ export function mountWorkspaceUI(
   });
   bindSettings(['uiSounds'], () => {
     qs<HTMLInputElement>('[data-ui-sounds]').checked = settings.uiSounds;
-  });
-  qs<HTMLTextAreaElement>('[data-dictation-draft]').addEventListener('input', (event) => {
-    callbacks.onDictationDraftChange?.((event.target as HTMLTextAreaElement).value);
   });
   qs<HTMLButtonElement>('[data-action="apply-grid"]').addEventListener('click', () => {
     const paneId = activePaneId;
@@ -924,7 +783,7 @@ export function mountWorkspaceUI(
     openInput(mode) {
       inputMode = mode;
       if (qs<HTMLElement>('[data-drawer]').hidden) capturedTarget = activePaneId;
-      clearModifiers();
+      keyboard.clearModifiers();
       qs<HTMLElement>('[data-drawer]').hidden = false;
       updateInputMode();
       commandLibrary.load();
@@ -1015,7 +874,7 @@ export function mountWorkspaceUI(
         }),
       });
     },
-    setDictationState,
+    setDictationState: (state) => keyboard.setDictationState(state),
     setArrangement: (pattern, persist = true) =>
       saveSettings({ arrangement: pattern }, { persist }),
     getCommandsForPane: (paneId) => commandLibrary.commandsForPane(paneId),
@@ -1037,7 +896,7 @@ export function mountWorkspaceUI(
     captureCommandTarget: () => capturedTarget,
     destroy() {
       stopSettings();
-      clearModifiers();
+      keyboard.clearModifiers();
       agentRoster.destroy();
       root.remove();
     },
