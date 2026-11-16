@@ -6,6 +6,7 @@ import {
   validateHandColor,
   validateWeatherZip,
 } from '@par/xr-workspace';
+import { BACKGROUNDS } from '../backgrounds';
 import type {
   BackgroundMode,
   KeyModifiers,
@@ -17,7 +18,6 @@ import type {
   TerminalStatus,
   WorkspaceSnapshot,
 } from '../contracts';
-import { BACKGROUND_MODES } from '../contracts';
 import { getKeyHelp } from '../control-help';
 import { HOST_CLIPBOARD_SETUP } from '../host-clipboard';
 import { isSharedCommand } from '../quick-commands';
@@ -36,7 +36,6 @@ import { AGENTS_SORTS, type AgentRosterRow } from '../workspace/agent-roster';
 import { type HierarchyStyle, validateHierarchyStyle } from '../workspace/hierarchy-style';
 import type { KeyborbMode } from '../workspace/keyborb';
 import { validateKeyborbMode } from '../workspace/keyborb';
-import { BACKGROUND_LABELS } from '../xr/background-picker';
 import { XR_ENTRY_LABELS, type XrEntryMode } from '../xr/entry';
 import { mountAgentRoster } from './agent-roster';
 import { escapeHtml, icon } from './html';
@@ -251,8 +250,8 @@ export function mountWorkspaceUI(
   let capturedTarget: string | undefined;
   const root = document.createElement('section');
   root.className = 'mux-ui';
-  const backgroundOptions = BACKGROUND_MODES.map(
-    (mode) => `<option value="${mode}">${escapeHtml(BACKGROUND_LABELS[mode])}</option>`,
+  const backgroundOptions = BACKGROUNDS.map(
+    ({ id, label }) => `<option value="${id}">${escapeHtml(label)}</option>`,
   ).join('');
   const keyboardMarkup = keyboardKeys
     .map(

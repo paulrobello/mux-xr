@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
+import { BACKGROUNDS } from '../src/backgrounds';
 import { createCommandStore } from '../src/commands/store';
 import {
   exportServerCommands,
@@ -7,11 +8,10 @@ import {
   reorderCommands,
   workspaceScope,
 } from '../src/commands/transfer';
-import { BACKGROUND_MODES, type QuickCommand } from '../src/contracts';
+import type { QuickCommand } from '../src/contracts';
 import { validateSettings } from '../src/settings/store';
 import { mountWorkspaceUI, validateHandColor } from '../src/ui';
 import { DEFAULT_BUTTON_MAP } from '../src/workspace/controller-buttons';
-import { BACKGROUND_LABELS } from '../src/xr/background-picker';
 
 const command = (id: string, workspaceId?: string): QuickCommand => ({
   id,
@@ -237,13 +237,13 @@ describe('mux XR local UI state', () => {
     localStorage.clear();
   });
 
-  it('lists every background mode in picker order with the XR picker labels', () => {
+  it('lists every background in table order with its label', () => {
     const root = document.createElement('div');
     const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
     const options = [...query<HTMLSelectElement>(root, '[data-background]').options];
-    expect(options.map((option) => option.value)).toEqual([...BACKGROUND_MODES]);
+    expect(options.map((option) => option.value)).toEqual(BACKGROUNDS.map(({ id }) => id));
     expect(options.map((option) => option.textContent)).toEqual(
-      BACKGROUND_MODES.map((mode) => BACKGROUND_LABELS[mode]),
+      BACKGROUNDS.map(({ label }) => label),
     );
     ui.destroy();
   });
