@@ -12,15 +12,15 @@ vi.mock('three', async (importOriginal) =>
 );
 
 import * as THREE from 'three';
-import { createPictureController, type PictureLoaders } from '../../src/workspace/pictures';
-import { measurePanelBounds } from '../../src/xr/panel-bounds';
-import { PictureLoadError, pictureErrorNotice } from '../../src/xr/picture-sizing';
+import { PictureLoadError, pictureErrorNotice } from '../../src/pictures/picture-sizing';
 import {
   createMemoryPictureStorage,
   createMemoryRecentPictureStorage,
   createPictureLibrary,
   createRecentPictureLibrary,
-} from '../../src/xr/picture-store';
+} from '../../src/pictures/picture-store';
+import { createPictureController, type PictureLoaders } from '../../src/workspace/pictures';
+import { measurePanelBounds } from '../../src/xr/panel-bounds';
 import type { createWorkspaceScene } from '../../src/xr/scene';
 import { WIDGET_REGISTRY } from '../../src/xr/widget-registry';
 import {

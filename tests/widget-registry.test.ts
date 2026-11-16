@@ -22,13 +22,13 @@ vi.mock('troika-three-text', async (importOriginal) => {
   };
 });
 
-import { createPictureFrameWidget } from '../src/xr/picture-frame';
 import {
   PICTURE_PLACEHOLDER_OFFSET,
   PICTURE_PLACEHOLDER_SCALE,
   PICTURE_SLOTS,
   pictureSpawnOffset,
-} from '../src/xr/picture-sizing';
+} from '../src/pictures/picture-sizing';
+import { createPictureFrameWidget } from '../src/xr/picture-frame';
 import { createWidgetPoseStore } from '../src/xr/widget-poses';
 import {
   findWidgetEntry,

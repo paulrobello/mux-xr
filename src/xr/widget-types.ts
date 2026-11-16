@@ -7,9 +7,9 @@ import type { PerfSample } from '@par/xr-workspace';
 import type * as THREE from 'three';
 import type { TerminalStatus } from '../contracts';
 import type { PairedHost } from '../host-pairing';
+import type { PictureImage } from '../pictures/picture-image';
 import type { TerminalLinkStats } from '../terminal/link-stats';
 import type { AgentRosterRow } from '../workspace/agent-roster';
-import type { PictureImage } from './picture-image';
 
 export interface BellFeedEntry {
   /** `bell:<paneId>` for bells, `notice:<text>` for HUD notices. */

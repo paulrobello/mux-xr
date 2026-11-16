@@ -24,15 +24,15 @@ import {
   stepDepthStrength,
 } from '@par/xr-workspace';
 import type { PictureDepthEstimator, PictureDepthResult } from '../src/host-picture-depth';
-import { createPictureController } from '../src/workspace/pictures';
-import { depthFailureNotice } from '../src/xr/picture-depth';
-import { createPictureFrameWidget } from '../src/xr/picture-frame';
-import type { PictureImage, PreparedPicture } from '../src/xr/picture-image';
+import { depthFailureNotice } from '../src/pictures/picture-depth';
+import type { PictureImage, PreparedPicture } from '../src/pictures/picture-image';
 import {
   createMemoryPictureStorage,
   createPictureLibrary,
   planEviction,
-} from '../src/xr/picture-store';
+} from '../src/pictures/picture-store';
+import { createPictureController } from '../src/workspace/pictures';
+import { createPictureFrameWidget } from '../src/xr/picture-frame';
 
 const canvas = (width: number, height: number) =>
   ({ width, height, getContext: () => null }) as unknown as HTMLCanvasElement;

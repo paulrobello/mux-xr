@@ -9,6 +9,7 @@ import type {
   TerminalColorMode,
   WorkspaceActions,
 } from '../contracts';
+import type { PictureImage } from '../pictures/picture-image';
 import type { TerminalFiltering } from '../terminal/filtering';
 import type { AgentRosterRow, AgentRows } from '../workspace/agent-roster';
 import type { HierarchyStyle } from '../workspace/hierarchy-style';
@@ -21,7 +22,6 @@ import type { CommandDraft } from './command-editor';
 import type { HierarchyNavigation, HierarchyNavigator } from './hierarchy-navigator';
 import type { PanelAction } from './panel-actions';
 import type { CommandTool, ConfirmAction } from './panel-ui';
-import type { PictureImage } from './picture-image';
 import type {
   RecentPictureEntry,
   ScenePicturePicker,

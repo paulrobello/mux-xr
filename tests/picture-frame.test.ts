@@ -18,9 +18,6 @@ vi.mock('troika-three-text', async (importOriginal) => {
 });
 
 import { frameSize } from '@par/xr-workspace';
-import { mountPicturePicker } from '../src/ui/pictures';
-import { createPictureController, type PictureLoaders } from '../src/workspace/pictures';
-import { createPictureFrameWidget, PICTURE_PLACEHOLDER_TEXT } from '../src/xr/picture-frame';
 import {
   createPictureThumbnail,
   loadPictureUrl,
@@ -28,7 +25,7 @@ import {
   type PictureLoaderDeps,
   type PreparedPicture,
   preparePicture,
-} from '../src/xr/picture-image';
+} from '../src/pictures/picture-image';
 import {
   fitWithin,
   freePictureSlot,
@@ -38,7 +35,7 @@ import {
   pictureErrorNotice,
   pictureSpawnOffset,
   probeImageSize,
-} from '../src/xr/picture-sizing';
+} from '../src/pictures/picture-sizing';
 import {
   createIndexedDBPictureStorage,
   createIndexedDBRecentPictureStorage,
@@ -50,7 +47,10 @@ import {
   planEviction,
   RECENT_PICTURE_LIMITS,
   type RecentPictureRecord,
-} from '../src/xr/picture-store';
+} from '../src/pictures/picture-store';
+import { mountPicturePicker } from '../src/ui/pictures';
+import { createPictureController, type PictureLoaders } from '../src/workspace/pictures';
+import { createPictureFrameWidget, PICTURE_PLACEHOLDER_TEXT } from '../src/xr/picture-frame';
 import type { SavedUIPose } from '../src/xr/ui-poses';
 import { createWidgetPoseStore } from '../src/xr/widget-poses';
 import { widgetKey, widgetKeyKind } from '../src/xr/widget-registry';

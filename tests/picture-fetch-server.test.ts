@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import type { HostClipboardSocket } from '../src/host-clipboard';
 import { createPictureProxyClient, type PictureProxyFailure } from '../src/host-picture-fetch';
+import { loadPictureUrl, type PictureLoaderDeps } from '../src/pictures/picture-image';
+import { PictureLoadError, pictureErrorNotice } from '../src/pictures/picture-sizing';
 import type { ClipboardSecret } from '../src/server/clipboard-server';
 import { attachHostService } from '../src/server/host-service';
 import {
@@ -23,8 +25,6 @@ import {
   pictureFetchMac,
   sniffImageType,
 } from '../src/server/picture-fetch-server';
-import { loadPictureUrl, type PictureLoaderDeps } from '../src/xr/picture-image';
-import { PictureLoadError, pictureErrorNotice } from '../src/xr/picture-sizing';
 
 const PAIRING = 'not-a-real-pairing-value-for-tests-only';
 const ORIGIN = 'https://allowed.test';

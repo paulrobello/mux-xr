@@ -10,6 +10,12 @@ import { createToastSubscription } from './host-toasts';
 import { createKeyFlash, formatKeyIndicator, mountPageKeyIndicator } from './key-indicator';
 import { installKeyboardRouter } from './keyboard-router';
 import { createLocalSpeechRecognition, isLocalSpeechSupported } from './local-speech';
+import {
+  createIndexedDBPictureStorage,
+  createIndexedDBRecentPictureStorage,
+  createPictureLibrary,
+  createRecentPictureLibrary,
+} from './pictures/picture-store';
 import { executeQuickCommand, loadSharedCommands } from './quick-commands';
 import { reloadAfterXR } from './reload';
 import {
@@ -46,12 +52,6 @@ import {
 import { createPictureController } from './workspace/pictures';
 import { createWorkspaceScene } from './xr';
 import { createXREntryController, type XrEntryMode } from './xr/entry';
-import {
-  createIndexedDBPictureStorage,
-  createIndexedDBRecentPictureStorage,
-  createPictureLibrary,
-  createRecentPictureLibrary,
-} from './xr/picture-store';
 
 export interface AppDeps {
   /** The device settings shared by the browser UI and the XR scene; a store over `localStorage` when omitted. */

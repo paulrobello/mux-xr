@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { describe, expect, it, vi } from 'vitest';
 import { isHeif } from '../src/image-format';
-import { decodeHeifPixels, HeifDecodeError, type HeifLibrary } from '../src/xr/heif-core';
-import { type PictureLoaderDeps, preparePicture } from '../src/xr/picture-image';
-import { MAX_UNPROBED_PICTURE_BYTES, PictureLoadError } from '../src/xr/picture-sizing';
+import { decodeHeifPixels, HeifDecodeError, type HeifLibrary } from '../src/pictures/heif-core';
+import { type PictureLoaderDeps, preparePicture } from '../src/pictures/picture-image';
+import { MAX_UNPROBED_PICTURE_BYTES, PictureLoadError } from '../src/pictures/picture-sizing';
 
 const fixture = readFileSync('tests/fixtures/gradient.heic');
 const require = createRequire(import.meta.url);

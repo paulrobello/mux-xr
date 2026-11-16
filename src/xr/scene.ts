@@ -54,6 +54,15 @@ import type {
   WorkspaceActions,
 } from '../contracts';
 import { getControlHelp, getControlHelpFor } from '../control-help';
+import type { PictureImage, RestoredPicture } from '../pictures/picture-image';
+import {
+  freePictureSlot,
+  PICTURE_PLACEHOLDER_OFFSET,
+  PICTURE_PLACEHOLDER_SCALE,
+  PICTURE_PLACEHOLDER_SLOT,
+  pictureSpawnOffset,
+} from '../pictures/picture-sizing';
+import { PICTURE_LIMITS } from '../pictures/picture-store';
 import { validPose } from '../pose-validation';
 import {
   copyCommand,
@@ -143,15 +152,6 @@ import {
 } from './panel-ui';
 import { isTypingMode, PANELS } from './panels';
 import { PICTURE_KIND } from './picture-frame';
-import type { PictureImage } from './picture-image';
-import {
-  freePictureSlot,
-  PICTURE_PLACEHOLDER_OFFSET,
-  PICTURE_PLACEHOLDER_SCALE,
-  PICTURE_PLACEHOLDER_SLOT,
-  pictureSpawnOffset,
-} from './picture-sizing';
-import { PICTURE_LIMITS } from './picture-store';
 import { createRadialMenu, type RadialMenuAction } from './radial-menu';
 import type { SceneContext } from './scene-context';
 import { STICKY_NOTE_PIN_OFFSET, stickyNoteSpawnOffset } from './sticky-note';
@@ -741,13 +741,7 @@ export interface RecentPictureEntry {
   thumbnail: PictureImage;
 }
 
-/** A stored picture to show again, with its depth map when the Mac made one. */
-export interface RestoredPicture {
-  id: string;
-  image: PictureImage;
-  depth?: PictureImage;
-  depthView?: PictureDepthView;
-}
+export type { RestoredPicture };
 
 /** An open "Add Picture" placeholder's pose key; it restores as a placeholder, not a picture. */
 const isPlaceholderKey = (key: string): boolean => key.startsWith(`${PICTURE_KIND}:placeholder-`);

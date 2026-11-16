@@ -1,4 +1,4 @@
-import type { PictureFrameImage } from '@par/xr-workspace';
+import type { PictureDepthView, PictureFrameImage } from '@par/xr-workspace';
 import {
   createDefaultPictureProxy,
   type PictureProxyFailure,
@@ -20,6 +20,14 @@ import {
 /** A decoded picture that can be shown and saved by the app. */
 export interface PictureImage extends PictureFrameImage {
   right?: StereoEye;
+}
+
+/** A stored picture to show again, with its depth map when the Mac made one. */
+export interface RestoredPicture {
+  id: string;
+  image: PictureImage;
+  depth?: PictureImage;
+  depthView?: PictureDepthView;
 }
 
 /** A stereo pair's right eye, the same size as the left, with its stored blob. */

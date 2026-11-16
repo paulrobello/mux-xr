@@ -19,23 +19,23 @@ vi.mock('troika-three-text', async (importOriginal) => {
 
 import { DEFAULT_DEPTH_VIEW, estimateDisparity, usesDepthMap } from '@par/xr-workspace';
 import type { PictureDepthResult } from '../src/host-picture-depth';
-import { createPictureController } from '../src/workspace/pictures';
 import {
   decodeHeifPixels,
   type HeifImageHandle,
   type HeifLibrary,
   readStereoPair,
-} from '../src/xr/heif-core';
-import { createPictureFrameWidget } from '../src/xr/picture-frame';
-import type { PictureImage, PreparedPicture } from '../src/xr/picture-image';
-import { preparePicture } from '../src/xr/picture-image';
+} from '../src/pictures/heif-core';
+import type { PictureImage, PreparedPicture } from '../src/pictures/picture-image';
+import { preparePicture } from '../src/pictures/picture-image';
 import {
   createMemoryPictureStorage,
   createMemoryRecentPictureStorage,
   createPictureLibrary,
   createRecentPictureLibrary,
   planEviction,
-} from '../src/xr/picture-store';
+} from '../src/pictures/picture-store';
+import { createPictureController } from '../src/workspace/pictures';
+import { createPictureFrameWidget } from '../src/xr/picture-frame';
 
 /** An ISO-BMFF box; `full` prepends the FullBox version and flags. */
 function box(type: string, payload: Uint8Array, full = false): Uint8Array {

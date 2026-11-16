@@ -6,18 +6,18 @@ import {
 } from '@par/xr-workspace';
 import { reportSwallowed, swallowTo } from '../diagnostics';
 import type { PictureDepthEstimator } from '../host-picture-depth';
-import { depthFailureNotice } from '../xr/picture-depth';
+import { depthFailureNotice } from '../pictures/picture-depth';
 import {
   createPictureThumbnail,
   loadPictureFile,
   loadPictureUrl,
   type PictureImage,
   type PreparedPicture,
+  type RestoredPicture,
   restorePicture,
-} from '../xr/picture-image';
-import { PictureLoadError, pictureErrorNotice } from '../xr/picture-sizing';
-import type { PictureLibrary, RecentPictureLibrary } from '../xr/picture-store';
-import type { RestoredPicture } from '../xr/scene';
+} from '../pictures/picture-image';
+import { PictureLoadError, pictureErrorNotice } from '../pictures/picture-sizing';
+import type { PictureLibrary, RecentPictureLibrary } from '../pictures/picture-store';
 
 export interface PictureSceneTarget {
   /**
