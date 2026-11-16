@@ -290,7 +290,9 @@ try {
           if (
             !target &&
             object.userData.inputAction === 'hierarchyNode' &&
-            object.userData.hierarchyPath?.length === length + 1
+            object.userData.hierarchyPath?.length === length + 1 &&
+            // The roster branch only holds panes, so descending it cannot reach a child branch.
+            !String(object.userData.hierarchyPath[0]).startsWith('agents:')
           )
             target = object;
         });
