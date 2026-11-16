@@ -1,12 +1,5 @@
 import './styles.css';
-import {
-  createModifierState,
-  keyboardDimensions,
-  keyboardKeys,
-  validateHandColor,
-  validateWeatherZip,
-} from '@par/xr-workspace';
-import { BACKGROUNDS } from '../backgrounds';
+import { validateHandColor } from '@par/xr-workspace';
 import type {
   BackgroundMode,
   KeyModifiers,
@@ -18,8 +11,6 @@ import type {
   TerminalStatus,
   WorkspaceSnapshot,
 } from '../contracts';
-import { getKeyHelp } from '../control-help';
-import { HOST_CLIPBOARD_SETUP } from '../host-clipboard';
 import { isSharedCommand } from '../quick-commands';
 import {
   browserStorage,
@@ -29,27 +20,27 @@ import {
   type WorkspaceSettings,
 } from '../settings/store';
 import type { DictationAction, DictationState } from '../speech-input';
-import { type TerminalFiltering, validateTerminalFiltering } from '../terminal/filtering';
+import type { TerminalFiltering } from '../terminal/filtering';
 import { type PaneProcess, processBadge } from '../terminal/lifecycle';
-import { terminalKeyLabel } from '../terminal/protocol';
 import { AGENTS_SORTS, type AgentRosterRow } from '../workspace/agent-roster';
-import { type HierarchyStyle, validateHierarchyStyle } from '../workspace/hierarchy-style';
+import type { HierarchyStyle } from '../workspace/hierarchy-style';
 import type { KeyborbMode } from '../workspace/keyborb';
-import { validateKeyborbMode } from '../workspace/keyborb';
 import { XR_ENTRY_LABELS, type XrEntryMode } from '../xr/entry';
+import { forwardedActions, mountHostClipboardControls } from './actions';
 import { mountAgentRoster } from './agent-roster';
-import { escapeHtml, icon } from './html';
 import { mountCommandLibrary } from './input-drawer';
+import { mountKeyboard } from './keyboard';
+import { mountSettingsControls } from './settings-controls';
 import { mountSettingsPanel } from './settings-panel';
+import { createSettingsSetters } from './settings-setters';
+import { buildShell } from './shell';
 import { mountSidebar } from './sidebar';
+import { mountTerminalControls } from './terminal-controls';
 
 export { validateHandColor };
 
 import type { PaneCreationState } from '../workspace/pane-create';
-import {
-  MAX_TERMINAL_CURVATURE_DEGREES,
-  type WindowPreferences,
-} from '../workspace/window-preferences';
+import type { WindowPreferences } from '../workspace/window-preferences';
 
 export type { SemanticKey } from '@par/xr-workspace';
 export {
@@ -209,124 +200,23 @@ export function mountWorkspaceUI(
   const paneProcesses = new Map<string, PaneProcess>();
   const paneBadge = (paneId: string): string | null =>
     processBadge(paneProcesses.get(paneId), paneStatuses.get(paneId));
-  const terminalGrid = new Map<string, { cols: number; rows: number; canResize: boolean }>();
-  const terminalCurvature = new Map<string, number>();
-  const terminalOpacity = new Map<string, number>();
-  const pendingGrid = new Map<string, { cols: number; rows: number }>();
   let inputMode: 'commands' | 'keyboard' = 'commands';
-  let dictationState: DictationState | undefined;
-  const modifierState = createModifierState();
-  const holdTimers = new Map<HTMLButtonElement, number>();
-  const keyboardLabel = (key: string, shift = false): string => {
-    if (key.length === 1 && key !== ' ') return terminalKeyLabel(key, shift);
-    return keyboardKeys.find((entry) => entry.key === key)?.label ?? key;
-  };
-  const keyboardTitle = (key: string): string => getKeyHelp(key) ?? '';
-  const syncModifierVisuals = (): void => {
-    for (const key of root.querySelectorAll<HTMLButtonElement>('.key')) {
-      const modifier = key.dataset.modifier as 'ctrl' | 'alt' | 'shift' | undefined;
-      if (modifier) {
-        const active = Boolean(modifierState.active[modifier]);
-        const locked = Boolean(modifierState.locked[modifier]);
-        key.classList.toggle('active', active);
-        key.classList.toggle('locked', locked);
-        key.setAttribute('aria-pressed', String(active));
-        key.title = locked
-          ? `${key.textContent ?? modifier} locked (click to unlock)`
-          : keyboardTitle(key.dataset.key ?? '');
-      } else {
-        key.textContent = keyboardLabel(key.dataset.key ?? '', Boolean(modifierState.active.shift));
-      }
-    }
-  };
-  const clearModifiers = (): void => {
-    for (const timer of holdTimers.values()) window.clearTimeout(timer);
-    holdTimers.clear();
-    modifierState.clear();
-    for (const key of root.querySelectorAll<HTMLButtonElement>('.key'))
-      delete key.dataset.longPressed;
-    syncModifierVisuals();
-  };
   let capturedTarget: string | undefined;
-  const root = document.createElement('section');
-  root.className = 'mux-ui';
-  const backgroundOptions = BACKGROUNDS.map(
-    ({ id, label }) => `<option value="${id}">${escapeHtml(label)}</option>`,
-  ).join('');
-  const keyboardMarkup = keyboardKeys
-    .map(
-      (entry) =>
-        `<button class="key" data-key="${escapeHtml(entry.key)}" data-modifier="${entry.modifier ?? ''}" style="--key-x:${entry.x};--key-y:${entry.y};--key-width:${entry.width};--key-height:${entry.height}" aria-pressed="false" aria-label="${escapeHtml(entry.key === 'Backspace' ? 'Backspace' : entry.label)}" title="${escapeHtml(keyboardTitle(entry.key))}">${escapeHtml(entry.label)}</button>`,
-    )
-    .join('');
-  root.innerHTML = `<header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><section class="agents" data-agents-section hidden aria-label="Agent roster"><div class="side-heading"><span>Agents <span data-agent-count></span></span><button data-action="agents-sort" class="mini-text" aria-label="Agent order" title="Change the agent order"></button></div><div class="agent-list" data-agents></div></section><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. Creates default-shell terminals only when the streamer allows it.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="update-notice" data-update-notice hidden role="status"><span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button></div><div class="workspace-notice" data-notice hidden role="status"><span data-notice-text></span><button data-action="dismiss-notice" class="icon-btn" aria-label="Dismiss notice" title="Dismiss notice">×</button></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button><button data-action="pin-command" class="text-btn" title="Pin or unpin the selected quick command in XR">Pin / unpin</button><button data-action="export-commands" class="text-btn" title="Download every quick command for this server as JSON">Export</button><button data-action="import-commands" class="text-btn" title="Merge quick commands from an exported JSON file">Import</button><input type="file" accept="application/json,.json" data-command-import hidden></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${keyboardMarkup}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background>${backgroundOptions}</select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Highlight the pane at the center of your view.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="desk-window" class="secondary">${XR_ENTRY_LABELS.desk}</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
-  const keyboardElement = root.querySelector<HTMLElement>('[data-keyboard]');
-  const drawer = root.querySelector<HTMLElement>('[data-drawer]');
-  const toast = document.createElement('div');
-  toast.className = 'mux-clipboard-toast';
-  toast.dataset.clipboardToast = 'true';
-  toast.setAttribute('role', 'status');
-  toast.setAttribute('aria-live', 'polite');
-  toast.hidden = true;
-  root.append(toast);
-  const dictationControls = document.createElement('div');
-  dictationControls.dataset.keyboardControls = 'true';
-  dictationControls.className = 'dictation-controls';
-  dictationControls.innerHTML =
-    '<div class="dictation-actions"><button data-action="dictation-start" class="secondary">Dictate</button><button data-action="dictation-stop" class="secondary" hidden>Stop</button><button data-action="dictation-insert" class="send-btn" disabled>Insert text</button><button data-action="dictation-clear" class="text-btn" hidden title="Clear the reviewed dictation text">Clear</button><button data-action="dictation-cancel" class="text-btn">Cancel</button></div><textarea data-dictation-draft rows="3" aria-label="Dictation transcript" placeholder="Dictation transcript appears here for review" disabled></textarea><small data-dictation-status>Speech input is idle.</small>';
-  drawer?.append(dictationControls);
-  const paste = document.createElement('button');
-  paste.dataset.action = 'paste-clipboard';
-  paste.className = 'secondary';
-  paste.textContent = 'Paste';
-  paste.title = 'Paste clipboard text into the selected terminal';
-  dictationControls.querySelector('.dictation-actions')?.prepend(paste);
-  const hostToQuest = document.createElement('button');
-  hostToQuest.dataset.action = 'host-to-quest';
-  hostToQuest.className = 'secondary';
-  hostToQuest.textContent = 'Host → Quest';
-  hostToQuest.title = "Copy the Mac's clipboard text into the Quest clipboard";
-  const questToHost = document.createElement('button');
-  questToHost.dataset.action = 'quest-to-host';
-  questToHost.className = 'secondary';
-  questToHost.textContent = 'Quest → Host';
-  questToHost.title = "Send the Quest clipboard text to the Mac's clipboard";
-  paste.after(hostToQuest, questToHost);
-  const gazeInput = document.createElement('label');
-  gazeInput.className = 'check';
-  gazeInput.dataset.keyboardControls = 'true';
-  gazeInput.title =
-    'Use head direction to choose the keyboard target after a short dwell. Looking at the keyboard keeps the last pane target.';
-  gazeInput.innerHTML =
-    '<input type="checkbox" data-gaze-input> Gaze keyboard input <span>In XR, looking at a pane briefly makes it the keyboard target. Off keeps manual selection.</span>';
-  drawer?.append(gazeInput);
-  if (keyboardElement) {
-    keyboardElement.style.setProperty('--keyboard-width', String(keyboardDimensions.width));
-    keyboardElement.style.setProperty('--keyboard-height', String(keyboardDimensions.height));
-  }
-  container.replaceChildren(root);
-  const updateNotice =
-    root.querySelector<HTMLElement>('[data-update-notice]') ?? document.createElement('div');
-  updateNotice.style.cssText =
-    'align-items:center;gap:10px;margin:-8px 0 18px;color:var(--muted);font-size:12px';
-  if (!updateNotice.parentElement) {
-    updateNotice.className = 'update-notice';
-    updateNotice.hidden = true;
-    updateNotice.setAttribute('role', 'status');
-    updateNotice.innerHTML =
-      '<span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button>';
-    root.querySelector('.stage-head')?.after(updateNotice);
-  }
-  const widgetsButton = document.createElement('button');
-  widgetsButton.className = 'secondary';
-  widgetsButton.dataset.action = 'widgets';
-  widgetsButton.textContent = 'Widgets';
-  widgetsButton.title = 'Open movable clock widgets';
-  widgetsButton.addEventListener('click', () => callbacks.onWidgets?.());
-  root.querySelector('.stage-tools')?.append(widgetsButton);
+  const { root, toast, updateNotice } = buildShell({
+    container,
+    onWidgets: () => callbacks.onWidgets?.(),
+  });
+  root.querySelector('[data-gaze]')?.parentElement?.remove();
+  const _settingsPanel = root.querySelector<HTMLElement>('[data-settings]');
+  const keyboard = mountKeyboard({
+    root,
+    capturedTarget: () => capturedTarget,
+    onSendKey: (paneId, key, modifiers) => callbacks.onSendKey?.(paneId, key, modifiers),
+    onDictationAction: (action) => callbacks.onDictationAction?.(action),
+    onDictationDraftChange: (text) => callbacks.onDictationDraftChange?.(text),
+  });
   const settingsPanel = root.querySelector<HTMLElement>('[data-settings]');
   root.querySelector('[data-gaze]')?.parentElement?.remove();
-  let filteringMaxAnisotropy = 16;
   const updateArrangementAvailability = (): void => {
     settingsPanelControls?.setArrangementAvailable(attachedPaneIds.length > 0);
   };
@@ -339,68 +229,28 @@ export function mountWorkspaceUI(
         saveSettings,
         bindSettings,
         activePaneId: () => activePaneId,
-        terminalCurvature,
-        terminalOpacity,
+        setTerminalCurvature: (paneId, degrees) => terminalControls.curvature.set(paneId, degrees),
+        setTerminalOpacity: (paneId, opacity) => terminalControls.opacity.set(paneId, opacity),
         qs: (selector) => qs(selector),
         renderAgents: () => agentRoster.render(),
       })
     : null;
-  const editor = document.createElement('div');
-  editor.className = 'command-editor';
-  editor.innerHTML =
-    '<input data-command-label placeholder="Label" aria-label="Command label"><input data-command-text placeholder="Command text ({{}} = type the rest)" aria-label="Command text"><label><input type="checkbox" data-command-newline checked> Enter</label><label><input type="checkbox" data-command-confirm> Confirm before running</label><button data-action="save-command" title="Save the quick command">Save</button><button data-action="move-up" title="Move the selected quick command up">Up</button><button data-action="move-down" title="Move the selected quick command down">Down</button>';
-  editor.dataset.commandControls = 'true';
-  root
-    .querySelector<HTMLElement>('[data-drawer]')
-    ?.insertBefore(
-      editor,
-      root.querySelector<HTMLElement>('[data-compose]')?.parentElement ?? null,
-    );
   const qs = <T extends Element>(selector: string): T => {
     const element = root.querySelector<T>(selector);
     if (!element) throw new Error(`Missing workspace control: ${selector}`);
     return element;
   };
-  const updateHostClipboardStatus = (message: string | null = null): void => {
-    const status = root.querySelector<HTMLElement>('[data-host-clipboard-status]');
-    if (!status) return;
-    status.textContent =
-      message ??
-      (callbacks.isHostClipboardPaired?.()
-        ? 'Paired. The secret is stored only in this browser.'
-        : `Not paired. ${HOST_CLIPBOARD_SETUP}`);
-  };
-  updateHostClipboardStatus();
-  const clearGridControls = (): void => {
-    qs<HTMLButtonElement>('[data-action="apply-grid"]').disabled = true;
-    qs<HTMLElement>('[data-grid-caption]').textContent = 'No terminal selected';
-    qs<HTMLElement>('[data-grid-status]').textContent =
-      'Select an attached terminal to change its grid.';
-    qs<HTMLInputElement>('[data-terminal-curvature]').value = '0';
-    qs<HTMLElement>('[data-terminal-curvature-value]').textContent = '0°';
-    qs<HTMLInputElement>('[data-terminal-curvature]').disabled = true;
-    qs<HTMLInputElement>('[data-terminal-opacity]').value = '100';
-    qs<HTMLElement>('[data-terminal-opacity-value]').textContent = '100%';
-    qs<HTMLInputElement>('[data-terminal-opacity]').disabled = true;
-    qs<HTMLButtonElement>('[data-action="reset-terminal-appearance"]').disabled = true;
-  };
-  const updateCurvatureControls = (paneId: string | undefined): void => {
-    const input = qs<HTMLInputElement>('[data-terminal-curvature]');
-    const value = paneId ? (terminalCurvature.get(paneId) ?? 0) : 0;
-    input.value = String(value);
-    input.disabled = !paneId;
-    qs<HTMLElement>('[data-terminal-curvature-value]').textContent = `${value}°`;
-  };
-  const updateOpacityControls = (paneId: string | undefined): void => {
-    const input = qs<HTMLInputElement>('[data-terminal-opacity]');
-    const value = paneId ? (terminalOpacity.get(paneId) ?? 100) : 100;
-    input.value = String(value);
-    input.disabled = !paneId;
-    qs<HTMLButtonElement>('[data-action="reset-terminal-appearance"]').disabled = !paneId;
-    qs<HTMLElement>('[data-terminal-opacity-value]').textContent = `${value}%`;
-  };
-  clearModifiers();
-  clearGridControls();
+  const forwarders = forwardedActions(callbacks);
+  const hostClipboard = mountHostClipboardControls({ root, callbacks });
+  const terminalControls = mountTerminalControls({
+    root,
+    activePaneId: () => activePaneId,
+    onResizeGrid: callbacks.onResizeGrid
+      ? (paneId, cols, rows) => callbacks.onResizeGrid?.(paneId, cols, rows) ?? false
+      : undefined,
+  });
+  keyboard.clearModifiers();
+  terminalControls.clear();
   updateArrangementAvailability();
   const actionHelp: Record<string, string> = {
     demo: 'Preview synthetic terminals without running commands',
@@ -468,35 +318,10 @@ export function mountWorkspaceUI(
     qs<HTMLElement>('[data-notice-text]').textContent = message ?? '';
     notice.hidden = message === null;
   };
-  const setDictationState = (state: DictationState): void => {
-    dictationState = { ...state };
-    const start = qs<HTMLButtonElement>('[data-action="dictation-start"]');
-    const stop = qs<HTMLButtonElement>('[data-action="dictation-stop"]');
-    const insert = qs<HTMLButtonElement>('[data-action="dictation-insert"]');
-    const clear = qs<HTMLButtonElement>('[data-action="dictation-clear"]');
-    const draft = qs<HTMLTextAreaElement>('[data-dictation-draft]');
-    const status = qs<HTMLElement>('[data-dictation-status]');
-    start.disabled = !state.supported || ['listening', 'transcribing'].includes(state.status);
-    start.textContent = state.status === 'transcribing' ? 'Transcribing…' : 'Dictate';
-    stop.hidden = state.status !== 'listening';
-    insert.hidden = Boolean(state.forNote);
-    insert.disabled =
-      Boolean(state.forNote) ||
-      !['review', 'error'].includes(state.status) ||
-      !state.transcript.trim();
-    clear.hidden = !['review', 'error'].includes(state.status) || !state.transcript.trim();
-    draft.disabled =
-      state.status === 'idle' ||
-      state.status === 'listening' ||
-      state.status === 'transcribing' ||
-      (state.status === 'error' && !state.transcript.trim());
-    if (draft.value !== state.transcript) draft.value = state.transcript;
-    status.textContent = state.error ?? `Speech input is ${state.status}.`;
-  };
   const closeInput = (): void => {
     callbacks.onDictationAction?.('cancel');
     capturedTarget = undefined;
-    clearModifiers();
+    keyboard.clearModifiers();
     qs<HTMLElement>('[data-drawer]').hidden = true;
     updateTargetCaption();
   };
@@ -508,44 +333,12 @@ export function mountWorkspaceUI(
     renderPanes();
     if (!qs<HTMLElement>('[data-drawer]').hidden) {
       capturedTarget = id;
-      clearModifiers();
+      keyboard.clearModifiers();
       commandLibrary.load();
     }
     updateTargetCaption();
     if (notify) callbacks.onSelectPane?.(pane);
   };
-  const cancelModifierHold = (button: HTMLButtonElement): void => {
-    const timer = holdTimers.get(button);
-    if (timer !== undefined) window.clearTimeout(timer);
-    holdTimers.delete(button);
-  };
-  root.addEventListener('pointerdown', (event) => {
-    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-modifier]');
-    if (!button) return;
-    const modifier = button.dataset.modifier as 'ctrl' | 'alt' | 'shift' | undefined;
-    if (!modifier) return;
-    delete button.dataset.longPressed;
-    cancelModifierHold(button);
-    button.setPointerCapture?.(event.pointerId);
-    holdTimers.set(
-      button,
-      window.setTimeout(() => {
-        modifierState.lock(modifier);
-        button.dataset.longPressed = 'true';
-        syncModifierVisuals();
-        holdTimers.delete(button);
-      }, 550),
-    );
-  });
-  for (const eventName of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) {
-    root.addEventListener(eventName, (event) => {
-      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-modifier]');
-      if (button) {
-        cancelModifierHold(button);
-        if (eventName === 'pointercancel') delete button.dataset.longPressed;
-      }
-    });
-  }
   root.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
     const button = target.closest<HTMLElement>('button');
@@ -571,60 +364,7 @@ export function mountWorkspaceUI(
       if (pane) callbacks.onTogglePaneConnection?.(pane);
       return;
     }
-    if (button.dataset.key) {
-      const key = button.dataset.key;
-      const modifier = button.dataset.modifier as 'ctrl' | 'alt' | 'shift' | '';
-      if (modifier) {
-        if (button.dataset.longPressed) {
-          delete button.dataset.longPressed;
-          return;
-        }
-        modifierState.tap(modifier);
-        syncModifierVisuals();
-        return;
-      }
-      if (['listening', 'transcribing'].includes(dictationState?.status ?? '')) return;
-      if (
-        dictationState?.status === 'review' ||
-        (dictationState?.status === 'error' && dictationState.transcript)
-      ) {
-        const draft = qs<HTMLTextAreaElement>('[data-dictation-draft]');
-        let start = draft.selectionStart;
-        let end = draft.selectionEnd;
-        if (key === 'Enter') {
-          if (!dictationState.forNote) callbacks.onDictationAction?.('insert');
-        } else if (key === 'Escape') callbacks.onDictationAction?.('cancel');
-        else {
-          if (key === 'ArrowLeft')
-            start = end =
-              draft.value.slice(0, start).length -
-              (Array.from(draft.value.slice(0, start)).at(-1)?.length ?? 0);
-          else if (key === 'ArrowRight')
-            start = end = end + (Array.from(draft.value.slice(end))[0]?.length ?? 0);
-          else if (key === 'Home') start = end = 0;
-          else if (key === 'End') start = end = draft.value.length;
-          else if (key === 'Backspace' || key === 'Delete' || key.length === 1) {
-            if (key === 'Backspace' && start === end)
-              start -= Array.from(draft.value.slice(0, start)).at(-1)?.length ?? 0;
-            if (key === 'Delete' && start === end)
-              end += Array.from(draft.value.slice(end))[0]?.length ?? 0;
-            const text =
-              key.length === 1 ? terminalKeyLabel(key, Boolean(modifierState.active.shift)) : '';
-            draft.setRangeText(text, start, end, 'end');
-            start = end = draft.selectionEnd;
-            callbacks.onDictationDraftChange?.(draft.value);
-          }
-          draft.setSelectionRange(start, end);
-        }
-        modifierState.consume();
-        syncModifierVisuals();
-        return;
-      }
-      if (capturedTarget) callbacks.onSendKey?.(capturedTarget, key, { ...modifierState.active });
-      modifierState.consume();
-      syncModifierVisuals();
-      return;
-    }
+    if (keyboard.handleKeyClick(button)) return;
     if (
       ['move-up', 'move-down', 'pin-command', 'remove-command'].includes(
         button.dataset.action ?? '',
@@ -635,6 +375,12 @@ export function mountWorkspaceUI(
       return;
     }
     if (commandLibrary.handleAction(button.dataset.action ?? '')) return;
+    if (hostClipboard.handleAction(button.dataset.action ?? '')) return;
+    const forwarded = forwarders[button.dataset.action ?? ''];
+    if (forwarded) {
+      forwarded();
+      return;
+    }
     switch (button.dataset.action) {
       case 'agents-sort': {
         const next =
@@ -646,22 +392,13 @@ export function mountWorkspaceUI(
       case 'connect': {
         const endpoint = qs<HTMLInputElement>('#endpoint').value.trim();
         capturedTarget = undefined;
-        clearModifiers();
+        keyboard.clearModifiers();
         qs<HTMLElement>('[data-drawer]').hidden = true;
         saveSettings({ endpoint });
         commandLibrary.load();
         callbacks.onConnect(endpoint);
         break;
       }
-      case 'refresh':
-        callbacks.onRefresh?.();
-        break;
-      case 'xr':
-        callbacks.onEnterXR?.();
-        break;
-      case 'reload-update':
-        callbacks.onReloadApp?.();
-        break;
       case 'dismiss-notice':
         setNotice(null);
         callbacks.onDismissNotice?.();
@@ -670,7 +407,7 @@ export function mountWorkspaceUI(
       case 'keyboard':
         inputMode = button.dataset.action as 'commands' | 'keyboard';
         if (qs<HTMLElement>('[data-drawer]').hidden) capturedTarget = activePaneId;
-        clearModifiers();
+        keyboard.clearModifiers();
         qs<HTMLElement>('[data-drawer]').hidden = false;
         updateInputMode();
         updateTargetCaption();
@@ -679,59 +416,14 @@ export function mountWorkspaceUI(
       case 'close-drawer':
         closeInput();
         break;
-      case 'dictation-start':
-        callbacks.onDictationAction?.('start');
-        break;
       case 'paste-clipboard':
         callbacks.onPaste?.(capturedTarget ?? activePaneId);
-        break;
-      case 'host-to-quest':
-        callbacks.onHostToQuest?.();
-        break;
-      case 'quest-to-host':
-        callbacks.onQuestToHost?.();
-        break;
-      case 'host-clipboard-save': {
-        const input = qs<HTMLInputElement>('[data-host-clipboard-secret]');
-        const saved = callbacks.onHostClipboardSecret?.(input.value) ?? false;
-        input.value = '';
-        updateHostClipboardStatus(saved ? null : 'Enter the secret before saving.');
-        break;
-      }
-      case 'host-clipboard-forget':
-        callbacks.onHostClipboardSecret?.(null);
-        qs<HTMLInputElement>('[data-host-clipboard-secret]').value = '';
-        updateHostClipboardStatus('Forgotten. Host clipboard transfers are off in this browser.');
-        break;
-      case 'dictation-stop':
-        callbacks.onDictationAction?.('stop');
-        break;
-      case 'dictation-insert':
-        callbacks.onDictationAction?.('insert');
-        break;
-      case 'dictation-clear':
-        callbacks.onDictationAction?.('clear');
-        break;
-      case 'dictation-cancel':
-        callbacks.onDictationAction?.('cancel');
         break;
       case 'settings':
         qs<HTMLElement>('[data-settings]').hidden = false;
         break;
       case 'close-settings':
         qs<HTMLElement>('[data-settings]').hidden = true;
-        break;
-      case 'passthrough':
-        callbacks.onPassthrough?.('ar');
-        break;
-      case 'desk-window':
-        callbacks.onPassthrough?.('desk');
-        break;
-      case 'demo':
-        callbacks.onDemo?.();
-        break;
-      case 'reset':
-        callbacks.onResetLayout?.();
         break;
       case 'send-text': {
         const text = qs<HTMLTextAreaElement>('[data-compose]').value;
@@ -743,102 +435,14 @@ export function mountWorkspaceUI(
       }
     }
   });
-  qs<HTMLInputElement>('#endpoint').value = settings.endpoint;
-  qs<HTMLSelectElement>('[data-background]').value = settings.background;
-  qs<HTMLSelectElement>('[data-hierarchy-style]').value = settings.hierarchyStyle;
-  qs<HTMLSelectElement>('[data-keyborb-mode]').value = settings.keyborbMode;
-  qs<HTMLSelectElement>('[data-color-mode]').value = settings.colorMode;
-  qs<HTMLInputElement>('[data-keyboard-background]').checked = settings.keyboardBackground;
-  qs<HTMLInputElement>('[data-gaze-input]').checked = settings.gazeInput;
-  qs<HTMLInputElement>('[data-ui-sounds]').checked = settings.uiSounds;
-  setDictationState({
+  mountSettingsControls({ root, current: () => settings, saveSettings, bindSettings });
+  keyboard.setDictationState({
     supported: false,
     status: 'idle',
     transcript: '',
     error: null,
   });
-  qs<HTMLSelectElement>('[data-background]').addEventListener('change', (event) =>
-    saveSettings({ background: (event.target as HTMLSelectElement).value as BackgroundMode }),
-  );
-  qs<HTMLSelectElement>('[data-hierarchy-style]').addEventListener('change', (event) =>
-    saveSettings({
-      hierarchyStyle: validateHierarchyStyle((event.target as HTMLSelectElement).value),
-    }),
-  );
-  qs<HTMLSelectElement>('[data-keyborb-mode]').addEventListener('change', (event) =>
-    saveSettings({ keyborbMode: validateKeyborbMode((event.target as HTMLSelectElement).value) }),
-  );
-  const weatherZipInput = qs<HTMLInputElement>('[data-weather-zip]');
-  weatherZipInput.value = settings.weatherZip;
-  bindSettings(['weatherZip'], () => {
-    weatherZipInput.value = settings.weatherZip;
-  });
-  weatherZipInput.addEventListener('change', () => {
-    const next = validateWeatherZip(weatherZipInput.value.trim());
-    weatherZipInput.value = next;
-    if (settings.weatherZip === next) return;
-    saveSettings({ weatherZip: next });
-  });
-  qs<HTMLInputElement>('[data-ui-sounds]').addEventListener('change', (event) =>
-    saveSettings({ uiSounds: (event.target as HTMLInputElement).checked }),
-  );
-  qs<HTMLInputElement>('[data-gaze-input]').addEventListener('change', (event) =>
-    saveSettings({ gazeInput: (event.target as HTMLInputElement).checked }),
-  );
-  qs<HTMLSelectElement>('[data-color-mode]').addEventListener('change', (event) =>
-    saveSettings({ colorMode: (event.target as HTMLSelectElement).value as TerminalColorMode }),
-  );
-  qs<HTMLInputElement>('[data-keyboard-background]').addEventListener('change', (event) =>
-    saveSettings({ keyboardBackground: (event.target as HTMLInputElement).checked }),
-  );
-  bindSettings(['background'], () => {
-    qs<HTMLSelectElement>('[data-background]').value = settings.background;
-  });
-  bindSettings(['colorMode'], () => {
-    qs<HTMLSelectElement>('[data-color-mode]').value = settings.colorMode;
-  });
-  bindSettings(['keyboardBackground'], () => {
-    qs<HTMLInputElement>('[data-keyboard-background]').checked = settings.keyboardBackground;
-  });
-  bindSettings(['gazeInput'], () => {
-    qs<HTMLInputElement>('[data-gaze-input]').checked = settings.gazeInput;
-  });
-  bindSettings(['uiSounds'], () => {
-    qs<HTMLInputElement>('[data-ui-sounds]').checked = settings.uiSounds;
-  });
-  qs<HTMLTextAreaElement>('[data-dictation-draft]').addEventListener('input', (event) => {
-    callbacks.onDictationDraftChange?.((event.target as HTMLTextAreaElement).value);
-  });
-  qs<HTMLButtonElement>('[data-action="apply-grid"]').addEventListener('click', () => {
-    const paneId = activePaneId;
-    const cols = Number(qs<HTMLInputElement>('[data-grid-cols]').value);
-    const rows = Number(qs<HTMLInputElement>('[data-grid-rows]').value);
-    if (
-      !Number.isInteger(cols) ||
-      !Number.isInteger(rows) ||
-      cols < 2 ||
-      cols > 300 ||
-      rows < 2 ||
-      rows > 150
-    ) {
-      qs<HTMLElement>('[data-grid-status]').textContent = 'Use 2–300 columns and 2–150 rows.';
-      return;
-    }
-    if (!paneId || !callbacks.onResizeGrid) {
-      qs<HTMLElement>('[data-grid-status]').textContent =
-        'Resize unavailable while disconnected or read-only.';
-      return;
-    }
-    pendingGrid.set(paneId, { cols, rows });
-    if (!callbacks.onResizeGrid(paneId, cols, rows)) {
-      pendingGrid.delete(paneId);
-      qs<HTMLElement>('[data-grid-status]').textContent =
-        'Resize unavailable while disconnected or read-only.';
-      return;
-    }
-    qs<HTMLElement>('[data-grid-status]').textContent =
-      'Resize requested. Waiting for server confirmation…';
-  });
+  const settingsSetters = createSettingsSetters({ root, current: () => settings, saveSettings });
   const sceneHost = qs<HTMLElement>('[data-scene-host]');
   return {
     sceneHost,
@@ -852,7 +456,7 @@ export function mountWorkspaceUI(
           paneProcesses.set(pane.id, pane.process);
       if (activePaneId && !next.panes.some((pane) => pane.id === activePaneId)) {
         activePaneId = undefined;
-        clearGridControls();
+        terminalControls.clear();
       }
       if (capturedTarget && !next.panes.some((pane) => pane.id === capturedTarget)) closeInput();
       commandLibrary.load();
@@ -888,19 +492,10 @@ export function mountWorkspaceUI(
     setActivePane: (id) => {
       if (id) {
         selectPane(id, false);
-        updateCurvatureControls(id);
-        updateOpacityControls(id);
-        const grid = terminalGrid.get(id);
-        if (grid) {
-          pendingGrid.delete(id);
-          qs<HTMLInputElement>('[data-grid-cols]').value = String(grid.cols);
-          qs<HTMLInputElement>('[data-grid-rows]').value = String(grid.rows);
-          qs<HTMLElement>('[data-grid-caption]').textContent = `${grid.cols} × ${grid.rows}`;
-          qs<HTMLButtonElement>('[data-action="apply-grid"]').disabled = !grid.canResize;
-        }
+        terminalControls.show(id);
       } else {
         activePaneId = undefined;
-        clearGridControls();
+        terminalControls.clear();
         renderTree();
         renderPanes();
         updateTargetCaption();
@@ -914,7 +509,7 @@ export function mountWorkspaceUI(
       attachedPaneIds = [...ids];
       if (activePaneId && !ids.includes(activePaneId)) {
         activePaneId = undefined;
-        clearGridControls();
+        terminalControls.clear();
       }
       if (capturedTarget && !ids.includes(capturedTarget)) closeInput();
       renderPanes();
@@ -924,7 +519,7 @@ export function mountWorkspaceUI(
     openInput(mode) {
       inputMode = mode;
       if (qs<HTMLElement>('[data-drawer]').hidden) capturedTarget = activePaneId;
-      clearModifiers();
+      keyboard.clearModifiers();
       qs<HTMLElement>('[data-drawer]').hidden = false;
       updateInputMode();
       commandLibrary.load();
@@ -941,83 +536,12 @@ export function mountWorkspaceUI(
       button.title = label;
     },
     setGazeInputEnabled: (enabled) => saveSettings({ gazeInput: enabled }),
-    setTerminalGrid(paneId, cols, rows, canResize) {
-      const previous = terminalGrid.get(paneId);
-      const pending = pendingGrid.get(paneId);
-      if (
-        previous?.cols === cols &&
-        previous.rows === rows &&
-        previous.canResize === canResize &&
-        (!pending || (pending.cols === cols && pending.rows === rows))
-      )
-        return;
-      terminalGrid.set(paneId, { cols, rows, canResize });
-      if (activePaneId !== paneId) return;
-      const acknowledged = !pending || (pending.cols === cols && pending.rows === rows);
-      if (acknowledged) {
-        pendingGrid.delete(paneId);
-        qs<HTMLInputElement>('[data-grid-cols]').value = String(cols);
-        qs<HTMLInputElement>('[data-grid-rows]').value = String(rows);
-      }
-      qs<HTMLElement>('[data-grid-caption]').textContent = `${cols} × ${rows}`;
-      const apply = qs<HTMLButtonElement>('[data-action="apply-grid"]');
-      apply.disabled = !canResize;
-      if (acknowledged)
-        qs<HTMLElement>('[data-grid-status]').textContent = canResize
-          ? 'Resize changes the process display size and do not restart it.'
-          : 'Resize unavailable while disconnected or read-only.';
-    },
-    setTerminalCurvature(paneId, degrees) {
-      const value = Number.isFinite(degrees)
-        ? Math.max(0, Math.min(MAX_TERMINAL_CURVATURE_DEGREES, degrees))
-        : 0;
-      terminalCurvature.set(paneId, value);
-      if (activePaneId === paneId) updateCurvatureControls(paneId);
-    },
-    setTerminalOpacity(paneId, value) {
-      const opacity = Number.isFinite(value) ? Math.max(10, Math.min(100, value)) : 100;
-      terminalOpacity.set(paneId, opacity);
-      if (activePaneId === paneId) updateOpacityControls(paneId);
-    },
-    setTerminalColorMode: (mode, persist = true) => saveSettings({ colorMode: mode }, { persist }),
-    setKeyboardBackgroundEnabled: (enabled, persist = true) =>
-      saveSettings({ keyboardBackground: enabled }, { persist }),
-    setKeyboardCurvature: (degrees, persist = false) =>
-      saveSettings({ keyboardCurvature: degrees }, { persist }),
-    setTerminalFiltering: (filtering, persist = false) => saveSettings({ filtering }, { persist }),
-    setWindowPreferences: (value, persist = false) =>
-      saveSettings({ windowPreferences: value }, { persist }),
-    setHierarchyStyle: (style, persist = false) =>
-      saveSettings({ hierarchyStyle: style }, { persist }),
-    setKeyborbMode: (mode, persist = false) => saveSettings({ keyborbMode: mode }, { persist }),
-    setBackground: (mode, persist = false) => saveSettings({ background: mode }, { persist }),
-    setArmColor: (color, persist = false) => saveSettings({ armColor: color }, { persist }),
-    setWeatherZip: (zip, persist = false) => saveSettings({ weatherZip: zip }, { persist }),
-    setAccentColor: (color, persist = false) => saveSettings({ accentColor: color }, { persist }),
-    setEnvironmentAccentColor: (color, persist = false) =>
-      saveSettings({ environmentAccentColor: color }, { persist }),
-    setHandColor: (color, persist = false) => saveSettings({ handColor: color }, { persist }),
-    setUISounds: (enabled, persist = false) => saveSettings({ uiSounds: enabled }, { persist }),
-    setFilteringCapabilities(maxAnisotropy) {
-      filteringMaxAnisotropy = Number.isFinite(maxAnisotropy)
-        ? Math.max(1, Math.min(16, maxAnisotropy))
-        : 16;
-      const select = qs<HTMLSelectElement>('[data-filter-anisotropy]');
-      for (const option of select.options)
-        option.hidden = Number(option.value) > filteringMaxAnisotropy;
-      if (Number(select.value) <= filteringMaxAnisotropy) return;
-      const available = [...select.options].reverse().find((option) => !option.hidden);
-      if (!available) return;
-      saveSettings({
-        filtering: validateTerminalFiltering({
-          ...settings.filtering,
-          anisotropy: Number(available.value),
-        }),
-      });
-    },
-    setDictationState,
-    setArrangement: (pattern, persist = true) =>
-      saveSettings({ arrangement: pattern }, { persist }),
+    setTerminalGrid: (paneId, cols, rows, canResize) =>
+      terminalControls.setGrid(paneId, cols, rows, canResize),
+    setTerminalCurvature: (paneId, degrees) => terminalControls.setCurvature(paneId, degrees),
+    setTerminalOpacity: (paneId, value) => terminalControls.setOpacity(paneId, value),
+    ...settingsSetters,
+    setDictationState: (state) => keyboard.setDictationState(state),
     getCommandsForPane: (paneId) => commandLibrary.commandsForPane(paneId),
     setSharedCommands: (next) => commandLibrary.setSharedCommands(next),
     recordCommandRun: (id, at = Date.now()) => commandLibrary.recordRun(id, at),
@@ -1037,7 +561,7 @@ export function mountWorkspaceUI(
     captureCommandTarget: () => capturedTarget,
     destroy() {
       stopSettings();
-      clearModifiers();
+      keyboard.clearModifiers();
       agentRoster.destroy();
       root.remove();
     },

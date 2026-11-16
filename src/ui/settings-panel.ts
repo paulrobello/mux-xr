@@ -39,8 +39,10 @@ export interface SettingsPanelDeps {
   bindSettings(keys: Array<keyof WorkspaceSettings>, refresh: () => void): void;
   /** The selected pane, which the per-pane curvature and opacity sliders edit. */
   activePaneId(): string | undefined;
-  terminalCurvature: Map<string, number>;
-  terminalOpacity: Map<string, number>;
+  /** Records the curvature the user chose for a pane. */
+  setTerminalCurvature(paneId: string, degrees: number): void;
+  /** Records the glass opacity percentage the user chose for a pane. */
+  setTerminalOpacity(paneId: string, opacity: number): void;
   qs<T extends Element = Element>(selector: string): T;
   /** Re-renders the agent roster after its layout setting changes. */
   renderAgents(): void;
@@ -54,7 +56,6 @@ export interface SettingsPanel {
 /** Builds the browser settings controls inside the panel and keeps them in step with the settings. */
 export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
   const { panel: settingsPanel, root, callbacks, current, saveSettings, bindSettings, qs } = deps;
-  const { terminalCurvature, terminalOpacity } = deps;
   const activePane = (): string | undefined => deps.activePaneId();
   const renderAgents = (): void => deps.renderAgents();
   let arrangementSelect: HTMLSelectElement | null = null;
@@ -498,7 +499,7 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
         0,
         Math.min(MAX_TERMINAL_CURVATURE_DEGREES, Number((event.target as HTMLInputElement).value)),
       );
-      terminalCurvature.set(paneId, degrees);
+      deps.setTerminalCurvature(paneId, degrees);
       qs<HTMLElement>('[data-terminal-curvature-value]').textContent = `${degrees}°`;
       callbacks.onTerminalCurvature?.(paneId, degrees);
     });
@@ -509,7 +510,7 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
       if (!paneId) return;
       const rawOpacity = Number((event.target as HTMLInputElement).value);
       const opacity = Number.isFinite(rawOpacity) ? Math.max(10, Math.min(100, rawOpacity)) : 100;
-      terminalOpacity.set(paneId, opacity);
+      deps.setTerminalOpacity(paneId, opacity);
       qs<HTMLElement>('[data-terminal-opacity-value]').textContent = `${opacity}%`;
       callbacks.onTerminalOpacity?.(paneId, opacity);
     });
