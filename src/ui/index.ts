@@ -6,13 +6,6 @@ import {
   validateHandColor,
   validateWeatherZip,
 } from '@par/xr-workspace';
-import { createCommandStatsStore, createCommandStore } from '../commands/store';
-import {
-  exportServerCommands,
-  mergeImportedCommands,
-  reorderCommands,
-  workspaceScope,
-} from '../commands/transfer';
 import type {
   BackgroundMode,
   KeyModifiers,
@@ -26,16 +19,7 @@ import type {
 } from '../contracts';
 import { getKeyHelp } from '../control-help';
 import { HOST_CLIPBOARD_SETUP } from '../host-clipboard';
-import {
-  commandServerKey,
-  copyCommand,
-  isCommand,
-  isSharedCommand,
-  parseCommandFile,
-  previewCommandText,
-  serializeCommandFile,
-  toSharedCommands,
-} from '../quick-commands';
+import { isSharedCommand } from '../quick-commands';
 import {
   browserStorage,
   createSettingsStore,
@@ -54,6 +38,7 @@ import { validateKeyborbMode } from '../workspace/keyborb';
 import { XR_ENTRY_LABELS, type XrEntryMode } from '../xr/entry';
 import { mountAgentRoster } from './agent-roster';
 import { escapeHtml, icon } from './html';
+import { mountCommandLibrary } from './input-drawer';
 import { mountSettingsPanel } from './settings-panel';
 import { mountSidebar } from './sidebar';
 
@@ -223,9 +208,6 @@ export function mountWorkspaceUI(
   const paneProcesses = new Map<string, PaneProcess>();
   const paneBadge = (paneId: string): string | null =>
     processBadge(paneProcesses.get(paneId), paneStatuses.get(paneId));
-  let commands: QuickCommand[] = [];
-  let sharedCommands: QuickCommand[] = [];
-  let commandScope = 'global';
   const terminalGrid = new Map<string, { cols: number; rows: number; canResize: boolean }>();
   const terminalCurvature = new Map<string, number>();
   const terminalOpacity = new Map<string, number>();
@@ -471,41 +453,16 @@ export function mountWorkspaceUI(
     renderAgents: () => agentRoster.render(),
   });
   const { renderTree, renderPanes } = sidebar;
-  const commandOption = (command: QuickCommand): string =>
-    `<option value="${escapeHtml(command.id)}">${escapeHtml(command.label)}${command.pinned ? ' · pinned' : ''}</option>`;
-  const targetWorkspace = (): string =>
-    snapshot.panes.find((pane) => pane.id === (capturedTarget ?? activePaneId))?.workspaceId ??
-    'default';
-  const visibleSharedCommands = (): QuickCommand[] =>
-    sharedCommands.filter((command) =>
-      commandScope === 'global'
-        ? command.workspaceId === undefined
-        : command.workspaceId === targetWorkspace(),
-    );
-  const findDrawerCommand = (id: string): QuickCommand | undefined =>
-    commands.find((item) => item.id === id) ??
-    visibleSharedCommands().find((item) => item.id === id);
-  const renderCommands = (): void => {
-    const shared = visibleSharedCommands();
-    qs<HTMLSelectElement>('[data-command-select]').innerHTML =
-      '<option value="">Choose a quick command</option>' +
-      commands.map(commandOption).join('') +
-      (shared.length
-        ? `<optgroup label="Shared" data-shared-commands>${shared.map(commandOption).join('')}</optgroup>`
-        : '');
-  };
-  const currentScope = (): string =>
-    commandScope === 'global'
-      ? workspaceScope(settings.endpoint, '*')
-      : workspaceScope(
-          settings.endpoint,
-          snapshot.panes.find((pane) => pane.id === (capturedTarget ?? activePaneId))
-            ?.workspaceId ?? 'default',
-        );
-  const loadCommands = (): void => {
-    commands = store.get(currentScope());
-    renderCommands();
-  };
+  const commandLibrary = mountCommandLibrary({
+    root,
+    storage,
+    current: () => settings,
+    snapshot: () => snapshot,
+    activePaneId: () => activePaneId,
+    capturedTarget: () => capturedTarget,
+    onCommandsChange: (list, scope) => callbacks.onCommandsChange?.(list, scope),
+    onRunCommand: (command, paneId) => callbacks.onRunCommand?.(command, paneId),
+  });
   const updateInputMode = (): void => {
     if (inputMode !== 'keyboard') callbacks.onDictationAction?.('cancel');
     qs<HTMLElement>('[data-drawer-heading]').textContent =
@@ -572,7 +529,7 @@ export function mountWorkspaceUI(
     if (!qs<HTMLElement>('[data-drawer]').hidden) {
       capturedTarget = id;
       clearModifiers();
-      loadCommands();
+      commandLibrary.load();
     }
     updateTargetCaption();
     if (notify) callbacks.onSelectPane?.(pane);
@@ -697,6 +654,7 @@ export function mountWorkspaceUI(
       qs<HTMLElement>('[data-detail]').textContent = 'Shared commands are read-only.';
       return;
     }
+    if (commandLibrary.handleAction(button.dataset.action ?? '')) return;
     switch (button.dataset.action) {
       case 'agents-sort': {
         const next =
@@ -711,7 +669,7 @@ export function mountWorkspaceUI(
         clearModifiers();
         qs<HTMLElement>('[data-drawer]').hidden = true;
         saveSettings({ endpoint });
-        loadCommands();
+        commandLibrary.load();
         callbacks.onConnect(endpoint);
         break;
       }
@@ -736,7 +694,7 @@ export function mountWorkspaceUI(
         qs<HTMLElement>('[data-drawer]').hidden = false;
         updateInputMode();
         updateTargetCaption();
-        loadCommands();
+        commandLibrary.load();
         break;
       case 'close-drawer':
         closeInput();
@@ -795,107 +753,6 @@ export function mountWorkspaceUI(
       case 'reset':
         callbacks.onResetLayout?.();
         break;
-      case 'add-command':
-        qs<HTMLSelectElement>('[data-command-select]').value = '';
-        qs<HTMLInputElement>('[data-command-label]').value = '';
-        qs<HTMLInputElement>('[data-command-text]').value = '';
-        qs<HTMLInputElement>('[data-command-newline]').checked = true;
-        qs<HTMLInputElement>('[data-command-confirm]').checked = false;
-        qs<HTMLInputElement>('[data-command-label]').focus();
-        break;
-      case 'save-command': {
-        const label = qs<HTMLInputElement>('[data-command-label]').value.trim();
-        const text = qs<HTMLInputElement>('[data-command-text]').value;
-        if (label && text) {
-          const selected = qs<HTMLSelectElement>('[data-command-select]').value;
-          const old = commands.find((item) => item.id === selected);
-          const targetPane = snapshot.panes.find((item) => item.id === capturedTarget);
-          if (commandScope === 'workspace' && !targetPane) {
-            qs<HTMLElement>('[data-detail]').textContent =
-              'Select a pane before saving a workspace command.';
-            break;
-          }
-          const added = {
-            id: old?.id ?? `${Date.now()}`,
-            label,
-            text,
-            sendNewline: qs<HTMLInputElement>('[data-command-newline]').checked,
-            ...(commandScope === 'workspace' ? { workspaceId: targetPane?.workspaceId } : {}),
-            ...(qs<HTMLInputElement>('[data-command-confirm]').checked ? { confirm: true } : {}),
-            ...(old?.pinned ? { pinned: true } : {}),
-          };
-          commands = old
-            ? commands.map((item) => (item.id === old.id ? added : item))
-            : [...commands, added];
-          persistCommands();
-          qs<HTMLSelectElement>('[data-command-select]').value = added.id;
-        }
-        break;
-      }
-      case 'move-up':
-      case 'move-down': {
-        const selected = qs<HTMLSelectElement>('[data-command-select]').value;
-        const index = commands.findIndex((item) => item.id === selected);
-        if (index >= 0) {
-          commands = reorderCommands(
-            commands,
-            index,
-            index + (button.dataset.action === 'move-up' ? -1 : 1),
-          );
-          persistCommands();
-        }
-        break;
-      }
-      case 'export-commands': {
-        const exported = exportServerCommands(store.all(), settings.endpoint);
-        const url = URL.createObjectURL(
-          new Blob([serializeCommandFile(exported)], { type: 'application/json' }),
-        );
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'mux-xr-quick-commands.json';
-        link.click();
-        URL.revokeObjectURL(url);
-        qs<HTMLElement>('[data-detail]').textContent =
-          `Exported ${exported.length} quick command${exported.length === 1 ? '' : 's'}.`;
-        break;
-      }
-      case 'import-commands':
-        qs<HTMLInputElement>('[data-command-import]').click();
-        break;
-      case 'pin-command': {
-        const select = qs<HTMLSelectElement>('[data-command-select]');
-        const selected = select.value;
-        if (!commands.some((item) => item.id === selected)) break;
-        commands = commands.map((item) =>
-          item.id === selected ? { ...copyCommand(item), pinned: !item.pinned } : item,
-        );
-        persistCommands();
-        select.value = selected;
-        break;
-      }
-      case 'remove-command': {
-        const selected = qs<HTMLSelectElement>('[data-command-select]').value;
-        commands = commands.filter((command) => command.id !== selected);
-        persistCommands();
-        callbacks.onCommandsChange?.(commands, currentScope());
-        break;
-      }
-      case 'run-command': {
-        const command = findDrawerCommand(qs<HTMLSelectElement>('[data-command-select]').value);
-        if (!command || !capturedTarget) break;
-        if (command.confirm) {
-          const target = snapshot.panes.find((pane) => pane.id === capturedTarget);
-          if (
-            !window.confirm(
-              `Run "${command.label}" in ${target?.title ?? capturedTarget}?\n\n${previewCommandText(command.text)}`,
-            )
-          )
-            break;
-        }
-        callbacks.onRunCommand?.(command, capturedTarget);
-        break;
-      }
       case 'send-text': {
         const text = qs<HTMLTextAreaElement>('[data-compose]').value;
         if (text && capturedTarget) {
@@ -905,24 +762,6 @@ export function mountWorkspaceUI(
         break;
       }
     }
-  });
-  qs<HTMLSelectElement>('[data-command-scope]').addEventListener('change', (event) => {
-    commandScope = (event.target as HTMLSelectElement).value;
-    loadCommands();
-  });
-  qs<HTMLInputElement>('[data-command-import]').addEventListener('change', (event) => {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-    if (file) void file.text().then(importCommands);
-  });
-  qs<HTMLSelectElement>('[data-command-select]').addEventListener('change', (event) => {
-    const selected = findDrawerCommand((event.target as HTMLSelectElement).value);
-    if (!selected) return;
-    qs<HTMLInputElement>('[data-command-label]').value = selected.label;
-    qs<HTMLInputElement>('[data-command-text]').value = selected.text;
-    qs<HTMLInputElement>('[data-command-newline]').checked = selected.sendNewline;
-    qs<HTMLInputElement>('[data-command-confirm]').checked = Boolean(selected.confirm);
   });
   qs<HTMLInputElement>('#endpoint').value = settings.endpoint;
   qs<HTMLSelectElement>('[data-background]').value = settings.background;
@@ -1020,79 +859,6 @@ export function mountWorkspaceUI(
     qs<HTMLElement>('[data-grid-status]').textContent =
       'Resize requested. Waiting for server confirmation…';
   });
-  const store = createCommandStore(storage);
-  const stats = createCommandStatsStore(storage);
-  const persistCommands = (): void => {
-    const scope = currentScope();
-    if (!store.set(scope, commands)) {
-      commands = store.get(scope);
-      renderCommands();
-      qs<HTMLElement>('[data-detail]').textContent = 'Commands could not be saved on this device.';
-      return;
-    }
-    renderCommands();
-    callbacks.onCommandsChange?.(commands, scope);
-  };
-  const writeCommand = (command: QuickCommand): boolean => {
-    if (!isCommand(command) || isSharedCommand(command)) return false;
-    const scope = workspaceScope(settings.endpoint, command.workspaceId ?? '*');
-    const values = withoutServerCommand(store.all(), command.id, scope);
-    const saved = store.get(scope);
-    const next = saved.some((item) => item.id === command.id)
-      ? saved.map((item) => (item.id === command.id ? copyCommand(command) : item))
-      : [...saved, copyCommand(command)];
-    values[scope] = next;
-    if (!store.setAll(values)) {
-      qs<HTMLElement>('[data-detail]').textContent = 'Commands could not be saved on this device.';
-      return false;
-    }
-    loadCommands();
-    callbacks.onCommandsChange?.(next, scope);
-    return true;
-  };
-  const serverScopePrefix = (): string => workspaceScope(settings.endpoint, '');
-  const withoutServerCommand = (
-    values: Record<string, QuickCommand[]>,
-    id: string,
-    keepScope?: string,
-  ): Record<string, QuickCommand[]> => {
-    for (const [scope, saved] of Object.entries(values))
-      if (scope !== keepScope && scope.startsWith(serverScopePrefix()))
-        values[scope] = saved.filter((item) => item.id !== id);
-    return values;
-  };
-  const deleteCommand = (id: string): boolean => {
-    const values = withoutServerCommand(store.all(), id);
-    if (!store.setAll(values)) {
-      qs<HTMLElement>('[data-detail]').textContent = 'Commands could not be saved on this device.';
-      return false;
-    }
-    loadCommands();
-    callbacks.onCommandsChange?.(commands, currentScope());
-    return true;
-  };
-  const importCommands = (text: string): void => {
-    const detail = qs<HTMLElement>('[data-detail]');
-    let parsed: ReturnType<typeof parseCommandFile> = null;
-    try {
-      parsed = parseCommandFile(JSON.parse(text));
-    } catch {
-      parsed = null;
-    }
-    if (!parsed) {
-      detail.textContent = 'Import failed: not a quick command file.';
-      return;
-    }
-    const merged = mergeImportedCommands(store.all(), settings.endpoint, parsed.commands);
-    if (!store.setAll(merged.values)) {
-      detail.textContent = 'Commands could not be saved on this device.';
-      return;
-    }
-    loadCommands();
-    callbacks.onCommandsChange?.(commands, currentScope());
-    const skipped = parsed.skipped + merged.skipped;
-    detail.textContent = `Imported ${merged.added + merged.updated} quick commands: ${merged.added} new, ${merged.updated} updated${skipped ? `, ${skipped} skipped` : ''}.`;
-  };
   const sceneHost = qs<HTMLElement>('[data-scene-host]');
   return {
     sceneHost,
@@ -1109,7 +875,7 @@ export function mountWorkspaceUI(
         clearGridControls();
       }
       if (capturedTarget && !next.panes.some((pane) => pane.id === capturedTarget)) closeInput();
-      loadCommands();
+      commandLibrary.load();
       renderTree();
       renderPanes();
     },
@@ -1181,7 +947,7 @@ export function mountWorkspaceUI(
       clearModifiers();
       qs<HTMLElement>('[data-drawer]').hidden = false;
       updateInputMode();
-      loadCommands();
+      commandLibrary.load();
       updateTargetCaption();
       if (mode === 'keyboard')
         qs<HTMLElement>('[data-keyboard]').scrollIntoView({ block: 'nearest' });
@@ -1272,26 +1038,9 @@ export function mountWorkspaceUI(
     setDictationState,
     setArrangement: (pattern, persist = true) =>
       saveSettings({ arrangement: pattern }, { persist }),
-    getCommandsForPane(paneId) {
-      const pane = snapshot.panes.find((item) => item.id === paneId);
-      const workspace = pane?.workspaceId ?? 'default';
-      const server = commandServerKey(settings.endpoint);
-      const shared = sharedCommands
-        .filter((command) => command.workspaceId === undefined || command.workspaceId === workspace)
-        .map((command): QuickCommandEntry => ({ ...command, shared: true }));
-      return [
-        ...shared,
-        ...store.get(workspaceScope(settings.endpoint, '*')),
-        ...store.get(workspaceScope(settings.endpoint, workspace)),
-      ].map((command): QuickCommandEntry => ({ ...command, ...stats.get(server, command.id) }));
-    },
-    setSharedCommands(next) {
-      sharedCommands = toSharedCommands(next.filter(isSharedCommand));
-      renderCommands();
-    },
-    recordCommandRun(id, at = Date.now()) {
-      stats.record(commandServerKey(settings.endpoint), id, at);
-    },
+    getCommandsForPane: (paneId) => commandLibrary.commandsForPane(paneId),
+    setSharedCommands: (next) => commandLibrary.setSharedCommands(next),
+    recordCommandRun: (id, at = Date.now()) => commandLibrary.recordRun(id, at),
     setUpdateAvailable,
     setNotice,
     setToast(message) {
@@ -1299,18 +1048,12 @@ export function mountWorkspaceUI(
       toast.hidden = message === null;
     },
     getSettings: () => ({ ...settings }),
-    getCommands: () => [...commands],
-    addCommand: writeCommand,
-    updateCommand: writeCommand,
-    deleteCommand,
-    removeCommand(id) {
-      commands = commands.filter((command) => command.id !== id);
-      persistCommands();
-    },
-    reorderCommands(from, to) {
-      commands = reorderCommands(commands, from, to);
-      persistCommands();
-    },
+    getCommands: () => [...commandLibrary.commands()],
+    addCommand: (command) => commandLibrary.writeCommand(command),
+    updateCommand: (command) => commandLibrary.writeCommand(command),
+    deleteCommand: (id) => commandLibrary.deleteCommand(id),
+    removeCommand: (id) => commandLibrary.removeCommand(id),
+    reorderCommands: (from, to) => commandLibrary.reorder(from, to),
     captureCommandTarget: () => capturedTarget,
     destroy() {
       stopSettings();
