@@ -5,18 +5,10 @@ import { loadavg } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
 import { chromium } from 'playwright';
 import type * as THREE from 'three';
-import type { TerminalSurface } from '../src/contracts';
 import { workspaceFloorY } from '../src/xr/floor-layout';
-import type { WorkspaceScene } from '../src/xr/scene';
+import type { FixtureWindow } from './lib/fixture-window';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
-type FixtureWindow = Window & {
-  __placementScene: WorkspaceScene;
-  __placementSurfaces: Map<string, TerminalSurface>;
-  __questThree: typeof THREE;
-  __questRenderer: THREE.WebGLRenderer;
-  __questControllers: THREE.Group[];
-};
 const root = process.env.MUX_XR_TEST_ROOT;
 if (process.env.MUX_XR_PRIVATE_TEST !== '1' || !root)
   throw new Error('Placement check requires MUX_XR_PRIVATE_TEST=1 and MUX_XR_TEST_ROOT');

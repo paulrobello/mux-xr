@@ -2,6 +2,7 @@
 import { create, type MessageInitShape, toBinary } from '@bufbuild/protobuf';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneDescriptor } from '../src/contracts';
+import { agentRosterLayout, validateSettings } from '../src/settings/store';
 import {
   type AgentEntry,
   AgentEntrySchema,
@@ -15,7 +16,7 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
-import { agentRosterLayout, mountWorkspaceUI, validateSettings } from '../src/ui';
+import { mountWorkspaceUI } from '../src/ui';
 import {
   AGENT_ROWS_PRESETS,
   type AgentRosterLayout,

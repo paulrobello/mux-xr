@@ -1,26 +1,10 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chromium, type Page } from 'playwright';
+import type { FixtureWindow } from './lib/fixture-window';
 import { assert, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
-type FixtureWindow = Window & {
-  __muxXR: {
-    getState(): {
-      scene: {
-        xrMode: string;
-        widgets: string[];
-        filtering: { mode: string; anisotropy: number; gazeClarity: boolean };
-      };
-    };
-  };
-  __questScene: import('three').Scene;
-  __questControllers: import('three').Group[];
-  __questThree: typeof import('three');
-  __questCamera: import('three').PerspectiveCamera;
-  __questRenderer: import('three').WebGLRenderer;
-  __widgetsPad: { buttons: Array<{ pressed: boolean }>; axes: number[] };
-};
 type Pose = { position: number[]; quaternion: number[]; scale: number[] };
 
 const BASE_URL = process.env.MUX_XR_BASE_URL;

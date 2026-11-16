@@ -1,4 +1,5 @@
 import type { Page } from 'playwright';
+import type { FixtureWindow } from './lib/fixture-window';
 import { assert, launchGpuBrowser, openApp, requirePrivateTest, waitFor } from './lib/harness';
 
 /**
@@ -16,15 +17,8 @@ assert(
   `Refusing non-loopback MUX_XR_BASE_URL: ${baseUrl}`,
 );
 
-type MuxWindow = Window & {
-  __muxXR: {
-    getState(): { scene: { notice: string | null } };
-    getThreeScene(): unknown;
-  };
-};
-
 const notice = (page: Page): Promise<string | null> =>
-  page.evaluate(() => (window as unknown as MuxWindow).__muxXR.getState().scene.notice);
+  page.evaluate(() => (window as unknown as FixtureWindow).__muxXR.getState().scene.notice);
 
 /**
  * The scene host also holds 2D terminal canvases, so the renderer's canvas is the one that hands
@@ -59,7 +53,7 @@ try {
   await waitFor(
     () =>
       page.evaluate(
-        () => typeof (window as unknown as MuxWindow).__muxXR?.getThreeScene === 'function',
+        () => typeof (window as unknown as FixtureWindow).__muxXR?.getThreeScene === 'function',
       ),
     'the app test hooks',
   );

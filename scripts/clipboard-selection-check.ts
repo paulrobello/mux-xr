@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import { chromium, type WebSocketRoute } from 'playwright';
 import type * as THREE from 'three';
-import type { TerminalSurface } from '../src/contracts';
 import {
   ClientMessageSchema,
   ConnectedSchema,
@@ -19,20 +18,8 @@ import {
   type ServerMessage,
   ServerMessageSchema,
 } from '../src/terminal/vendor/terminal_pb';
-import type { WorkspaceScene } from '../src/xr/scene';
+import type { FixtureWindow } from './lib/fixture-window';
 import { prepareQuestFixture } from './prepare-quest-fixture';
-
-type FixtureWindow = Window & {
-  __selectionScene: WorkspaceScene;
-  __selectionSurfaces: Map<string, TerminalSurface>;
-  __questControllers: THREE.Group[];
-  __questThree: typeof THREE;
-  __questRenderer: THREE.WebGLRenderer;
-  __questCamera: THREE.PerspectiveCamera;
-  __aimSelection(col: number, row: number): void;
-  __clipboardWrite: Clipboard['writeText'];
-  __rejectClipboard?: () => void;
-};
 
 const base = process.env.MUX_XR_BASE_URL;
 const root = process.env.MUX_XR_TEST_ROOT;

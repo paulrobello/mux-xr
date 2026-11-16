@@ -6,15 +6,8 @@ import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import type * as THREE from 'three';
-import type { WorkspaceScene } from '../src/xr/scene';
+import type { FixtureWindow } from './lib/fixture-window';
 import { prepareQuestFixture } from './prepare-quest-fixture';
-
-type FixtureWindow = Window & {
-  __designScene: WorkspaceScene;
-  __questRenderer: THREE.WebGLRenderer;
-  __questThree: typeof THREE;
-  __questControllers: THREE.Group[];
-};
 
 const root = process.env.MUX_XR_TEST_ROOT;
 if (process.env.MUX_XR_PRIVATE_TEST !== '1' || !root)

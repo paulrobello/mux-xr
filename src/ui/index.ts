@@ -1,3 +1,4 @@
+import './styles.css';
 import {
   createModifierState,
   keyboardDimensions,
@@ -5,6 +6,13 @@ import {
   validateHandColor,
   validateWeatherZip,
 } from '@par/xr-workspace';
+import { createCommandStatsStore, createCommandStore } from '../commands/store';
+import {
+  exportServerCommands,
+  mergeImportedCommands,
+  reorderCommands,
+  workspaceScope,
+} from '../commands/transfer';
 import type {
   BackgroundMode,
   KeyModifiers,
@@ -12,14 +20,11 @@ import type {
   PanelArrangement,
   QuickCommand,
   QuickCommandEntry,
-  QuickCommandStats,
   TerminalColorMode,
   TerminalStatus,
   WorkspaceSnapshot,
 } from '../contracts';
-import { isBackgroundMode } from '../contracts';
 import { getKeyHelp } from '../control-help';
-import { reportSwallowed } from '../diagnostics';
 import { HOST_CLIPBOARD_SETUP } from '../host-clipboard';
 import {
   commandServerKey,
@@ -31,57 +36,39 @@ import {
   serializeCommandFile,
   toSharedCommands,
 } from '../quick-commands';
-import type { DictationAction, DictationState } from '../speech-input';
 import {
-  DEFAULT_TERMINAL_FILTERING,
-  type TerminalFiltering,
-  validateTerminalFiltering,
-} from '../terminal/filtering';
+  agentRosterLayout,
+  browserStorage,
+  createSettingsStore,
+  type SettingsStore,
+  settingChanged,
+  type WorkspaceSettings,
+} from '../settings/store';
+import type { DictationAction, DictationState } from '../speech-input';
+import { type TerminalFiltering, validateTerminalFiltering } from '../terminal/filtering';
 import { type PaneProcess, processBadge } from '../terminal/lifecycle';
 import { terminalKeyLabel } from '../terminal/protocol';
 import {
   AGE_TOKENS,
-  AGENT_ROWS_CHOICES,
-  AGENT_TOKENS,
   AGENTS_SORTS,
-  type AgentRosterLayout,
   type AgentRosterRow,
-  type AgentRowsChoice,
-  type AgentsSort,
   agentRowLines,
   agentRowParts,
   agentRowsSignature,
   agentStateTone,
   agentTokenText,
-  DEFAULT_AGENT_ROSTER_LAYOUT,
-  parseAgentRows,
-  resolveAgentRows,
 } from '../workspace/agent-roster';
-import {
-  BUTTON_FUNCTION_LABELS,
-  BUTTON_FUNCTIONS,
-  CONTROLLER_BUTTON_LABELS,
-  CONTROLLER_BUTTONS,
-  type ControllerButton,
-  DEFAULT_BUTTON_MAP,
-} from '../workspace/controller-buttons';
-import {
-  DEFAULT_HIERARCHY_STYLE,
-  type HierarchyStyle,
-  validateHierarchyStyle,
-} from '../workspace/hierarchy-style';
-import { validateKeyboardCurvature } from '../workspace/keyboard-curvature';
+import { type HierarchyStyle, validateHierarchyStyle } from '../workspace/hierarchy-style';
 import type { KeyborbMode } from '../workspace/keyborb';
 import { validateKeyborbMode } from '../workspace/keyborb';
 import { XR_ENTRY_LABELS, type XrEntryMode } from '../xr/entry';
+import { mountSettingsPanel } from './settings-panel';
 
 export { validateHandColor };
 
 import type { PaneCreationState } from '../workspace/pane-create';
 import {
-  DEFAULT_WINDOW_PREFERENCES,
   MAX_TERMINAL_CURVATURE_DEGREES,
-  validateWindowPreferences,
   type WindowPreferences,
 } from '../workspace/window-preferences';
 
@@ -128,46 +115,6 @@ export interface UICallbacks {
   onDismissNotice?(): void;
   onDictationAction?(action: DictationAction): void;
   onDictationDraftChange?(text: string): void;
-}
-
-export interface WorkspaceSettings {
-  version: 1;
-  endpoint: string;
-  background: BackgroundMode;
-  gazeInput: boolean;
-  colorMode: TerminalColorMode;
-  keyboardBackground: boolean;
-  keyboardCurvature: number;
-  arrangement: PanelArrangement;
-  filtering: TerminalFiltering;
-  windowPreferences: WindowPreferences;
-  hierarchyStyle: HierarchyStyle;
-  keyborbMode: KeyborbMode;
-  uiSounds: boolean;
-  /** `#rrggbb` tint for the XR hands and arms, or empty for the default color. */
-  handColor: string;
-  /** `#rrggbb` arm tint, or empty to match the hands. */
-  armColor: string;
-  /** `#rrggbb` XR interface accent, or empty for the default cyan. */
-  accentColor: string;
-  /** `#rrggbb` XR environment accent, or empty to match the interface accent. */
-  environmentAccentColor: string;
-  /** Five-digit US ZIP for the weather widget, or empty when none is set. */
-  weatherZip: string;
-  /** par-mux `agent-rows` preset, or `custom` for {@link agentRowsCustom}. */
-  agentRows: AgentRowsChoice;
-  agentRowsCustom: string;
-  agentsSort: AgentsSort;
-}
-
-/** The roster layout a settings value selects. */
-export function agentRosterLayout(
-  settings: Pick<WorkspaceSettings, 'agentRows' | 'agentRowsCustom' | 'agentsSort'>,
-): AgentRosterLayout {
-  return {
-    rows: resolveAgentRows(settings.agentRows, settings.agentRowsCustom),
-    sort: settings.agentsSort,
-  };
 }
 
 export interface WorkspaceUI {
@@ -229,281 +176,11 @@ export interface WorkspaceUI {
   setKeyboardCurvature(degrees: number, persist?: boolean): void;
 }
 
-export interface CommandStore {
-  get(scopeKey: string): QuickCommand[];
-  set(scopeKey: string, commands: QuickCommand[]): boolean;
-  all(): Record<string, QuickCommand[]>;
-  setAll(values: Record<string, QuickCommand[]>): boolean;
-}
-
-const SETTINGS_KEY = 'mux-xr:settings:v1';
 // The swatch the color picker shows while the hands keep their default color.
-const DEFAULT_HAND_SWATCH = '#b4b4b4';
+const _DEFAULT_HAND_SWATCH = '#b4b4b4';
 // The swatch the accent pickers show while the XR accent stays the default cyan.
-const DEFAULT_ACCENT_SWATCH = '#68d6ff';
+const _DEFAULT_ACCENT_SWATCH = '#68d6ff';
 const AGENT_AGE_REFRESH_MS = 15_000;
-const COMMANDS_KEY = 'mux-xr:commands:v1';
-const COMMAND_STATS_KEY = 'mux-xr:command-stats:v1';
-
-export interface CommandStatsStore {
-  get(server: string, id: string): QuickCommandStats | undefined;
-  record(server: string, id: string, at: number): boolean;
-}
-
-export function createCommandStatsStore(
-  storage: Storage | undefined = typeof localStorage === 'undefined' ? undefined : localStorage,
-): CommandStatsStore {
-  const read = (): Record<string, QuickCommandStats> => {
-    try {
-      const parsed: unknown = JSON.parse(storage?.getItem(COMMAND_STATS_KEY) ?? '{}');
-      if (!parsed || typeof parsed !== 'object') return {};
-      const result: Record<string, QuickCommandStats> = {};
-      for (const [key, value] of Object.entries(parsed)) {
-        const entry = value as Partial<QuickCommandStats> | null;
-        if (
-          entry &&
-          Number.isFinite(entry.lastRunAt) &&
-          Number.isInteger(entry.runCount) &&
-          Number(entry.runCount) > 0
-        )
-          result[key] = { lastRunAt: Number(entry.lastRunAt), runCount: Number(entry.runCount) };
-      }
-      return result;
-    } catch {
-      return {};
-    }
-  };
-  return {
-    get: (server, id) => read()[`${server}::${id}`],
-    record(server, id, at) {
-      const values = read();
-      const key = `${server}::${id}`;
-      values[key] = { lastRunAt: at, runCount: (values[key]?.runCount ?? 0) + 1 };
-      try {
-        storage?.setItem(COMMAND_STATS_KEY, JSON.stringify(values));
-        return true;
-      } catch (error) {
-        reportSwallowed('ui.command-stats-save', error);
-        return false;
-      }
-    },
-  };
-}
-const DEFAULT_SETTINGS: WorkspaceSettings = {
-  version: 1,
-  endpoint: '',
-  background: 'observatory',
-  gazeInput: false,
-  colorMode: 'comfort',
-  keyboardBackground: true,
-  keyboardCurvature: 0,
-  arrangement: 'arc',
-  filtering: { ...DEFAULT_TERMINAL_FILTERING },
-  windowPreferences: { ...DEFAULT_WINDOW_PREFERENCES },
-  hierarchyStyle: DEFAULT_HIERARCHY_STYLE,
-  keyborbMode: 'auto',
-  uiSounds: true,
-  handColor: '',
-  weatherZip: '',
-  armColor: '',
-  accentColor: '',
-  environmentAccentColor: '',
-  agentRows: 'full',
-  agentRowsCustom: '',
-  agentsSort: DEFAULT_AGENT_ROSTER_LAYOUT.sort,
-};
-
-export function workspaceScope(endpoint: string, workspaceId: string): string {
-  return `${commandServerKey(endpoint)}::${workspaceId}`;
-}
-
-/** Every saved command for one server, with workspaceId restored from its scope key. */
-export function exportServerCommands(
-  values: Record<string, QuickCommand[]>,
-  endpoint: string,
-): QuickCommand[] {
-  const prefix = workspaceScope(endpoint, '');
-  const result: QuickCommand[] = [];
-  for (const [scope, commands] of Object.entries(values)) {
-    if (!scope.startsWith(prefix)) continue;
-    const workspaceId = scope.slice(prefix.length);
-    for (const command of commands) {
-      const { workspaceId: _ignored, ...rest } = copyCommand(command);
-      result.push(workspaceId === '*' ? rest : { ...rest, workspaceId });
-    }
-  }
-  return result;
-}
-
-/** Merges imported commands by id into one server's scopes; an imported command replaces any saved copy. */
-export function mergeImportedCommands(
-  values: Record<string, QuickCommand[]>,
-  endpoint: string,
-  imported: QuickCommand[],
-): { values: Record<string, QuickCommand[]>; added: number; updated: number; skipped: number } {
-  const prefix = workspaceScope(endpoint, '');
-  const next: Record<string, QuickCommand[]> = {};
-  for (const [scope, commands] of Object.entries(values)) next[scope] = [...commands];
-  let added = 0;
-  let updated = 0;
-  let skipped = 0;
-  const seen = new Set<string>();
-  for (const command of imported) {
-    if (isSharedCommand(command) || !isCommand(command) || seen.has(command.id)) {
-      skipped++;
-      continue;
-    }
-    seen.add(command.id);
-    const scope = workspaceScope(endpoint, command.workspaceId ?? '*');
-    let existed = false;
-    for (const [key, commands] of Object.entries(next)) {
-      if (key === scope || !key.startsWith(prefix)) continue;
-      const kept = commands.filter((item) => item.id !== command.id);
-      if (kept.length !== commands.length) existed = true;
-      next[key] = kept;
-    }
-    const list = next[scope] ?? [];
-    const index = list.findIndex((item) => item.id === command.id);
-    if (index >= 0) list[index] = copyCommand(command);
-    else list.push(copyCommand(command));
-    next[scope] = list;
-    if (existed || index >= 0) updated++;
-    else added++;
-  }
-  return { values: next, added, updated, skipped };
-}
-
-function normalizeScopeKey(scope: string): string {
-  const split = scope.lastIndexOf('::');
-  if (split < 0) return scope;
-  return workspaceScope(scope.slice(0, split), scope.slice(split + 2));
-}
-
-export function reorderCommands(
-  commands: QuickCommand[],
-  from: number,
-  to: number,
-): QuickCommand[] {
-  if (from < 0 || from >= commands.length || to < 0 || to >= commands.length || from === to)
-    return [...commands];
-  const result = [...commands];
-  const [command] = result.splice(from, 1);
-  result.splice(to, 0, command);
-  return result;
-}
-
-export function validateSettings(value: unknown): WorkspaceSettings {
-  if (!value || typeof value !== 'object') return { ...DEFAULT_SETTINGS };
-  const candidate = value as Partial<WorkspaceSettings>;
-  return {
-    version: 1,
-    endpoint: typeof candidate.endpoint === 'string' ? candidate.endpoint : '',
-    background: isBackgroundMode(candidate.background)
-      ? candidate.background
-      : DEFAULT_SETTINGS.background,
-    gazeInput: candidate.gazeInput === true,
-    colorMode:
-      candidate.colorMode === 'original' || candidate.colorMode === 'monochrome'
-        ? candidate.colorMode
-        : 'comfort',
-    keyboardBackground: candidate.keyboardBackground !== false,
-    keyboardCurvature: validateKeyboardCurvature(candidate.keyboardCurvature),
-    filtering: validateTerminalFiltering(candidate.filtering),
-    windowPreferences: validateWindowPreferences(candidate.windowPreferences),
-    hierarchyStyle: validateHierarchyStyle(candidate.hierarchyStyle),
-    keyborbMode: validateKeyborbMode(candidate.keyborbMode),
-    uiSounds: candidate.uiSounds !== false,
-    handColor: validateHandColor(candidate.handColor),
-    armColor: validateHandColor(candidate.armColor),
-    accentColor: validateHandColor(candidate.accentColor),
-    environmentAccentColor: validateHandColor(candidate.environmentAccentColor),
-    weatherZip: validateWeatherZip(candidate.weatherZip),
-    agentRows: AGENT_ROWS_CHOICES.includes(candidate.agentRows as AgentRowsChoice)
-      ? (candidate.agentRows as AgentRowsChoice)
-      : DEFAULT_SETTINGS.agentRows,
-    agentRowsCustom:
-      typeof candidate.agentRowsCustom === 'string' ? candidate.agentRowsCustom.slice(0, 500) : '',
-    agentsSort: AGENTS_SORTS.includes(candidate.agentsSort as AgentsSort)
-      ? (candidate.agentsSort as AgentsSort)
-      : DEFAULT_SETTINGS.agentsSort,
-    arrangement:
-      candidate.arrangement === 'row' ||
-      candidate.arrangement === 'grid' ||
-      candidate.arrangement === 'sphere' ||
-      candidate.arrangement === 'arc'
-        ? candidate.arrangement
-        : DEFAULT_SETTINGS.arrangement,
-  };
-}
-
-export function createCommandStore(
-  storage: Storage | undefined = typeof localStorage === 'undefined' ? undefined : localStorage,
-): CommandStore {
-  const read = (): Record<string, QuickCommand[]> => {
-    if (!storage) return {};
-    try {
-      const parsed: unknown = JSON.parse(storage.getItem(COMMANDS_KEY) ?? '{}');
-      if (!parsed || typeof parsed !== 'object') return {};
-      const result: Record<string, QuickCommand[]> = {};
-      let migrated = false;
-      for (const [scope, value] of Object.entries(parsed)) {
-        if (!Array.isArray(value)) continue;
-        const key = normalizeScopeKey(scope);
-        if (key !== scope) migrated = true;
-        const merged = result[key] ?? [];
-        for (const command of value.filter(isCommand).map(copyCommand))
-          if (!merged.some((item) => item.id === command.id)) merged.push(command);
-        result[key] = merged;
-      }
-      if (migrated) write(result);
-      return result;
-    } catch {
-      return {};
-    }
-  };
-  const write = (values: Record<string, QuickCommand[]>): boolean => {
-    try {
-      storage?.setItem(COMMANDS_KEY, JSON.stringify(values));
-      return true;
-    } catch (error) {
-      reportSwallowed('ui.commands-save', error);
-      return false;
-    }
-  };
-  return {
-    get(scopeKey) {
-      return read()[scopeKey] ?? [];
-    },
-    all: read,
-    setAll(values) {
-      const next: Record<string, QuickCommand[]> = {};
-      for (const [scope, commands] of Object.entries(values))
-        if (commands.length) next[scope] = commands.filter(isCommand).map(copyCommand);
-      return write(next);
-    },
-    set(scopeKey, commands) {
-      const values = read();
-      const next = commands.filter(isCommand).map(copyCommand);
-      const previous = values[scopeKey];
-      values[scopeKey] = next;
-      if (write(values)) return true;
-      if (previous) values[scopeKey] = previous;
-      else delete values[scopeKey];
-      return false;
-    },
-  };
-}
-
-export function loadSettings(
-  storage: Storage | undefined = typeof localStorage === 'undefined' ? undefined : localStorage,
-): WorkspaceSettings {
-  if (!storage) return { ...DEFAULT_SETTINGS };
-  try {
-    return validateSettings(JSON.parse(storage.getItem(SETTINGS_KEY) ?? 'null'));
-  } catch {
-    return { ...DEFAULT_SETTINGS };
-  }
-}
 
 function icon(name: 'close' | 'link' | 'xr' | 'send' | 'plus' | 'settings'): string {
   const paths: Record<string, string> = {
@@ -530,11 +207,47 @@ function connectionActionTitle(title: string, status: TerminalStatus | undefined
     : `Reconnect ${title} view to the running terminal`;
 }
 
-export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks): WorkspaceUI {
-  const storage = typeof localStorage === 'undefined' ? undefined : localStorage;
-  let settings = loadSettings(storage);
-  if (!settings.endpoint && typeof location !== 'undefined')
-    settings = { ...settings, endpoint: location.origin };
+export interface WorkspaceUIOptions {
+  /** The settings both presenters share; a private store over `localStorage` when omitted. */
+  settings?: SettingsStore;
+}
+
+export function mountWorkspaceUI(
+  container: HTMLElement,
+  callbacks: UICallbacks,
+  options: WorkspaceUIOptions = {},
+): WorkspaceUI {
+  const storage = browserStorage();
+  const settingsStore = options.settings ?? createSettingsStore(storage);
+  if (!settingsStore.get().endpoint && typeof location !== 'undefined')
+    settingsStore.update({ endpoint: location.origin }, { persist: false });
+  let settings = settingsStore.get();
+  // Each control registers the settings it shows, so a change from XR or another presenter
+  // re-renders exactly the controls whose fields moved.
+  const settingsViews: Array<{ keys: Array<keyof WorkspaceSettings>; refresh: () => void }> = [];
+  const bindSettings = (keys: Array<keyof WorkspaceSettings>, refresh: () => void): void => {
+    settingsViews.push({ keys, refresh });
+  };
+  const refreshSettingsViews = (changed: (key: keyof WorkspaceSettings) => boolean): void => {
+    for (const view of settingsViews) if (view.keys.some(changed)) view.refresh();
+  };
+  // Re-renders the patched controls even when the store ignored the patch, because a control may
+  // hold a raw typed value that validation changed back to the stored one.
+  const saveSettings = (
+    patch: Partial<WorkspaceSettings>,
+    saveOptions?: { persist?: boolean },
+  ): void => {
+    const saved = settingsStore.update(patch, saveOptions);
+    settings = settingsStore.get();
+    refreshSettingsViews((key) => key in patch);
+    if (!saved)
+      qs<HTMLElement>('[data-detail]').textContent = 'Settings could not be saved on this device.';
+  };
+  const stopSettings = settingsStore.subscribe((next, previous) => {
+    settings = settingsStore.get();
+    refreshSettingsViews((key) => settingChanged(next, previous, key));
+    callbacks.onSettingsChange?.(next);
+  });
   let snapshot: WorkspaceSnapshot = { panes: [] };
   let activePaneId: string | undefined;
   let attachedPaneIds: string[] = [];
@@ -598,7 +311,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
         `<button class="key" data-key="${escapeHtml(entry.key)}" data-modifier="${entry.modifier ?? ''}" style="--key-x:${entry.x};--key-y:${entry.y};--key-width:${entry.width};--key-height:${entry.height}" aria-pressed="false" aria-label="${escapeHtml(entry.key === 'Backspace' ? 'Backspace' : entry.label)}" title="${escapeHtml(keyboardTitle(entry.key))}">${escapeHtml(entry.label)}</button>`,
     )
     .join('');
-  root.innerHTML = `<style>${CSS}</style><header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><section class="agents" data-agents-section hidden aria-label="Agent roster"><div class="side-heading"><span>Agents <span data-agent-count></span></span><button data-action="agents-sort" class="mini-text" aria-label="Agent order" title="Change the agent order"></button></div><div class="agent-list" data-agents></div></section><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. Creates default-shell terminals only when the streamer allows it.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="update-notice" data-update-notice hidden role="status"><span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button></div><div class="workspace-notice" data-notice hidden role="status"><span data-notice-text></span><button data-action="dismiss-notice" class="icon-btn" aria-label="Dismiss notice" title="Dismiss notice">×</button></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button><button data-action="pin-command" class="text-btn" title="Pin or unpin the selected quick command in XR">Pin / unpin</button><button data-action="export-commands" class="text-btn" title="Download every quick command for this server as JSON">Export</button><button data-action="import-commands" class="text-btn" title="Merge quick commands from an exported JSON file">Import</button><input type="file" accept="application/json,.json" data-command-import hidden></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${keyboardMarkup}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option><option value="hangar">Hangar deck</option><option value="deep-water">Deep-water station</option><option value="studio">Minimal studio</option><option value="desert">Desert night</option><option value="aurora">Aurora tundra</option><option value="koi">Koi garden</option><option value="summit">Cloud summit</option><option value="rooftop">Rain rooftop</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Highlight the pane at the center of your view.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="desk-window" class="secondary">${XR_ENTRY_LABELS.desk}</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
+  root.innerHTML = `<header class="mux-top"><div class="brand"><span class="brand-mark">M</span><span>MUX / XR</span><span class="demo-badge" hidden>DEMO</span></div><div class="connection"><span class="status-dot"></span><span class="status-copy">Ready to connect</span></div><div class="top-actions"><button data-action="demo" class="quiet">Demo</button><button data-action="xr" class="quiet" aria-label="Enter immersive XR">${icon('xr')} Enter XR</button><button data-action="settings" class="icon-btn" aria-label="Open settings" title="Open workspace settings">${icon('settings')}</button></div></header><div class="mux-body"><aside class="sidebar"><section class="agents" data-agents-section hidden aria-label="Agent roster"><div class="side-heading"><span>Agents <span data-agent-count></span></span><button data-action="agents-sort" class="mini-text" aria-label="Agent order" title="Change the agent order"></button></div><div class="agent-list" data-agents></div></section><div class="side-heading"><span>Workspace</span><button data-action="refresh" class="mini-btn" aria-label="Refresh panes" title="Refresh workspace panes">${icon('settings')}</button></div><div class="tree" data-tree><div class="empty-tree">Connect to see panes</div></div><div class="setup"><label for="endpoint">Streamer endpoint</label><div class="endpoint-row"><input id="endpoint" type="url" placeholder="wss://your-computer.local/stream" autocomplete="url"><button data-action="connect" class="connect-btn" aria-label="Connect" title="Connect to the streamer endpoint">${icon('link')}</button></div><p class="hint">LAN WSS or WS endpoint. Creates default-shell terminals only when the streamer allows it.</p></div></aside><main class="stage"><div class="stage-head"><div><h1>Terminal workspace</h1><p class="stage-sub" data-detail>Select a pane to begin monitoring.</p></div><div class="stage-tools"><button data-action="commands" class="secondary">Commands</button><button data-action="keyboard" class="secondary">Keyboard</button></div></div><div class="update-notice" data-update-notice hidden role="status"><span>Update available</span><button data-action="reload-update" class="secondary" aria-label="Reload to apply update" title="Reload to apply the available update">Reload</button></div><div class="workspace-notice" data-notice hidden role="status"><span data-notice-text></span><button data-action="dismiss-notice" class="icon-btn" aria-label="Dismiss notice" title="Dismiss notice">×</button></div><div class="panes" data-panes><div class="empty-state"><div class="empty-orbit"></div><h2>No panes attached</h2><p>Choose a pane from the workspace tree to attach it to the XR scene.</p></div></div><div class="scene-host" data-scene-host aria-label="XR scene host"></div></main></div><div class="drawer" data-drawer hidden><div class="drawer-head"><strong data-drawer-heading>Commands</strong><button data-action="close-drawer" class="icon-btn" aria-label="Close drawer" title="Close input drawer">${icon('close')}</button></div><div class="command-row" data-command-controls><select data-command-scope aria-label="Command scope"><option value="global">Global commands</option><option value="workspace">Workspace commands</option></select><select data-command-select aria-label="Quick command"><option value="">Choose a quick command</option></select><button data-action="run-command" class="send-btn" title="Run the selected quick command">Run</button></div><div class="command-edit" data-command-controls><button data-action="add-command" class="text-btn" title="Create a new quick command">${icon('plus')} Add command</button><button data-action="remove-command" class="text-btn" title="Delete the selected quick command">Remove selected</button><button data-action="pin-command" class="text-btn" title="Pin or unpin the selected quick command in XR">Pin / unpin</button><button data-action="export-commands" class="text-btn" title="Download every quick command for this server as JSON">Export</button><button data-action="import-commands" class="text-btn" title="Merge quick commands from an exported JSON file">Import</button><input type="file" accept="application/json,.json" data-command-import hidden></div><div class="compose-row" data-keyboard-controls><textarea data-compose rows="2" placeholder="Compose text for the selected pane" aria-label="Compose terminal text"></textarea><button data-action="send-text" class="send-btn" aria-label="Send composed text" title="Send composed text to the selected pane">${icon('send')}</button></div><div class="keyboard" data-keyboard data-keyboard-controls>${keyboardMarkup}</div></div><div class="settings-panel" data-settings hidden><div class="drawer-head"><strong>Workspace settings</strong><button data-action="close-settings" class="icon-btn" aria-label="Close settings" title="Close settings">${icon('close')}</button></div><label>Background<select data-background><option value="observatory">Observatory</option><option value="gradient">Gradient</option><option value="black">Black</option><option value="hangar">Hangar deck</option><option value="deep-water">Deep-water station</option><option value="studio">Minimal studio</option><option value="desert">Desert night</option><option value="aurora">Aurora tundra</option><option value="koi">Koi garden</option><option value="summit">Cloud summit</option><option value="rooftop">Rain rooftop</option></select></label><label class="check"><input type="checkbox" data-gaze> Gaze emphasis <span>Highlight the pane at the center of your view.</span></label><button data-action="passthrough" class="secondary">Enter passthrough</button><button data-action="desk-window" class="secondary">${XR_ENTRY_LABELS.desk}</button><button data-action="reset" class="text-btn" title="Reset pane layout without deleting commands">Reset local arrangement</button></div>`;
   const keyboardElement = root.querySelector<HTMLElement>('[data-keyboard]');
   root
     .querySelector('style')
@@ -689,484 +402,25 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   root.querySelector('.stage-tools')?.append(widgetsButton);
   const settingsPanel = root.querySelector<HTMLElement>('[data-settings]');
   root.querySelector('[data-gaze]')?.parentElement?.remove();
-  let arrangementSelect: HTMLSelectElement | null = null;
-  let arrangementApply: HTMLButtonElement | null = null;
-  let hierarchyStyleSelect: HTMLSelectElement | null = null;
-  let agentSortSelect: HTMLSelectElement | null = null;
-  let keyborbModeSelect: HTMLSelectElement | null = null;
   let filteringMaxAnisotropy = 16;
-  let updateWindowPreferenceControls = (): void => undefined;
-  let updateHandColorControls = (): void => undefined;
   const updateArrangementAvailability = (): void => {
-    if (arrangementApply) arrangementApply.disabled = attachedPaneIds.length === 0;
+    settingsPanelControls?.setArrangementAvailable(attachedPaneIds.length > 0);
   };
-  if (settingsPanel) {
-    const colorLabel = document.createElement('label');
-    colorLabel.textContent = 'Terminal colors';
-    const colorSelect = document.createElement('select');
-    colorSelect.dataset.colorMode = 'true';
-    colorSelect.setAttribute('aria-label', 'Terminal color mode');
-    colorSelect.innerHTML =
-      '<option value="comfort">Comfort colors</option><option value="original">Original colors</option><option value="monochrome">Monochrome</option>';
-    colorLabel.append(colorSelect);
-    settingsPanel.insertBefore(
-      colorLabel,
-      settingsPanel.querySelector('[data-background]')?.parentElement ?? null,
-    );
-    const keyboardBackground = document.createElement('label');
-    keyboardBackground.className = 'check';
-    keyboardBackground.innerHTML =
-      '<input type="checkbox" data-keyboard-background> Keyboard background <span>Show the keyboard panel background in XR.</span>';
-    settingsPanel.insertBefore(
-      keyboardBackground,
-      settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
-    );
-    const keyboardCurvature = document.createElement('label');
-    keyboardCurvature.innerHTML =
-      '<span>Keyboard curvature <span data-keyboard-curvature-value>0°</span></span><input data-keyboard-curvature type="range" min="0" max="100" step="1" aria-label="Keyboard curvature in degrees">';
-    settingsPanel.insertBefore(
-      keyboardCurvature,
-      settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
-    );
-    const keyboardCurvatureInput = keyboardCurvature.querySelector<HTMLInputElement>(
-      '[data-keyboard-curvature]',
-    );
-    const keyboardCurvatureValue = keyboardCurvature.querySelector<HTMLElement>(
-      '[data-keyboard-curvature-value]',
-    );
-    if (!keyboardCurvatureInput || !keyboardCurvatureValue)
-      throw new Error('Keyboard curvature control missing');
-    const updateKeyboardCurvature = (): void => {
-      keyboardCurvatureInput.value = String(settings.keyboardCurvature);
-      keyboardCurvatureValue.textContent = `${settings.keyboardCurvature}°`;
-    };
-    keyboardCurvatureInput.addEventListener('input', () => {
-      settings = {
-        ...settings,
-        keyboardCurvature: validateKeyboardCurvature(Number(keyboardCurvatureInput.value)),
-      };
-      updateKeyboardCurvature();
-      saveSettings();
-    });
-    updateKeyboardCurvature();
-    const keyborb = document.createElement('label');
-    keyborb.innerHTML =
-      '<span>Keyborb</span><select data-keyborb-mode aria-label="Keyborb"><option value="off">Off</option><option value="on">On</option><option value="auto">Auto</option></select><small>Auto uses Keyborb with hand tracking.</small>';
-    settingsPanel.insertBefore(
-      keyborb,
-      settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
-    );
-    keyborbModeSelect = keyborb.querySelector('[data-keyborb-mode]');
-    if (!keyborbModeSelect) throw new Error('Keyborb control missing');
-    keyborbModeSelect.value = settings.keyborbMode;
-    const uiSounds = document.createElement('label');
-    uiSounds.className = 'check';
-    uiSounds.innerHTML =
-      '<input type="checkbox" data-ui-sounds> UI sounds <span>Play short clicks in XR and pulse the controllers on presses, grabs and scrolling.</span>';
-    settingsPanel.insertBefore(
-      uiSounds,
-      settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
-    );
-    const weatherZip = document.createElement('label');
-    weatherZip.innerHTML =
-      '<span>Weather ZIP</span><input data-weather-zip type="text" inputmode="numeric" maxlength="5" pattern="[0-9]{5}" placeholder="5-digit US ZIP" aria-label="Weather ZIP code"><small>US ZIP for the XR weather widget; leave empty for none.</small>';
-    settingsPanel.insertBefore(
-      weatherZip,
-      settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
-    );
-    // A color picker plus a button that clears the color back to empty.
-    const colorPicker = (
-      key: 'handColor' | 'armColor' | 'accentColor' | 'environmentAccentColor',
-      label: string,
-      reset: string,
-      resetTitle: string,
-      swatch: () => string,
-    ): (() => void) => {
-      const row = document.createElement('div');
-      const id = {
-        handColor: 'hand',
-        armColor: 'arm',
-        accentColor: 'accent',
-        environmentAccentColor: 'environment-accent',
-      }[key];
-      row.innerHTML = `<label for="mux-${id}-color">${label}</label><div class="hand-color-row"><input id="mux-${id}-color" type="color" data-${id}-color><button type="button" data-action="${id}-color-default" class="text-btn" title="${resetTitle}">${reset}</button></div>`;
-      settingsPanel.insertBefore(row, settingsPanel.querySelector('[data-action="passthrough"]'));
-      const input = row.querySelector<HTMLInputElement>(`[data-${id}-color]`);
-      const clear = row.querySelector<HTMLButtonElement>(`[data-action="${id}-color-default"]`);
-      if (!input || !clear) throw new Error(`${label} control missing`);
-      const update = (): void => {
-        input.value = settings[key] || swatch();
-        clear.disabled = !settings[key];
-      };
-      input.addEventListener('input', () => {
-        settings = { ...settings, [key]: validateHandColor(input.value) };
-        updateHandColorControls();
-        saveSettings();
-      });
-      clear.addEventListener('click', () => {
-        settings = { ...settings, [key]: '' };
-        updateHandColorControls();
-        saveSettings();
-      });
-      return update;
-    };
-    const updateHandPicker = colorPicker(
-      'handColor',
-      'Hand color',
-      'Default',
-      'Use the default hand color',
-      () => DEFAULT_HAND_SWATCH,
-    );
-    const updateArmPicker = colorPicker(
-      'armColor',
-      'Arm color',
-      'Match hands',
-      'Color the arms like the hands',
-      () => settings.handColor || DEFAULT_HAND_SWATCH,
-    );
-    const updateAccentPicker = colorPicker(
-      'accentColor',
-      'XR accent color',
-      'Default',
-      'Use the default cyan accent',
-      () => DEFAULT_ACCENT_SWATCH,
-    );
-    const updateEnvironmentAccentPicker = colorPicker(
-      'environmentAccentColor',
-      'Environment accent',
-      'Match accent',
-      'Tint environment glows like the XR accent',
-      () => settings.accentColor || DEFAULT_ACCENT_SWATCH,
-    );
-    updateHandColorControls = () => {
-      updateHandPicker();
-      updateArmPicker();
-      updateAccentPicker();
-      updateEnvironmentAccentPicker();
-    };
-    updateHandColorControls();
-    const filteringControls = document.createElement('div');
-    filteringControls.innerHTML =
-      '<label>Terminal filtering<select data-filter-mode aria-label="Terminal filtering"><option value="nearest">Nearest pixels</option><option value="linear">Linear (sharp)</option><option value="mipmap-nearest">Mipmap bilinear</option><option value="mipmap-linear">Mipmap trilinear (smooth)</option></select></label><label data-filter-anisotropy-row>Anisotropy (mipmap modes)<select data-filter-anisotropy aria-label="Terminal anisotropy"><option value="1">Off</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option><option value="16">16x</option></select><span>Anisotropy matters for oblique minification. 8x and 16x may look the same front-facing.</span></label><label class="check"><input type="checkbox" data-filter-gaze> Sharper gazed terminal <span>Use sharp linear sampling while looking at a terminal.</span></label><label data-filter-distance-row>Gaze max distance<input data-filter-distance type="number" min="0.25" max="20" step="0.25" aria-label="Gaze maximum distance in meters"><span>Sharper gaze ignores mipmaps within this distance.</span></label>';
-    settingsPanel.insertBefore(
-      filteringControls,
-      settingsPanel.querySelector('[data-action="passthrough"]'),
-    );
-    const filterMode = filteringControls.querySelector<HTMLSelectElement>('[data-filter-mode]');
-    const filterAnisotropy = filteringControls.querySelector<HTMLSelectElement>(
-      '[data-filter-anisotropy]',
-    );
-    const filterGaze = filteringControls.querySelector<HTMLInputElement>('[data-filter-gaze]');
-    const filterDistance =
-      filteringControls.querySelector<HTMLInputElement>('[data-filter-distance]');
-    const filterAnisotropyRow = filteringControls.querySelector<HTMLElement>(
-      '[data-filter-anisotropy-row]',
-    );
-    const filterDistanceRow = filteringControls.querySelector<HTMLElement>(
-      '[data-filter-distance-row]',
-    );
-    if (
-      !filterMode ||
-      !filterAnisotropy ||
-      !filterGaze ||
-      !filterDistance ||
-      !filterAnisotropyRow ||
-      !filterDistanceRow
-    )
-      throw new Error('Filtering controls missing');
-    const updateFilteringVisibility = (): void => {
-      const mipmapMode =
-        filterMode.value === 'mipmap-nearest' || filterMode.value === 'mipmap-linear';
-      filterAnisotropyRow.hidden = !mipmapMode;
-      filterDistanceRow.hidden = !mipmapMode || !filterGaze.checked;
-    };
-    const changeFiltering = (): void => {
-      settings = {
-        ...settings,
-        filtering: validateTerminalFiltering({
-          mode: filterMode.value,
-          anisotropy: Number(filterAnisotropy.value),
-          gazeClarity: filterGaze.checked,
-          gazeMaxDistance: Number(filterDistance.value),
-        }),
-      };
-      filterDistance.value = String(settings.filtering.gazeMaxDistance);
-      updateFilteringVisibility();
-      saveSettings();
-    };
-    filterMode.addEventListener('change', changeFiltering);
-    filterAnisotropy.addEventListener('change', changeFiltering);
-    filterGaze.addEventListener('change', changeFiltering);
-    filterDistance.addEventListener('change', changeFiltering);
-    filterMode.value = settings.filtering.mode;
-    filterAnisotropy.value = String(settings.filtering.anisotropy);
-    filterGaze.checked = settings.filtering.gazeClarity;
-    filterDistance.value = String(settings.filtering.gazeMaxDistance);
-    updateFilteringVisibility();
-    const hierarchyStyle = document.createElement('label');
-    hierarchyStyle.innerHTML =
-      '<span>Hierarchy style</span><select data-hierarchy-style aria-label="Hierarchy style"><option value="helix">Helix Navigator</option><option value="spatial-docks">Spatial Docks</option></select>';
-    settingsPanel.insertBefore(
-      hierarchyStyle,
-      settingsPanel.querySelector('[data-action="passthrough"]'),
-    );
-    hierarchyStyleSelect = hierarchyStyle.querySelector('[data-hierarchy-style]');
-    if (!hierarchyStyleSelect) throw new Error('Hierarchy style control missing');
-    hierarchyStyleSelect.value = settings.hierarchyStyle;
-    const agentControls = document.createElement('fieldset');
-    agentControls.dataset.agentRoster = 'true';
-    agentControls.innerHTML = `<legend>Agent roster</legend><label>Rows<select data-agent-rows aria-label="Agent roster rows"><option value="full">Full (state, agent, title / workspace, project, pane / message)</option><option value="default">par-mux default (state, workspace, project / agent)</option><option value="compact">Compact (state, agent)</option><option value="detailed">Detailed (state, workspace, project / agent, pane)</option><option value="verbose">Verbose (state, agent / message)</option><option value="custom">Custom</option></select></label><label data-agent-rows-custom-row>Custom rows<input data-agent-rows-custom type="text" spellcheck="false" placeholder="state_icon, workspace, project / agent" aria-label="Custom agent roster rows"><small data-agent-rows-hint></small></label><label>Order<select data-agents-sort aria-label="Agent order"><option value="pane">Pane (rows stay put)</option><option value="grouped">Grouped by workspace, urgent first</option><option value="priority">Priority, most urgent first</option></select></label>`;
-    settingsPanel.insertBefore(agentControls, settingsPanel.querySelector('[data-action="reset"]'));
-    const hostClipboard = document.createElement('fieldset');
-    hostClipboard.dataset.hostClipboard = 'true';
-    hostClipboard.innerHTML =
-      '<legend>Host clipboard</legend><label>Pairing secret<input data-host-clipboard-secret type="password" autocomplete="off" spellcheck="false" aria-label="Host clipboard pairing secret" placeholder="Contents of .local/clipboard-secret"></label><div class="dictation-actions"><button data-action="host-clipboard-save" class="secondary">Save</button><button data-action="host-clipboard-forget" class="text-btn" title="Remove the pairing secret from this browser">Forget</button></div><small data-host-clipboard-status></small>';
-    settingsPanel.insertBefore(hostClipboard, settingsPanel.querySelector('[data-action="reset"]'));
-    const agentRowsSelect = agentControls.querySelector<HTMLSelectElement>('[data-agent-rows]');
-    const agentRowsCustom = agentControls.querySelector<HTMLInputElement>(
-      '[data-agent-rows-custom]',
-    );
-    const agentRowsCustomRow = agentControls.querySelector<HTMLElement>(
-      '[data-agent-rows-custom-row]',
-    );
-    const agentRowsHint = agentControls.querySelector<HTMLElement>('[data-agent-rows-hint]');
-    agentSortSelect = agentControls.querySelector('[data-agents-sort]');
-    if (
-      !agentRowsSelect ||
-      !agentRowsCustom ||
-      !agentRowsCustomRow ||
-      !agentRowsHint ||
-      !agentSortSelect
-    )
-      throw new Error('Agent roster controls missing');
-    const sortSelect = agentSortSelect;
-    const updateAgentControls = (): void => {
-      agentRowsSelect.value = settings.agentRows;
-      agentRowsCustom.value = settings.agentRowsCustom;
-      sortSelect.value = settings.agentsSort;
-      agentRowsCustomRow.hidden = settings.agentRows !== 'custom';
-      const { rows, unknown } = parseAgentRows(settings.agentRowsCustom);
-      agentRowsHint.textContent = `${
-        unknown.length ? `Unknown, skipped: ${unknown.join(', ')}. ` : ''
-      }${rows.length ? '' : 'No known token yet, so the Full rows show. '}Separate lines with / and tokens with commas. Tokens: ${AGENT_TOKENS.join(', ')}.`;
-      agentRowsHint.classList.toggle('warn', unknown.length > 0);
-    };
-    const changeAgentLayout = (): void => {
-      settings = {
-        ...settings,
-        agentRows: validateSettings({ ...settings, agentRows: agentRowsSelect.value }).agentRows,
-        agentRowsCustom: agentRowsCustom.value.slice(0, 500),
-        agentsSort: validateSettings({ ...settings, agentsSort: sortSelect.value }).agentsSort,
-      };
-      updateAgentControls();
-      saveSettings();
-      renderAgents();
-    };
-    agentRowsSelect.addEventListener('change', changeAgentLayout);
-    agentRowsCustom.addEventListener('change', changeAgentLayout);
-    sortSelect.addEventListener('change', changeAgentLayout);
-    updateAgentControls();
-    const windowControls = document.createElement('div');
-    windowControls.dataset.windowPreferences = 'true';
-    windowControls.innerHTML = `<fieldset><legend>Window and focus preferences</legend><label>New window glass opacity <span data-window-opacity-value>100%</span><input data-window-opacity type="range" min="10" max="100" step="1" aria-label="New window glass opacity percentage"><small>Applies to new windows only. Existing panes are unchanged.</small></label><label>New window warp <span data-window-warp-value>0°</span><input data-window-warp type="range" min="0" max="${MAX_TERMINAL_CURVATURE_DEGREES}" step="5" aria-label="New window curvature in degrees"><small>Applies to new windows only. Existing panes are unchanged.</small></label><label>Focus distance <span data-focus-distance-value>1.5 m</span><input data-focus-distance type="range" min="0.5" max="5" step="0.1" aria-label="Focus distance in meters"><small>Distance in front of you when focusing any window.</small></label><label>Focus warp <select data-focus-warp-mode><option value="custom">Custom</option><option value="inherit">Inherit from terminal</option></select></label><label>Focus warp angle <span data-focus-curvature-value>0°</span><input data-focus-curvature type="range" min="0" max="${MAX_TERMINAL_CURVATURE_DEGREES}" step="5" aria-label="Focus curvature in degrees"><small>Temporary focus curvature. The original curvature restores when focus ends.</small></label><label>Scroll strip <select data-scroll-strip-side aria-label="Scroll strip side"><option value="right">Right</option><option value="left">Left</option><option value="both">Both sides</option></select><small>Pinch and drag the strip beside each pane to scroll it.</small></label><label><input data-frame-chin type="checkbox" aria-label="Show the chin under each pane frame"> Frame chin<small>Adds the instrument strip under each pane frame.</small></label></fieldset>`;
-    settingsPanel.insertBefore(
-      windowControls,
-      settingsPanel.querySelector('[data-action="passthrough"]'),
-    );
-    const windowOpacity = windowControls.querySelector<HTMLInputElement>('[data-window-opacity]');
-    const windowWarp = windowControls.querySelector<HTMLInputElement>('[data-window-warp]');
-    const windowDistance = windowControls.querySelector<HTMLInputElement>('[data-focus-distance]');
-    const focusWarpMode = windowControls.querySelector<HTMLSelectElement>('[data-focus-warp-mode]');
-    const windowCurvature =
-      windowControls.querySelector<HTMLInputElement>('[data-focus-curvature]');
-    const stripSide = windowControls.querySelector<HTMLSelectElement>('[data-scroll-strip-side]');
-    const frameChin = windowControls.querySelector<HTMLInputElement>('[data-frame-chin]');
-    const windowOpacityValue = windowControls.querySelector<HTMLElement>(
-      '[data-window-opacity-value]',
-    );
-    const windowWarpValue = windowControls.querySelector<HTMLElement>('[data-window-warp-value]');
-    const windowDistanceValue = windowControls.querySelector<HTMLElement>(
-      '[data-focus-distance-value]',
-    );
-    const windowCurvatureValue = windowControls.querySelector<HTMLElement>(
-      '[data-focus-curvature-value]',
-    );
-    if (
-      !windowOpacity ||
-      !windowWarp ||
-      !windowWarpValue ||
-      !windowDistance ||
-      !windowCurvature ||
-      !focusWarpMode ||
-      !stripSide ||
-      !frameChin ||
-      !windowOpacityValue ||
-      !windowDistanceValue ||
-      !windowCurvatureValue
-    )
-      throw new Error('Window preference controls missing');
-    updateWindowPreferenceControls = (): void => {
-      windowOpacity.value = String(Math.round(settings.windowPreferences.defaultOpacity * 100));
-      windowWarp.value = String(settings.windowPreferences.defaultCurvature);
-      windowDistance.value = String(settings.windowPreferences.focusDistance);
-      focusWarpMode.value = settings.windowPreferences.focusWarpMode;
-      windowCurvature.disabled = focusWarpMode.value === 'inherit';
-      windowCurvature.value = String(settings.windowPreferences.focusCurvature);
-      stripSide.value = settings.windowPreferences.scrollStripSide;
-      frameChin.checked = settings.windowPreferences.frameChin;
-      windowOpacityValue.textContent = `${windowOpacity.value}%`;
-      windowWarpValue.textContent = `${windowWarp.value}°`;
-      windowDistanceValue.textContent = `${windowDistance.value} m`;
-      windowCurvatureValue.textContent = `${windowCurvature.value}°`;
-    };
-    const changeWindowPreferences = (): void => {
-      settings = {
-        ...settings,
-        windowPreferences: validateWindowPreferences({
-          defaultOpacity: Number(windowOpacity.value) / 100,
-          defaultCurvature: Number(windowWarp.value),
-          focusDistance: Number(windowDistance.value),
-          focusWarpMode: focusWarpMode.value,
-          focusCurvature: Number(windowCurvature.value),
-          scrollStripSide: stripSide.value,
-          frameChin: frameChin.checked,
-          buttonMap: settings.windowPreferences.buttonMap,
-        }),
-      };
-      updateWindowPreferenceControls();
-      saveSettings();
-    };
-    windowOpacity.addEventListener('input', changeWindowPreferences);
-    windowWarp.addEventListener('input', changeWindowPreferences);
-    windowDistance.addEventListener('input', changeWindowPreferences);
-    focusWarpMode.addEventListener('change', changeWindowPreferences);
-    windowCurvature.addEventListener('input', changeWindowPreferences);
-    stripSide.addEventListener('change', changeWindowPreferences);
-    frameChin.addEventListener('change', changeWindowPreferences);
-    updateWindowPreferenceControls();
-    const buttonControls = document.createElement('div');
-    buttonControls.dataset.controllerButtons = 'true';
-    const functionOptions = BUTTON_FUNCTIONS.map(
-      (choice) => `<option value="${choice}">${BUTTON_FUNCTION_LABELS[choice]}</option>`,
-    ).join('');
-    buttonControls.innerHTML = `<fieldset><legend>Controller buttons</legend>${CONTROLLER_BUTTONS.map(
-      (button) =>
-        `<label>${CONTROLLER_BUTTON_LABELS[button]} <select data-controller-button="${button}" aria-label="${CONTROLLER_BUTTON_LABELS[button]} button function">${functionOptions}</select></label>`,
-    ).join(
-      '',
-    )}<button data-action="reset-controller-buttons" class="secondary">Reset buttons</button><small>While warping a pane, right A saves and right B cancels.</small></fieldset>`;
-    settingsPanel.insertBefore(
-      buttonControls,
-      settingsPanel.querySelector('[data-action="passthrough"]'),
-    );
-    const buttonSelects = [
-      ...buttonControls.querySelectorAll<HTMLSelectElement>('[data-controller-button]'),
-    ];
-    const updateButtonControls = (): void => {
-      for (const select of buttonSelects)
-        select.value =
-          settings.windowPreferences.buttonMap[select.dataset.controllerButton as ControllerButton];
-    };
-    const saveButtonMap = (buttonMap: unknown): void => {
-      settings = {
-        ...settings,
-        windowPreferences: validateWindowPreferences({ ...settings.windowPreferences, buttonMap }),
-      };
-      updateButtonControls();
-      saveSettings();
-    };
-    for (const select of buttonSelects)
-      select.addEventListener('change', () =>
-        saveButtonMap(
-          Object.fromEntries(
-            buttonSelects.map((entry) => [entry.dataset.controllerButton, entry.value]),
-          ),
-        ),
-      );
-    buttonControls
-      .querySelector('[data-action="reset-controller-buttons"]')
-      ?.addEventListener('click', () => saveButtonMap(DEFAULT_BUTTON_MAP));
-    const refreshWindowControls = updateWindowPreferenceControls;
-    updateWindowPreferenceControls = (): void => {
-      refreshWindowControls();
-      updateButtonControls();
-    };
-    updateButtonControls();
-    const grid = document.createElement('div');
-    grid.dataset.gridControls = 'true';
-    grid.innerHTML = `<label>Selected terminal grid <span data-grid-caption>None selected</span></label><div class="grid-inputs"><label>Columns<input data-grid-cols type="number" min="2" max="300" step="1" aria-label="Terminal columns"></label><label>Rows<input data-grid-rows type="number" min="2" max="150" step="1" aria-label="Terminal rows"></label></div><button data-action="apply-grid" class="secondary">Apply grid</button><small data-grid-status>Resize changes the process display size and do not restart it.</small><label>Terminal curvature <span data-terminal-curvature-value>0°</span><input data-terminal-curvature type="range" min="0" max="${MAX_TERMINAL_CURVATURE_DEGREES}" step="1" value="0" aria-label="Terminal curvature in degrees"></label><label>Terminal glass opacity <span data-terminal-opacity-value>100%</span><input data-terminal-opacity type="range" min="10" max="100" step="5" value="100" aria-label="Terminal glass opacity"><small>Foreground text remains opaque.</small></label><button data-action="reset-terminal-appearance" class="secondary" title="Forget this pane's saved glass opacity and warp so it follows the new-window defaults">Reset to defaults</button>`;
-    settingsPanel.insertBefore(
-      grid,
-      settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
-    );
-    const arrangement = document.createElement('div');
-    arrangement.dataset.arrangementControls = 'true';
-    arrangement.innerHTML =
-      '<label for="arrangement-pattern">3D arrangement</label><select id="arrangement-pattern" data-arrangement aria-label="3D terminal arrangement"><option value="row">Row</option><option value="grid">Grid</option><option value="arc">Arc</option><option value="sphere">Sphere</option></select><small>Applies to attached terminals in 3D. Sphere uses a front hemisphere. Terminals remain individually adjustable.</small><button data-action="apply-arrangement" class="secondary" title="Apply this 3D arrangement to attached terminals">Apply arrangement</button>';
-    const distanceRow = document.createElement('div');
-    distanceRow.className = 'grid-inputs';
-    for (const [label, direction] of [
-      ['Closer', -1],
-      ['Farther', 1],
-    ] as const) {
-      const button = document.createElement('button');
-      button.className = 'secondary';
-      button.textContent = label;
-      button.dataset.action = direction < 0 ? 'layout-closer' : 'layout-farther';
-      button.title =
-        direction < 0
-          ? 'Move all terminals closer without resizing them'
-          : 'Move all terminals farther without resizing them';
-      button.addEventListener('click', () => callbacks.onMoveLayout?.(direction));
-      distanceRow.append(button);
-    }
-    arrangement.append(distanceRow);
-    settingsPanel.insertBefore(
-      arrangement,
-      settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
-    );
-    arrangementSelect = arrangement.querySelector('[data-arrangement]');
-    arrangementApply = arrangement.querySelector('[data-action="apply-arrangement"]');
-    if (!arrangementSelect || !arrangementApply) throw new Error('Missing arrangement controls');
-    const select = arrangementSelect;
-    select.value = settings.arrangement;
-    arrangementApply.addEventListener('click', () => {
-      const pattern = select.value as PanelArrangement;
-      settings = { ...settings, arrangement: pattern };
-      saveSettings();
-      callbacks.onArrange?.(pattern);
-    });
-    root
-      .querySelector<HTMLInputElement>('[data-terminal-curvature]')
-      ?.addEventListener('input', (event) => {
-        if (!activePaneId) return;
-        const degrees = Math.max(
-          0,
-          Math.min(
-            MAX_TERMINAL_CURVATURE_DEGREES,
-            Number((event.target as HTMLInputElement).value),
-          ),
-        );
-        terminalCurvature.set(activePaneId, degrees);
-        qs<HTMLElement>('[data-terminal-curvature-value]').textContent = `${degrees}°`;
-        callbacks.onTerminalCurvature?.(activePaneId, degrees);
-      });
-    root
-      .querySelector<HTMLInputElement>('[data-terminal-opacity]')
-      ?.addEventListener('input', (event) => {
-        if (!activePaneId) return;
-        const rawOpacity = Number((event.target as HTMLInputElement).value);
-        const opacity = Number.isFinite(rawOpacity) ? Math.max(10, Math.min(100, rawOpacity)) : 100;
-        terminalOpacity.set(activePaneId, opacity);
-        qs<HTMLElement>('[data-terminal-opacity-value]').textContent = `${opacity}%`;
-        callbacks.onTerminalOpacity?.(activePaneId, opacity);
-      });
-    root
-      .querySelector<HTMLButtonElement>('[data-action="reset-terminal-appearance"]')
-      ?.addEventListener('click', () => {
-        if (activePaneId) callbacks.onTerminalReset?.(activePaneId);
-      });
-  }
+  const settingsPanelControls = settingsPanel
+    ? mountSettingsPanel({
+        panel: settingsPanel,
+        root,
+        callbacks,
+        current: () => settings,
+        saveSettings,
+        bindSettings,
+        activePaneId: () => activePaneId,
+        terminalCurvature,
+        terminalOpacity,
+        qs: (selector) => qs(selector),
+        renderAgents: () => renderAgents(),
+      })
+    : null;
   const editor = document.createElement('div');
   editor.className = 'command-editor';
   editor.innerHTML =
@@ -1239,15 +493,6 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
   root
     .querySelector('[data-command-newline]')
     ?.setAttribute('title', 'Append Enter after the command text to execute it');
-  const saveSettings = (): void => {
-    try {
-      storage?.setItem(SETTINGS_KEY, JSON.stringify(settings));
-      callbacks.onSettingsChange?.(settings);
-    } catch (error) {
-      reportSwallowed('ui.settings-save', error);
-      qs<HTMLElement>('[data-detail]').textContent = 'Settings could not be saved on this device.';
-    }
-  };
   const renderAgents = (): void => {
     const section = qs<HTMLElement>('[data-agents-section]');
     section.hidden = agentRows.length === 0;
@@ -1619,19 +864,16 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       case 'agents-sort': {
         const next =
           AGENTS_SORTS[(AGENTS_SORTS.indexOf(settings.agentsSort) + 1) % AGENTS_SORTS.length];
-        settings = { ...settings, agentsSort: next };
-        if (agentSortSelect) agentSortSelect.value = next;
-        saveSettings();
+        saveSettings({ agentsSort: next });
         renderAgents();
         break;
       }
       case 'connect': {
         const endpoint = qs<HTMLInputElement>('#endpoint').value.trim();
-        settings = { ...settings, endpoint };
         capturedTarget = undefined;
         clearModifiers();
         qs<HTMLElement>('[data-drawer]').hidden = true;
-        saveSettings();
+        saveSettings({ endpoint });
         loadCommands();
         callbacks.onConnect(endpoint);
         break;
@@ -1859,57 +1101,54 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     transcript: '',
     error: null,
   });
-  qs<HTMLSelectElement>('[data-background]').addEventListener('change', (event) => {
-    settings = {
-      ...settings,
-      background: (event.target as HTMLSelectElement).value as BackgroundMode,
-    };
-    saveSettings();
-  });
-  qs<HTMLSelectElement>('[data-hierarchy-style]').addEventListener('change', (event) => {
-    settings = {
-      ...settings,
+  qs<HTMLSelectElement>('[data-background]').addEventListener('change', (event) =>
+    saveSettings({ background: (event.target as HTMLSelectElement).value as BackgroundMode }),
+  );
+  qs<HTMLSelectElement>('[data-hierarchy-style]').addEventListener('change', (event) =>
+    saveSettings({
       hierarchyStyle: validateHierarchyStyle((event.target as HTMLSelectElement).value),
-    };
-    saveSettings();
-  });
-  qs<HTMLSelectElement>('[data-keyborb-mode]').addEventListener('change', (event) => {
-    settings = {
-      ...settings,
-      keyborbMode: validateKeyborbMode((event.target as HTMLSelectElement).value),
-    };
-    saveSettings();
-  });
+    }),
+  );
+  qs<HTMLSelectElement>('[data-keyborb-mode]').addEventListener('change', (event) =>
+    saveSettings({ keyborbMode: validateKeyborbMode((event.target as HTMLSelectElement).value) }),
+  );
   const weatherZipInput = qs<HTMLInputElement>('[data-weather-zip]');
   weatherZipInput.value = settings.weatherZip;
+  bindSettings(['weatherZip'], () => {
+    weatherZipInput.value = settings.weatherZip;
+  });
   weatherZipInput.addEventListener('change', () => {
     const next = validateWeatherZip(weatherZipInput.value.trim());
     weatherZipInput.value = next;
     if (settings.weatherZip === next) return;
-    settings = { ...settings, weatherZip: next };
-    saveSettings();
+    saveSettings({ weatherZip: next });
   });
-  qs<HTMLInputElement>('[data-ui-sounds]').addEventListener('change', (event) => {
-    settings = { ...settings, uiSounds: (event.target as HTMLInputElement).checked };
-    saveSettings();
+  qs<HTMLInputElement>('[data-ui-sounds]').addEventListener('change', (event) =>
+    saveSettings({ uiSounds: (event.target as HTMLInputElement).checked }),
+  );
+  qs<HTMLInputElement>('[data-gaze-input]').addEventListener('change', (event) =>
+    saveSettings({ gazeInput: (event.target as HTMLInputElement).checked }),
+  );
+  qs<HTMLSelectElement>('[data-color-mode]').addEventListener('change', (event) =>
+    saveSettings({ colorMode: (event.target as HTMLSelectElement).value as TerminalColorMode }),
+  );
+  qs<HTMLInputElement>('[data-keyboard-background]').addEventListener('change', (event) =>
+    saveSettings({ keyboardBackground: (event.target as HTMLInputElement).checked }),
+  );
+  bindSettings(['background'], () => {
+    qs<HTMLSelectElement>('[data-background]').value = settings.background;
   });
-  qs<HTMLInputElement>('[data-gaze-input]').addEventListener('change', (event) => {
-    settings = { ...settings, gazeInput: (event.target as HTMLInputElement).checked };
-    saveSettings();
+  bindSettings(['colorMode'], () => {
+    qs<HTMLSelectElement>('[data-color-mode]').value = settings.colorMode;
   });
-  qs<HTMLSelectElement>('[data-color-mode]').addEventListener('change', (event) => {
-    settings = {
-      ...settings,
-      colorMode: (event.target as HTMLSelectElement).value as TerminalColorMode,
-    };
-    saveSettings();
+  bindSettings(['keyboardBackground'], () => {
+    qs<HTMLInputElement>('[data-keyboard-background]').checked = settings.keyboardBackground;
   });
-  qs<HTMLInputElement>('[data-keyboard-background]').addEventListener('change', (event) => {
-    settings = {
-      ...settings,
-      keyboardBackground: (event.target as HTMLInputElement).checked,
-    };
-    saveSettings();
+  bindSettings(['gazeInput'], () => {
+    qs<HTMLInputElement>('[data-gaze-input]').checked = settings.gazeInput;
+  });
+  bindSettings(['uiSounds'], () => {
+    qs<HTMLInputElement>('[data-ui-sounds]').checked = settings.uiSounds;
   });
   qs<HTMLTextAreaElement>('[data-dictation-draft]').addEventListener('input', (event) => {
     callbacks.onDictationDraftChange?.((event.target as HTMLTextAreaElement).value);
@@ -2123,12 +1362,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       button.setAttribute('aria-label', label);
       button.title = label;
     },
-    setGazeInputEnabled(enabled) {
-      if (settings.gazeInput === enabled) return;
-      settings = { ...settings, gazeInput: enabled };
-      qs<HTMLInputElement>('[data-gaze-input]').checked = enabled;
-      saveSettings();
-    },
+    setGazeInputEnabled: (enabled) => saveSettings({ gazeInput: enabled }),
     setTerminalGrid(paneId, cols, rows, canResize) {
       const previous = terminalGrid.get(paneId);
       const pending = pendingGrid.get(paneId);
@@ -2167,112 +1401,25 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       terminalOpacity.set(paneId, opacity);
       if (activePaneId === paneId) updateOpacityControls(paneId);
     },
-    setTerminalColorMode(mode, persist = true) {
-      settings = { ...settings, colorMode: mode };
-      qs<HTMLSelectElement>('[data-color-mode]').value = mode;
-      if (persist) saveSettings();
-    },
-    setKeyboardBackgroundEnabled(enabled, persist = true) {
-      settings = { ...settings, keyboardBackground: enabled };
-      qs<HTMLInputElement>('[data-keyboard-background]').checked = enabled;
-      if (persist) saveSettings();
-    },
-    setKeyboardCurvature(degrees, persist = false) {
-      const value = validateKeyboardCurvature(degrees);
-      if (settings.keyboardCurvature === value) return;
-      settings = { ...settings, keyboardCurvature: value };
-      const input = qs<HTMLInputElement>('[data-keyboard-curvature]');
-      input.value = String(value);
-      qs<HTMLElement>('[data-keyboard-curvature-value]').textContent = `${value}°`;
-      if (persist) saveSettings();
-    },
-    setTerminalFiltering(filtering, persist = false) {
-      const next = validateTerminalFiltering(filtering);
-      if (JSON.stringify(settings.filtering) === JSON.stringify(next)) return;
-      settings = { ...settings, filtering: next };
-      qs<HTMLSelectElement>('[data-filter-mode]').value = settings.filtering.mode;
-      qs<HTMLSelectElement>('[data-filter-anisotropy]').value = String(
-        settings.filtering.anisotropy,
-      );
-      qs<HTMLInputElement>('[data-filter-gaze]').checked = settings.filtering.gazeClarity;
-      qs<HTMLInputElement>('[data-filter-distance]').value = String(
-        settings.filtering.gazeMaxDistance,
-      );
-      const mode = settings.filtering.mode;
-      const mipmapMode = mode === 'mipmap-nearest' || mode === 'mipmap-linear';
-      qs<HTMLElement>('[data-filter-anisotropy-row]').hidden = !mipmapMode;
-      qs<HTMLElement>('[data-filter-distance-row]').hidden =
-        !mipmapMode || !settings.filtering.gazeClarity;
-      if (persist) saveSettings();
-    },
-    setWindowPreferences(value, persist = false) {
-      const next = validateWindowPreferences(value);
-      if (JSON.stringify(settings.windowPreferences) === JSON.stringify(next)) return;
-      settings = { ...settings, windowPreferences: next };
-      updateWindowPreferenceControls();
-      if (persist) saveSettings();
-    },
-    setHierarchyStyle(style, persist = false) {
-      const next = validateHierarchyStyle(style);
-      if (settings.hierarchyStyle === next) return;
-      settings = { ...settings, hierarchyStyle: next };
-      if (hierarchyStyleSelect) hierarchyStyleSelect.value = next;
-      if (persist) saveSettings();
-    },
-    setKeyborbMode(mode, persist = false) {
-      const next = validateKeyborbMode(mode);
-      if (settings.keyborbMode === next) return;
-      settings = { ...settings, keyborbMode: next };
-      if (keyborbModeSelect) keyborbModeSelect.value = next;
-      if (persist) saveSettings();
-    },
-    setBackground(mode, persist = false) {
-      if (settings.background === mode) return;
-      settings = { ...settings, background: mode };
-      qs<HTMLSelectElement>('[data-background]').value = mode;
-      if (persist) saveSettings();
-    },
-    setArmColor(color, persist = false) {
-      const next = validateHandColor(color);
-      if (settings.armColor === next) return;
-      settings = { ...settings, armColor: next };
-      updateHandColorControls();
-      if (persist) saveSettings();
-    },
-    setWeatherZip(zip, persist = false) {
-      const next = validateWeatherZip(zip);
-      if (settings.weatherZip === next) return;
-      settings = { ...settings, weatherZip: next };
-      qs<HTMLInputElement>('[data-weather-zip]').value = next;
-      if (persist) saveSettings();
-    },
-    setAccentColor(color, persist = false) {
-      const next = validateHandColor(color);
-      if (settings.accentColor === next) return;
-      settings = { ...settings, accentColor: next };
-      updateHandColorControls();
-      if (persist) saveSettings();
-    },
-    setEnvironmentAccentColor(color, persist = false) {
-      const next = validateHandColor(color);
-      if (settings.environmentAccentColor === next) return;
-      settings = { ...settings, environmentAccentColor: next };
-      updateHandColorControls();
-      if (persist) saveSettings();
-    },
-    setHandColor(color, persist = false) {
-      const next = validateHandColor(color);
-      if (settings.handColor === next) return;
-      settings = { ...settings, handColor: next };
-      updateHandColorControls();
-      if (persist) saveSettings();
-    },
-    setUISounds(enabled, persist = false) {
-      if (settings.uiSounds === enabled) return;
-      settings = { ...settings, uiSounds: enabled };
-      qs<HTMLInputElement>('[data-ui-sounds]').checked = enabled;
-      if (persist) saveSettings();
-    },
+    setTerminalColorMode: (mode, persist = true) => saveSettings({ colorMode: mode }, { persist }),
+    setKeyboardBackgroundEnabled: (enabled, persist = true) =>
+      saveSettings({ keyboardBackground: enabled }, { persist }),
+    setKeyboardCurvature: (degrees, persist = false) =>
+      saveSettings({ keyboardCurvature: degrees }, { persist }),
+    setTerminalFiltering: (filtering, persist = false) => saveSettings({ filtering }, { persist }),
+    setWindowPreferences: (value, persist = false) =>
+      saveSettings({ windowPreferences: value }, { persist }),
+    setHierarchyStyle: (style, persist = false) =>
+      saveSettings({ hierarchyStyle: style }, { persist }),
+    setKeyborbMode: (mode, persist = false) => saveSettings({ keyborbMode: mode }, { persist }),
+    setBackground: (mode, persist = false) => saveSettings({ background: mode }, { persist }),
+    setArmColor: (color, persist = false) => saveSettings({ armColor: color }, { persist }),
+    setWeatherZip: (zip, persist = false) => saveSettings({ weatherZip: zip }, { persist }),
+    setAccentColor: (color, persist = false) => saveSettings({ accentColor: color }, { persist }),
+    setEnvironmentAccentColor: (color, persist = false) =>
+      saveSettings({ environmentAccentColor: color }, { persist }),
+    setHandColor: (color, persist = false) => saveSettings({ handColor: color }, { persist }),
+    setUISounds: (enabled, persist = false) => saveSettings({ uiSounds: enabled }, { persist }),
     setFilteringCapabilities(maxAnisotropy) {
       filteringMaxAnisotropy = Number.isFinite(maxAnisotropy)
         ? Math.max(1, Math.min(16, maxAnisotropy))
@@ -2283,22 +1430,16 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
       if (Number(select.value) <= filteringMaxAnisotropy) return;
       const available = [...select.options].reverse().find((option) => !option.hidden);
       if (!available) return;
-      select.value = available.value;
-      settings = {
-        ...settings,
+      saveSettings({
         filtering: validateTerminalFiltering({
           ...settings.filtering,
           anisotropy: Number(available.value),
         }),
-      };
-      saveSettings();
+      });
     },
     setDictationState,
-    setArrangement(pattern, persist = true) {
-      settings = { ...settings, arrangement: pattern };
-      if (arrangementSelect) arrangementSelect.value = pattern;
-      if (persist) saveSettings();
-    },
+    setArrangement: (pattern, persist = true) =>
+      saveSettings({ arrangement: pattern }, { persist }),
     getCommandsForPane(paneId) {
       const pane = snapshot.panes.find((item) => item.id === paneId);
       const workspace = pane?.workspaceId ?? 'default';
@@ -2340,6 +1481,7 @@ export function mountWorkspaceUI(container: HTMLElement, callbacks: UICallbacks)
     },
     captureCommandTarget: () => capturedTarget,
     destroy() {
+      stopSettings();
       clearModifiers();
       clearInterval(agentAgeTimer);
       root.remove();
@@ -2355,5 +1497,3 @@ function escapeHtml(value: string): string {
       character,
   );
 }
-
-const CSS = `.mux-ui{--bg:#080b10;--surface:#111720;--surface-2:#17212d;--line:#293746;--text:#edf4f8;--muted:#9aabb6;--cyan:#66d5e7;--amber:#f1b65e;position:relative;min-height:100%;height:100%;overflow:hidden;background:radial-gradient(ellipse at 72% -25%,#203747 0%,transparent 45%),linear-gradient(135deg,#080b10,#0e151d 70%,#0b1118);color:var(--text);font:14px/1.4 Inter,ui-sans-serif,system-ui,sans-serif}.mux-ui *{box-sizing:border-box}.mux-top{height:64px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 24px;gap:28px;background:#0b1016dd}.brand{display:flex;align-items:center;gap:10px;font-size:12px;letter-spacing:.14em;font-weight:700}.brand-mark{display:grid;place-items:center;width:28px;height:28px;border:1px solid var(--cyan);color:var(--cyan);font-size:14px;border-radius:7px}.demo-badge{font-size:10px;letter-spacing:.1em;color:#15100a;background:var(--amber);padding:3px 7px;border-radius:4px}.connection{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px}.status-dot{width:7px;height:7px;background:var(--amber);border-radius:50%;box-shadow:0 0 8px #f1b65e88}.status-dot.connected{background:#66dc9d;box-shadow:0 0 8px #66dc9d88}.status-dot.disconnected,.status-dot.error{background:#ee776f;box-shadow:none}.status-dot.paused{background:#9aabb6;box-shadow:none}.top-actions{margin-left:auto;display:flex;gap:9px}.mux-ui button{font:inherit;color:inherit;cursor:pointer}.quiet,.secondary,.connect-btn,.icon-btn,.mini-btn,.send-btn,.text-btn,.key{border:1px solid var(--line);background:transparent}.quiet,.secondary{padding:9px 13px;border-radius:6px;color:var(--muted);display:inline-flex;align-items:center;gap:8px}.quiet:hover,.secondary:hover{color:var(--text);border-color:#537080}.quiet svg,.icon-btn svg,.connect-btn svg,.send-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.icon-btn{display:grid;place-items:center;width:34px;height:34px;border-radius:6px;color:var(--muted)}.icon-btn:hover{color:var(--text);background:var(--surface-2)}.mux-body{display:grid;grid-template-columns:270px 1fr;height:calc(100% - 64px)}.sidebar{border-right:1px solid var(--line);padding:22px 15px 16px;display:flex;flex-direction:column;min-height:0;overflow-y:auto}.side-heading{display:flex;justify-content:space-between;color:var(--muted);font-size:11px;letter-spacing:.1em;text-transform:uppercase;padding:0 8px 12px}.mini-btn{border:0;color:var(--muted);font-size:18px}.tree{overflow:auto;flex:1 1 auto;min-height:96px}.empty-tree{padding:28px 9px;color:#70808b;font-size:12px}.tree-workspace{margin-bottom:16px}.tree-workspace-name{color:var(--muted);font-size:11px;padding:7px 9px}.tree-pane{width:100%;display:flex;gap:9px;text-align:left;padding:9px;border:0;border-radius:6px;background:transparent}.tree-pane:hover,.tree-pane.selected{background:var(--surface-2)}.tree-pane.selected{box-shadow:inset 2px 0 var(--cyan)}.tree-pane b,.tree-pane small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tree-pane b{font-size:13px;font-weight:600}.tree-pane small{color:var(--muted);font-size:11px;margin-top:2px}.pane-pip{flex:none;width:7px;height:7px;margin-top:6px;border-radius:50%;background:#6ecfa8}.setup{border-top:1px solid var(--line);padding:17px 8px 0}.setup label,.settings-panel label{font-size:11px;color:var(--muted);display:block;margin-bottom:7px}.endpoint-row{display:flex;gap:6px}.endpoint-row input,.command-row select,.compose-row textarea,.settings-panel select{min-width:0;background:#0b1016;border:1px solid var(--line);border-radius:5px;color:var(--text);padding:9px;font:12px ui-monospace,SFMono-Regular,monospace}.endpoint-row input{width:100%}.connect-btn{border-radius:5px;color:var(--cyan);padding:0 10px}.hint{font-size:10px;color:#71818b;margin:8px 0 0}.picture-pick-row{margin-top:6px}.stage{padding:27px clamp(20px,4vw,58px);overflow:auto}.stage-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:22px}h1{font-size:26px;letter-spacing:-.02em;margin:0 0 5px;font-weight:600}.stage-sub{color:var(--muted);margin:0;font-size:13px}.stage-tools{display:flex;gap:8px}.panes{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px}.pane{min-height:270px;background:#0e151dcc;border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 12px 26px #0005}.pane.active{border-color:#5797a4;box-shadow:0 12px 30px #0007,0 0 0 1px #66d5e722}.pane-head{display:flex;justify-content:space-between;gap:12px;padding:14px 15px;border-bottom:1px solid var(--line)}.pane-head strong,.pane-head small,.pane-label{display:block}.pane-head strong{font-size:14px;font-weight:600}.pane-head small{font:11px ui-monospace,SFMono-Regular,monospace;color:var(--muted);margin-top:4px}.pane-label{font-size:10px;color:var(--cyan);letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px}.terminal-placeholder{height:205px;padding:24px;display:grid;place-content:center;text-align:center;color:#81929e;font:12px ui-monospace,SFMono-Regular,monospace;background:repeating-linear-gradient(0deg,#0e151d,#0e151d 22px,#101922 23px)}.terminal-placeholder small{color:#647581;margin-top:7px}.empty-state{grid-column:1/-1;min-height:430px;display:grid;place-content:center;text-align:center;color:var(--muted)}.empty-state h2{font-size:18px;font-weight:500;color:var(--text);margin:12px 0 5px}.empty-state p{max-width:410px;margin:0 auto;font-size:13px}.empty-orbit{width:64px;height:64px;border:1px solid #45626e;border-radius:50%;margin:auto;position:relative}.empty-orbit:after{content:'';position:absolute;width:7px;height:7px;border-radius:50%;background:var(--cyan);left:8px;top:9px;box-shadow:0 0 14px var(--cyan)}.drawer,.settings-panel{position:absolute;z-index:3;right:20px;bottom:20px;width:min(480px,calc(100% - 40px));background:#111a24f5;border:1px solid #38505e;border-radius:8px;padding:17px;box-shadow:0 18px 45px #000b;backdrop-filter:blur(14px)}.drawer-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.command-row,.compose-row{display:flex;gap:7px;margin-bottom:9px}.command-row select,.compose-row textarea{flex:1}.compose-row textarea{resize:vertical}.send-btn{padding:0 12px;border-radius:5px;color:var(--cyan)}.keyboard{display:flex;flex-direction:column;gap:5px}.key-row{display:flex;gap:5px}.key{min-height:28px;flex:1;border-radius:4px;font:11px ui-monospace,SFMono-Regular,monospace;color:#c5d4da}.key:hover{background:#29404a;color:#fff;border-color:#5c8790}.settings-panel{width:290px;display:flex;flex-direction:column;gap:13px}.update-notice{display:flex}.settings-panel select{width:100%;margin-top:6px}.settings-panel{max-height:calc(100vh - 40px);overflow:auto}[data-grid-controls]{display:grid;gap:10px;border-top:1px solid var(--line);padding-top:12px}[data-grid-controls]>label{display:grid;gap:4px;font-size:12px}[data-grid-caption],[data-grid-status]{color:var(--muted);font-size:11px;line-height:1.5}.grid-inputs{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid-inputs label{display:grid;gap:6px;font-size:12px;color:var(--muted)}.grid-inputs input{box-sizing:border-box;width:100%;min-width:0;min-height:36px;background:#0b141d;color:var(--text);border:1px solid #38505e;border-radius:4px;padding:7px 9px;font:inherit;color-scheme:dark}[data-action=apply-grid]{justify-self:start;padding:8px 12px}[data-action=apply-grid]:disabled{opacity:.45;cursor:default}.check{display:grid!important;grid-template-columns:auto 1fr;gap:7px}.check span{grid-column:2;color:#71818b;font-size:10px}.text-btn{border:0;color:var(--amber);text-align:left;padding:5px 0}.text-btn:disabled{opacity:.45;cursor:default}.hand-color-row{display:flex;align-items:center;gap:12px}.hand-color-row input{width:44px;height:30px;padding:2px;background:#0b1016;border:1px solid var(--line);border-radius:5px;cursor:pointer}.mux-ui button:focus-visible,.mux-ui input:focus-visible,.mux-ui textarea:focus-visible,.mux-ui select:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}@media(max-width:760px){.mux-top{padding:0 13px}.mux-body{grid-template-columns:205px 1fr}.quiet{font-size:0;padding:9px}.stage{padding:20px 16px}.stage-head{display:block}.stage-tools{margin-top:14px}.panes{grid-template-columns:1fr}.sidebar{padding-left:8px;padding-right:8px}}`;

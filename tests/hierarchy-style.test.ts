@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { mountWorkspaceUI, validateSettings, type WorkspaceSettings } from '../src/ui';
+import { validateSettings, type WorkspaceSettings } from '../src/settings/store';
+import { mountWorkspaceUI } from '../src/ui';
 import { DEFAULT_HIERARCHY_STYLE, validateHierarchyStyle } from '../src/workspace/hierarchy-style';
 
 describe('hierarchy style settings', () => {

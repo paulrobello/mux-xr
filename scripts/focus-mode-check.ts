@@ -2,24 +2,9 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import type * as THREE from 'three';
+import type { FixtureWindow } from './lib/fixture-window';
 import { requirePrivateTest } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
-
-type FixtureWindow = Window & {
-  __muxXR: {
-    getState(): {
-      attached: string[];
-      scene: { focusModeTerminalId: string | null; xrMode: string };
-    };
-  };
-  __questScene: THREE.Scene;
-  __questControllers: THREE.Group[];
-  __questCamera: THREE.PerspectiveCamera;
-  __questRenderer: THREE.WebGLRenderer;
-  __questThree: typeof THREE;
-  __focusPad: { buttons: Array<{ pressed: boolean }>; axes: number[] };
-  __focusOriginal: { position: number[]; quaternion: number[]; scale: number[] };
-};
 
 const { MUX_XR_BASE_URL: base, MUX_XR_TEST_ROOT: root } = requirePrivateTest([
   'MUX_XR_BASE_URL',

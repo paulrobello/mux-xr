@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { chromium, type WebSocketRoute } from 'playwright';
+import type { FixtureWindow } from './lib/fixture-window';
 import { assert, requirePrivateTest, waitFor } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
 
@@ -13,10 +14,6 @@ if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(BASE_URL).hostname))
   throw new Error('auto-entry-check only accepts a loopback BASE_URL');
 
 type Variant = 'allow' | 'deny';
-type FixtureWindow = Window & {
-  __muxXR: { getState(): { scene: { xrMode: string; notice: string | null } } };
-  __autoXR: { calls: number; activationAtRequest: boolean[] };
-};
 
 async function buildVariant(root: string, variant: Variant): Promise<void> {
   const shimPath = join(root, 'quest-three-shim.js');

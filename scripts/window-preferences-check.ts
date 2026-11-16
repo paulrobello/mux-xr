@@ -4,19 +4,9 @@ import { loadavg } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import type * as THREE from 'three';
-import type { PaneDescriptor, TerminalSurface } from '../src/contracts';
-import type { WorkspaceScene } from '../src/xr/scene';
+import type { FixtureWindow } from './lib/fixture-window';
 import { requirePrivateTest } from './lib/harness';
 import { prepareQuestFixture } from './prepare-quest-fixture';
-
-type FixtureWindow = Window & {
-  __designScene: WorkspaceScene;
-  __demoSurface(pane: PaneDescriptor): TerminalSurface;
-  __questCamera: THREE.PerspectiveCamera;
-  __questRenderer: THREE.WebGLRenderer;
-  __questThree: typeof THREE;
-  __originalPose: string;
-};
 
 const { MUX_XR_BASE_URL: base, MUX_XR_TEST_ROOT: root } = requirePrivateTest([
   'MUX_XR_BASE_URL',
