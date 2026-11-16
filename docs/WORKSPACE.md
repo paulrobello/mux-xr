@@ -15,6 +15,7 @@ See the [README](../README.md) to start the app and the [host setup guide](HOST-
   - [Scrolling and terminal mouse input](#scrolling-and-terminal-mouse-input)
   - [Focus, warp, and terminal settings](#focus-warp-and-terminal-settings)
   - [Automatic terminal detail](#automatic-terminal-detail)
+- [Streamer API key](#streamer-api-key)
 - [Quick command setup](#quick-command-setup)
 - [Spatial arrangements](#spatial-arrangements)
 - [Widgets](#widgets)
@@ -214,6 +215,10 @@ Mesh filtering is saved in Workspace Settings and radial Settings â†’ Display â†
 Filtering shows anisotropy only for mipmap modes and hides values beyond the device cap. Sharper gaze has a saved maximum distance, default 3 m, adjustable in browser settings or native Filtering. It uses physical distance and remains independent of Gaze input. Anisotropy primarily affects oblique minification. Higher values can look alike front-on, and base-level sharper gaze bypasses mip smoothing.
 
 See the [measured terminal LOD comparison](performance/terminal-lod-2026-11-02.md) for the workload, limits and results.
+
+## Streamer API key
+
+When the streamer runs with `--api-key`, enter the same value in the sidebar's **Streamer API key** field, below the endpoint. A browser WebSocket cannot set custom headers, so the app presents the key as an `api_key=` URL parameter; the server must also run `--allow-api-key-in-query` to accept it. Leave the field empty when the streamer needs no key: connections then carry nothing extra, exactly as before. The key applies on the next connect or page reload, is masked while typing, and never appears in `?server=` links, connection notices, or the diagnostics log. There is no XR settings control for the key: enter it on the page before entering immersive view.
 
 ## Quick command setup
 

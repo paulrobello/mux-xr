@@ -51,6 +51,8 @@ export interface PaneCreateRequestOptions {
   timeoutMs?: number;
   /** How long a timed-out request keeps listening for a late correlated reply. */
   lateGraceMs?: number;
+  /** The streamer API key appended to the create socket's URL; empty or absent appends nothing. */
+  apiKey?: string;
   socketFactory?: (url: string) => PaneCreateSocket;
   onLateReply?: (outcome: CreatedOutcome) => void;
   /** Aborting closes the stream; a pending result resolves `unreachable` (unsent) or `uncertain`. */
@@ -111,7 +113,7 @@ export function requestPaneCreate(
   return new Promise((resolve) => {
     let socket: PaneCreateSocket;
     try {
-      socket = factory(paneWebSocketURL(endpoint, anchorPaneId));
+      socket = factory(paneWebSocketURL(endpoint, anchorPaneId, options.apiKey));
     } catch (error) {
       resolve({
         kind: 'refused',

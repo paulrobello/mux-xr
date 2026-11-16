@@ -69,6 +69,22 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
   let keyborbModeSelect: HTMLSelectElement | null = null;
   let updateWindowPreferenceControls = (): void => undefined;
   let updateHandColorControls = (): void => undefined;
+  // The streamer API key rides the endpoint block: one secret field, masked, bound to the shared
+  // store. The value never leaves the page except on streamer connections; no XR control exists,
+  // because typing a secret on-quest through the spatial keyboard is hostile.
+  const streamerKey = document.createElement('label');
+  streamerKey.innerHTML =
+    '<span>Streamer API key</span><input data-streamer-api-key type="password" autocomplete="off" spellcheck="false" aria-label="Streamer API key" placeholder="Streamer --api-key value; leave empty for none"><small>Sent to the streamer when it requires an API key. Applies on the next connect and never appears in links, notices or diagnostics.</small>';
+  root.querySelector('.setup')?.append(streamerKey);
+  const streamerKeyInput = streamerKey.querySelector<HTMLInputElement>('[data-streamer-api-key]');
+  if (!streamerKeyInput) throw new Error('Streamer API key control missing');
+  bindSettings(['streamerApiKey'], () => {
+    streamerKeyInput.value = current().streamerApiKey;
+  });
+  streamerKeyInput.value = current().streamerApiKey;
+  streamerKeyInput.addEventListener('change', () =>
+    saveSettings({ streamerApiKey: streamerKeyInput.value }),
+  );
   const colorLabel = document.createElement('label');
   colorLabel.textContent = 'Terminal colors';
   const colorSelect = document.createElement('select');

@@ -33,6 +33,8 @@ import {
 export interface WorkspaceSettings {
   version: 1;
   endpoint: string;
+  /** Streamer `--api-key` value, or empty when the streamer needs none. Never logged or echoed. */
+  streamerApiKey: string;
   background: BackgroundMode;
   gazeInput: boolean;
   colorMode: TerminalColorMode;
@@ -67,6 +69,7 @@ export const SETTINGS_KEY = 'mux-xr:settings:v1';
 export const DEFAULT_SETTINGS: WorkspaceSettings = {
   version: 1,
   endpoint: '',
+  streamerApiKey: '',
   background: 'observatory',
   gazeInput: false,
   colorMode: 'comfort',
@@ -104,6 +107,8 @@ export function validateSettings(value: unknown): WorkspaceSettings {
   return {
     version: 1,
     endpoint: typeof candidate.endpoint === 'string' ? candidate.endpoint : '',
+    streamerApiKey:
+      typeof candidate.streamerApiKey === 'string' ? candidate.streamerApiKey.trim() : '',
     background: isBackgroundMode(candidate.background)
       ? candidate.background
       : DEFAULT_SETTINGS.background,

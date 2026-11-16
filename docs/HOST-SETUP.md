@@ -41,6 +41,8 @@ Build the frontend with `make build`. Run the streamer in a par-mux pane with th
 
 Since core 0.80.0, unauthenticated non-loopback binds require an explicit `--allow-unauthenticated` opt-in. Anyone who can reach an unauthenticated writable listener can send shell input. Keep the listener on the intended LAN and preserve your existing authentication and origin settings. Add `--allow-pane-create` only when users should be able to [create a terminal](WORKSPACE.md#create-terminals). Stop the streamer with Ctrl-C in its owning pane.
 
+To protect the streamer with an API key, run it with `--api-key <key>`; browser clients (Mux XR) can only present the key as a URL parameter, so `--allow-api-key-in-query` must also be set, and clients enter the same value in the app's Streamer API key field ([workspace guide](WORKSPACE.md#streamer-api-key)).
+
 ## Quest and LAN HTTPS
 
 Open the frontend over HTTPS with a certificate the headset trusts and whose name matches the address you open. Use WSS for the streamer. Desktop localhost can use HTTP for development. Vite can use an existing PEM certificate and key via `MUX_XR_TLS_CERT` and `MUX_XR_TLS_KEY`.

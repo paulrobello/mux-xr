@@ -163,6 +163,7 @@ export function createApp(root: HTMLElement, deps: AppDeps = {}): App {
       const current = panes.generation;
       return requestPaneCreate(panes.endpoint, anchorPaneId, sessionId, {
         signal,
+        apiKey: settingsStore.get().streamerApiKey,
         name: PANE_CREATE_WINDOW_NAME,
         onLateReply: (outcome) => {
           if (current === panes.generation) paneCreator.lateReply(outcome, token);
@@ -318,6 +319,7 @@ export function createApp(root: HTMLElement, deps: AppDeps = {}): App {
             if (current === panes.generation) agentRoster.apply(entry, released);
           },
         },
+        settingsStore.get().streamerApiKey,
       );
       if (current !== panes.generation) connection.disconnect();
       else {
@@ -463,7 +465,9 @@ export function createApp(root: HTMLElement, deps: AppDeps = {}): App {
   // Presenter order is the order each pane event reaches the views: UI, desktop panels, scene.
   const panes = createPaneController({
     createSurface: (pane, source) =>
-      source.demo ? createDemoSurface(pane) : createTerminalSurface(source.endpoint, pane),
+      source.demo
+        ? createDemoSurface(pane)
+        : createTerminalSurface(source.endpoint, pane, settingsStore.get().streamerApiKey),
     colorMode: () => settingsStore.get().colorMode,
     openViews: createOpenViewsStore(),
     capturePose: (id) => scene.captureTerminalPose(id),

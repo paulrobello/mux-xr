@@ -103,7 +103,7 @@ export function terminalKeyBytes(
   return prefix + (named[key] ?? key);
 }
 
-export function paneWebSocketURL(endpoint: string, paneId: string): string {
+export function paneWebSocketURL(endpoint: string, paneId: string, apiKey?: string): string {
   const match = /^(?:pane-)?(\d+)$/.exec(paneId) ?? /^%([0-9]+)$/.exec(paneId);
   if (!match) throw new Error(`Invalid pane id: ${paneId}`);
   const session = `pane-${match[1]}`;
@@ -117,6 +117,9 @@ export function paneWebSocketURL(endpoint: string, paneId: string): string {
   url.searchParams.set('session', session);
   url.searchParams.delete('metadata');
   url.searchParams.delete('mux_tree');
+  // The streamer's query channel is the only one a browser WebSocket can use; absent or empty
+  // appends nothing, so unset-key URLs stay byte-identical to the pre-key builder.
+  if (apiKey) url.searchParams.set('api_key', apiKey);
   return url.toString();
 }
 
@@ -125,7 +128,11 @@ export function ignoreXtermKeys(terminal: Pick<Terminal, 'attachCustomKeyEventHa
   terminal.attachCustomKeyEventHandler(() => false);
 }
 
-export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): TerminalSurface {
+export function createTerminalSurface(
+  endpoint: string,
+  pane: PaneDescriptor,
+  apiKey?: string,
+): TerminalSurface {
   const canvas = document.createElement('canvas');
   const host = document.createElement('div');
   host.style.cssText =
@@ -501,7 +508,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
     setStatus('connecting');
     let ws: SocketLike;
     try {
-      ws = new WebSocket(paneWebSocketURL(endpoint, pane.id));
+      ws = new WebSocket(paneWebSocketURL(endpoint, pane.id, apiKey));
     } catch {
       setStatus('disconnected');
       scheduleRetry();

@@ -39,7 +39,7 @@ export function normalizeTree(tree: MuxTreeSnapshot): WorkspaceSnapshot {
   return { panes };
 }
 
-export function hierarchyURL(endpoint: string): string {
+export function hierarchyURL(endpoint: string, apiKey?: string): string {
   const url = new URL(endpoint || location.origin, location.href);
   if (!['https:', 'http:', 'ws:', 'wss:'].includes(url.protocol))
     throw new Error('Use an HTTP or WebSocket streamer endpoint.');
@@ -49,6 +49,8 @@ export function hierarchyURL(endpoint: string): string {
   if (!url.pathname.endsWith('/ws')) url.pathname = `${url.pathname.replace(/\/$/, '')}/ws`;
   url.searchParams.delete('session');
   url.searchParams.set('metadata', '1');
+  // Same rule as paneWebSocketURL: absent or empty appends nothing, keeping the URL byte-identical.
+  if (apiKey) url.searchParams.set('api_key', apiKey);
   return url.toString();
 }
 
@@ -63,8 +65,9 @@ export async function connectHierarchy(
   onSnapshot: (snapshot: WorkspaceSnapshot) => void,
   onError: (message: string) => void,
   onRoster?: RosterHandlers,
+  apiKey?: string,
 ): Promise<{ disconnect(): void; refresh(): void }> {
-  const url = hierarchyURL(endpoint);
+  const url = hierarchyURL(endpoint, apiKey);
   let socket: WebSocket | undefined;
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -76,6 +79,7 @@ export async function connectHierarchy(
       clearTimeout(retry);
       retry = undefined;
     }
+    let opened = false;
     const current = new WebSocket(url);
     socket = current;
     current.binaryType = 'arraybuffer';
@@ -84,7 +88,8 @@ export async function connectHierarchy(
       onError('No mux hierarchy received. Check the streamer version and endpoint.');
       current.close();
     }, 8000);
-    current.onopen = () =>
+    current.onopen = () => {
+      opened = true;
       current.send(
         encodeClientMessage(
           create(ClientMessageSchema, {
@@ -92,6 +97,7 @@ export async function connectHierarchy(
           }),
         ),
       );
+    };
     current.onmessage = (event: MessageEvent<ArrayBuffer>) => {
       if (socket !== current || stopped) return;
       let message: ReturnType<typeof decodeServerMessage>;
@@ -124,7 +130,12 @@ export async function connectHierarchy(
       }
     };
     current.onerror = () => {
-      if (!stopped) onError('Cannot reach the streamer. Check its LAN address and certificate.');
+      if (!stopped)
+        onError(
+          apiKey && !opened
+            ? 'Cannot reach the streamer. Check the endpoint, its certificate, and the streamer API key.'
+            : 'Cannot reach the streamer. Check its LAN address and certificate.',
+        );
     };
     current.onclose = () => {
       if (socket !== current || stopped) return;
