@@ -34,14 +34,12 @@ import { mountKeyboard } from './keyboard';
 import { mountSettingsPanel } from './settings-panel';
 import { buildShell } from './shell';
 import { mountSidebar } from './sidebar';
+import { mountTerminalControls } from './terminal-controls';
 
 export { validateHandColor };
 
 import type { PaneCreationState } from '../workspace/pane-create';
-import {
-  MAX_TERMINAL_CURVATURE_DEGREES,
-  type WindowPreferences,
-} from '../workspace/window-preferences';
+import type { WindowPreferences } from '../workspace/window-preferences';
 
 export type { SemanticKey } from '@par/xr-workspace';
 export {
@@ -201,10 +199,6 @@ export function mountWorkspaceUI(
   const paneProcesses = new Map<string, PaneProcess>();
   const paneBadge = (paneId: string): string | null =>
     processBadge(paneProcesses.get(paneId), paneStatuses.get(paneId));
-  const terminalGrid = new Map<string, { cols: number; rows: number; canResize: boolean }>();
-  const terminalCurvature = new Map<string, number>();
-  const terminalOpacity = new Map<string, number>();
-  const pendingGrid = new Map<string, { cols: number; rows: number }>();
   let inputMode: 'commands' | 'keyboard' = 'commands';
   let capturedTarget: string | undefined;
   const { root, toast, updateNotice } = buildShell({
@@ -235,8 +229,8 @@ export function mountWorkspaceUI(
         saveSettings,
         bindSettings,
         activePaneId: () => activePaneId,
-        terminalCurvature,
-        terminalOpacity,
+        setTerminalCurvature: (paneId, degrees) => terminalControls.curvature.set(paneId, degrees),
+        setTerminalOpacity: (paneId, opacity) => terminalControls.opacity.set(paneId, opacity),
         qs: (selector) => qs(selector),
         renderAgents: () => agentRoster.render(),
       })
@@ -256,36 +250,15 @@ export function mountWorkspaceUI(
         : `Not paired. ${HOST_CLIPBOARD_SETUP}`);
   };
   updateHostClipboardStatus();
-  const clearGridControls = (): void => {
-    qs<HTMLButtonElement>('[data-action="apply-grid"]').disabled = true;
-    qs<HTMLElement>('[data-grid-caption]').textContent = 'No terminal selected';
-    qs<HTMLElement>('[data-grid-status]').textContent =
-      'Select an attached terminal to change its grid.';
-    qs<HTMLInputElement>('[data-terminal-curvature]').value = '0';
-    qs<HTMLElement>('[data-terminal-curvature-value]').textContent = '0°';
-    qs<HTMLInputElement>('[data-terminal-curvature]').disabled = true;
-    qs<HTMLInputElement>('[data-terminal-opacity]').value = '100';
-    qs<HTMLElement>('[data-terminal-opacity-value]').textContent = '100%';
-    qs<HTMLInputElement>('[data-terminal-opacity]').disabled = true;
-    qs<HTMLButtonElement>('[data-action="reset-terminal-appearance"]').disabled = true;
-  };
-  const updateCurvatureControls = (paneId: string | undefined): void => {
-    const input = qs<HTMLInputElement>('[data-terminal-curvature]');
-    const value = paneId ? (terminalCurvature.get(paneId) ?? 0) : 0;
-    input.value = String(value);
-    input.disabled = !paneId;
-    qs<HTMLElement>('[data-terminal-curvature-value]').textContent = `${value}°`;
-  };
-  const updateOpacityControls = (paneId: string | undefined): void => {
-    const input = qs<HTMLInputElement>('[data-terminal-opacity]');
-    const value = paneId ? (terminalOpacity.get(paneId) ?? 100) : 100;
-    input.value = String(value);
-    input.disabled = !paneId;
-    qs<HTMLButtonElement>('[data-action="reset-terminal-appearance"]').disabled = !paneId;
-    qs<HTMLElement>('[data-terminal-opacity-value]').textContent = `${value}%`;
-  };
+  const terminalControls = mountTerminalControls({
+    root,
+    activePaneId: () => activePaneId,
+    onResizeGrid: callbacks.onResizeGrid
+      ? (paneId, cols, rows) => callbacks.onResizeGrid?.(paneId, cols, rows) ?? false
+      : undefined,
+  });
   keyboard.clearModifiers();
-  clearGridControls();
+  terminalControls.clear();
   updateArrangementAvailability();
   const actionHelp: Record<string, string> = {
     demo: 'Preview synthetic terminals without running commands',
@@ -581,36 +554,6 @@ export function mountWorkspaceUI(
   bindSettings(['uiSounds'], () => {
     qs<HTMLInputElement>('[data-ui-sounds]').checked = settings.uiSounds;
   });
-  qs<HTMLButtonElement>('[data-action="apply-grid"]').addEventListener('click', () => {
-    const paneId = activePaneId;
-    const cols = Number(qs<HTMLInputElement>('[data-grid-cols]').value);
-    const rows = Number(qs<HTMLInputElement>('[data-grid-rows]').value);
-    if (
-      !Number.isInteger(cols) ||
-      !Number.isInteger(rows) ||
-      cols < 2 ||
-      cols > 300 ||
-      rows < 2 ||
-      rows > 150
-    ) {
-      qs<HTMLElement>('[data-grid-status]').textContent = 'Use 2–300 columns and 2–150 rows.';
-      return;
-    }
-    if (!paneId || !callbacks.onResizeGrid) {
-      qs<HTMLElement>('[data-grid-status]').textContent =
-        'Resize unavailable while disconnected or read-only.';
-      return;
-    }
-    pendingGrid.set(paneId, { cols, rows });
-    if (!callbacks.onResizeGrid(paneId, cols, rows)) {
-      pendingGrid.delete(paneId);
-      qs<HTMLElement>('[data-grid-status]').textContent =
-        'Resize unavailable while disconnected or read-only.';
-      return;
-    }
-    qs<HTMLElement>('[data-grid-status]').textContent =
-      'Resize requested. Waiting for server confirmation…';
-  });
   const sceneHost = qs<HTMLElement>('[data-scene-host]');
   return {
     sceneHost,
@@ -624,7 +567,7 @@ export function mountWorkspaceUI(
           paneProcesses.set(pane.id, pane.process);
       if (activePaneId && !next.panes.some((pane) => pane.id === activePaneId)) {
         activePaneId = undefined;
-        clearGridControls();
+        terminalControls.clear();
       }
       if (capturedTarget && !next.panes.some((pane) => pane.id === capturedTarget)) closeInput();
       commandLibrary.load();
@@ -660,19 +603,10 @@ export function mountWorkspaceUI(
     setActivePane: (id) => {
       if (id) {
         selectPane(id, false);
-        updateCurvatureControls(id);
-        updateOpacityControls(id);
-        const grid = terminalGrid.get(id);
-        if (grid) {
-          pendingGrid.delete(id);
-          qs<HTMLInputElement>('[data-grid-cols]').value = String(grid.cols);
-          qs<HTMLInputElement>('[data-grid-rows]').value = String(grid.rows);
-          qs<HTMLElement>('[data-grid-caption]').textContent = `${grid.cols} × ${grid.rows}`;
-          qs<HTMLButtonElement>('[data-action="apply-grid"]').disabled = !grid.canResize;
-        }
+        terminalControls.show(id);
       } else {
         activePaneId = undefined;
-        clearGridControls();
+        terminalControls.clear();
         renderTree();
         renderPanes();
         updateTargetCaption();
@@ -686,7 +620,7 @@ export function mountWorkspaceUI(
       attachedPaneIds = [...ids];
       if (activePaneId && !ids.includes(activePaneId)) {
         activePaneId = undefined;
-        clearGridControls();
+        terminalControls.clear();
       }
       if (capturedTarget && !ids.includes(capturedTarget)) closeInput();
       renderPanes();
@@ -713,44 +647,10 @@ export function mountWorkspaceUI(
       button.title = label;
     },
     setGazeInputEnabled: (enabled) => saveSettings({ gazeInput: enabled }),
-    setTerminalGrid(paneId, cols, rows, canResize) {
-      const previous = terminalGrid.get(paneId);
-      const pending = pendingGrid.get(paneId);
-      if (
-        previous?.cols === cols &&
-        previous.rows === rows &&
-        previous.canResize === canResize &&
-        (!pending || (pending.cols === cols && pending.rows === rows))
-      )
-        return;
-      terminalGrid.set(paneId, { cols, rows, canResize });
-      if (activePaneId !== paneId) return;
-      const acknowledged = !pending || (pending.cols === cols && pending.rows === rows);
-      if (acknowledged) {
-        pendingGrid.delete(paneId);
-        qs<HTMLInputElement>('[data-grid-cols]').value = String(cols);
-        qs<HTMLInputElement>('[data-grid-rows]').value = String(rows);
-      }
-      qs<HTMLElement>('[data-grid-caption]').textContent = `${cols} × ${rows}`;
-      const apply = qs<HTMLButtonElement>('[data-action="apply-grid"]');
-      apply.disabled = !canResize;
-      if (acknowledged)
-        qs<HTMLElement>('[data-grid-status]').textContent = canResize
-          ? 'Resize changes the process display size and do not restart it.'
-          : 'Resize unavailable while disconnected or read-only.';
-    },
-    setTerminalCurvature(paneId, degrees) {
-      const value = Number.isFinite(degrees)
-        ? Math.max(0, Math.min(MAX_TERMINAL_CURVATURE_DEGREES, degrees))
-        : 0;
-      terminalCurvature.set(paneId, value);
-      if (activePaneId === paneId) updateCurvatureControls(paneId);
-    },
-    setTerminalOpacity(paneId, value) {
-      const opacity = Number.isFinite(value) ? Math.max(10, Math.min(100, value)) : 100;
-      terminalOpacity.set(paneId, opacity);
-      if (activePaneId === paneId) updateOpacityControls(paneId);
-    },
+    setTerminalGrid: (paneId, cols, rows, canResize) =>
+      terminalControls.setGrid(paneId, cols, rows, canResize),
+    setTerminalCurvature: (paneId, degrees) => terminalControls.setCurvature(paneId, degrees),
+    setTerminalOpacity: (paneId, value) => terminalControls.setOpacity(paneId, value),
     setTerminalColorMode: (mode, persist = true) => saveSettings({ colorMode: mode }, { persist }),
     setKeyboardBackgroundEnabled: (enabled, persist = true) =>
       saveSettings({ keyboardBackground: enabled }, { persist }),
