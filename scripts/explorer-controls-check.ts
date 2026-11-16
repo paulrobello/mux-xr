@@ -33,7 +33,7 @@ const entry = resolve(root, 'quest-main.ts');
 await writeFile(
   entry,
   `${await readFile(entry, 'utf8')}
-import { waitForLabelSync as settleLabel } from ${JSON.stringify(resolve('src/xr/labels.ts'))};
+import { waitForLabelSync as settleLabel } from ${JSON.stringify(resolve('packages/xr-workspace/src/index.ts'))};
 Object.assign(window, { __scene: scene, __speech: speechInput, __surfaces: surfaces,
   __settleLabels: async () => { const jobs = []; scene.scene.traverse(object => { if(object.userData.labelTextObject) jobs.push(settleLabel(object)); }); await Promise.all(jobs); }
 });`,
