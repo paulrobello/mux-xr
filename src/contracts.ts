@@ -4,7 +4,6 @@ import type { HostClipboardResult } from './host-clipboard';
 import type { DictationAction } from './speech-input';
 import type { PaneProcess } from './terminal/lifecycle';
 import type { TerminalLinkStats } from './terminal/link-stats';
-import type { XrEntryMode } from './xr/entry';
 
 /**
  * The interfaces between the presenters (browser UI, desktop panels, XR scene) and the transport
@@ -178,6 +177,9 @@ export type BackgroundMode = BackgroundId;
 export function isBackgroundMode(value: unknown): value is BackgroundMode {
   return (BACKGROUND_MODES as readonly unknown[]).includes(value);
 }
+
+/** How an XR session starts: full VR, passthrough (`ar`), or VR around a passthrough desk window. */
+export type XrEntryMode = 'vr' | 'ar' | 'desk';
 
 /** The spatial arrangement presets that place attached terminal panels. */
 export type PanelArrangement = 'row' | 'grid' | 'arc' | 'sphere';
