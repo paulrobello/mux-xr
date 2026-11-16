@@ -105,7 +105,12 @@ export function prepareQuestFixture(testRoot: string): void {
   writeFileSync(shimPath, threeShimSource());
   const sceneSource = readFileSync(sceneSourcePath, 'utf8')
     .replace(/from\s+(["'])three\1/, `from ${JSON.stringify(shimPath)}`)
-    // The copy lives outside the repo, so bare three subpath imports cannot resolve from it.
+    // The copy lives outside the repo, so bare imports cannot resolve from it; three goes through
+    // the shim and the workspace package through its entry file.
+    .replace(
+      /from\s+(["'])@par\/xr-workspace\1/g,
+      `from ${JSON.stringify(join(repoRoot, 'packages/xr-workspace/src/index.ts'))}`,
+    )
     .replace(
       /from\s+(["'])(three\/[^"']+)\1/g,
       (_match, _quote: string, specifier: string) =>
@@ -116,9 +121,43 @@ export function prepareQuestFixture(testRoot: string): void {
     entryPath,
     `export { createWorkspaceScene } from ${JSON.stringify(sceneCopyPath)};\n`,
   );
-  const mainSource = readFileSync(mainSourcePath, 'utf8');
-  const mainReplacements = new Map<string, string>([['./xr', entryPath]]);
-  writeFileSync(mainCopyPath, absoluteImport(mainSource, mainSourcePath, mainReplacements));
+  // ARC-009 moved composition into src/app.ts, so the shimmed scene copy must replace the module
+  // the app actually loads: rewrite './xr' in a quest-app.ts copy, then point quest-main.ts at it.
+  const appSourcePath = join(repoRoot, 'src/app.ts');
+  const appCopyPath = join(root, 'quest-app.ts');
+  writeFileSync(
+    appCopyPath,
+    absoluteImport(
+      readFileSync(appSourcePath, 'utf8'),
+      appSourcePath,
+      new Map([['./xr', entryPath]]),
+    ),
+  );
+  // Glue runs before createApp() in the copied main module, so it is prepended, and it fills the
+  // lets the checks append references to (scene, surfaces, speechInput, selectPane,
+  // createDemoSurface) from the app.ts seam hook.
+  const glue = `let scene;
+let surfaces;
+let speechInput;
+let selectPane;
+let createDemoSurface;
+window.__muxXrFixtureHook = (seam) => {
+  scene = seam.scene;
+  surfaces = seam.surfaces;
+  speechInput = seam.speechInput;
+  selectPane = seam.selectPane;
+  createDemoSurface = seam.createDemoSurface;
+};
+`;
+  writeFileSync(
+    mainCopyPath,
+    glue +
+      absoluteImport(
+        readFileSync(mainSourcePath, 'utf8'),
+        mainSourcePath,
+        new Map([['./app', appCopyPath]]),
+      ),
+  );
   const bun = 'bun';
   try {
     execFileSync(bun, ['build', mainCopyPath, '--target', 'browser', '--outdir', root], {

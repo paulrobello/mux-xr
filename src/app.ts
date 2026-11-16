@@ -1,4 +1,10 @@
-import type { KeyModifiers, QuickCommand, TerminalMouseInput, WorkspaceActions } from './contracts';
+import type {
+  KeyModifiers,
+  QuickCommand,
+  TerminalMouseInput,
+  TerminalSurface,
+  WorkspaceActions,
+} from './contracts';
 import { createDebugApi, installDebugApi } from './debug-api';
 import { createDemoSurface, demoAgents, demoSnapshot } from './demo';
 import { createDesktopPanels } from './desktop/panels';
@@ -51,8 +57,33 @@ import {
   requestPaneCreate,
 } from './workspace/pane-create';
 import { createPictureController } from './workspace/pictures';
-import { createWorkspaceScene } from './xr';
+import { createWorkspaceScene, type WorkspaceScene } from './xr';
 import { createXREntryController, type XrEntryMode } from './xr/entry';
+
+/** Live app pieces the quest fixture checks (consumers of scripts/prepare-quest-fixture.ts) drive. */
+export interface FixtureSeam {
+  /** The workspace scene instance this app presents. */
+  scene: WorkspaceScene;
+  /** Attached pane surfaces keyed by pane id, kept live by a fixture presenter. */
+  surfaces: Map<string, TerminalSurface>;
+  /** The dictation presenter; browser checks read its state. */
+  speechInput: SpeechInput;
+  /** Selects an attached pane by id. */
+  selectPane(id: string): void;
+  /** The demo terminal factory the desktop preview uses. */
+  createDemoSurface: typeof createDemoSurface;
+}
+
+declare global {
+  interface Window {
+    /**
+     * Test-only seam: the quest fixture page sets this before the app boots so createApp hands
+     * over the live pieces the check glue reads. Production pages never set it, so the payload
+     * and its surfaces presenter never exist.
+     */
+    __muxXrFixtureHook?: (seam: FixtureSeam) => void;
+  }
+}
 
 export interface AppDeps {
   /** The device settings shared by the browser UI and the XR scene; a store over `localStorage` when omitted. */
@@ -109,6 +140,10 @@ export function createApp(root: HTMLElement, deps: AppDeps = {}): App {
   let enteringXR = false;
   let xrEntryMode: XrEntryMode = 'vr';
   let disposed = false;
+
+  // Quest fixture pages set the hook before boot; nothing below runs when it is unset.
+  const fixtureHook = window.__muxXrFixtureHook;
+  const fixtureSurfaces = fixtureHook ? new Map<string, TerminalSurface>() : null;
 
   const hostClipboardSecret = createHostClipboardSecretStore();
   const hostClipboard = createHostClipboardClient({
@@ -486,6 +521,14 @@ export function createApp(root: HTMLElement, deps: AppDeps = {}): App {
           }
         },
       },
+      ...(fixtureSurfaces
+        ? [
+            {
+              addPane: (surface: TerminalSurface) => fixtureSurfaces.set(surface.pane.id, surface),
+              removePane: (id: string) => fixtureSurfaces.delete(id),
+            },
+          ]
+        : []),
     ],
   });
 
@@ -636,6 +679,16 @@ export function createApp(root: HTMLElement, deps: AppDeps = {}): App {
     });
     updateChecker.start();
   }
+
+  // The quest fixture glue captures these live references; every page load hands over fresh ones.
+  if (fixtureHook && fixtureSurfaces)
+    fixtureHook({
+      scene,
+      surfaces: fixtureSurfaces,
+      speechInput,
+      selectPane: (id) => panes.selectPane(id),
+      createDemoSurface,
+    });
 
   return {
     connect,

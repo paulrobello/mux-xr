@@ -394,6 +394,10 @@ try {
     navigator.clipboard.writeText = (window as unknown as FixtureWindow).__clipboardWrite;
   });
 
+  // The rejection test leaves the app's clipboard bridge holding its retained text with an
+  // unconfirmed write, so a paste here would send that instead of the system clipboard; reload
+  // the fixture page for a clean bridge and cold press state, then set the clipboard fresh.
+  await setup();
   await page.evaluate(() => {
     navigator.clipboard.writeText('pasted single line');
   });
@@ -434,6 +438,9 @@ try {
   await page.screenshot({ path: join(root, 'clipboard-paste-single.png') });
   await page.evaluate(() => (window as unknown as FixtureWindow).__selectionScene.hideInput());
   messages.length = 0;
+  // The single-line paste rewrote the system clipboard; put the unicode text back so the cancel
+  // asserts below have a known baseline to prove the cancelled gestures copy nothing.
+  await page.evaluate((text) => navigator.clipboard.writeText(text), unicode);
 
   await begin(6, 0);
   await drag(9, 1);
