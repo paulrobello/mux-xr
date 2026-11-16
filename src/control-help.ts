@@ -224,7 +224,8 @@ const MODE_HELP: Record<InputMode, string> = {
   world: 'Choose VR background, passthrough, hand and accent colors and the weather ZIP',
   'weather-zip': 'Enter the US ZIP code the weather widget shows',
   accent: 'Choose the interface and environment accent colors',
-  widgets: 'Open movable widgets: clocks, weather, timer, performance, pictures and boards',
+  widgets:
+    'Open movable widgets: clocks, weather, timer, performance, pictures, boards and diagnostics',
   filtering: 'Choose filtering and viewed-terminal clarity',
   arrange: 'Arrange attached terminals in a spatial pattern',
   commands: COMMANDS_HELP,

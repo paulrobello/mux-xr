@@ -10,6 +10,7 @@ import type {
   TerminalStatus,
   TerminalSurface,
 } from '../contracts';
+import { diagnostics } from '../diagnostics';
 import {
   type PaneProcess,
   parsePaneProcess,
@@ -185,6 +186,7 @@ export function createTerminalSurface(endpoint: string, pane: PaneDescriptor): T
       try {
         listener();
       } catch (cause) {
+        diagnostics.report('terminal.surface', cause);
         console.error('[mux-xr] terminal surface listener failed', cause);
       }
     }

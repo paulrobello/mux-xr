@@ -22,6 +22,7 @@ See the [README](../README.md) to start the app and the [host setup guide](HOST-
   - [Agent board](#agent-board)
   - [Timer](#timer)
   - [Bell feed](#bell-feed)
+  - [Diagnostics log](#diagnostics-log)
   - [Performance](#performance)
   - [Host load](#host-load)
   - [Sticky note](#sticky-note)
@@ -271,6 +272,14 @@ A countdown that ends under the stopwatch shows a small amber **Countdown done**
 Notices reach the feed only when they were raised outside your current action: streamer and connection errors, saved views missing on restore, and blocked automatic XR entry. Feedback to a press (paste, warp, a pane that is no longer open) and storage failures stay on the HUD. A repeated notice moves to the top instead of adding a row, notice rows disappear after 10 minutes, and the feed keeps at most 24 bells and, separately, 8 notices, so notices never push out a pending bell.
 
 Point and trigger, or pinch, on a bell row to select that pane through the same path as the agent board. A pane's bell row clears as soon as the pane is viewed, whether by selecting the row, selecting the pane or focusing it, and when its view is closed or it leaves the tree. Notice rows never select. While a ray rests anywhere on the feed, rows hold still: a cleared row leaves its slot empty and new entries wait in the **+N more** count until the ray leaves the feed or XR ends, so a row never moves under the pointer, even right after you select it. The feed collects bells and notices while it is closed, so they show when it opens. Grip the feed to move it, and its × closes it.
+
+### Diagnostics log
+
+**Diagnostics** adds a dark panel at 0.7 scale lower right below service health, turned to face you, that lists the newest client-side errors, newest first, so a failure is visible in the headset without a remote inspector. The title counts the entries kept, each row shows `scope · message · age` with a relative age that ticks at most once a second, and a report repeating at the top of the log collapses into an `×N` count instead of adding a row. Eight rows show at once, with a **+N more** line for the rest. The log keeps the newest 200 entries in memory only: nothing is written to storage or sent anywhere. **Clear** empties the log. The **Widgets** panel marks the Diagnostics entry with a dot while the log holds entries newer than the last time the widget was visible.
+
+Recorded: errors recovered by the app (swallowed errors), uncaught `error` events, unhandled promise rejections, and consumer exceptions from terminal surfaces and the workspace hierarchy. Each entry stores the error class and a message truncated to 200 characters, with query strings, fragments and long token-like runs redacted. Not recorded and never accepted by the log: clipboard text, dictated text, pasted text, request bodies and secrets — call sites pass only a static scope and the error object.
+
+Browser **Settings → Diagnostics** shows the entry count and a **Copy diagnostics** button that puts the whole log on the clipboard as JSON to share. The private browser checks read the same ring through `__muxXR.diagnostics()`. Grip to move the widget, and its × closes it.
 
 ### Performance
 

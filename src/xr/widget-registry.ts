@@ -3,6 +3,7 @@ import {
   createStickyNoteWidget,
   createTimerWidget,
 } from '@par/xr-workspace';
+import { diagnostics } from '../diagnostics';
 import { createAgentBoardWidget } from './agent-board';
 import { createBellFeedWidget } from './bell-feed';
 import {
@@ -12,6 +13,7 @@ import {
   parseBookingsFeed,
 } from './booking-timeline';
 import { createDeskWindow, DESK_WINDOW_KIND } from './desk-window';
+import { createDiagnosticsWidget } from './diagnostics-widget';
 import { createHostLoadWidget } from './host-load';
 import { hostFeedSource, hostStatsSource, repoStatusFetcher, weatherFetcher } from './host-sources';
 import {
@@ -146,6 +148,21 @@ export const WIDGET_REGISTRY = [
         ctx.channels.streamLinks.subscribe(({ links, nowMs }) =>
           widget.setStreamLinks(links, nowMs),
         ),
+      ]),
+  },
+  {
+    kind: 'diagnostics',
+    displayName: 'Diagnostics',
+    // Lower right below service health, a glance down and right; the placement suites leave only
+    // this far low band clear at this scale.
+    spawnOffset: [3.6, -1.5, -2],
+    spawnScale: 0.7,
+    faceViewer: true,
+    // The log is a module-level store (ARC-006 widget contexts do not carry it yet), so the
+    // subscription here is module-level too.
+    create: (ctx) =>
+      subscribed(createDiagnosticsWidget(ctx.envMap), (widget) => [
+        diagnostics.subscribe(() => widget.setEntries(diagnostics.entries())),
       ]),
   },
   {

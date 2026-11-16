@@ -47,7 +47,7 @@ describe('control help table', () => {
   it('describes the widget toggle and the widgets entry point generically', () => {
     expect(getControlHelp({ type: 'toggleWidget' })).toBe('Show or hide this widget');
     expect(getControlHelp({ type: 'openInput', mode: 'widgets' })).toBe(
-      'Open movable widgets: clocks, weather, timer, performance, pictures and boards',
+      'Open movable widgets: clocks, weather, timer, performance, pictures, boards and diagnostics',
     );
   });
 

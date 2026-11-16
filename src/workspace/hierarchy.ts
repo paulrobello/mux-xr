@@ -1,5 +1,6 @@
 import { create } from '@bufbuild/protobuf';
 import type { PaneDescriptor, WorkspaceSnapshot } from '../contracts';
+import { diagnostics } from '../diagnostics';
 import { parsePaneProcess } from '../terminal/lifecycle';
 import { decodeServerMessage, encodeClientMessage } from '../terminal/protocol';
 import {
@@ -112,10 +113,12 @@ export async function connectHierarchy(
           onRoster?.apply(message.message.value.agent, message.message.value.released);
         else if (message.message.case === 'error') onError(message.message.value.message);
       } catch (cause) {
+        diagnostics.report('workspace.hierarchy', cause);
         console.error('[mux-xr] hierarchy consumer failed', cause);
         try {
           onError('The workspace view hit an internal error. Reload the page if panes look wrong.');
         } catch (reportCause) {
+          diagnostics.report('workspace.hierarchy', reportCause);
           console.error('[mux-xr] hierarchy error reporter failed', reportCause);
         }
       }

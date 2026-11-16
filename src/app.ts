@@ -2,6 +2,7 @@ import type { KeyModifiers, QuickCommand, TerminalMouseInput, WorkspaceActions }
 import { createDebugApi, installDebugApi } from './debug-api';
 import { createDemoSurface, demoAgents, demoSnapshot } from './demo';
 import { createDesktopPanels } from './desktop/panels';
+import { diagnostics } from './diagnostics';
 import { createEnvironmentManager, loadObservatory } from './environment';
 import { createHostClipboardClient, createHostClipboardSecretStore } from './host-clipboard';
 import { createDefaultPictureDepth } from './host-picture-depth';
@@ -611,6 +612,16 @@ export function createApp(root: HTMLElement, deps: AppDeps = {}): App {
     }),
   );
 
+  // Client-side failures reach the diagnostics log even when no inspector is attached.
+  const reportWindowError = (event: ErrorEvent): void => {
+    diagnostics.report('window.error', event.error ?? (event.message || 'unknown error'));
+  };
+  const reportUnhandledRejection = (event: PromiseRejectionEvent): void => {
+    diagnostics.report('window.unhandledrejection', event.reason ?? 'unhandled rejection');
+  };
+  window.addEventListener('error', reportWindowError);
+  window.addEventListener('unhandledrejection', reportUnhandledRejection);
+
   if (/^[a-f0-9]{64}$/.test(runningBuildId)) {
     updateChecker = createUpdateChecker({
       runningBuildId,
@@ -637,6 +648,8 @@ export function createApp(root: HTMLElement, deps: AppDeps = {}): App {
     dispose() {
       if (disposed) return;
       disposed = true;
+      window.removeEventListener('error', reportWindowError);
+      window.removeEventListener('unhandledrejection', reportUnhandledRejection);
       if (scene.state.xrMode !== 'desktop') scene.captureWorkspaceState();
       panes.persistOpenViews();
       xrEntry.dispose();

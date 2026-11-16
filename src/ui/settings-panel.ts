@@ -1,5 +1,6 @@
 import { validateHandColor } from '@par/xr-workspace';
 import type { PanelArrangement } from '../contracts';
+import { diagnostics } from '../diagnostics';
 import { validatePasteReviewMode } from '../paste-review';
 import type { WorkspaceSettings } from '../settings/store';
 import { validateTerminalFiltering } from '../terminal/filtering';
@@ -52,6 +53,8 @@ export interface SettingsPanelDeps {
 export interface SettingsPanel {
   /** Enables Apply arrangement only while terminals are attached. */
   setArrangementAvailable(available: boolean): void;
+  /** Ends the diagnostics-log subscription keeping the entry count live. */
+  dispose(): void;
 }
 
 /** Builds the browser settings controls inside the panel and keeps them in step with the settings. */
@@ -303,6 +306,32 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
   hostClipboard.innerHTML =
     '<legend>Host clipboard</legend><label>Pairing secret<input data-host-clipboard-secret type="password" autocomplete="off" spellcheck="false" aria-label="Host clipboard pairing secret" placeholder="Contents of .local/clipboard-secret"></label><div class="dictation-actions"><button data-action="host-clipboard-save" class="secondary">Save</button><button data-action="host-clipboard-forget" class="text-btn" title="Remove the pairing secret from this browser">Forget</button></div><small data-host-clipboard-status></small>';
   settingsPanel.insertBefore(hostClipboard, settingsPanel.querySelector('[data-action="reset"]'));
+  const diagnosticsControls = document.createElement('fieldset');
+  diagnosticsControls.dataset.diagnostics = 'true';
+  diagnosticsControls.innerHTML =
+    '<legend>Diagnostics</legend><div class="dictation-actions"><button data-action="copy-diagnostics" class="secondary">Copy diagnostics</button><small data-diagnostics-count>0 entries</small></div><small>Client-side errors recorded this session: swallowed errors, uncaught errors and unhandled rejections. Nothing leaves the page; Copy puts the JSON on the clipboard to share.</small>';
+  settingsPanel.insertBefore(
+    diagnosticsControls,
+    settingsPanel.querySelector('[data-action="reset"]'),
+  );
+  const copyDiagnostics = diagnosticsControls.querySelector<HTMLButtonElement>(
+    '[data-action="copy-diagnostics"]',
+  );
+  const diagnosticsCount = diagnosticsControls.querySelector<HTMLElement>(
+    '[data-diagnostics-count]',
+  );
+  if (!copyDiagnostics || !diagnosticsCount) throw new Error('Diagnostics controls missing');
+  const updateDiagnosticsCount = (): void => {
+    const entries = diagnostics.entries();
+    diagnosticsCount.textContent = `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`;
+  };
+  copyDiagnostics.addEventListener('click', () => {
+    void navigator.clipboard
+      .writeText(JSON.stringify(diagnostics.entries()))
+      .catch(() => undefined);
+  });
+  const stopDiagnosticsLog = diagnostics.subscribe(updateDiagnosticsCount);
+  updateDiagnosticsCount();
   const agentRowsSelect = agentControls.querySelector<HTMLSelectElement>('[data-agent-rows]');
   const agentRowsCustom = agentControls.querySelector<HTMLInputElement>('[data-agent-rows-custom]');
   const agentRowsCustomRow = agentControls.querySelector<HTMLElement>(
@@ -540,6 +569,9 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
   return {
     setArrangementAvailable(available) {
       if (arrangementApply) arrangementApply.disabled = !available;
+    },
+    dispose() {
+      stopDiagnosticsLog();
     },
   };
 }

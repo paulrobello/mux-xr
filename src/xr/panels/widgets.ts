@@ -1,9 +1,32 @@
 import type * as THREE from 'three';
+import { diagnostics } from '../../diagnostics';
+import { hasUnseenDiagnostics } from '../diagnostics-widget';
 import { actionData } from '../panel-actions';
 import { createLabelButton } from '../panel-ui';
 import type { PanelModule, SceneContext } from '../scene-context';
 import { layoutWidgetPanel } from '../widget-panel-layout';
 import { getWidgetEntry, isWidgetKind, WIDGET_REGISTRY } from '../widget-registry';
+
+/**
+ * While the panel is open, a new log entry rebuilds it so the unread dot appears live. Rebuilds
+ * are throttled because a failing call site can report every frame.
+ */
+let panelContext: SceneContext | null = null;
+let logWatcherInstalled = false;
+let lastDotRefreshAt = 0;
+const DOT_REFRESH_INTERVAL_MS = 500;
+const ensureLogWatcher = (ctx: SceneContext): void => {
+  panelContext = ctx;
+  if (logWatcherInstalled) return;
+  logWatcherInstalled = true;
+  diagnostics.subscribe(() => {
+    const now = Date.now();
+    if (now - lastDotRefreshAt < DOT_REFRESH_INTERVAL_MS) return;
+    lastDotRefreshAt = now;
+    if (panelContext && panelContext.inputMode === 'widgets')
+      panelContext.refreshInputRoot('widgets');
+  });
+};
 
 export const widgetsPanel: PanelModule = {
   title: () => 'Widgets',
@@ -16,12 +39,15 @@ export const widgetsPanel: PanelModule = {
     return { x, y };
   },
   build(root: THREE.Group, ctx: SceneContext): void {
+    ensureLogWatcher(ctx);
     const layout = layoutWidgetPanel(WIDGET_REGISTRY.length, ctx.widgetsPage);
     ctx.widgetsPage = layout.page;
     layout.buttons.forEach((rect, index) => {
       const { kind, displayName } = WIDGET_REGISTRY[layout.first + index];
+      const unreadDot = kind === 'diagnostics' && hasUnseenDiagnostics() ? '● ' : '';
       const button = createLabelButton(
         (ctx.widgets.has(kind) && !getWidgetEntry(kind).multiInstance ? 'Hide ' : 'Add ') +
+          unreadDot +
           displayName,
         rect.width,
         rect.height,

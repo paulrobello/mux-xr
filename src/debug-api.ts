@@ -5,6 +5,7 @@ import type {
   TerminalRenderQuality,
   TerminalStatus,
 } from './contracts';
+import { type DiagnosticEntry, diagnostics } from './diagnostics';
 import type { PaneController } from './workspace/pane-controller';
 import type { WorkspaceScene, WorkspaceSceneState } from './xr/scene';
 
@@ -50,6 +51,8 @@ export interface MuxXrDebugApi {
   getControlHints: WorkspaceScene['getControlHints'];
   /** `scripts/quest-frame-probe.ts` hides scene groups through this to price them on the headset. */
   getThreeScene(): WorkspaceScene['scene'];
+  /** The diagnostics ring, newest first; checks assert a clean run produced no entries. */
+  diagnostics(): readonly DiagnosticEntry[];
   checkForUpdate(): Promise<void>;
   startDemo(): void;
   connect(endpoint: string): Promise<void>;
@@ -113,6 +116,7 @@ export function createDebugApi(sources: DebugApiSources): MuxXrDebugApi {
     }),
     getControlHints: () => scene.getControlHints(),
     getThreeScene: () => scene.scene,
+    diagnostics: () => diagnostics.entries(),
     checkForUpdate: sources.checkForUpdate,
     startDemo: sources.startDemo,
     connect: sources.connect,

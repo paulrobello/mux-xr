@@ -552,6 +552,7 @@ export function mountWorkspaceUI(
       binding.stop();
       keyboard.clearModifiers();
       agentRoster.destroy();
+      settingsPanelControls?.dispose();
       root.remove();
     },
   };
