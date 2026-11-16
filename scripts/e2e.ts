@@ -707,6 +707,25 @@ async function runViewport(browser: Browser, viewport: Viewport): Promise<Record
     await page.locator('[data-action="connect"]').click();
     await waitForText(page, '.status-copy', /HTTP|WebSocket|endpoint/i);
     assert(errors.length === 0, `page errors: ${errors.join('; ')}`);
+    const cleanDiag: unknown[] = await page.evaluate(() =>
+      (window as unknown as { __muxXR: { diagnostics: () => unknown[] } }).__muxXR.diagnostics(),
+    );
+    assert(
+      cleanDiag.length === 0,
+      `clean run produced diagnostics: ${JSON.stringify(cleanDiag.slice(0, 3))}`,
+    );
+    await page.evaluate(() =>
+      window.dispatchEvent(new ErrorEvent('error', { message: 'synthetic e2e diagnostics probe' })),
+    );
+    const probeDiag: { scope: string }[] = await page.evaluate(() =>
+      (
+        window as unknown as { __muxXR: { diagnostics: () => { scope: string }[] } }
+      ).__muxXR.diagnostics(),
+    );
+    assert(
+      probeDiag.length === 1 && probeDiag[0].scope === 'window.error',
+      `synthetic error did not land as window.error: ${JSON.stringify(probeDiag)}`,
+    );
     const renderer = await page.evaluate(() => {
       const canvas = document.querySelector<HTMLCanvasElement>(
         'canvas[aria-label="Mux XR workspace"]',
