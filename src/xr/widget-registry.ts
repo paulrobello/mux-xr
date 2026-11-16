@@ -3,19 +3,40 @@ import {
   createStickyNoteWidget,
   createTimerWidget,
 } from '@par/xr-workspace';
-import type * as THREE from 'three';
 import { createAgentBoardWidget } from './agent-board';
 import { createBellFeedWidget } from './bell-feed';
-import { createBookingTimelineWidget } from './booking-timeline';
+import {
+  BOOKINGS_PATH,
+  BOOKINGS_PROTOCOL,
+  createBookingTimelineWidget,
+  parseBookingsFeed,
+} from './booking-timeline';
 import { createDeskWindow, DESK_WINDOW_KIND } from './desk-window';
 import { createHostLoadWidget } from './host-load';
-import { createKanbanStripWidget } from './kanban-strip';
-import { createMeshInboxWidget } from './mesh-inbox';
+import { hostFeedSource, hostStatsSource, repoStatusFetcher, weatherFetcher } from './host-sources';
+import {
+  createKanbanStripWidget,
+  KANBAN_STRIP_PATH,
+  KANBAN_STRIP_PROTOCOL,
+  parseKanbanStrip,
+} from './kanban-strip';
+import {
+  createMeshInboxWidget,
+  MESH_INBOX_PATH,
+  MESH_INBOX_PROTOCOL,
+  parseMeshInbox,
+} from './mesh-inbox';
 import { createPictureFrameWidget } from './picture-frame';
 import { createRepoStatusWidget } from './repo-status-widget';
-import { createServiceHealthWidget } from './service-health';
+import {
+  createServiceHealthWidget,
+  parseServiceHealth,
+  SERVICE_HEALTH_PATH,
+  SERVICE_HEALTH_PROTOCOL,
+} from './service-health';
 import { createStreamHealthWidget } from './stream-health';
 import { createWeatherWidget } from './weather-widget';
+import { subscribed, type WidgetContext } from './widget-types';
 import { createClockWidget, type Widget } from './widgets';
 
 export interface WidgetEntry {
@@ -31,7 +52,19 @@ export interface WidgetEntry {
   faceViewer?: true;
   /** Many instances may coexist; each is keyed `<kind>:<id>` in the scene and the pose store. */
   multiInstance?: boolean;
-  create: (envMap: THREE.Texture | null) => Widget;
+  create: (ctx: WidgetContext) => Widget;
+}
+
+/** A picture frame wired to the anisotropy channel; the scene also builds frames for stored pictures. */
+export function createPictureWidget(
+  ctx: WidgetContext,
+  options: Parameters<typeof createPictureFrameWidget>[1] = {},
+): ReturnType<typeof createPictureFrameWidget> {
+  return subscribed(createPictureFrameWidget(ctx.envMap, options), (widget) => [
+    ctx.channels.textureAnisotropy.subscribe((anisotropy) =>
+      widget.setTextureAnisotropy(anisotropy),
+    ),
+  ]);
 }
 
 /** Entry order is the Widgets panel order. */
@@ -40,13 +73,13 @@ export const WIDGET_REGISTRY = [
     kind: 'digital-clock',
     displayName: 'Digital clock',
     spawnOffset: [-0.45, 0.3, -1.25],
-    create: (envMap) => createClockWidget('digital-clock', envMap),
+    create: ({ envMap }) => createClockWidget('digital-clock', envMap),
   },
   {
     kind: 'analog-clock',
     displayName: 'Analog clock',
     spawnOffset: [0.45, 0.3, -1.25],
-    create: (envMap) => createClockWidget('analog-clock', envMap),
+    create: ({ envMap }) => createClockWidget('analog-clock', envMap),
   },
   {
     kind: 'agent-board',
@@ -54,14 +87,17 @@ export const WIDGET_REGISTRY = [
     // Centred below both clocks and above the HUD, default or recentered.
     spawnOffset: [0, -0.27, -1.25],
     spawnScale: 0.8,
-    create: (envMap) => createAgentBoardWidget(envMap),
+    create: (ctx) =>
+      subscribed(createAgentBoardWidget(ctx.envMap), (widget) => [
+        ctx.channels.agentRoster.subscribe((rows) => widget.setAgentRoster(rows)),
+      ]),
   },
   {
     kind: 'timer',
     displayName: 'Timer',
     // Centred in the gap between the clock bodies (-0.14 to 0.16, so x +0.01); the widget is 0.27 m wide.
     spawnOffset: [0.01, 0.3, -1.25],
-    create: (envMap) => createTimerWidget(envMap),
+    create: ({ envMap }) => createTimerWidget(envMap),
   },
   {
     kind: 'bell-feed',
@@ -70,7 +106,10 @@ export const WIDGET_REGISTRY = [
     spawnOffset: [1.05, 0.15, -1.1],
     spawnScale: 0.8,
     faceViewer: true,
-    create: (envMap) => createBellFeedWidget(envMap),
+    create: (ctx) =>
+      subscribed(createBellFeedWidget(ctx.envMap), (widget) => [
+        ctx.channels.bellFeed.subscribe((entries) => widget.setBellFeed(entries)),
+      ]),
   },
   {
     kind: 'perf-gauge',
@@ -79,7 +118,11 @@ export const WIDGET_REGISTRY = [
     spawnOffset: [-1, 0.15, -1.1],
     spawnScale: 0.9,
     faceViewer: true,
-    create: (envMap) => createPerfGaugeWidget(envMap),
+    create: (ctx) =>
+      subscribed(createPerfGaugeWidget(ctx.envMap), (widget) => [
+        ctx.channels.perfSample.subscribe((sample) => widget.setPerfSample(sample)),
+        ctx.channels.perfReset.subscribe(() => widget.resetPerf()),
+      ]),
   },
   {
     kind: 'host-load',
@@ -88,7 +131,7 @@ export const WIDGET_REGISTRY = [
     spawnOffset: [-1.15, 0.53, -1.3],
     spawnScale: 0.7,
     faceViewer: true,
-    create: (envMap) => createHostLoadWidget(envMap),
+    create: ({ envMap, host }) => createHostLoadWidget(envMap, { source: hostStatsSource(host) }),
   },
   {
     kind: 'stream-health',
@@ -98,7 +141,12 @@ export const WIDGET_REGISTRY = [
     spawnOffset: [-1.6, 0.6, -1.1],
     spawnScale: 0.6,
     faceViewer: true,
-    create: (envMap) => createStreamHealthWidget(envMap),
+    create: (ctx) =>
+      subscribed(createStreamHealthWidget(ctx.envMap), (widget) => [
+        ctx.channels.streamLinks.subscribe(({ links, nowMs }) =>
+          widget.setStreamLinks(links, nowMs),
+        ),
+      ]),
   },
   {
     kind: 'repo-status',
@@ -108,7 +156,15 @@ export const WIDGET_REGISTRY = [
     spawnOffset: [0.6, -0.1, -1.4],
     spawnScale: 0.7,
     faceViewer: true,
-    create: (envMap) => createRepoStatusWidget(envMap),
+    create: (ctx) =>
+      subscribed(
+        createRepoStatusWidget(ctx.envMap, { fetchStatus: repoStatusFetcher(ctx.host) }),
+        (widget) => [
+          ctx.channels.focusedPane.subscribe((paneId, cwd, host) =>
+            widget.setFocusedPane(paneId, cwd, host),
+          ),
+        ],
+      ),
   },
   {
     kind: 'weather',
@@ -118,7 +174,11 @@ export const WIDGET_REGISTRY = [
     spawnOffset: [-0.6, 0.574, -1.32],
     spawnScale: 0.62,
     faceViewer: true,
-    create: (envMap) => createWeatherWidget(envMap),
+    create: (ctx) =>
+      subscribed(
+        createWeatherWidget(ctx.envMap, { fetchWeather: weatherFetcher(ctx.host) }),
+        (widget) => [ctx.channels.weatherZip.subscribe((zip) => widget.setWeatherZip(zip))],
+      ),
   },
   {
     kind: 'picture',
@@ -129,7 +189,7 @@ export const WIDGET_REGISTRY = [
     multiInstance: true,
     faceViewer: true,
     // The menu spawns the placeholder; pictures picked on the page fill it.
-    create: (envMap) => createPictureFrameWidget(envMap),
+    create: (ctx) => createPictureWidget(ctx),
   },
   {
     kind: 'kanban-strip',
@@ -139,7 +199,22 @@ export const WIDGET_REGISTRY = [
     spawnOffset: [0, -0.9, -1.2],
     spawnScale: 0.7,
     faceViewer: true,
-    create: (envMap) => createKanbanStripWidget(envMap),
+    create: (ctx) =>
+      subscribed(
+        createKanbanStripWidget(ctx.envMap, {
+          source: hostFeedSource(
+            ctx.host,
+            KANBAN_STRIP_PATH,
+            KANBAN_STRIP_PROTOCOL,
+            parseKanbanStrip,
+          ),
+        }),
+        (widget) => [
+          ctx.channels.focusedPane.subscribe((paneId, cwd, host) =>
+            widget.setFocusedPane(paneId, cwd, host),
+          ),
+        ],
+      ),
   },
   {
     kind: 'booking-timeline',
@@ -149,7 +224,10 @@ export const WIDGET_REGISTRY = [
     spawnOffset: [-2.5, 0.05, -1.6],
     spawnScale: 0.7,
     faceViewer: true,
-    create: (envMap) => createBookingTimelineWidget(envMap),
+    create: ({ envMap, host }) =>
+      createBookingTimelineWidget(envMap, {
+        source: hostFeedSource(host, BOOKINGS_PATH, BOOKINGS_PROTOCOL, parseBookingsFeed),
+      }),
   },
   {
     kind: 'service-health',
@@ -159,7 +237,12 @@ export const WIDGET_REGISTRY = [
     spawnOffset: [2.65, -0.45, -1.6],
     spawnScale: 0.7,
     faceViewer: true,
-    create: (envMap) => createServiceHealthWidget(envMap),
+    create: ({ envMap, host }) =>
+      createServiceHealthWidget(envMap, {
+        source: hostFeedSource(host, SERVICE_HEALTH_PATH, SERVICE_HEALTH_PROTOCOL, (data) =>
+          parseServiceHealth(data, Date.now()),
+        ),
+      }),
   },
   {
     kind: 'mesh-inbox',
@@ -168,7 +251,15 @@ export const WIDGET_REGISTRY = [
     spawnOffset: [0, 1.55, -1.2],
     spawnScale: 0.7,
     faceViewer: true,
-    create: (envMap) => createMeshInboxWidget(envMap),
+    create: (ctx) =>
+      subscribed(
+        createMeshInboxWidget(ctx.envMap, {
+          source: hostFeedSource(ctx.host, MESH_INBOX_PATH, MESH_INBOX_PROTOCOL, (data) =>
+            parseMeshInbox(data, Date.now()),
+          ),
+        }),
+        (widget) => [ctx.channels.agentRoster.subscribe((rows) => widget.setAgentRoster(rows))],
+      ),
   },
   {
     kind: 'sticky-note',
@@ -180,7 +271,7 @@ export const WIDGET_REGISTRY = [
     multiInstance: true,
     faceViewer: true,
     // The menu starts dictation; Pin as note creates each note with its text.
-    create: (envMap) => createStickyNoteWidget(envMap),
+    create: ({ envMap }) => createStickyNoteWidget(envMap),
   },
 ] as const satisfies readonly WidgetEntry[];
 

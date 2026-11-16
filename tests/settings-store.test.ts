@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { resolveAccent } from '@par/xr-workspace';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createSettingsStore,
@@ -9,7 +8,6 @@ import {
   type WorkspaceSettings,
 } from '../src/settings/store';
 import { mountWorkspaceUI } from '../src/ui';
-import { accent } from '../src/xr/accent-state';
 import { fixture } from './helpers/xr-harness';
 
 function memoryStorage(initial?: string): Storage & { values: Map<string, string> } {
@@ -184,7 +182,6 @@ describe('settings shared by the browser presenter and the XR scene', () => {
     expect(workspace.state.handColor).toBe('#112233');
     expect(workspace.state.weatherZip).toBe('90210');
     expect(workspace.state.accentColor).toBe('#ff8800');
-    expect(accent.hex).toBe(resolveAccent('#ff8800'));
     workspace.dispose();
   });
 

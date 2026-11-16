@@ -15,7 +15,6 @@ export const fakeXR = {
 };
 
 export const handPoses = { count: 0, probeReads: 0 };
-export const focusedDirectories = { git: vi.fn(), kanban: vi.fn() };
 
 /** `three` with a renderer that needs no GL context and exposes the fake XR controllers. */
 export function createThreeMock(actual: typeof import('three')): typeof import('three') {
@@ -48,32 +47,6 @@ export function createThreeMock(actual: typeof import('three')): typeof import('
     dispose(): void {}
   }
   return { ...actual, WebGLRenderer: FakeRenderer } as unknown as typeof import('three');
-}
-
-/** The repo-status widget with its focused-pane hook routed to `focusedDirectories.git`. */
-export function withSpiedRepoStatus(
-  actual: typeof import('../../src/xr/repo-status-widget'),
-): typeof import('../../src/xr/repo-status-widget') {
-  return {
-    ...actual,
-    createRepoStatusWidget: (...args: Parameters<typeof actual.createRepoStatusWidget>) => ({
-      ...actual.createRepoStatusWidget(...args),
-      setFocusedPane: focusedDirectories.git,
-    }),
-  };
-}
-
-/** The kanban strip with its focused-pane hook routed to `focusedDirectories.kanban`. */
-export function withSpiedKanbanStrip(
-  actual: typeof import('../../src/xr/kanban-strip'),
-): typeof import('../../src/xr/kanban-strip') {
-  return {
-    ...actual,
-    createKanbanStripWidget: (...args: Parameters<typeof actual.createKanbanStripWidget>) => ({
-      ...actual.createKanbanStripWidget(...args),
-      setFocusedPane: focusedDirectories.kanban,
-    }),
-  };
 }
 
 /**

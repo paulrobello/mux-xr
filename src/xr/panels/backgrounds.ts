@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import type { BackgroundMode } from '../../contracts';
-import { accent } from '../accent-state';
 import {
   BACKGROUND_LABELS,
   BACKGROUND_TILE_HEIGHT,
@@ -39,7 +38,7 @@ export const backgroundsPanel: PanelModule = {
       if (selected) {
         const frame = new THREE.Mesh(
           new THREE.PlaneGeometry(BACKGROUND_TILE_WIDTH + 0.024, BACKGROUND_TILE_HEIGHT + 0.024),
-          new THREE.MeshBasicMaterial({ color: accent.hex }),
+          new THREE.MeshBasicMaterial({ color: ctx.accent.hex }),
         );
         frame.name = 'xr-background-selected';
         setAction(frame, { type: 'noop' });
@@ -53,7 +52,7 @@ export const backgroundsPanel: PanelModule = {
         actionData({ type: 'background', background }),
       );
       caption.position.set(x, y - BACKGROUND_TILE_HEIGHT / 2 - 0.05, 0);
-      setModifierVisual(caption, selected);
+      setModifierVisual(caption, selected, ctx.accent.hex);
       root.add(caption);
     }
     for (const [glyph, delta, y, enabled] of [

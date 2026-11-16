@@ -5,16 +5,6 @@ vi.mock('@par/xr-workspace', async (importOriginal) =>
     await importOriginal<typeof import('@par/xr-workspace')>(),
   ),
 );
-vi.mock('../../src/xr/repo-status-widget', async (original) =>
-  (await import('../helpers/xr-mocks')).withSpiedRepoStatus(
-    await original<typeof import('../../src/xr/repo-status-widget')>(),
-  ),
-);
-vi.mock('../../src/xr/kanban-strip', async (original) =>
-  (await import('../helpers/xr-mocks')).withSpiedKanbanStrip(
-    await original<typeof import('../../src/xr/kanban-strip')>(),
-  ),
-);
 vi.mock('three', async (importOriginal) =>
   (await import('../helpers/xr-mocks')).createThreeMock(
     await importOriginal<typeof import('three')>(),

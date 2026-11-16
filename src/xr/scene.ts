@@ -2,6 +2,7 @@ import type { CartoonHand, PictureDepthView } from '@par/xr-workspace';
 import {
   applyUIEnvironment,
   countsAsFrame,
+  createFrameUpdaters,
   createHandContact,
   createKeyborbInput,
   createModifierState,
@@ -12,8 +13,6 @@ import {
   createUIEnvironment,
   createWristMenuWatch,
   curveKeyboardContent,
-  DEFAULT_ACCENT,
-  DEFAULT_ACCENT_HOVER,
   disposeScalableLabel,
   type HandContact,
   type HandContactSample,
@@ -88,7 +87,7 @@ import {
   validateWindowPreferences,
   type WindowPreferences,
 } from '../workspace/window-preferences';
-import { accent } from './accent-state';
+import { createAccentState } from './accent-state';
 import { calculateArrangement } from './arrangements';
 import {
   BACKGROUND_LABELS,
@@ -143,7 +142,7 @@ import {
   setModifierVisual,
 } from './panel-ui';
 import { isTypingMode, PANELS } from './panels';
-import { createPictureFrameWidget, PICTURE_KIND } from './picture-frame';
+import { PICTURE_KIND } from './picture-frame';
 import type { PictureImage } from './picture-image';
 import {
   freePictureSlot,
@@ -188,8 +187,10 @@ import {
 } from './ui-poses';
 import { updateVisibleMatrixWorld } from './visible-matrix-world';
 import { intersectVisible } from './visible-raycast';
+import { createBrowserHost } from './widget-host';
 import { createWidgetPoseStore, type WidgetPose } from './widget-poses';
 import {
+  createPictureWidget,
   findWidgetEntry,
   getWidgetEntry,
   isWidgetKind,
@@ -200,6 +201,12 @@ import {
   widgetSpawnYaw,
 } from './widget-registry';
 import { keepWidgetSpawnInView } from './widget-spawn';
+import {
+  createWidgetChannels,
+  type PictureDepthTarget,
+  type WidgetContext,
+  type WidgetHost,
+} from './widget-types';
 import type { Widget } from './widgets';
 
 type InputKind = 'hand' | 'controller';
@@ -294,6 +301,8 @@ export interface WorkspaceScene {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
   readonly state: Readonly<WorkspaceSceneState>;
+  /** Adds a callback the scene runs once per frame with the frame delta in seconds; returns its removal. */
+  registerFrameUpdater(update: (deltaSeconds: number) => void): () => void;
   /** The renderer's anisotropic filtering ceiling; 1 without a renderer. */
   readonly maxAnisotropy: number;
   addTerminal(surface: TerminalSurface): void;
@@ -474,7 +483,6 @@ const _KEYBORB_DICTATION_COLUMN = 9;
 const SCROLL_STRIP_WIDTH = 0.05;
 const SCROLL_STRIP_OPACITY = 0.14;
 const SCROLL_STRIP_ACTIVE_OPACITY = 0.38;
-// The live XR accent; each scene resets it and its setter retints what was built with it.
 const SELECTED_FRAME_GLOW = 0.45;
 const CONTROLLER_RAY_LENGTH = 8;
 // An XR press becomes a drag only once its hit moves past both limits, so hand and controller
@@ -487,7 +495,6 @@ const CURSOR_HALF_ANGLE = Math.tan(THREE.MathUtils.degToRad(0.25));
 const CURSOR_PINCH_OPEN = 0.08;
 const CURSOR_PINCH_CLOSED = 0.02;
 const cursorColor = new THREE.Color();
-const cursorRest = new THREE.Color(DEFAULT_ACCENT);
 const cursorPinched = new THREE.Color(0xffffff);
 const QUALITY_RANK: Record<TerminalRenderQuality, number> = {
   hidden: 0,
@@ -760,14 +767,18 @@ export function createWorkspaceScene(
     onPictureDepthView?: (id: string, view: PictureDepthView) => void;
     /** The device settings shared with the browser presenter; a private in-memory store when omitted. */
     settings?: SettingsStore;
+    /** The host service connection host-backed widgets use; defaults to the page's own. */
+    host?: WidgetHost;
   } = {},
 ): WorkspaceScene {
   const feedback = options.feedback ?? createUIFeedback();
   const settingsStore = options.settings ?? createSettingsStore();
   const scene = new THREE.Scene();
-  accent.hex = DEFAULT_ACCENT;
-  accent.hover = DEFAULT_ACCENT_HOVER;
-  cursorRest.setHex(DEFAULT_ACCENT);
+  const frameUpdaters = createFrameUpdaters();
+  // Test seam for scripts/*-check.ts, which reach only the Three scene: runs the frame updaters.
+  scene.userData.stepFrameUpdaters = frameUpdaters.update;
+  const accent = createAccentState();
+  const cursorRest = new THREE.Color(accent.hex);
   const camera = new THREE.PerspectiveCamera(58, 1, 0.01, 100);
   camera.position.set(0, 1.52, 0.45);
   camera.lookAt(0, 1.42, -1.05);
@@ -1272,7 +1283,7 @@ export function createWorkspaceScene(
   const resetPerfStats = (): void => {
     perfWorstFrameMs = 0;
     perfWasHidden = true;
-    for (const widget of widgets.values()) widget.resetPerf?.();
+    widgetChannels.perfReset.publish();
   };
   let fpsLabel: THREE.Mesh | null = null;
   let keyLabel: THREE.Mesh | null = null;
@@ -1365,9 +1376,19 @@ export function createWorkspaceScene(
   scene.add(messageToasts.root);
   // Reused every frame: widgets whose meshes a controller ray hit.
   const pointedWidgets = new Set<Widget>();
-  bellFeed.subscribe(() => {
-    for (const widget of widgets.values()) widget.setBellFeed?.(bellFeed.entries());
+  const widgetChannels = createWidgetChannels({
+    bellFeed: bellFeed.entries(),
+    textureAnisotropy: Math.min(mutableState.filtering.anisotropy, maxAnisotropy()),
+    weatherZip: mutableState.weatherZip,
   });
+  const widgetContext: WidgetContext = {
+    get envMap() {
+      return uiEnvironment.texture;
+    },
+    host: options.host ?? createBrowserHost(),
+    channels: widgetChannels,
+  };
+  bellFeed.subscribe(() => widgetChannels.bellFeed.publish(bellFeed.entries()));
   const rosterDirectories = new Map<string, string>();
   let agentRosterSignature = '';
   let agentRosterRows: AgentRows = DEFAULT_AGENT_ROSTER_LAYOUT.rows;
@@ -1460,7 +1481,7 @@ export function createWorkspaceScene(
       root.traverse((object) => {
         const modifier = object.userData.modifier as KeyboardModifier | undefined;
         if (!modifier) return;
-        setModifierVisual(object, Boolean(active[modifier]));
+        setModifierVisual(object, Boolean(active[modifier]), accent.hex);
         object.userData.locked = Boolean(locked[modifier]);
         updateLabel(
           object as THREE.Mesh,
@@ -1556,7 +1577,7 @@ export function createWorkspaceScene(
     mouseCaptures.delete(source);
     const panel = panels.get(capture.id);
     if (panel)
-      actions.sendMouse?.(capture.id, {
+      actions.sendMouse(capture.id, {
         ...capture,
         col: Math.min(capture.col, panel.surface.cols - 1),
         row: Math.min(capture.row, panel.surface.rows - 1),
@@ -1722,7 +1743,7 @@ export function createWorkspaceScene(
         continue;
       }
       drag.anchor += lines * line;
-      actions.scrollTerminal?.(panel.id, lines);
+      actions.scrollTerminal(panel.id, lines);
       cue('tick', source);
     }
   };
@@ -1944,7 +1965,7 @@ export function createWorkspaceScene(
       eventType: 'press',
       modifiers,
     };
-    if (!actions.sendMouse?.(panel.id, input)) return false;
+    if (!actions.sendMouse(panel.id, input)) return false;
     mouseCaptures.set(source, { ...input, id: panel.id });
     if (typeof source === 'object')
       mousePresses.set(source, {
@@ -1977,7 +1998,7 @@ export function createWorkspaceScene(
     }
     capture.col = cell.col;
     capture.row = cell.row;
-    actions.sendMouse?.(capture.id, { ...capture, eventType: 'move' });
+    actions.sendMouse(capture.id, { ...capture, eventType: 'move' });
   };
 
   const notify = (): void => {
@@ -2639,9 +2660,7 @@ export function createWorkspaceScene(
   };
   // Pings and per-pane sampling run only while a stream health widget is mounted.
   const sampleStreamLinks = (time: number): void => {
-    const consumers: Widget[] = [];
-    for (const widget of widgets.values()) if (widget.setStreamLinks) consumers.push(widget);
-    if (!consumers.length) return;
+    if (!widgetChannels.streamLinks.hasSubscribers()) return;
     const links: StreamLinkInput[] = [];
     const pingAt = performance.now();
     for (const [paneId, panel] of panels) {
@@ -2655,7 +2674,7 @@ export function createWorkspaceScene(
         stats: surface.linkStats,
       });
     }
-    for (const widget of consumers) widget.setStreamLinks?.(links, time);
+    widgetChannels.streamLinks.publish({ links, nowMs: time });
   };
   let focusQuadLayer: FocusQuadLayer | null = null;
   let focusQuadPending = false;
@@ -2666,7 +2685,7 @@ export function createWorkspaceScene(
       // Multi-instance widgets (pictures) restore from their own records, not from a pose.
       if (!pose || touchedWidgets.has(kind)) continue;
       if (isPlaceholderKey(kind) && !widgets.has(kind)) {
-        const widget = createPictureFrameWidget(uiEnvironment.texture, {
+        const widget = createPictureWidget(widgetContext, {
           id: kind.slice(PICTURE_KIND.length + 1),
         });
         mountWidget(PICTURE_KIND, widget, false);
@@ -2795,7 +2814,7 @@ export function createWorkspaceScene(
       ? focusedPanel.surface.cwd || rosterDirectories.get(focusedPanel.id) || null
       : null;
     for (const widget of widgets.values()) {
-      widget.setFocusedPane?.(
+      widgetChannels.focusedPane.publish(
         focusedPanel?.id ?? null,
         focusedCwd,
         focusedPanel?.surface.cwdHost ?? null,
@@ -2808,7 +2827,7 @@ export function createWorkspaceScene(
     );
     if (hierarchyNavigator)
       hierarchyNavigator.root.userData.transitioning = hierarchyNavigator.transitioning;
-    (scene.userData.updateEnvironment as ((delta: number) => void) | undefined)?.(deltaSeconds);
+    frameUpdaters.update(deltaSeconds);
     if (renderer?.xr.isPresenting) {
       let leftController: THREE.Group | null = null;
       let leftVisual: CartoonHand | undefined;
@@ -2959,7 +2978,7 @@ export function createWorkspaceScene(
         shownPanes,
         targetHz: renderer?.xr.isPresenting ? (activeSession?.frameRate ?? 72) : 60,
       };
-      for (const widget of widgets.values()) widget.setPerfSample?.(sample);
+      widgetChannels.perfSample.publish(sample);
       perfWorstFrameMs = 0;
     }
     if (time - streamSampleAt >= STREAM_HEALTH_SAMPLE_MS) {
@@ -3105,7 +3124,7 @@ export function createWorkspaceScene(
         }
         const panel = target?.terminalId ? panels.get(target.terminalId) : undefined;
         if (panel && target?.uv && target.object === panel.screen) {
-          actions.scrollTerminal?.(panel.id, Math.sign(axis) * 3, cellAtUV(panel, target.uv));
+          actions.scrollTerminal(panel.id, Math.sign(axis) * 3, cellAtUV(panel, target.uv));
           scrollDue.set(controller, time + 160 / Math.abs(axis));
         }
       }
@@ -3569,8 +3588,7 @@ export function createWorkspaceScene(
     if (!panel || target?.object !== panel.screen || !target.uv) return;
     const unit = event.deltaMode === 1 ? 1 : event.deltaMode === 2 ? panel.surface.rows : 1 / 40;
     const lines = Math.sign(event.deltaY) * Math.max(1, Math.round(Math.abs(event.deltaY) * unit));
-    if (actions.scrollTerminal?.(panel.id, lines, cellAtUV(panel, target.uv)))
-      event.preventDefault();
+    if (actions.scrollTerminal(panel.id, lines, cellAtUV(panel, target.uv))) event.preventDefault();
   };
   canvas.addEventListener('wheel', onWheel, { passive: false });
   canvas.addEventListener('pointerdown', onPointerDown);
@@ -3739,9 +3757,6 @@ export function createWorkspaceScene(
       object.userData.widgetId = widgetId;
       if (!object.userData.inputAction) object.userData.inputAction = 'grabWidget';
     });
-    widget.setAgentRoster?.(latestAgentRoster);
-    widget.setBellFeed?.(bellFeed.entries());
-    widget.setWeatherZip?.(mutableState.weatherZip);
     retintAccentMaterials(widget.root, '', mutableState.accentColor);
     widgets.set(key, widget);
     scene.add(widget.root);
@@ -3749,7 +3764,7 @@ export function createWorkspaceScene(
     return key;
   };
   const addWidget = (kind: WidgetKind): Widget => {
-    const widget = getWidgetEntry(kind).create(uiEnvironment.texture);
+    const widget = getWidgetEntry(kind).create(widgetContext);
     mountWidget(kind, widget);
     return widget;
   };
@@ -3871,7 +3886,7 @@ export function createWorkspaceScene(
       ? undefined
       : (targeted ??
         [...widgets.values()].reverse().find((entry) => entry.root.userData.picturePlaceholder));
-    const widget = createPictureFrameWidget(uiEnvironment.texture, {
+    const widget = createPictureWidget(widgetContext, {
       id,
       image,
       anisotropy: pictureAnisotropy(),
@@ -3939,7 +3954,7 @@ export function createWorkspaceScene(
       return;
     }
     showInput('keyboard');
-    if (status !== 'listening' && status !== 'transcribing') actions.dictationAction?.('startNote');
+    if (status !== 'listening' && status !== 'transcribing') actions.dictationAction('startNote');
   };
   const pinNote = (): void => {
     const text = normalizeStickyNoteText(mutableState.dictation.transcript);
@@ -3961,7 +3976,7 @@ export function createWorkspaceScene(
     placeWidget(key, widget, STICKY_NOTE_PIN_OFFSET);
     widget.root.userData.picturePlaced = true;
     saveWidgetPose(key, widget);
-    actions.dictationAction?.('cancel');
+    actions.dictationAction('cancel');
     mutableState.widgets = [...widgets.keys()];
     setNotice('Pinned the note');
     notify();
@@ -4181,7 +4196,7 @@ export function createWorkspaceScene(
       mode !== 'keyboard' &&
       ['listening', 'transcribing'].includes(mutableState.dictation.status)
     )
-      actions.dictationAction?.('cancel');
+      actions.dictationAction('cancel');
     const previousRoot = inputRoot;
     const previousPair = previousRoot ? pairGrabs.get(previousRoot) : undefined;
     if (previousRoot) pairGrabs.delete(previousRoot);
@@ -4427,11 +4442,11 @@ export function createWorkspaceScene(
   const editDictationKey = (key: string): void => {
     if (key === 'Enter') {
       if (mutableState.dictation.forNote) pinNote();
-      else actions.dictationAction?.('insert');
+      else actions.dictationAction('insert');
       return;
     }
     if (key === 'Escape') {
-      actions.dictationAction?.('cancel');
+      actions.dictationAction('cancel');
       return;
     }
     const characters = Array.from(mutableState.dictation.transcript);
@@ -4454,13 +4469,13 @@ export function createWorkspaceScene(
       );
       consumeArmedModifiers();
     }
-    actions.editDictation?.(characters.join(''));
+    actions.editDictation(characters.join(''));
   };
   const typeTextEntryKey = (key: string): boolean => {
     if (!inputRoot) return false;
     if (inputMode === 'keyboard' && mutableState.dictation.forNote) {
       if (dictationReview()) editDictationKey(key);
-      else if (key === 'Escape') actions.dictationAction?.('cancel');
+      else if (key === 'Escape') actions.dictationAction('cancel');
       return true;
     }
     if (inputMode !== 'picture-url') return false;
@@ -4586,7 +4601,7 @@ export function createWorkspaceScene(
         if (action.terminalId) actions.closePane(action.terminalId);
         return true;
       case 'toggleConnection':
-        if (action.terminalId) actions.togglePaneConnection?.(action.terminalId);
+        if (action.terminalId) actions.togglePaneConnection(action.terminalId);
         return true;
       case 'bringHere':
         if (action.terminalId) bringTerminalHere(action.terminalId);
@@ -4692,14 +4707,14 @@ export function createWorkspaceScene(
           radialMenu.close();
           mutableState.radialOpen = false;
         }
-        actions.reloadApp?.();
+        actions.reloadApp();
         return true;
       }
       case 'exit': {
         if (!confirmControl('exit')) return true;
         hideInput();
         if (activeSession) void activeSession.end();
-        else actions.exitPreview?.();
+        else actions.exitPreview();
         return true;
       }
       case 'closeWidget': {
@@ -4723,7 +4738,7 @@ export function createWorkspaceScene(
           );
           return true;
         }
-        if (typeof action.sessionId === 'string') actions.createPane?.(action.sessionId);
+        if (typeof action.sessionId === 'string') actions.createPane(action.sessionId);
         return true;
       case 'selectAgentPane': {
         const paneId = action.agentPaneId;
@@ -4773,7 +4788,7 @@ export function createWorkspaceScene(
         if (modifier) {
           modifierState.tap(modifier);
           syncModifierVisuals();
-          setModifierVisual(hit, Boolean(modifierState.active[modifier]));
+          setModifierVisual(hit, Boolean(modifierState.active[modifier]), accent.hex);
           if (modifier === 'shift') refreshInputRoot(inputMode);
           return true;
         }
@@ -4804,7 +4819,7 @@ export function createWorkspaceScene(
     commandsMessage = '';
     if (isSharedCommand(command)) commandsMessage = 'Shared commands are read-only';
     else if (commandTool === 'pin') {
-      if (actions.saveCommand?.({ ...copyCommand(command), pinned: !command.pinned }))
+      if (actions.saveCommand({ ...copyCommand(command), pinned: !command.pinned }))
         snapshotMenuCommands();
       else commandsMessage = 'Could not save on this device';
     } else if (commandTool === 'edit') {
@@ -4824,7 +4839,7 @@ export function createWorkspaceScene(
       }
       if (confirmTooSoon()) return;
       disarmCommand();
-      if (actions.removeCommand?.(command.id)) {
+      if (actions.removeCommand(command.id)) {
         snapshotMenuCommands();
         commandPage = Math.min(commandPage, Math.max(0, Math.ceil(menuCommands.length / 8) - 1));
         commandsMessage = `Removed ${command.label}`;
@@ -4957,7 +4972,7 @@ export function createWorkspaceScene(
         if (modifier) {
           modifierState.tap(modifier);
           syncModifierVisuals();
-          if (hit) setModifierVisual(hit, Boolean(modifierState.active[modifier]));
+          if (hit) setModifierVisual(hit, Boolean(modifierState.active[modifier]), accent.hex);
         } else {
           actions.sendKey(
             keyName,
@@ -6063,7 +6078,7 @@ export function createWorkspaceScene(
       setTerminalMaterialFiltering(panel.screen.material, next, panel.filterGaze);
       panel.filterVersion = filterVersion;
     }
-    for (const widget of widgets.values()) widget.setTextureAnisotropy?.(pictureAnisotropy());
+    widgetChannels.textureAnisotropy.publish(pictureAnisotropy());
     if (inputRoot && inputMode === 'filtering') refreshInputRoot('filtering');
     notify();
   };
@@ -6082,7 +6097,7 @@ export function createWorkspaceScene(
       if (trigger) updateLabel(trigger, BACKGROUND_LABELS[mode]);
       select?.traverse((child) => {
         if (child.userData.inputAction === 'background')
-          setModifierVisual(child, child.userData.background === mode);
+          setModifierVisual(child, child.userData.background === mode, accent.hex);
       });
     }
     const deskWindow = mutableState.xrMode === 'ar' && widgets.has(DESK_WINDOW_KIND);
@@ -6160,7 +6175,7 @@ export function createWorkspaceScene(
     const next = validateWeatherZip(zip);
     if (next === mutableState.weatherZip) return;
     mutableState.weatherZip = next;
-    for (const widget of widgets.values()) widget.setWeatherZip?.(next);
+    widgetChannels.weatherZip.publish(next);
     if (inputRoot && inputMode === 'world') refreshInputRoot(inputMode);
     notify();
   };
@@ -6344,7 +6359,7 @@ export function createWorkspaceScene(
       const directory = rosterProjectDirectory(row.project);
       if (directory) rosterDirectories.set(row.paneId, directory);
     }
-    for (const widget of widgets.values()) widget.setAgentRoster?.(latestAgentRoster);
+    widgetChannels.agentRoster.publish(latestAgentRoster);
     const signature = agentRowsSignature(rows, layout);
     if (signature === agentRosterSignature) return;
     agentRosterSignature = signature;
@@ -6455,7 +6470,7 @@ export function createWorkspaceScene(
       inputMode === 'keyboard' &&
       ['listening', 'transcribing'].includes(mutableState.dictation.status)
     )
-      actions.dictationAction?.('cancel');
+      actions.dictationAction('cancel');
     clearInputCapture();
     notify();
   };
@@ -7172,6 +7187,7 @@ export function createWorkspaceScene(
       get maxAnisotropy() {
         return maxAnisotropy();
       },
+      accent,
       actions,
       panels,
       widgets,
@@ -7458,6 +7474,7 @@ export function createWorkspaceScene(
     enterXR,
     exitXR,
     setUpdateAvailable,
+    registerFrameUpdater: frameUpdaters.register,
     setKeyIndicator,
     isTextEntryActive,
     typeTextEntryKey,
@@ -7480,7 +7497,9 @@ export function createWorkspaceScene(
     },
     removePicture: (id) => removeWidget(widgetKey(PICTURE_KIND, id)),
     setPictureDepth: (id, depth) => {
-      const widget = widgets.get(widgetKey(PICTURE_KIND, id));
+      const widget: (Widget & Partial<PictureDepthTarget>) | undefined = widgets.get(
+        widgetKey(PICTURE_KIND, id),
+      );
       if (widget?.setPictureDepth) widget.setPictureDepth(depth);
       else {
         depth.source.width = 0;

@@ -5,7 +5,7 @@ import {
   updateScalableLabel,
 } from '@par/xr-workspace';
 import * as THREE from 'three';
-import { defaultHostFeedSource, type HostFeedFailure, type HostFeedSource } from '../host-feed';
+import type { HostFeedFailure, HostFeedSource } from '../host-feed';
 import { createFeedPoller, FEED_FAILURE_TEXT, isWidgetShown } from './feed-poller';
 import { disposeOwned, type Widget } from './widgets';
 
@@ -216,7 +216,8 @@ interface Slot {
 }
 
 export interface ServiceHealthWidgetOptions {
-  source?: HostFeedSource<ServiceHealth>;
+  /** The host feed this widget polls; the registry builds it from the scene's host connection. */
+  source: HostFeedSource<ServiceHealth>;
   pollMs?: number;
   retryStore?: () => Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined;
   now?: () => number;
@@ -224,8 +225,8 @@ export interface ServiceHealthWidgetOptions {
 }
 
 export function createServiceHealthWidget(
-  envMap: THREE.Texture | null = null,
-  options: ServiceHealthWidgetOptions = {},
+  envMap: THREE.Texture | null,
+  options: ServiceHealthWidgetOptions,
 ): Widget {
   const widgetId = `${SERVICE_HEALTH_KIND}-${nextServiceHealthId++}`;
   const clock = options.now ?? Date.now;
@@ -361,11 +362,7 @@ export function createServiceHealthWidget(
   };
 
   const poller = createFeedPoller<ServiceHealth>({
-    source:
-      options.source ??
-      defaultHostFeedSource(SERVICE_HEALTH_PATH, SERVICE_HEALTH_PROTOCOL, (data) =>
-        parseServiceHealth(data, clock()),
-      ),
+    source: options.source,
     pollMs: options.pollMs ?? SERVICE_HEALTH_POLL_MS,
     retryStore: options.retryStore,
     now: options.now,

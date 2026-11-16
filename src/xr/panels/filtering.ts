@@ -23,7 +23,7 @@ export const filteringPanel: PanelModule = {
         actionData({ type: 'filterMode', filterMode }),
       );
       button.position.set(index % 2 ? 0.4 : -0.4, 0.3 - Math.floor(index / 2) * 0.16, 0);
-      setModifierVisual(button, ctx.mutableState.filtering.mode === filterMode);
+      setModifierVisual(button, ctx.mutableState.filtering.mode === filterMode, ctx.accent.hex);
       root.add(button);
     });
     const mipMode = ctx.mutableState.filtering.mode.startsWith('mipmap-');
@@ -38,7 +38,11 @@ export const filteringPanel: PanelModule = {
           actionData({ type: 'filterAnisotropy', anisotropy }),
         );
         button.position.set((index - (levels.length - 1) / 2) * 0.3, -0.1, 0);
-        setModifierVisual(button, ctx.mutableState.filtering.anisotropy === anisotropy);
+        setModifierVisual(
+          button,
+          ctx.mutableState.filtering.anisotropy === anisotropy,
+          ctx.accent.hex,
+        );
         root.add(button);
       });
       const hint = createLabelButton(
@@ -57,7 +61,7 @@ export const filteringPanel: PanelModule = {
       actionData({ type: 'filterGaze' }),
     );
     gaze.position.y = -0.28;
-    setModifierVisual(gaze, ctx.mutableState.filtering.gazeClarity);
+    setModifierVisual(gaze, ctx.mutableState.filtering.gazeClarity, ctx.accent.hex);
     root.add(gaze);
     if (mipMode && ctx.mutableState.filtering.gazeClarity) {
       const distance = createLabelButton(

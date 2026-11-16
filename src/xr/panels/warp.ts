@@ -53,7 +53,7 @@ export const warpPanel: PanelModule = {
         actionData({ type: 'curvature', degrees: value }),
       );
       button.position.set(((index % 4) - 1.5) * 0.4, 0.08 - Math.floor(index / 4) * 0.18, 0);
-      setModifierVisual(button, degrees === value);
+      setModifierVisual(button, degrees === value, ctx.accent.hex);
       root.add(button);
     }
     for (const [index, delta] of [-5, 5].entries()) {

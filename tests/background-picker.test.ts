@@ -1,7 +1,9 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { BACKGROUNDS, backgroundThumbnail } from '../src/backgrounds';
 import { BACKGROUND_MODES, type BackgroundMode } from '../src/contracts';
+import { mountWorkspaceUI } from '../src/ui';
 import {
   BACKGROUND_LABELS,
   BACKGROUND_PICKER_COLUMNS,
@@ -23,6 +25,25 @@ describe('background picker layout', () => {
       expect(BACKGROUND_LABELS[mode]).toBeTruthy();
       expect(backgroundThumbnailUrl(mode)).toBe(`/assets/backgrounds/${mode}.webp`);
     }
+  });
+
+  it('derives the mode list, labels and thumbnails from the one BACKGROUNDS table', () => {
+    expect([...BACKGROUND_MODES]).toEqual(BACKGROUNDS.map((background) => background.id));
+    for (const background of BACKGROUNDS) {
+      expect(BACKGROUND_LABELS[background.id]).toBe(background.label);
+      expect(backgroundThumbnail(background.id)).toBe(`/assets/backgrounds/${background.id}.webp`);
+    }
+  });
+
+  it('offers every table entry, with its label, in the browser settings select', () => {
+    const root = document.createElement('div');
+    mountWorkspaceUI(root, { onConnect: () => undefined, onSelectPane: () => undefined });
+    const options = [...root.querySelectorAll<HTMLOptionElement>('[data-background] option')].map(
+      (option) => [option.value, option.textContent],
+    );
+    expect(options.sort()).toEqual(
+      BACKGROUNDS.map((background) => [background.id, background.label]).sort(),
+    );
   });
 
   it('ships a thumbnail for every background (make background-thumbnails)', () => {

@@ -20,5 +20,22 @@ export default defineConfig({
   ],
   server: { https, host: '0.0.0.0', port: 4240, strictPort: true },
   preview: { https, host: '0.0.0.0', port: 4240, strictPort: true },
-  build: { target: 'es2023', sourcemap: true },
+  build: {
+    target: 'es2023',
+    sourcemap: true,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: 'vendor-three', test: /node_modules[\\/]three[\\/]/ },
+            { name: 'vendor-xterm', test: /node_modules[\\/]@xterm[\\/]/ },
+            {
+              name: 'vendor-troika',
+              test: /node_modules[\\/](troika-[^\\/]+|bidi-js|webgl-sdf-generator)[\\/]/,
+            },
+          ],
+        },
+      },
+    },
+  },
 });

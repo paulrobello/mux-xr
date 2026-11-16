@@ -1,4 +1,4 @@
-import { HANGAR_DECK_PANE_SAFE_RADIUS } from '@par/xr-workspace';
+import { HANGAR_DECK_PANE_SAFE_RADIUS } from '@par/xr-workspace/hangar-deck-layout';
 import * as THREE from 'three';
 import type { BackgroundMode } from '../contracts';
 import { measurePanelBounds } from './panel-bounds';

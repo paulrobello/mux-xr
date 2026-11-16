@@ -1,8 +1,7 @@
 /** One authenticated git and CI status query per connection to the dictation server's `/repo-status`. */
 
-import { createHostClipboardSecretStore, type HostClipboardSocket } from './host-clipboard';
+import type { HostClipboardSocket } from './host-clipboard';
 import { openPairedSocket } from './host-pairing';
-import { hostServiceUrl } from './host-service';
 
 const PROTOCOL = 'mux-xr-repo-status-v1';
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -56,6 +55,8 @@ export interface RepoStatusClientOptions {
   url: () => string;
   secret: () => string | null;
   socketFactory?: (url: string) => HostClipboardSocket;
+  /** Replaces the paired-socket session, so a host fake can answer without a socket. */
+  openPaired?: typeof openPairedSocket;
   subtle?: Pick<SubtleCrypto, 'importKey' | 'sign'>;
   timeoutMs?: number;
 }
@@ -112,7 +113,7 @@ export function createRepoStatusClient(options: RepoStatusClientOptions): RepoSt
     if (!secret) return Promise.resolve({ ok: false, code: 'no-secret' });
     const crypto = options.subtle ?? globalThis.crypto?.subtle;
     if (!crypto) return Promise.resolve({ ok: false, code: 'unavailable' });
-    return openPairedSocket<RepoStatusReport, RepoStatusFailure>({
+    return (options.openPaired ?? openPairedSocket)<RepoStatusReport, RepoStatusFailure>({
       url: options.url(),
       secret,
       protocol: PROTOCOL,
@@ -133,13 +134,4 @@ export function createRepoStatusClient(options: RepoStatusClientOptions): RepoSt
       },
     }).then((outcome) => (outcome.ok ? { ok: true, report: outcome.value } : outcome));
   };
-}
-
-/** The production client: the host service port on the page's host, paired by the host clipboard secret. */
-export function createDefaultRepoStatusFetcher(): RepoStatusFetcher {
-  const secret = createHostClipboardSecretStore();
-  return createRepoStatusClient({
-    url: () => hostServiceUrl('/repo-status', window.location),
-    secret: () => secret.get(),
-  });
 }

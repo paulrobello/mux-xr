@@ -1,5 +1,6 @@
-/** How an XR session starts: full VR, passthrough (`ar`), or VR around a passthrough desk window. */
-export type XrEntryMode = 'vr' | 'ar' | 'desk';
+import type { XrEntryMode } from '../contracts';
+
+export type { XrEntryMode };
 
 /** Button labels for each entry mode, shared by the browser page and the XR scene. */
 export const XR_ENTRY_LABELS: Record<XrEntryMode, string> = {

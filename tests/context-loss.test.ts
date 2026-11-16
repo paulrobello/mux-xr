@@ -36,8 +36,9 @@ vi.mock('three', async (importOriginal) => {
 });
 
 import type * as THREE from 'three';
-import type { PaneDescriptor, TerminalSurface, WorkspaceActions } from '../src/contracts';
+import type { PaneDescriptor, TerminalSurface } from '../src/contracts';
 import { createWorkspaceScene } from '../src/xr/scene';
+import { createTestActions } from './helpers/actions';
 
 const NOTICE = 'The headset reclaimed graphics memory. Restoring the workspace.';
 
@@ -80,15 +81,7 @@ function surface(descriptor: PaneDescriptor): TerminalSurface {
 const cleanups: Array<() => void> = [];
 
 function fixture() {
-  const actions: WorkspaceActions = {
-    selectPane: vi.fn(),
-    closePane: vi.fn(),
-    sendText: vi.fn(),
-    sendKey: vi.fn(),
-    runCommand: vi.fn(),
-    openKeyboard: vi.fn(),
-    openCommands: vi.fn(),
-  };
+  const actions = createTestActions();
   const container = document.createElement('div');
   const workspace = createWorkspaceScene(container, actions);
   const terminal = surface(pane('pane-a'));

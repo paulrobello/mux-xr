@@ -7,16 +7,10 @@ import {
 } from '@par/xr-workspace';
 import * as THREE from 'three';
 import type { TerminalStatus } from '../contracts';
-import type { TerminalLinkStats } from '../terminal/link-stats';
+import type { StreamLinkInput, StreamLinksConsumer } from './widget-types';
 import { disposeOwned, type Widget } from './widgets';
 
-/** One pane's stream as the scene reports it each sample. */
-export interface StreamLinkInput {
-  paneId: string;
-  label: string;
-  status: TerminalStatus;
-  stats: Readonly<TerminalLinkStats> | undefined;
-}
+export type { StreamLinkInput } from './widget-types';
 
 export interface StreamHealthRow {
   paneId: string;
@@ -235,7 +229,9 @@ interface Slot {
   parts: THREE.Object3D[];
 }
 
-export function createStreamHealthWidget(envMap: THREE.Texture | null = null): Widget {
+export function createStreamHealthWidget(
+  envMap: THREE.Texture | null = null,
+): Widget & StreamLinksConsumer {
   const widgetId = `stream-health-${nextWidgetId++}`;
   const root = new THREE.Group();
   root.name = widgetId;

@@ -4,6 +4,7 @@ import type { PaneDescriptor, PanelArrangement, TerminalSurface } from '../src/c
 import { createDemoSurface } from '../src/demo';
 import { createWorkspaceScene } from '../src/xr';
 import { workspaceFloorY } from '../src/xr/floor-layout';
+import { createNoopActions } from './lib/noop-actions';
 
 const patterns: readonly PanelArrangement[] = ['row', 'grid', 'arc', 'sphere'];
 const host = document.querySelector<HTMLElement>('#fixture-host');
@@ -43,15 +44,15 @@ const surfaces: TerminalSurface[] = panes.map((pane) => {
   return surface;
 });
 
-const scene = createWorkspaceScene(host, {
-  selectPane: (id) => scene.selectTerminal(id),
-  closePane: (id) => scene.removeTerminal(id),
-  sendText: () => undefined,
-  sendKey: () => undefined,
-  runCommand: () => undefined,
-  openCommands: () => scene.showInput('commands'),
-  openKeyboard: () => scene.showInput('keyboard'),
-});
+const scene = createWorkspaceScene(
+  host,
+  createNoopActions({
+    selectPane: (id) => scene.selectTerminal(id),
+    closePane: (id) => scene.removeTerminal(id),
+    openCommands: () => scene.showInput('commands'),
+    openKeyboard: () => scene.showInput('keyboard'),
+  }),
+);
 scene.setAvailablePanes(panes);
 surfaces.forEach((surface) => {
   scene.addTerminal(surface);
