@@ -1,5 +1,5 @@
 import './styles.css';
-import { validateHandColor, validateWeatherZip } from '@par/xr-workspace';
+import { validateHandColor } from '@par/xr-workspace';
 import type {
   BackgroundMode,
   KeyModifiers,
@@ -24,13 +24,13 @@ import type { DictationAction, DictationState } from '../speech-input';
 import { type TerminalFiltering, validateTerminalFiltering } from '../terminal/filtering';
 import { type PaneProcess, processBadge } from '../terminal/lifecycle';
 import { AGENTS_SORTS, type AgentRosterRow } from '../workspace/agent-roster';
-import { type HierarchyStyle, validateHierarchyStyle } from '../workspace/hierarchy-style';
+import type { HierarchyStyle } from '../workspace/hierarchy-style';
 import type { KeyborbMode } from '../workspace/keyborb';
-import { validateKeyborbMode } from '../workspace/keyborb';
 import { XR_ENTRY_LABELS, type XrEntryMode } from '../xr/entry';
 import { mountAgentRoster } from './agent-roster';
 import { mountCommandLibrary } from './input-drawer';
 import { mountKeyboard } from './keyboard';
+import { mountSettingsControls } from './settings-controls';
 import { mountSettingsPanel } from './settings-panel';
 import { buildShell } from './shell';
 import { mountSidebar } from './sidebar';
@@ -491,68 +491,12 @@ export function mountWorkspaceUI(
       }
     }
   });
-  qs<HTMLInputElement>('#endpoint').value = settings.endpoint;
-  qs<HTMLSelectElement>('[data-background]').value = settings.background;
-  qs<HTMLSelectElement>('[data-hierarchy-style]').value = settings.hierarchyStyle;
-  qs<HTMLSelectElement>('[data-keyborb-mode]').value = settings.keyborbMode;
-  qs<HTMLSelectElement>('[data-color-mode]').value = settings.colorMode;
-  qs<HTMLInputElement>('[data-keyboard-background]').checked = settings.keyboardBackground;
-  qs<HTMLInputElement>('[data-gaze-input]').checked = settings.gazeInput;
-  qs<HTMLInputElement>('[data-ui-sounds]').checked = settings.uiSounds;
+  mountSettingsControls({ root, current: () => settings, saveSettings, bindSettings });
   keyboard.setDictationState({
     supported: false,
     status: 'idle',
     transcript: '',
     error: null,
-  });
-  qs<HTMLSelectElement>('[data-background]').addEventListener('change', (event) =>
-    saveSettings({ background: (event.target as HTMLSelectElement).value as BackgroundMode }),
-  );
-  qs<HTMLSelectElement>('[data-hierarchy-style]').addEventListener('change', (event) =>
-    saveSettings({
-      hierarchyStyle: validateHierarchyStyle((event.target as HTMLSelectElement).value),
-    }),
-  );
-  qs<HTMLSelectElement>('[data-keyborb-mode]').addEventListener('change', (event) =>
-    saveSettings({ keyborbMode: validateKeyborbMode((event.target as HTMLSelectElement).value) }),
-  );
-  const weatherZipInput = qs<HTMLInputElement>('[data-weather-zip]');
-  weatherZipInput.value = settings.weatherZip;
-  bindSettings(['weatherZip'], () => {
-    weatherZipInput.value = settings.weatherZip;
-  });
-  weatherZipInput.addEventListener('change', () => {
-    const next = validateWeatherZip(weatherZipInput.value.trim());
-    weatherZipInput.value = next;
-    if (settings.weatherZip === next) return;
-    saveSettings({ weatherZip: next });
-  });
-  qs<HTMLInputElement>('[data-ui-sounds]').addEventListener('change', (event) =>
-    saveSettings({ uiSounds: (event.target as HTMLInputElement).checked }),
-  );
-  qs<HTMLInputElement>('[data-gaze-input]').addEventListener('change', (event) =>
-    saveSettings({ gazeInput: (event.target as HTMLInputElement).checked }),
-  );
-  qs<HTMLSelectElement>('[data-color-mode]').addEventListener('change', (event) =>
-    saveSettings({ colorMode: (event.target as HTMLSelectElement).value as TerminalColorMode }),
-  );
-  qs<HTMLInputElement>('[data-keyboard-background]').addEventListener('change', (event) =>
-    saveSettings({ keyboardBackground: (event.target as HTMLInputElement).checked }),
-  );
-  bindSettings(['background'], () => {
-    qs<HTMLSelectElement>('[data-background]').value = settings.background;
-  });
-  bindSettings(['colorMode'], () => {
-    qs<HTMLSelectElement>('[data-color-mode]').value = settings.colorMode;
-  });
-  bindSettings(['keyboardBackground'], () => {
-    qs<HTMLInputElement>('[data-keyboard-background]').checked = settings.keyboardBackground;
-  });
-  bindSettings(['gazeInput'], () => {
-    qs<HTMLInputElement>('[data-gaze-input]').checked = settings.gazeInput;
-  });
-  bindSettings(['uiSounds'], () => {
-    qs<HTMLInputElement>('[data-ui-sounds]').checked = settings.uiSounds;
   });
   const sceneHost = qs<HTMLElement>('[data-scene-host]');
   return {
