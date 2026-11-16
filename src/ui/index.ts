@@ -20,7 +20,7 @@ import {
   type WorkspaceSettings,
 } from '../settings/store';
 import type { DictationAction, DictationState } from '../speech-input';
-import { type TerminalFiltering, validateTerminalFiltering } from '../terminal/filtering';
+import type { TerminalFiltering } from '../terminal/filtering';
 import { type PaneProcess, processBadge } from '../terminal/lifecycle';
 import { AGENTS_SORTS, type AgentRosterRow } from '../workspace/agent-roster';
 import type { HierarchyStyle } from '../workspace/hierarchy-style';
@@ -32,6 +32,7 @@ import { mountCommandLibrary } from './input-drawer';
 import { mountKeyboard } from './keyboard';
 import { mountSettingsControls } from './settings-controls';
 import { mountSettingsPanel } from './settings-panel';
+import { createSettingsSetters } from './settings-setters';
 import { buildShell } from './shell';
 import { mountSidebar } from './sidebar';
 import { mountTerminalControls } from './terminal-controls';
@@ -216,7 +217,6 @@ export function mountWorkspaceUI(
   });
   const settingsPanel = root.querySelector<HTMLElement>('[data-settings]');
   root.querySelector('[data-gaze]')?.parentElement?.remove();
-  let filteringMaxAnisotropy = 16;
   const updateArrangementAvailability = (): void => {
     settingsPanelControls?.setArrangementAvailable(attachedPaneIds.length > 0);
   };
@@ -442,6 +442,7 @@ export function mountWorkspaceUI(
     transcript: '',
     error: null,
   });
+  const settingsSetters = createSettingsSetters({ root, current: () => settings, saveSettings });
   const sceneHost = qs<HTMLElement>('[data-scene-host]');
   return {
     sceneHost,
@@ -539,45 +540,8 @@ export function mountWorkspaceUI(
       terminalControls.setGrid(paneId, cols, rows, canResize),
     setTerminalCurvature: (paneId, degrees) => terminalControls.setCurvature(paneId, degrees),
     setTerminalOpacity: (paneId, value) => terminalControls.setOpacity(paneId, value),
-    setTerminalColorMode: (mode, persist = true) => saveSettings({ colorMode: mode }, { persist }),
-    setKeyboardBackgroundEnabled: (enabled, persist = true) =>
-      saveSettings({ keyboardBackground: enabled }, { persist }),
-    setKeyboardCurvature: (degrees, persist = false) =>
-      saveSettings({ keyboardCurvature: degrees }, { persist }),
-    setTerminalFiltering: (filtering, persist = false) => saveSettings({ filtering }, { persist }),
-    setWindowPreferences: (value, persist = false) =>
-      saveSettings({ windowPreferences: value }, { persist }),
-    setHierarchyStyle: (style, persist = false) =>
-      saveSettings({ hierarchyStyle: style }, { persist }),
-    setKeyborbMode: (mode, persist = false) => saveSettings({ keyborbMode: mode }, { persist }),
-    setBackground: (mode, persist = false) => saveSettings({ background: mode }, { persist }),
-    setArmColor: (color, persist = false) => saveSettings({ armColor: color }, { persist }),
-    setWeatherZip: (zip, persist = false) => saveSettings({ weatherZip: zip }, { persist }),
-    setAccentColor: (color, persist = false) => saveSettings({ accentColor: color }, { persist }),
-    setEnvironmentAccentColor: (color, persist = false) =>
-      saveSettings({ environmentAccentColor: color }, { persist }),
-    setHandColor: (color, persist = false) => saveSettings({ handColor: color }, { persist }),
-    setUISounds: (enabled, persist = false) => saveSettings({ uiSounds: enabled }, { persist }),
-    setFilteringCapabilities(maxAnisotropy) {
-      filteringMaxAnisotropy = Number.isFinite(maxAnisotropy)
-        ? Math.max(1, Math.min(16, maxAnisotropy))
-        : 16;
-      const select = qs<HTMLSelectElement>('[data-filter-anisotropy]');
-      for (const option of select.options)
-        option.hidden = Number(option.value) > filteringMaxAnisotropy;
-      if (Number(select.value) <= filteringMaxAnisotropy) return;
-      const available = [...select.options].reverse().find((option) => !option.hidden);
-      if (!available) return;
-      saveSettings({
-        filtering: validateTerminalFiltering({
-          ...settings.filtering,
-          anisotropy: Number(available.value),
-        }),
-      });
-    },
+    ...settingsSetters,
     setDictationState: (state) => keyboard.setDictationState(state),
-    setArrangement: (pattern, persist = true) =>
-      saveSettings({ arrangement: pattern }, { persist }),
     getCommandsForPane: (paneId) => commandLibrary.commandsForPane(paneId),
     setSharedCommands: (next) => commandLibrary.setSharedCommands(next),
     recordCommandRun: (id, at = Date.now()) => commandLibrary.recordRun(id, at),
