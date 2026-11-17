@@ -104,6 +104,7 @@ import {
   type AgentRows,
   agentRowsSignature,
   DEFAULT_AGENT_ROSTER_LAYOUT,
+  validateAgentBoardRows,
 } from '../workspace/agent-roster';
 import type { ButtonFunction, ControllerButton } from '../workspace/controller-buttons';
 import { type HierarchyStyle, validateHierarchyStyle } from '../workspace/hierarchy-style';
@@ -281,6 +282,8 @@ export interface WorkspaceSceneState {
   environmentAccentColor: string;
   /** Five-digit US ZIP for the weather widget, or empty when none is set. */
   weatherZip: string;
+  /** Rows per page on the agent board widget, validated on the way in. */
+  agentBoardMaxRows: number;
   dictation: DictationState;
   fps: number | null;
   xrMode: 'desktop' | 'vr' | 'ar';
@@ -933,6 +936,7 @@ export function createWorkspaceScene(
     accentColor: device.accentColor,
     environmentAccentColor: device.environmentAccentColor,
     weatherZip: device.weatherZip,
+    agentBoardMaxRows: device.agentBoardMaxRows,
     dictation: { supported: false, status: 'idle', transcript: '', error: null },
     fps: null,
     xrMode: 'desktop',
@@ -1394,6 +1398,7 @@ export function createWorkspaceScene(
   // Reused every frame: widgets whose meshes a controller ray hit.
   const pointedWidgets = new Set<Widget>();
   const widgetChannels = createWidgetChannels({
+    agentBoardMaxRows: mutableState.agentBoardMaxRows,
     bellFeed: bellFeed.entries(),
     textureAnisotropy: Math.min(mutableState.filtering.anisotropy, maxAnisotropy()),
     weatherZip: mutableState.weatherZip,
@@ -6311,6 +6316,13 @@ export function createWorkspaceScene(
     if (inputRoot && inputMode === 'world') refreshInputRoot(inputMode);
     notify();
   };
+  const applyAgentBoardMaxRows = (rows: number): void => {
+    const next = validateAgentBoardRows(rows);
+    if (next === mutableState.agentBoardMaxRows) return;
+    mutableState.agentBoardMaxRows = next;
+    widgetChannels.agentBoardMaxRows.publish(next);
+    notify();
+  };
   const applyArmColor = (color: string | null): void => {
     const next = validateHandColor(color);
     if (next === mutableState.armColor) return;
@@ -6423,6 +6435,7 @@ export function createWorkspaceScene(
     applyAccentColor(next.accentColor);
     applyEnvironmentAccentColor(next.environmentAccentColor);
     applyWeatherZip(next.weatherZip);
+    applyAgentBoardMaxRows(next.agentBoardMaxRows);
   });
   const applyHandColors = (): void => {
     const { handColor, armColor } = mutableState;

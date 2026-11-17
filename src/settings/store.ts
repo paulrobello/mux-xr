@@ -9,6 +9,7 @@ import {
   validateTerminalFiltering,
 } from '../terminal/filtering';
 import {
+  AGENT_BOARD_ROWS_DEFAULT,
   AGENT_ROWS_CHOICES,
   AGENTS_SORTS,
   type AgentRosterLayout,
@@ -16,6 +17,7 @@ import {
   type AgentsSort,
   DEFAULT_AGENT_ROSTER_LAYOUT,
   resolveAgentRows,
+  validateAgentBoardRows,
 } from '../workspace/agent-roster';
 import {
   DEFAULT_HIERARCHY_STYLE,
@@ -62,6 +64,8 @@ export interface WorkspaceSettings {
   agentRows: AgentRowsChoice;
   agentRowsCustom: string;
   agentsSort: AgentsSort;
+  /** Rows per page on the XR agent board, 3-12. */
+  agentBoardMaxRows: number;
 }
 
 export const SETTINGS_KEY = 'mux-xr:settings:v1';
@@ -90,6 +94,7 @@ export const DEFAULT_SETTINGS: WorkspaceSettings = {
   agentRows: 'full',
   agentRowsCustom: '',
   agentsSort: DEFAULT_AGENT_ROSTER_LAYOUT.sort,
+  agentBoardMaxRows: AGENT_BOARD_ROWS_DEFAULT,
 };
 
 /** The roster layout a settings value selects. */
@@ -138,6 +143,7 @@ export function validateSettings(value: unknown): WorkspaceSettings {
     agentsSort: AGENTS_SORTS.includes(candidate.agentsSort as AgentsSort)
       ? (candidate.agentsSort as AgentsSort)
       : DEFAULT_SETTINGS.agentsSort,
+    agentBoardMaxRows: validateAgentBoardRows(candidate.agentBoardMaxRows),
     arrangement:
       candidate.arrangement === 'row' ||
       candidate.arrangement === 'grid' ||

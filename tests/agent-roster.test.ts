@@ -18,6 +18,7 @@ import {
 } from '../src/terminal/vendor/terminal_pb';
 import { mountWorkspaceUI } from '../src/ui';
 import {
+  AGENT_BOARD_ROWS_DEFAULT,
   AGENT_ROWS_PRESETS,
   type AgentRosterLayout,
   type AgentRows,
@@ -34,6 +35,7 @@ import {
   parseAgentRows,
   resolveAgentRows,
   sortAgentRows,
+  validateAgentBoardRows,
 } from '../src/workspace/agent-roster';
 import { connectHierarchy } from '../src/workspace/hierarchy';
 
@@ -563,5 +565,47 @@ describe('browser agent roster list', () => {
     expect(order()).toEqual(['%1', '%2']);
     ui.destroy();
     vi.useRealTimers();
+  });
+});
+
+describe('agent board rows setting', () => {
+  it('rounds then clamps the board rows value into 3-12, defaulting on garbage', () => {
+    expect(validateAgentBoardRows(6)).toBe(6);
+    expect(validateAgentBoardRows(3)).toBe(3);
+    expect(validateAgentBoardRows(12)).toBe(12);
+    expect(validateAgentBoardRows(2)).toBe(3);
+    expect(validateAgentBoardRows(13)).toBe(12);
+    expect(validateAgentBoardRows(3.7)).toBe(4);
+    expect(validateAgentBoardRows(Number.NaN)).toBe(AGENT_BOARD_ROWS_DEFAULT);
+    expect(validateAgentBoardRows(Number.POSITIVE_INFINITY)).toBe(AGENT_BOARD_ROWS_DEFAULT);
+    expect(validateAgentBoardRows('9')).toBe(AGENT_BOARD_ROWS_DEFAULT);
+    expect(validateAgentBoardRows(undefined)).toBe(AGENT_BOARD_ROWS_DEFAULT);
+  });
+
+  it('defaults the board rows for stored settings without the field', () => {
+    expect(validateSettings({ agentRows: 'compact' }).agentBoardMaxRows).toBe(
+      AGENT_BOARD_ROWS_DEFAULT,
+    );
+    expect(validateSettings({ agentBoardMaxRows: 9 }).agentBoardMaxRows).toBe(9);
+  });
+
+  it('sets the agent board rows from the drawer settings stepper', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const ui = mountWorkspaceUI(root, { onConnect: () => undefined });
+    const stepper = root.querySelector<HTMLInputElement>('[data-agent-board-rows]');
+    if (!stepper) throw new Error('board rows control missing');
+    expect(stepper.value).toBe('6');
+    stepper.value = '9';
+    stepper.dispatchEvent(new Event('change'));
+    expect(ui.getSettings().agentBoardMaxRows).toBe(9);
+    stepper.value = 'abc';
+    stepper.dispatchEvent(new Event('change'));
+    // A number input reads invalid text as empty, so the validator clamps 0 to the minimum.
+    expect(ui.getSettings().agentBoardMaxRows).toBe(3);
+    stepper.value = '99';
+    stepper.dispatchEvent(new Event('change'));
+    expect(ui.getSettings().agentBoardMaxRows).toBe(12);
+    ui.destroy();
   });
 });

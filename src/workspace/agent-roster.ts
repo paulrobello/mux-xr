@@ -37,6 +37,17 @@ export interface AgentRosterRow extends AgentRosterEntry {
 
 export type AgentStateTone = 'attention' | 'working' | 'idle' | 'done' | 'unknown';
 
+/** Rows-per-page bounds for the XR agent board; the default preserves today's board size. */
+export const AGENT_BOARD_ROWS_MIN = 3;
+export const AGENT_BOARD_ROWS_MAX = 12;
+export const AGENT_BOARD_ROWS_DEFAULT = 6;
+
+/** Round then clamp a board rows value; anything that is not a finite number takes the default. */
+export function validateAgentBoardRows(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return AGENT_BOARD_ROWS_DEFAULT;
+  return Math.min(AGENT_BOARD_ROWS_MAX, Math.max(AGENT_BOARD_ROWS_MIN, Math.round(value)));
+}
+
 const TONES: Record<string, AgentStateTone> = {
   question: 'attention',
   blocked: 'attention',

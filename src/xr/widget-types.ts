@@ -134,6 +134,8 @@ export function createFocusedPaneChannel(): FocusedPaneChannel {
 export interface WidgetChannels {
   /** Every roster change; replayed to a new widget. */
   agentRoster: Channel<readonly AgentRosterRow[]>;
+  /** The agent board's rows-per-page setting; replayed to a new widget. */
+  agentBoardMaxRows: Channel<number>;
   /** Every bell feed change, newest first; replayed to a new widget. */
   bellFeed: Channel<readonly BellFeedEntry[]>;
   /** Frame stats each time the scene's frame counter reports (about 2 Hz). */
@@ -152,6 +154,7 @@ export interface WidgetChannels {
 /** The scene's side of `WidgetChannels`: the same channels with `publish`. */
 export interface WidgetChannelPublishers extends WidgetChannels {
   agentRoster: Publisher<readonly AgentRosterRow[]>;
+  agentBoardMaxRows: Publisher<number>;
   bellFeed: Publisher<readonly BellFeedEntry[]>;
   perfSample: Publisher<PerfSample>;
   perfReset: Publisher<void>;
@@ -161,12 +164,14 @@ export interface WidgetChannelPublishers extends WidgetChannels {
 }
 
 export function createWidgetChannels(initial: {
+  agentBoardMaxRows: number;
   bellFeed: readonly BellFeedEntry[];
   textureAnisotropy: number;
   weatherZip: string;
 }): WidgetChannelPublishers {
   return {
     agentRoster: createChannel<readonly AgentRosterRow[]>([], true),
+    agentBoardMaxRows: createChannel(initial.agentBoardMaxRows, true),
     bellFeed: createChannel(initial.bellFeed, true),
     // The initial sample is never delivered: a new subscriber hears only later samples.
     perfSample: createChannel<PerfSample>({ fps: 0, worstFrameMs: 0, targetHz: 60 }, false),

@@ -29,8 +29,9 @@ import {
   TIMER_WIDTH,
 } from '@par/xr-workspace';
 import {
-  AGENT_BOARD_HEIGHT,
+  AGENT_BOARD_MAX_ROWS,
   AGENT_BOARD_WIDTH,
+  agentBoardHeight,
   createAgentBoardWidget,
 } from '../src/xr/agent-board';
 import {
@@ -56,7 +57,7 @@ const CASES = [
     () => createAgentBoardWidget(),
     'agent-board-close',
     AGENT_BOARD_WIDTH,
-    AGENT_BOARD_HEIGHT,
+    agentBoardHeight(AGENT_BOARD_MAX_ROWS),
   ],
   [
     'perf gauge',

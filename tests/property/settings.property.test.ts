@@ -49,6 +49,11 @@ const everyFieldIsValid = (settings: Record<string, unknown>): boolean => {
       case 'agentsSort':
         if (!(AGENTS_SORTS as readonly unknown[]).includes(value)) return false;
         break;
+      case 'agentBoardMaxRows':
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 3 || value > 12) {
+          return false;
+        }
+        break;
       case 'handColor':
       case 'armColor':
       case 'accentColor':

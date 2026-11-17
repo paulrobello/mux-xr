@@ -9,6 +9,7 @@ import {
   type AgentRowsChoice,
   type AgentsSort,
   parseAgentRows,
+  validateAgentBoardRows,
 } from '../workspace/agent-roster';
 import {
   BUTTON_FUNCTION_LABELS,
@@ -315,7 +316,7 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
   hierarchyStyleSelect.value = current().hierarchyStyle;
   const agentControls = document.createElement('fieldset');
   agentControls.dataset.agentRoster = 'true';
-  agentControls.innerHTML = `<legend>Agent roster</legend><label>Rows<select data-agent-rows aria-label="Agent roster rows"><option value="full">Full (state, agent, title / workspace, project, pane / message)</option><option value="default">par-mux default (state, workspace, project / agent)</option><option value="compact">Compact (state, agent)</option><option value="detailed">Detailed (state, workspace, project / agent, pane)</option><option value="verbose">Verbose (state, agent / message)</option><option value="custom">Custom</option></select></label><label data-agent-rows-custom-row>Custom rows<input data-agent-rows-custom type="text" spellcheck="false" placeholder="state_icon, workspace, project / agent" aria-label="Custom agent roster rows"><small data-agent-rows-hint></small></label><label>Order<select data-agents-sort aria-label="Agent order"><option value="pane">Pane (rows stay put)</option><option value="grouped">Grouped by workspace, urgent first</option><option value="priority">Priority, most urgent first</option></select></label>`;
+  agentControls.innerHTML = `<legend>Agent roster</legend><label>Rows<select data-agent-rows aria-label="Agent roster rows"><option value="full">Full (state, agent, title / workspace, project, pane / message)</option><option value="default">par-mux default (state, workspace, project / agent)</option><option value="compact">Compact (state, agent)</option><option value="detailed">Detailed (state, workspace, project / agent, pane)</option><option value="verbose">Verbose (state, agent / message)</option><option value="custom">Custom</option></select></label><label data-agent-rows-custom-row>Custom rows<input data-agent-rows-custom type="text" spellcheck="false" placeholder="state_icon, workspace, project / agent" aria-label="Custom agent roster rows"><small data-agent-rows-hint></small></label><label>Order<select data-agents-sort aria-label="Agent order"><option value="pane">Pane (rows stay put)</option><option value="grouped">Grouped by workspace, urgent first</option><option value="priority">Priority, most urgent first</option></select></label><label>Board rows<input data-agent-board-rows type="number" min="3" max="12" step="1" aria-label="Agent board rows per page"><small>Rows the XR agent board shows per page.</small></label>`;
   settingsPanel.insertBefore(agentControls, settingsPanel.querySelector('[data-action="reset"]'));
   const hostClipboard = document.createElement('fieldset');
   hostClipboard.dataset.hostClipboard = 'true';
@@ -355,12 +356,14 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
   );
   const agentRowsHint = agentControls.querySelector<HTMLElement>('[data-agent-rows-hint]');
   agentSortSelect = agentControls.querySelector('[data-agents-sort]');
+  const boardRowsInput = agentControls.querySelector<HTMLInputElement>('[data-agent-board-rows]');
   if (
     !agentRowsSelect ||
     !agentRowsCustom ||
     !agentRowsCustomRow ||
     !agentRowsHint ||
-    !agentSortSelect
+    !agentSortSelect ||
+    !boardRowsInput
   )
     throw new Error('Agent roster controls missing');
   const sortSelect = agentSortSelect;
@@ -368,6 +371,7 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     agentRowsSelect.value = current().agentRows;
     agentRowsCustom.value = current().agentRowsCustom;
     sortSelect.value = current().agentsSort;
+    boardRowsInput.value = String(current().agentBoardMaxRows);
     agentRowsCustomRow.hidden = current().agentRows !== 'custom';
     const { rows, unknown } = parseAgentRows(current().agentRowsCustom);
     agentRowsHint.textContent = `${
@@ -380,13 +384,18 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
       agentRows: agentRowsSelect.value as AgentRowsChoice,
       agentRowsCustom: agentRowsCustom.value.slice(0, 500),
       agentsSort: sortSelect.value as AgentsSort,
+      agentBoardMaxRows: validateAgentBoardRows(Number(boardRowsInput.value)),
     });
     renderAgents();
   };
-  bindSettings(['agentRows', 'agentRowsCustom', 'agentsSort'], updateAgentControls);
+  bindSettings(
+    ['agentRows', 'agentRowsCustom', 'agentsSort', 'agentBoardMaxRows'],
+    updateAgentControls,
+  );
   agentRowsSelect.addEventListener('change', changeAgentLayout);
   agentRowsCustom.addEventListener('change', changeAgentLayout);
   sortSelect.addEventListener('change', changeAgentLayout);
+  boardRowsInput.addEventListener('change', changeAgentLayout);
   updateAgentControls();
   const windowControls = document.createElement('div');
   windowControls.dataset.windowPreferences = 'true';

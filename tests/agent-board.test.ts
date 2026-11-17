@@ -23,6 +23,9 @@ vi.mock('troika-three-text', async (importOriginal) => {
 import type { AgentRosterRow } from '../src/workspace/agent-roster';
 import {
   AGENT_BOARD_MAX_ROWS,
+  agentBoardHeight,
+  agentBoardPage,
+  agentBoardPageCount,
   agentBoardRows,
   createAgentBoardWidget,
 } from '../src/xr/agent-board';
@@ -73,6 +76,17 @@ function named(widget: ReturnType<typeof createAgentBoardWidget>, name: string):
   return found;
 }
 
+function pagerNode(
+  widget: ReturnType<typeof createAgentBoardWidget>,
+  side: string,
+): THREE.Object3D {
+  return named(widget, `agent-board-page-${side}`);
+}
+
+function activate(widget: ReturnType<typeof createAgentBoardWidget>, side: string): void {
+  widget.activate(pagerNode(widget, side));
+}
+
 describe('agent board widget', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -83,7 +97,9 @@ describe('agent board widget', () => {
     expect(rows(widget)).toHaveLength(0);
     expect(named(widget, 'agent-board-empty').visible).toBe(true);
     expect(named(widget, 'agent-board-empty').userData.labelText).toBe('No agents reporting');
-    expect(named(widget, 'agent-board-overflow').visible).toBe(false);
+    expect(named(widget, 'agent-board-page-label').visible).toBe(false);
+    expect(named(widget, 'agent-board-page-prev').visible).toBe(false);
+    expect(named(widget, 'agent-board-page-next').visible).toBe(false);
     expect(named(widget, 'agent-board-header').userData.labelText).toBe('Agents');
     widget.dispose();
   });
@@ -128,7 +144,7 @@ describe('agent board widget', () => {
     widget.dispose();
   });
 
-  it('caps the rows and counts the overflow', () => {
+  it('caps the rows and offers the rest on the pager', () => {
     const widget = createAgentBoardWidget(null);
     const roster = Array.from({ length: AGENT_BOARD_MAX_ROWS + 3 }, (_, index) =>
       agent(index + 1, 'working'),
@@ -136,8 +152,8 @@ describe('agent board widget', () => {
     roster.push(agent(99, 'blocked'));
     widget.setAgentRoster?.(roster);
     expect(rows(widget)).toHaveLength(AGENT_BOARD_MAX_ROWS);
-    expect(named(widget, 'agent-board-overflow').visible).toBe(true);
-    expect(named(widget, 'agent-board-overflow').userData.labelText).toBe('+4 more');
+    expect(named(widget, 'agent-board-page-label').visible).toBe(true);
+    expect(named(widget, 'agent-board-page-label').userData.labelText).toBe('1/2');
     // A blocked agent past the cap in pane order still makes the board, in its pane slot.
     const shownIds = rows(widget).map((row) => part(row, 'plate').userData.agentPaneId);
     expect(shownIds).toEqual(['%1', '%2', '%3', '%4', '%5', '%99']);
@@ -148,7 +164,7 @@ describe('agent board widget', () => {
     expect(rows(widget).map((row) => part(row, 'plate').userData.agentPaneId)).toEqual(shownIds);
     widget.setAgentRoster?.(roster.slice(0, 2));
     expect(rows(widget)).toHaveLength(2);
-    expect(named(widget, 'agent-board-overflow').visible).toBe(false);
+    expect(named(widget, 'agent-board-page-label').visible).toBe(false);
     const freed = widget.root.children.find(
       (child) => child.name.startsWith('agent-board-row-') && !child.visible,
     );
@@ -231,4 +247,92 @@ describe('agent board widget', () => {
     expect(ids.slice(-2)).toEqual(['%40', '%50']);
     expect(ids).toEqual([...ids].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))));
   });
+
+  it('counts pages and lists later pages in priority order', () => {
+    expect(agentBoardPageCount([], 6)).toBe(1);
+    const eight = Array.from({ length: 8 }, (_, index) => agent(index + 1, 'working'));
+    const fifteen = Array.from({ length: 15 }, (_, index) => agent(index + 1, 'working'));
+    expect(agentBoardPageCount(eight, 6)).toBe(2);
+    expect(agentBoardPageCount(fifteen, 6)).toBe(3);
+    expect(agentBoardPage(eight, [], 0, 6)).toEqual(agentBoardRows(eight, [], 6));
+    expect(agentBoardPage(eight, [], 1, 6).map((row) => row.paneId)).toEqual(['%7', '%8']);
+    expect(agentBoardPage(eight, [], 99, 6).map((row) => row.paneId)).toEqual(['%7', '%8']);
+    expect(agentBoardPage(eight, [], -1, 6).map((row) => row.paneId)).toEqual([
+      '%1',
+      '%2',
+      '%3',
+      '%4',
+      '%5',
+      '%6',
+    ]);
+  });
+
+  it('flips pages from the pager buttons', () => {
+    const widget = createAgentBoardWidget(null);
+    const roster = Array.from({ length: 8 }, (_, index) => agent(index + 1, 'working'));
+    widget.setAgentRoster?.(roster);
+    const ids = (): unknown[] => rows(widget).map((row) => part(row, 'plate').userData.agentPaneId);
+    expect(ids()).toEqual(['%1', '%2', '%3', '%4', '%5', '%6']);
+    expect(named(widget, 'agent-board-page-label').userData.labelText).toBe('1/2');
+    for (const name of ['prev', 'next']) {
+      expect(pagerNode(widget, name).userData.inputAction).toBe('widgetControl');
+      expect(pagerNode(widget, name).userData.agentBoardAction).toBe(name);
+    }
+    expect(pagerNode(widget, 'prev').userData.helpText).toBe('Previous agents page');
+    expect(pagerNode(widget, 'next').userData.helpText).toBe('Next agents page');
+    activate(widget, 'next');
+    expect(ids()).toEqual(['%7', '%8']);
+    expect(pagerLabelText(widget)).toBe('2/2');
+    activate(widget, 'next');
+    expect(pagerLabelText(widget)).toBe('2/2');
+    activate(widget, 'prev');
+    expect(ids()).toEqual(['%1', '%2', '%3', '%4', '%5', '%6']);
+    expect(pagerLabelText(widget)).toBe('1/2');
+    activate(widget, 'label');
+    expect(ids()).toEqual(['%1', '%2', '%3', '%4', '%5', '%6']);
+    expect(pagerLabelText(widget)).toBe('1/2');
+    widget.dispose();
+  });
+
+  it('clamps the page when the roster shrinks below it', () => {
+    const widget = createAgentBoardWidget(null);
+    const roster = Array.from({ length: 8 }, (_, index) => agent(index + 1, 'working'));
+    widget.setAgentRoster?.(roster);
+    activate(widget, 'next');
+    expect(pagerLabelText(widget)).toBe('2/2');
+    widget.setAgentRoster?.(roster.slice(0, 4));
+    expect(pagerNode(widget, 'label').visible).toBe(false);
+    const shown = rows(widget).map((row) => part(row, 'plate').userData.agentPaneId);
+    expect(shown).toEqual(['%1', '%2', '%3', '%4']);
+    widget.dispose();
+  });
+
+  it('rebuilds the board when max rows change, keeping the stored roster', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
+    const widget = createAgentBoardWidget(null);
+    const four = [agent(1, 'working'), agent(2, 'idle'), agent(3, 'done'), agent(4, 'working')];
+    widget.setAgentRoster?.(four);
+    widget.setAgentBoardMaxRows?.(3);
+    expect(rows(widget)).toHaveLength(3);
+    expect(pagerLabelText(widget)).toBe('1/2');
+    const body = named(widget, 'agent-board-body') as THREE.Mesh;
+    expect((body.geometry as THREE.BoxGeometry).parameters.height).toBe(agentBoardHeight(3));
+    const eight = Array.from({ length: 8 }, (_, index) => agent(index + 1, 'working'));
+    widget.setAgentRoster?.(eight);
+    activate(widget, 'next');
+    expect(pagerLabelText(widget)).toBe('2/3');
+    expect(rows(widget).map((row) => part(row, 'plate').userData.agentPaneId)).toEqual([
+      '%4',
+      '%5',
+      '%6',
+    ]);
+    widget.setAgentBoardMaxRows?.(12);
+    expect(pagerNode(widget, 'label').visible).toBe(false);
+    expect(rows(widget)).toHaveLength(8);
+    widget.dispose();
+  });
 });
+
+function pagerLabelText(widget: ReturnType<typeof createAgentBoardWidget>): string | undefined {
+  return named(widget, 'agent-board-page-label').userData.labelText as string | undefined;
+}

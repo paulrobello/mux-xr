@@ -18,7 +18,11 @@ vi.mock('troika-three-text', async (importOriginal) => {
 });
 
 import { getWidgetEntry } from '../src/xr/widget-registry';
-import { createChannel, createFocusedPaneChannel } from '../src/xr/widget-types';
+import {
+  createChannel,
+  createFocusedPaneChannel,
+  createWidgetChannels,
+} from '../src/xr/widget-types';
 import { createTestWidgetContext } from './helpers/widget-context';
 
 describe('widget channels', () => {
@@ -46,6 +50,25 @@ describe('widget channels', () => {
     channel.publish(2);
     expect(listener).toHaveBeenCalledExactlyOnceWith(1);
     expect(channel.hasSubscribers()).toBe(false);
+  });
+
+  it('replays the agent board max rows to subscribers that join late', () => {
+    const channels = createWidgetChannels({
+      bellFeed: [],
+      textureAnisotropy: 4,
+      weatherZip: '',
+      agentBoardMaxRows: 6,
+    });
+    expect(channels.agentBoardMaxRows.get()).toBe(6);
+    const joined = vi.fn();
+    channels.agentBoardMaxRows.subscribe(joined);
+    expect(joined).toHaveBeenCalledExactlyOnceWith(6);
+    channels.agentBoardMaxRows.publish(9);
+    expect(joined).toHaveBeenCalledTimes(2);
+    expect(joined).toHaveBeenLastCalledWith(9);
+    const late = vi.fn();
+    channels.agentBoardMaxRows.subscribe(late);
+    expect(late).toHaveBeenCalledExactlyOnceWith(9);
   });
 
   it('calls each focused-pane subscriber only when its own last value differs', () => {

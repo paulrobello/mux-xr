@@ -90,9 +90,15 @@ export const WIDGET_REGISTRY = [
     spawnOffset: [0, -0.27, -1.25],
     spawnScale: 0.8,
     create: (ctx) =>
-      subscribed(createAgentBoardWidget(ctx.envMap), (widget) => [
-        ctx.channels.agentRoster.subscribe((rows) => widget.setAgentRoster(rows)),
-      ]),
+      subscribed(
+        createAgentBoardWidget(ctx.envMap, { maxRows: ctx.channels.agentBoardMaxRows.get() }),
+        (widget) => [
+          ctx.channels.agentRoster.subscribe((rows) => widget.setAgentRoster(rows)),
+          ctx.channels.agentBoardMaxRows.subscribe((maxRows) =>
+            widget.setAgentBoardMaxRows(maxRows),
+          ),
+        ],
+      ),
   },
   {
     kind: 'timer',

@@ -28,7 +28,12 @@ export function createFakeHost(secret: string | null = 'test-secret') {
 /** A context with fresh channels and a recording fake host; pass overrides to inject a different host. */
 export function createTestWidgetContext(overrides: Partial<WidgetContext> = {}) {
   const fake = createFakeHost();
-  const channels = createWidgetChannels({ bellFeed: [], textureAnisotropy: 1, weatherZip: '' });
+  const channels = createWidgetChannels({
+    agentBoardMaxRows: 6,
+    bellFeed: [],
+    textureAnisotropy: 1,
+    weatherZip: '',
+  });
   const context: WidgetContext = {
     envMap: null,
     host: fake.host,
