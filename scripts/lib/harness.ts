@@ -1,4 +1,23 @@
 import { type Browser, chromium, type Page } from 'playwright';
+import type { CheckSpec } from '../checks/manifest';
+
+/**
+ * The manifest-driven environment guard `scripts/run-check.ts` runs before importing a check:
+ * every entry requirement is checked together, so a run without a fixture announces all of the
+ * variables it needs at once, including `MUX_XR_PRIVATE_TEST` when the check sends input.
+ * Returns the required variables' values so a caller can pass them on.
+ */
+export function resolveCheckEnv(spec: CheckSpec): Record<string, string> {
+  const missing: string[] = [];
+  if (spec.sendsInput && process.env.MUX_XR_PRIVATE_TEST !== '1')
+    missing.push('MUX_XR_PRIVATE_TEST');
+  for (const name of spec.requires) if (!process.env[name]) missing.push(name);
+  if (missing.length)
+    throw new Error(
+      `${spec.name} requires ${missing.join(', ')} to point at a private fixture you own. Set them and MUX_XR_PRIVATE_TEST=1 for checks that send input.`,
+    );
+  return Object.fromEntries(spec.requires.map((name) => [name, process.env[name] as string]));
+}
 
 /** Throws `message` unless `condition` holds. */
 export function assert(condition: unknown, message: string): asserts condition {

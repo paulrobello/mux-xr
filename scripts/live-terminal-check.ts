@@ -34,6 +34,10 @@ function arrayBuffer(data: Buffer): ArrayBuffer {
 async function main(): Promise<void> {
   assert(STREAMER, 'MUX_XR_STREAMER is required for the live adapter diagnostic');
   assert(panes.length === 2, 'MUX_XR_PANES must contain exactly two pane ids');
+  assert(
+    process.env.MUX_XR_PRIVATE_TEST === '1',
+    'MUX_XR_PRIVATE_TEST=1 is required: this check types into real panes',
+  );
   const beforeLoad = loadavg()[0] ?? 0;
   const browser = await chromium.launch({
     channel: 'chromium',
