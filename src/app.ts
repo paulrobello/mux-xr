@@ -590,10 +590,6 @@ export function createApp(root: HTMLElement, deps: AppDeps = {}): App {
     },
     isActive: () => scene.state.xrMode !== 'desktop',
     onError: (error) => notice(error instanceof Error ? error.message : 'Could not enter XR.'),
-    onActivationRequired: () =>
-      scene.setNotice('Automatic XR entry was blocked. Select Enter XR to continue.', {
-        feed: true,
-      }),
     xr: navigator.xr,
     eventTarget: window,
     userActivation: () => navigator.userActivation?.isActive ?? false,
@@ -646,7 +642,6 @@ export function createApp(root: HTMLElement, deps: AppDeps = {}): App {
       console.warn('Observatory unavailable; using the lightweight background.', error);
     });
   if (scene.state.rendererError) notice(scene.state.rendererError);
-  void xrEntry.enableAutoStart().catch(() => undefined);
 
   installDebugApi(
     createDebugApi({

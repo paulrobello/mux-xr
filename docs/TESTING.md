@@ -40,7 +40,6 @@ The table is generated from the manifest with `make testing-table`. Variable def
 | --- | --- | --- | --- | --- | --- |
 | `make hierarchy-check` | Both hierarchy styles, browser and native synchronization, navigation, screenshots and reload persistence | `MUX_XR_PRIVATE_TEST`, `MUX_XR_TEST_ROOT` |  | Loopback browser fixture, GPU | Headset behavior |
 | `make input-refinement-check` | Hierarchy, keyboard curvature, warped rims and injected fake speech recognition | `MUX_XR_PRIVATE_TEST`, `MUX_XR_TEST_ROOT` |  | Loopback browser fixture, GPU | Microphone, transcription service or physical Quest voice support |
-| `make auto-entry-check` | Automatic XR entry with and without user activation | `MUX_XR_PRIVATE_TEST`, `MUX_XR_BASE_URL`, `MUX_XR_TEST_ROOT` |  | Loopback browser fixture, GPU | A real XR session |
 | `make production-label-check` | Actual UI glyph pixels in a built app served with the streamer CSP | `MUX_XR_BASE_URL` |  | Private streamer and daemon, GPU, Built app behind the streamer | A Vite development server cannot stand in for it |
 | `make update-notice-check` | Update notice, polling and the automatic desktop reload between two builds | `MUX_XR_PRIVATE_TEST`, `MUX_XR_BASE_URL`, `MUX_XR_UPDATE_TEST_ROOT` |  | Loopback browser fixture, GPU, Two owned fixture builds | The immersive reload on a headset |
 | `make arrangement-check` | Row, Grid, Arc and Sphere arrangements | `MUX_XR_PRIVATE_TEST`, `MUX_XR_BASE_URL`, `MUX_XR_TEST_ROOT` |  | Loopback browser fixture, GPU | Comfort of a layout |

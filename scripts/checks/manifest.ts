@@ -55,16 +55,6 @@ export const CHECKS: readonly CheckSpec[] = [
     doesNotProve: 'Microphone, transcription service or physical Quest voice support',
   },
   {
-    name: 'auto-entry-check',
-    script: 'scripts/auto-entry-check.ts',
-    purpose: 'Automatic XR entry with and without user activation',
-    requires: ['MUX_XR_BASE_URL', 'MUX_XR_TEST_ROOT'],
-    optional: [],
-    fixture: 'browser-fixture',
-    sendsInput: true,
-    doesNotProve: 'A real XR session',
-  },
-  {
     name: 'production-label-check',
     script: 'scripts/production-label-check.ts',
     purpose: 'Actual UI glyph pixels in a built app served with the streamer CSP',
