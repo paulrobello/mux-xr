@@ -20,7 +20,9 @@ protocol-check: ## Verify the vendored protobuf binding against core-release.jso
 checkall: protocol-check lint typecheck test build ## Fast gate: protocol check, lint, typecheck, unit tests and build
 checkall-ci: checkall asset-check ## CI-parity gate: checkall, asset checks, Gitleaks and the dependency audit
 	gitleaks dir . --redact --no-banner
-	bun audit --audit-level high
+	# GHSA-fc5q-39xc-vjpf: picomatch <=4.0.7 ReDoS, dev-toolchain only (vite/vitest);
+	# no patched release exists yet (latest is 4.0.7). Remove this ignore once 4.0.8 publishes.
+	bun audit --audit-level high --ignore GHSA-fc5q-39xc-vjpf
 e2e: ## Run the browser suite against a local app with synthetic streams
 	bun run e2e
 .PHONY: background-thumbnails
