@@ -152,6 +152,9 @@ export function createClipboardBridge(
           if (settled) return;
           if (disposed) finish(null);
           else if (snapshotGeneration !== generation) finish(snapshotText);
+          // Quest Browser can resolve a read with '' right after a write; the retained local
+          // copy is what the user just made, so an empty system answer must not discard it.
+          else if (value === '' && snapshotText) finish(snapshotText);
           else finish(typeof value === 'string' ? value : snapshotText);
         },
         () => finish(disposed ? null : snapshotText),

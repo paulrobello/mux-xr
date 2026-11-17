@@ -43,13 +43,15 @@ describe('clipboard bridge', () => {
     await expect(denied.read()).resolves.toBe('fallback');
   });
 
-  it('prefers the OS read, including an externally cleared clipboard', async () => {
+  it('lets an external copy win but falls back to the local copy when the OS read resolves empty', async () => {
     const readText = vi.fn(async () => 'external');
     const bridge = createClipboardBridge(() => providerWith({ readText }));
     await expect(bridge.copy('local')).resolves.toBe(true);
     await expect(bridge.read()).resolves.toBe('external');
+    // Quest Browser can resolve a read with '' right after a write; the local copy is what the
+    // user just made, so an empty OS answer must not discard it.
     readText.mockResolvedValueOnce('');
-    await expect(bridge.read()).resolves.toBe('');
+    await expect(bridge.read()).resolves.toBe('local');
   });
 
   it('reads an external clipboard before any app copy', async () => {
