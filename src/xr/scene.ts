@@ -5468,7 +5468,7 @@ export function createWorkspaceScene(
     panel.frameAccent.geometry.dispose();
     panel.frameAccent.geometry = createTerminalFrameAccentGeometry(span, options);
   };
-  const syncPanelGrid = (panel: TerminalPanel): void => {
+  const syncPanelGrid = (panel: TerminalPanel, requestFloorCorrection = true): void => {
     const width = (PANEL_WIDTH * panel.surface.cols) / 80;
     const height = (PANEL_HEIGHT * panel.surface.rows) / 24;
     const curvature = panel.focusCurvature ?? panel.curvature;
@@ -5510,7 +5510,7 @@ export function createWorkspaceScene(
     followCurve(panel.connectionButton);
     followCurve(panel.closeButton);
     followCurve(panel.bringButton);
-    floorCorrectionPending = true;
+    if (requestFloorCorrection) floorCorrectionPending = true;
   };
   const addTerminal = (surface: TerminalSurface): void => {
     if (panels.has(surface.pane.id)) return;
@@ -5711,7 +5711,7 @@ export function createWorkspaceScene(
         mutableState.windowPreferences.defaultOpacity,
       ),
     };
-    syncPanelGrid(panel);
+    syncPanelGrid(panel, false);
     applyTerminalOpacity(panel);
     panel.unsubscribe = surface.subscribe(() => {
       syncPanelGrid(panel);
@@ -5760,9 +5760,22 @@ export function createWorkspaceScene(
     });
     panels.set(panel.id, panel);
     showScrollStrips(panel);
-    floorCorrectionPending = true;
     terminalScreens.push(screen);
     scene.add(root);
+    // Opening a pane must leave every other terminal where it is (the agent-board row
+    // contract), so the new panel clamps itself into the safe region instead of arming the
+    // whole-layout floor pass, which lifts and re-faces the other panels toward the viewer.
+    const viewer = poseViewer();
+    viewer.updateMatrixWorld(true);
+    keepLayoutInsideRadius(
+      [root],
+      workspacePaneSafeRadius(mutableState.background, mutableState.xrMode),
+    );
+    keepLayoutAboveFloor(
+      [root],
+      workspaceFloorY(mutableState.background, mutableState.xrMode),
+      viewer.getWorldPosition(new THREE.Vector3()),
+    );
     if (!mutableState.selectedTerminalId) {
       mutableState.selectedTerminalId = panel.id;
       mutableState.focusedTerminalId = panel.id;
