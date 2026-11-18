@@ -6730,7 +6730,15 @@ export function createWorkspaceScene(
       gl: renderer?.getContext() as WebGL2RenderingContext,
     });
     focusQuadLayer = {
+      // The getters must stay live: a spread snapshot would freeze `working` at its
+      // creation-time false and make the retry loop rebuild a healthy layer forever.
       ...layer,
+      get supported() {
+        return layer.supported;
+      },
+      get working() {
+        return layer.working;
+      },
       dispose() {
         layer.dispose();
         aperture.removeFromParent();
