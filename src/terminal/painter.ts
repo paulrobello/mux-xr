@@ -195,6 +195,10 @@ export function createTerminalPainter(
     return changed;
   };
 
+  // Backgrounds of every cell paint before any glyph, so a symbol that renders wider
+  // than its cell (emoji, bullets) keeps its spill past the cell edge visible instead
+  // of being covered by the next cell's background. Progressive redraws may not have
+  // rescanned their rows this paint, so both passes re-read the live cell.
   const drawRow = (
     ctx: PainterContext,
     row: number,
@@ -209,13 +213,49 @@ export function createTerminalPainter(
     const line: IBufferLine | undefined = terminal.buffer.active.getLine(
       terminal.buffer.active.viewportY + row,
     );
+    const bufferRow = terminal.buffer.active.viewportY + row;
     for (let col = 0; col < cols; col += 1) {
       const index = row * cols + col;
       const current = line?.getCell(col, cell);
       const width = cachedWidth[index];
-      const x = col * CELL_WIDTH;
       if (!current || width === 0) continue;
-      const bufferRow = terminal.buffer.active.viewportY + row;
+      const x = col * CELL_WIDTH;
+      const selected =
+        selectionContains(selection, col, bufferRow) ||
+        (width === 2 && selectionContains(selection, col + 1, bufferRow));
+      const inverse = (cachedFlags[index] & 8) !== 0;
+      const fg = terminalColor(
+        colorMode,
+        current.isFgRGB(),
+        current.isFgPalette(),
+        cachedFgValue[index],
+        DEFAULT_FOREGROUND,
+        (cachedFlags[index] & 1) !== 0,
+        false,
+      );
+      const bg = terminalColor(
+        colorMode,
+        current.isBgRGB(),
+        current.isBgPalette(),
+        cachedBgValue[index],
+        background,
+        false,
+        true,
+      );
+      const cellBackground = selected ? '#284f5b' : inverse ? fg : bg;
+      if (cellBackground !== background) {
+        setFillStyle(ctx, cellBackground);
+        ctx.fillRect(x, row * LINE_HEIGHT, width * CELL_WIDTH, LINE_HEIGHT);
+      }
+    }
+    for (let col = 0; col < cols; col += 1) {
+      const index = col + row * cols;
+      const current = line?.getCell(col, cell);
+      const width = cachedWidth[index];
+      if (!current || width === 0) continue;
+      const x = col * CELL_WIDTH;
+      const chars = cachedChars[index];
+      if (!chars) continue;
       const selected =
         selectionContains(selection, col, bufferRow) ||
         (width === 2 && selectionContains(selection, col + 1, bufferRow));
@@ -239,13 +279,6 @@ export function createTerminalPainter(
         true,
       );
       const foreground = selected ? '#ffffff' : inverse ? bg : fg;
-      const cellBackground = selected ? '#284f5b' : inverse ? fg : bg;
-      if (cellBackground !== background) {
-        setFillStyle(ctx, cellBackground);
-        ctx.fillRect(x, row * LINE_HEIGHT, Math.max(1, width) * CELL_WIDTH, LINE_HEIGHT);
-      }
-      const chars = cachedChars[index];
-      if (!chars) continue;
       setFillStyle(ctx, foreground);
       const font = `${(cachedFlags[index] & 1) !== 0 ? 'bold ' : ''}${
         (cachedFlags[index] & 2) !== 0 ? 'italic ' : ''
@@ -253,7 +286,7 @@ export function createTerminalPainter(
       if (ctx.font !== font) ctx.font = font;
       ctx.fillText(chars, x, row * LINE_HEIGHT);
       if ((cachedFlags[index] & 4) !== 0) {
-        ctx.fillRect(x, (row + 1) * LINE_HEIGHT - 2, Math.max(1, width) * CELL_WIDTH, 1);
+        ctx.fillRect(x, (row + 1) * LINE_HEIGHT - 2, width * CELL_WIDTH, 1);
       }
     }
   };

@@ -207,6 +207,19 @@ describe('terminal painter', () => {
     ).toEqual(['界', 'é']);
   });
 
+  it('paints every background before any glyph so wide-rendering bullets keep their spill', () => {
+    const f = fixture(3, 1);
+    f.lines[0][0] = cell({ chars: '●' });
+    f.lines[0][1] = cell({ chars: 'U', bgMode: 2, bg: 0x101820 });
+    const painter = createTerminalPainter(f.canvas, f.terminal as never);
+    expect(painter.paint(3, 1, 'comfort')).toBe(true);
+    const calls = f.context.calls as string[];
+    const firstText = calls.indexOf('text');
+    expect(firstText).toBeGreaterThan(-1);
+    expect(calls.slice(0, firstText)).not.toContain('text');
+    expect(calls.slice(firstText)).not.toContain('fill');
+  });
+
   it('does not paint a continuation-cell highlight over a selected wide glyph', () => {
     const f = fixture(2, 1);
     f.lines[0][0] = cell({ chars: '界', width: 2 });
