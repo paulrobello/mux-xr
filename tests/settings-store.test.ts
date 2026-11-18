@@ -43,14 +43,14 @@ describe('settings store', () => {
     expect(store.get().keyboardCurvature).toBeLessThanOrEqual(100);
   });
 
-  it('defaults crisp focused terminal to off and persists an enable', () => {
+  it('defaults crisp focused terminal to on and honors an explicit disable', () => {
     const storage = memoryStorage();
     const store = createSettingsStore(storage);
-    expect(store.get().crispFocusedTerminal).toBe(false);
-    expect(store.update({ crispFocusedTerminal: true })).toBe(true);
     expect(store.get().crispFocusedTerminal).toBe(true);
-    expect(stored(storage).crispFocusedTerminal).toBe(true);
-    expect(loadSettings(storage).crispFocusedTerminal).toBe(true);
+    expect(store.update({ crispFocusedTerminal: false })).toBe(true);
+    expect(store.get().crispFocusedTerminal).toBe(false);
+    expect(stored(storage).crispFocusedTerminal).toBe(false);
+    expect(loadSettings(storage).crispFocusedTerminal).toBe(false);
   });
 
   it('treats an update that changes nothing as a no-op', () => {

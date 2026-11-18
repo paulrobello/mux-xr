@@ -78,7 +78,7 @@ export const DEFAULT_SETTINGS: WorkspaceSettings = {
   streamerApiKey: '',
   background: 'observatory',
   gazeInput: false,
-  crispFocusedTerminal: false,
+  crispFocusedTerminal: true,
   colorMode: 'comfort',
   keyboardBackground: true,
   keyboardCurvature: 0,
@@ -121,7 +121,7 @@ export function validateSettings(value: unknown): WorkspaceSettings {
       ? candidate.background
       : DEFAULT_SETTINGS.background,
     gazeInput: candidate.gazeInput === true,
-    crispFocusedTerminal: candidate.crispFocusedTerminal === true,
+    crispFocusedTerminal: candidate.crispFocusedTerminal !== false,
     colorMode:
       candidate.colorMode === 'original' || candidate.colorMode === 'monochrome'
         ? candidate.colorMode
