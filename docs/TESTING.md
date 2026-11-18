@@ -115,12 +115,12 @@ Every variable that the checks read. Host service flags and page settings are in
 
 Use an isolated daemon socket, streamer, and test panes. The prepared LAN preview uses the shared default daemon. Restrict live delivery verification to static frontend files and normal application startup. `make real-app-check` issues two harmless marker commands, so use isolated test panes. The targets that create panes, resize panes or report agent state refuse to run without `MUX_XR_PRIVATE_TEST=1`.
 
-Bring a private pair up from clean like this (verified 2026-11-17 with `make real-app-check`):
+Bring a private pair up from clean like this (verified 2026-11-17 with `make real-app-check`; re-verified 2026-11-18 on core 0.83.0):
 
-1. Inside a par-mux pane (`PAR_MUX_ENV` set), export `PAR_MUX_ALLOW_NESTED=1` first; the daemon start refuses to run nested without it.
-2. `par-mux --socket /tmp/<scratch>.sock start --no-attach` starts the private daemon on its own socket.
+1. Inside a par-mux pane (`PAR_MUX_ENV` set), export `PAR_MUX_ALLOW_NESTED=1` first; the daemon start refuses to run nested without it. On a par-mux 0.83 daemon also export `PAR_MUX_NO_APP_WRAPPER=1`, or `start` hands off to `/Applications/Par-mux.app` and the handoff can die between tool calls.
+2. `par-mux --socket /tmp/<scratch>.sock start --no-attach --state-dir <scratch>/state` starts the private daemon on its own socket. The 0.83 daemon refuses to start when another daemon already serves the platform state file, so pin the scratch state dir.
 3. `par-mux --socket <scratch>.sock --cmd "new-session -d -s <name>"` must run before any `new-window`: a fresh daemon has no sessions, and `new-window` refuses with "no sessions exist" until one exists.
-4. Create the panes the check needs with `new-window` (two for `real-app-check`; `agent-roster-app-check` needs its panes running `claude` or `codex` processes so the daemon keeps the claims, per its table row).
+4. Create the panes the check needs with `new-window` (two shell panes for `real-app-check`, whose marker commands need a shell to execute; `agent-roster-app-check` needs its panes running `claude` or `codex` processes so the daemon keeps the claims, per its table row).
 5. Start the streamer on a loopback port with an owned copy of `dist`: `.local/bin/streamer-candidate --host 127.0.0.1 --port 4241 --enable-http --web-root <scratch>/dist --mux-socket <scratch>.sock --allow-unauthenticated`. The default `MUX_XR_BASE_URL` of `http://127.0.0.1:4241` then needs no override. `agent-roster-app-check` additionally takes `MUX_XR_MUX_SOCKET=<scratch>.sock`.
 6. Run the check with `MUX_XR_PRIVATE_TEST=1 make <target>`, then tear down: stop the streamer, `par-mux --socket <scratch>.sock stop`, and delete the scratch tree.
 
