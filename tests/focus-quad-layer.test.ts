@@ -284,6 +284,31 @@ describe('createFocusQuadLayer', () => {
     expect(glCalls).toHaveLength(2);
   });
 
+  it('reports working only after a successful upload and drops it on deactivation', () => {
+    const layer = createFocusQuadLayer(makeHost());
+    expect(layer.working).toBe(false);
+    layer.activate();
+    expect(layer.working).toBe(false);
+    layer.update({ frame: 1 });
+    expect(layer.working).toBe(true);
+    layer.deactivate();
+    expect(layer.working).toBe(false);
+  });
+
+  it('deactivates after a run of frames without the compositor layer so the scene can retry', () => {
+    const layer = createFocusQuadLayer(makeHost());
+    layer.activate();
+    layer.update({ frame: 1 });
+    expect(layer.working).toBe(true);
+    sessionLayers.splice(0, 1);
+    for (let frame = 2; frame <= 9; frame += 1) layer.update({ frame });
+    expect(layer.working).toBe(false);
+    expect(surfaceVisible.at(-1)).toBe(true);
+    expect(sessionLayers).toEqual([{ id: 'base' }]);
+    layer.update({ frame: 10 });
+    expect(glCalls).toHaveLength(1);
+  });
+
   it('restores renderer state and releases owned GPU resources when the copy fails', () => {
     const host = makeHost();
     const boundTexture = { id: 'three-texture' };
@@ -310,6 +335,7 @@ describe('createFocusQuadLayer', () => {
       expect(host.gl.deleteTexture).toHaveBeenCalledWith({ id: 'owned-texture' });
       expect(host.gl.deleteFramebuffer).toHaveBeenCalledWith({ id: 'owned-framebuffer' });
       expect(sessionLayers).toEqual([{ id: 'base' }]);
+      expect(layer.working).toBe(false);
       expect(surfaceVisible).toEqual([true]);
     } finally {
       warn.mockRestore();

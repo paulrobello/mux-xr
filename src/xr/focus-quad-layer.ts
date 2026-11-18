@@ -91,6 +91,8 @@ export interface FocusQuadLayerHost {
 export interface FocusQuadLayer {
   /** False when the session lacks the layers feature or XRWebGLBinding. */
   readonly supported: boolean;
+  /** False until an activation succeeds and a frame has uploaded to the compositor. */
+  readonly working: boolean;
   activate(): void;
   /** Call every rendered frame while active; pass the current XRFrame. */
   update(frame: unknown): void;
@@ -136,6 +138,8 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
   const binding: XrWebGlBindingLike | null = createBinding();
   let layer: XrQuadLayerLike | null = null;
   let active = false;
+  let working = false;
+  let missedIncludes = 0;
   let source: { texture: WebGLTexture; framebuffer: WebGLFramebuffer } | null = null;
   let uploaded: { revision: number; width: number; height: number } | null = null;
   let checkedCopy = false;
@@ -299,9 +303,14 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
   const uploadForFrame = (frame: unknown): void => {
     if (!binding || !layer) return;
     if (!host.session.renderState.layers.includes(layer)) {
+      // One frame of absence is the normal activation handoff; a run of them is a dropped
+      // layer the scene's retry can rebuild.
+      missedIncludes += 1;
       host.setSurfaceVisible(true);
+      if (missedIncludes >= 8) doDeactivate();
       return;
     }
+    missedIncludes = 0;
     const {
       colorTexture,
       viewport: { x, y, width, height },
@@ -336,6 +345,7 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
       gl.bindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
     }
     host.setSurfaceVisible(false);
+    working = true;
   };
 
   let layerPixelW = 0;
@@ -344,6 +354,7 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
   const doDeactivate = (): void => {
     if (!active) return;
     active = false;
+    working = false;
     destroyLayer();
     if (source) {
       host.gl.deleteFramebuffer(source.framebuffer);
@@ -358,11 +369,15 @@ export function createFocusQuadLayer(host: FocusQuadLayerHost): FocusQuadLayer {
     get supported() {
       return binding !== null;
     },
+    get working() {
+      return working;
+    },
     activate(): void {
       if (!binding || active) return;
       baseLayers = [...(host.session.renderState.layers ?? [])];
       if (!baseLayers.length) return;
       active = true;
+      missedIncludes = 0;
       try {
         buildLayer();
       } catch (error) {

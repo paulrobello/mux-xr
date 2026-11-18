@@ -535,6 +535,24 @@ describe('native XR controller event routing', () => {
     second.container.remove();
   });
 
+  it('draws the scroll strip after the panes with depth so photos behind it cannot paint over it', () => {
+    const { workspace } = fixture();
+    const panel = workspace.scene.getObjectByName('terminal-panel-pane-b') as THREE.Group;
+    const strip = panel.getObjectByName('terminal-scroll-strip') as THREE.Mesh<
+      THREE.BufferGeometry,
+      THREE.MeshBasicMaterial
+    >;
+    const grip = strip.getObjectByName('terminal-scroll-strip-grip') as THREE.Mesh<
+      THREE.BufferGeometry,
+      THREE.MeshBasicMaterial
+    >;
+    expect(strip.material.depthWrite).toBe(true);
+    expect(strip.renderOrder).toBe(0.5);
+    expect(grip.material.depthWrite).toBe(true);
+    expect(grip.renderOrder).toBe(0.6);
+    workspace.dispose();
+  });
+
   it('recolors live XR accents from the Accent colors page and restores the default', () => {
     const { workspace, container } = fixture();
     workspace.selectTerminal('pane-a');

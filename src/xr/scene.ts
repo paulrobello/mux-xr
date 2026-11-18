@@ -494,6 +494,7 @@ export function routeInput(
 }
 
 const CONTEXT_LOST_NOTICE = 'The headset reclaimed graphics memory. Restoring the workspace.';
+const CRISP_NOTICE = 'Crisp rendering is unavailable for this terminal.';
 const PANEL_WIDTH = 1.42;
 const PANEL_HEIGHT = 0.8;
 const _KEYBORB_DICTATION_COLUMN = 9;
@@ -2797,6 +2798,9 @@ export function createWorkspaceScene(
   let focusQuadLayer: FocusQuadLayer | null = null;
   let focusQuadPending = false;
   let focusQuadPaneId: string | null = null;
+  /** Cooldown between crisp-layer rebuild attempts; failures surface as the crisp notice. */
+  let quadRetryAt = 0;
+  let quadFailures = 0;
   /** One-shot widget restore; the frame callback calls it when a restore is pending. */
   const restoreWidgetsOnce = (): void => {
     const savedNotes = stickyNoteStore.read();
@@ -3686,6 +3690,14 @@ export function createWorkspaceScene(
     if (frame && focusQuadLayer) {
       focusQuadLayer.notifyCanvasResized();
       focusQuadLayer.update(frame);
+    }
+    if (frame && focusQuadLayer?.working) {
+      quadFailures = 0;
+      if (mutableState.notice === CRISP_NOTICE) setNotice(null);
+    }
+    if (frame && focusQuadLayer?.supported && !focusQuadLayer.working && time >= quadRetryAt) {
+      syncFocusQuadLayer();
+      quadRetryAt = time + 1000;
     }
     renderScene();
     if (!renderer && typeof window.requestAnimationFrame === 'function')
@@ -5609,13 +5621,15 @@ export function createWorkspaceScene(
           color: accent.hex,
           transparent: true,
           opacity: SCROLL_STRIP_OPACITY,
-          depthWrite: false,
           side: THREE.DoubleSide,
           // A flat unlit plane blends identically in one pass. The default back-then-front pair
           // also marks the material changed twice per draw, rebuilding its program parameters.
           forceSinglePass: true,
         }),
       );
+      // Widgets draw at renderOrder 1 after the transparent panes, so a renderOrder-0 strip that
+      // skips depth would let a photo behind the pane paint over the track.
+      strip.renderOrder = 0.5;
       strip.name = name;
       setAction(strip, { type: 'scrollStrip' });
       Object.assign(strip.userData, {
@@ -5631,6 +5645,7 @@ export function createWorkspaceScene(
         mergeGeometries(marks),
         new THREE.MeshBasicMaterial({ color: accent.hex, transparent: true, opacity: 0.7 }),
       );
+      grip.renderOrder = 0.6;
       for (const mark of marks) mark.dispose();
       grip.name = 'terminal-scroll-strip-grip';
       grip.position.z = 0.001;
@@ -6656,7 +6671,11 @@ export function createWorkspaceScene(
     const id =
       mutableState.focusModeTerminalId ??
       (mutableState.crispFocusedTerminal ? mutableState.selectedTerminalId : null);
-    if (id && focusQuadPaneId === id && focusQuadLayer) return;
+    if (id && focusQuadPaneId === id && focusQuadLayer?.working) return;
+    if (id && focusQuadPaneId === id && focusQuadLayer && !focusQuadLayer.working)
+      quadFailures += 1;
+    else quadFailures = 0;
+    if (quadFailures === 3) setNotice(CRISP_NOTICE);
     focusQuadLayer?.dispose();
     focusQuadLayer = null;
     focusQuadPaneId = null;
@@ -6720,6 +6739,8 @@ export function createWorkspaceScene(
     };
     focusQuadPaneId = id;
     focusQuadLayer.activate();
+    // Give the first upload a frame to land before the frame loop counts this layer as failed.
+    quadRetryAt = performance.now() + 500;
   };
 
   const startXR = async (mode: XrEntryMode): Promise<void> => {
