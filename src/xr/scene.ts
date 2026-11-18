@@ -257,6 +257,8 @@ export interface WorkspaceSceneState {
   selectedTerminalId: string | null;
   background: BackgroundMode;
   gazeInputEnabled: boolean;
+  /** The selected terminal renders through a compositor quad layer for sharper text. */
+  crispFocusedTerminal: boolean;
   terminalColorMode: TerminalColorMode;
   filtering: TerminalFiltering;
   windowPreferences: WindowPreferences;
@@ -916,6 +918,7 @@ export function createWorkspaceScene(
     selectedTerminalId: null,
     background: device.background,
     gazeInputEnabled: device.gazeInput,
+    crispFocusedTerminal: device.crispFocusedTerminal,
     terminalColorMode: device.colorMode,
     filtering: validateTerminalFiltering({
       ...device.filtering,
@@ -2793,6 +2796,7 @@ export function createWorkspaceScene(
   };
   let focusQuadLayer: FocusQuadLayer | null = null;
   let focusQuadPending = false;
+  let focusQuadPaneId: string | null = null;
   /** One-shot widget restore; the frame callback calls it when a restore is pending. */
   const restoreWidgetsOnce = (): void => {
     const savedNotes = stickyNoteStore.read();
@@ -5784,6 +5788,7 @@ export function createWorkspaceScene(
     if (!mutableState.selectedTerminalId) {
       mutableState.selectedTerminalId = panel.id;
       mutableState.focusedTerminalId = panel.id;
+      syncFocusQuadLayer();
     }
     setSelectedVisual();
     paneFocus.add(root);
@@ -5822,6 +5827,7 @@ export function createWorkspaceScene(
       mutableState.selectedTerminalId = panels.keys().next().value ?? null;
     if (mutableState.focusedTerminalId === id)
       mutableState.focusedTerminalId = mutableState.selectedTerminalId;
+    syncFocusQuadLayer();
     setSelectedVisual();
     notify();
   };
@@ -5840,6 +5846,7 @@ export function createWorkspaceScene(
     clearArmedPaste();
     mutableState.selectedTerminalId = nextId;
     mutableState.focusedTerminalId = mutableState.selectedTerminalId;
+    syncFocusQuadLayer();
     if (mutableState.selectedTerminalId) actions.selectPane(mutableState.selectedTerminalId);
     if (inputRoot) {
       clearArmedModifiers();
@@ -6261,6 +6268,13 @@ export function createWorkspaceScene(
       updateLabel(inputToggle as THREE.Mesh, `Gaze input: ${enabled ? 'on' : 'off'}`);
     notify();
   };
+  const applyCrispFocusedTerminal = (enabled: boolean): void => {
+    if (mutableState.crispFocusedTerminal === enabled) return;
+    mutableState.crispFocusedTerminal = enabled;
+    syncFocusQuadLayer();
+    if (inputRoot && inputMode === 'settings') refreshInputRoot(inputMode);
+    notify();
+  };
   const applyTerminalColorMode = (mode: TerminalColorMode): void => {
     if (mutableState.terminalColorMode === mode) return;
     mutableState.terminalColorMode = mode;
@@ -6421,6 +6435,7 @@ export function createWorkspaceScene(
   const stopSettings = settingsStore.subscribe((next) => {
     if (next.background !== mutableState.background) applyBackground(next.background);
     applyGazeInputEnabled(next.gazeInput);
+    applyCrispFocusedTerminal(next.crispFocusedTerminal);
     applyTerminalColorMode(next.colorMode);
     applyTerminalFiltering(next.filtering);
     applyWindowPreferences(next.windowPreferences);
@@ -6625,10 +6640,15 @@ export function createWorkspaceScene(
   };
   const syncFocusQuadLayer = (): void => {
     focusQuadPending = false;
+    const id =
+      mutableState.focusModeTerminalId ??
+      (mutableState.crispFocusedTerminal ? mutableState.selectedTerminalId : null);
+    if (id && focusQuadPaneId === id && focusQuadLayer) return;
     focusQuadLayer?.dispose();
     focusQuadLayer = null;
+    focusQuadPaneId = null;
+
     if (!activeSession || mutableState.xrMode !== 'vr') return;
-    const id = mutableState.focusModeTerminalId;
     if (!id) return;
     const panel = panels.get(id);
     if (!panel) return;
@@ -6636,6 +6656,7 @@ export function createWorkspaceScene(
     if (!supportsQuadLayers(activeSession as unknown as { enabledFeatures?: string[] })) return;
     if (paneFocus.moving) {
       focusQuadPending = true;
+      focusQuadPaneId = id;
       return;
     }
     // An alpha aperture lets the underlay show through while scene geometry can still cover it.
@@ -6684,6 +6705,7 @@ export function createWorkspaceScene(
         apertureMaterial.dispose();
       },
     };
+    focusQuadPaneId = id;
     focusQuadLayer.activate();
   };
 

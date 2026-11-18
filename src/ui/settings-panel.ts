@@ -170,6 +170,23 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     uiSounds,
     settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
   );
+  const crispFocused = document.createElement('label');
+  crispFocused.className = 'check';
+  crispFocused.innerHTML =
+    '<input type="checkbox" data-crisp-focused> Crisp focused terminal <span>Render the selected pane through a compositor layer for sharper text in XR. It follows your pane selection.</span>';
+  settingsPanel.insertBefore(
+    crispFocused,
+    settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
+  );
+  const crispFocusedInput = crispFocused.querySelector<HTMLInputElement>('[data-crisp-focused]');
+  if (!crispFocusedInput) throw new Error('Crisp focused terminal quad-layer control missing');
+  bindSettings(['crispFocusedTerminal'], () => {
+    crispFocusedInput.checked = current().crispFocusedTerminal;
+  });
+  crispFocusedInput.checked = current().crispFocusedTerminal;
+  crispFocusedInput.addEventListener('change', () =>
+    saveSettings({ crispFocusedTerminal: crispFocusedInput.checked }),
+  );
   const weatherZip = document.createElement('label');
   weatherZip.innerHTML =
     '<span>Weather ZIP</span><input data-weather-zip type="text" inputmode="numeric" maxlength="5" pattern="[0-9]{5}" placeholder="5-digit US ZIP" aria-label="Weather ZIP code"><small>US ZIP for the XR weather widget; leave empty for none.</small>';

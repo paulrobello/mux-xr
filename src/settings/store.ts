@@ -39,6 +39,8 @@ export interface WorkspaceSettings {
   streamerApiKey: string;
   background: BackgroundMode;
   gazeInput: boolean;
+  /** Render the selected terminal through a compositor quad layer for sharper text. */
+  crispFocusedTerminal: boolean;
   colorMode: TerminalColorMode;
   keyboardBackground: boolean;
   keyboardCurvature: number;
@@ -76,6 +78,7 @@ export const DEFAULT_SETTINGS: WorkspaceSettings = {
   streamerApiKey: '',
   background: 'observatory',
   gazeInput: false,
+  crispFocusedTerminal: false,
   colorMode: 'comfort',
   keyboardBackground: true,
   keyboardCurvature: 0,
@@ -118,6 +121,7 @@ export function validateSettings(value: unknown): WorkspaceSettings {
       ? candidate.background
       : DEFAULT_SETTINGS.background,
     gazeInput: candidate.gazeInput === true,
+    crispFocusedTerminal: candidate.crispFocusedTerminal === true,
     colorMode:
       candidate.colorMode === 'original' || candidate.colorMode === 'monochrome'
         ? candidate.colorMode
