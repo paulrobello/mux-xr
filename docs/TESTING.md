@@ -115,6 +115,15 @@ Every variable that the checks read. Host service flags and page settings are in
 
 Use an isolated daemon socket, streamer, and test panes. The prepared LAN preview uses the shared default daemon. Restrict live delivery verification to static frontend files and normal application startup. `make real-app-check` issues two harmless marker commands, so use isolated test panes. The targets that create panes, resize panes or report agent state refuse to run without `MUX_XR_PRIVATE_TEST=1`.
 
+Bring a private pair up from clean like this (verified 2026-11-17 with `make real-app-check`):
+
+1. Inside a par-mux pane (`PAR_MUX_ENV` set), export `PAR_MUX_ALLOW_NESTED=1` first; the daemon start refuses to run nested without it.
+2. `par-mux --socket /tmp/<scratch>.sock start --no-attach` starts the private daemon on its own socket.
+3. `par-mux --socket <scratch>.sock --cmd "new-session -d -s <name>"` must run before any `new-window`: a fresh daemon has no sessions, and `new-window` refuses with "no sessions exist" until one exists.
+4. Create the panes the check needs with `new-window` (two for `real-app-check`; `agent-roster-app-check` needs its panes running `claude` or `codex` processes so the daemon keeps the claims, per its table row).
+5. Start the streamer on a loopback port with an owned copy of `dist`: `.local/bin/streamer-candidate --host 127.0.0.1 --port 4241 --enable-http --web-root <scratch>/dist --mux-socket <scratch>.sock --allow-unauthenticated`. The default `MUX_XR_BASE_URL` of `http://127.0.0.1:4241` then needs no override. `agent-roster-app-check` additionally takes `MUX_XR_MUX_SOCKET=<scratch>.sock`.
+6. Run the check with `MUX_XR_PRIVATE_TEST=1 make <target>`, then tear down: stop the streamer, `par-mux --socket <scratch>.sock stop`, and delete the scratch tree.
+
 ## Physical Quest checks
 
 Browser and simulated XR checks establish software behavior. Verify real controller and hand interactions, text readability, passthrough, microphone permissions, and comfort on the headset. Capacity and frame pacing require a measured headset workload. The owner reported that the controller build worked well on Quest 3. Hand input still requires physical acceptance.
