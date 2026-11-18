@@ -48,7 +48,9 @@ export function setTerminalBackgroundOpacity(
   if (material.userData.terminalBackgroundOpacityTransparent === transparent) return;
   material.userData.terminalBackgroundOpacityTransparent = transparent;
   material.transparent = transparent;
-  material.depthWrite = !transparent;
+  // Glass panes keep writing depth so widgets (drawn after transparent panels) are
+  // occluded behind them; pane-through-pane still sorts back-to-front.
+  material.depthWrite = true;
   material.needsUpdate = true;
 }
 

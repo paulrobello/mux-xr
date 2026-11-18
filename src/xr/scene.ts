@@ -3875,6 +3875,19 @@ export function createWorkspaceScene(
       object.userData.widgetKey = key;
       object.userData.widgetId = widgetId;
       if (!object.userData.inputAction) object.userData.inputAction = 'grabWidget';
+      // Widgets render after every panel (glass ones depth-write) so they never
+      // show through a pane in front of them, while pane-through-pane keeps its
+      // back-to-front depth cue.
+      const mesh = object as THREE.Mesh;
+      if ((mesh as unknown as { isMesh?: boolean }).isMesh) {
+        if (mesh.renderOrder < 1) mesh.renderOrder = 1;
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const material of materials)
+          if (material && !material.transparent) {
+            material.transparent = true;
+            material.needsUpdate = true;
+          }
+      }
     });
     retintAccentMaterials(widget.root, '', mutableState.accentColor);
     widgets.set(key, widget);

@@ -111,7 +111,7 @@ describe('terminal material filtering', () => {
     const material = createTerminalMaterial(new THREE.DataTexture());
     setTerminalBackgroundOpacity(material, 0.5);
     expect(material.transparent).toBe(true);
-    expect(material.depthWrite).toBe(false);
+    expect(material.depthWrite).toBe(true);
     expect((material.userData.terminalBackgroundOpacity as { value: number }).value).toBe(0.5);
     const nonOpaqueMaterialVersion = material.version;
     setTerminalBackgroundOpacity(material, 0.4);
