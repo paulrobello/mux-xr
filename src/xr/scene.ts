@@ -1473,10 +1473,11 @@ export function createWorkspaceScene(
   >();
   const radialButtonDown = new Set<THREE.Group>();
   /**
-   * While the right thumbstick press that opened the radial menu stays held, the stick angle
-   * highlights wedges and the trigger activates the highlight; the release cancels and closes.
+   * A radial menu opened by a right thumbstick click: the live stick angle highlights wedges
+   * while it stays open, the trigger confirms the highlight, and another click dismisses it.
    */
   let stickRadial: { controller: THREE.Group; choice: RadialMenuAction | null } | null = null;
+  let stickClickLatched = false;
   const keyboardHolds = new Map<
     string,
     { controller: THREE.Group; index: number; seconds: number; summoned: boolean }
@@ -3171,26 +3172,17 @@ export function createWorkspaceScene(
       if (stickPad) {
         const { controller, pad } = stickPad;
         const pressed = Boolean(pad?.buttons[3]?.pressed);
-        const wasPressed = stickRadial !== null;
-        const stickHeld = stickRadial?.controller === controller;
-        if (pressed && !wasPressed) {
-          if (stickRadial) {
-            // A second stick press dismisses a stick-opened menu.
+        if (pressed && !stickClickLatched) {
+          stickClickLatched = true;
+          if (radialMenu.isOpen) {
+            // A second click dismisses a menu this stick opened (or any open menu).
             closeRadial();
             notify();
-          } else if (!warpEdit && !gripActive() && !radialMenu.isOpen) {
+          } else if (!warpEdit && !gripActive()) {
             toggleRadialMenu(controller);
             if (radialMenu.isOpen) stickRadial = { controller, choice: null };
           }
-        } else if (!pressed && stickHeld && stickRadial) {
-          // A centered release cancels and closes; a tilted or early release keeps the menu
-          // open with live navigation, so a quick stick tap opens it and the trigger confirms.
-          if (radialMenu.isOpen && radialMenu.interactive && !stickRadial.choice) {
-            closeRadial();
-            notify();
-            stickRadial = null;
-          }
-        }
+        } else if (!pressed) stickClickLatched = false;
       }
       if (stickRadial && radialMenu.isOpen && radialMenu.interactive) {
         const pad = controllerGamepads.get(stickRadial.controller);
@@ -3712,7 +3704,9 @@ export function createWorkspaceScene(
           nextHovered.set(controller, object);
         }
       }
-      radialMenu.setHovered(radialHoverAction);
+      // The stick's angle owns the highlight while it navigates; the ray would otherwise
+      // overwrite it with its own (usually empty) pick every frame.
+      if (!stickRadial) radialMenu.setHovered(radialHoverAction);
       const allHovered = new Set(nextHovered.values());
       for (const previous of hoveredByController.values()) {
         if (allHovered.has(previous)) continue;

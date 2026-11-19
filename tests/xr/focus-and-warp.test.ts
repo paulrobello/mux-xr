@@ -1172,27 +1172,30 @@ describe('native XR controller event routing', () => {
     container.remove();
   });
 
-  it('closes the stick-opened radial menu on a centered release and on a centered trigger', () => {
+  it('keeps the stick-opened radial menu open without holding and dismisses it by click or trigger', () => {
     const { workspace, container } = fixture();
     const controller = fakeXR.controllers[0] as THREE.Group;
     const gamepad = connectController(0, [0, 0, 0, 0], 'right');
     setStickPressed(gamepad, true);
     fakeXR.frame?.(1000);
+    setStickPressed(gamepad, false);
     fakeXR.frame?.(2000);
-    setStickPressed(gamepad, false);
-    fakeXR.frame?.(2016);
-    expect(workspace.state.radialOpen).toBe(false);
-    // A quick centered tap releases before the opening animation settles, so the menu stays
-    // open; the trigger on the centered (cancel) highlight then closes it.
-    setStickPressed(gamepad, true);
-    fakeXR.frame?.(2100);
-    setStickPressed(gamepad, false);
-    fakeXR.frame?.(2120);
+    // The click toggled the menu open; releasing does not close it.
     expect(workspace.state.radialOpen).toBe(true);
-    fakeXR.frame?.(3100);
     controller.dispatchEvent({ type: 'selectstart' } as never);
     expect(workspace.state.radialOpen).toBe(false);
     expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+    // Another click reopens, and a second click dismisses.
+    setStickPressed(gamepad, true);
+    fakeXR.frame?.(2100);
+    setStickPressed(gamepad, false);
+    fakeXR.frame?.(3000);
+    expect(workspace.state.radialOpen).toBe(true);
+    setStickPressed(gamepad, true);
+    fakeXR.frame?.(3100);
+    setStickPressed(gamepad, false);
+    fakeXR.frame?.(3200);
+    expect(workspace.state.radialOpen).toBe(false);
     workspace.dispose();
     container.remove();
   });
