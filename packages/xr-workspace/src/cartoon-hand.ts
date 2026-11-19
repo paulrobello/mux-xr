@@ -5,17 +5,25 @@ import {
   createElasticArm,
   DEFAULT_ARM_NEAR_FADE,
 } from './elastic-arm';
-import { dimHandColor } from './hand-colors';
+import {
+  applyHandSurface,
+  dimHandColor,
+  type HandSurfaceTheme,
+  type HandTheme,
+} from './hand-colors';
 import type { HandContactProbe } from './hand-contact';
 
 type HandSide = 'left' | 'right';
 type HandJoints = THREE.Group & { joints?: Record<string, THREE.Object3D | undefined> };
+
+export type { HandSurfaceTheme, HandTheme } from './hand-colors';
 
 export interface CartoonHandOptions {
   /** Draw the elastic arm. Defaults to true. */
   arm?: boolean;
   /** Fade the arm out near the eye. Defaults to DEFAULT_ARM_NEAR_FADE; false keeps it opaque. */
   armNearFade?: ArmNearFade | false;
+  theme?: HandTheme;
 }
 
 export interface CartoonHand {
@@ -43,6 +51,8 @@ export interface CartoonHand {
    * tint gives it. A set glow survives setColor and a model load.
    */
   setArmGlow(color: THREE.ColorRepresentation | null): void;
+  /** Applies or clears the optional hand and sleeve material theme at runtime. */
+  setTheme(theme: HandTheme | null): void;
   /** For hand visuals that replace the arm material's contents: restores the fade and the glow. */
   reapplyArmMaterial(): void;
   dispose(): void;
@@ -153,9 +163,21 @@ export function createCartoonHand(options: CartoonHandOptions = {}): CartoonHand
   let armGlow: THREE.Color | null = null;
   let handTint: THREE.ColorRepresentation | null = null;
   let armTint: THREE.ColorRepresentation | null = null;
+  let theme: HandTheme | null = options.theme ?? null;
   const tintArm = (): void => {
     dimHandColor(armMaterial.color, armTint ?? handTint ?? DEFAULT_COLOR);
     dimHandColor(armMaterial.emissive, armTint ?? handTint ?? DEFAULT_EMISSIVE);
+  };
+  const applyTheme = (): void => {
+    material.roughness = 0.85;
+    material.metalness = 0;
+    material.emissiveIntensity = 0.6;
+    armMaterial.roughness = 0.85;
+    armMaterial.metalness = 0;
+    armMaterial.emissiveIntensity = 0.6;
+    applyHandSurface(material, theme?.hand);
+    applyHandSurface(armMaterial, theme?.sleeve);
+    if (armGlow) armMaterial.emissive.copy(armGlow);
   };
   arm.mesh.name = 'elastic-hand-arm';
   root.add(mesh, arm.mesh);
@@ -477,6 +499,11 @@ export function createCartoonHand(options: CartoonHandOptions = {}): CartoonHand
       dimHandColor(material.emissive, color ?? DEFAULT_EMISSIVE);
       tintArm();
       if (armGlow) armMaterial.emissive.copy(armGlow);
+      applyTheme();
+    },
+    setTheme(next) {
+      theme = next;
+      hand.setColor(handTint, armTint);
     },
     setArmVisible: (visible) => arm.setVisible(visible),
     setArmGlow(color) {

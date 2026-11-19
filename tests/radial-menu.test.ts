@@ -26,6 +26,7 @@ vi.mock('troika-three-text', () => ({
 }));
 
 import { findControl } from '../packages/xr-workspace/src/control-ids';
+import { createRadialMenu as createWorkspaceRadialMenu } from '../packages/xr-workspace/src/radial-menu';
 import { createRadialMenu, type RadialMenuAction } from '../src/xr/radial-menu';
 
 function actionNodes(menu: ReturnType<typeof createRadialMenu>): THREE.Object3D[] {
@@ -181,5 +182,70 @@ describe('animated radial menu', () => {
     menu.update(0.01);
     expect(menu.interactive).toBe(true);
     menu.dispose();
+  });
+
+  it('applies a custom palette to fills, true Troika text, footer, and center label', () => {
+    const menu = createWorkspaceRadialMenu({
+      items: [
+        { id: 'one', label: 'One' },
+        { id: 'two', label: 'Two' },
+      ],
+      centerLabel: 'Back',
+      theme: {
+        glass: '#112233',
+        selected: '#334455',
+        cancel: '#556677',
+        text: '#f0c000',
+        outline: '#00aaff',
+      },
+      footer: { id: 'footer', label: 'Footer' },
+    });
+    const sector = menu.root.getObjectByName('radial-menu-one') as THREE.Group;
+    const sectorFill = sector.children.find((child) => child instanceof THREE.Mesh) as THREE.Mesh;
+    const center = menu.root.getObjectByName('radial-menu-cancel') as THREE.Group;
+    const centerFill = center.children.find((child) => child instanceof THREE.Mesh) as THREE.Mesh;
+    const sectorLabel = sector.children.find((child) => child.userData.labelText) as THREE.Object3D;
+    const centerLabel = center.children.find((child) => child.userData.labelText) as THREE.Object3D;
+    const textColor = (label: THREE.Object3D): number =>
+      (label.userData.labelTextObject as { color: number | string | THREE.Color }).color instanceof
+      THREE.Color
+        ? (label.userData.labelTextObject as { color: THREE.Color }).color.getHex()
+        : new THREE.Color(
+            (label.userData.labelTextObject as { color: number | string }).color,
+          ).getHex();
+
+    expect((sectorFill.material as THREE.MeshBasicMaterial).color.getHexString()).toBe('112233');
+    expect((centerFill.material as THREE.MeshBasicMaterial).color.getHexString()).toBe('556677');
+    expect(textColor(sectorLabel)).toBe(0xf0c000);
+    expect(textColor(centerLabel)).toBe(0xf0c000);
+    const footer = menu.root.getObjectByName('radial-menu-footer') as THREE.Mesh;
+    expect((footer.material as THREE.MeshBasicMaterial).map).not.toBeNull();
+    expect(textColor(footer)).toBe(0xf0c000);
+    const outline = sector.children.find((child) => child.name === 'radial-outline') as THREE.Mesh;
+    expect((outline.material as THREE.MeshBasicMaterial).color.getHexString()).toBe('00aaff');
+
+    menu.open();
+    menu.update(0.8);
+    menu.setHovered('one');
+    expect((sectorFill.material as THREE.MeshBasicMaterial).color.getHexString()).toBe('334455');
+    menu.setHovered(null);
+    expect((sectorFill.material as THREE.MeshBasicMaterial).color.getHexString()).toBe('112233');
+    menu.setAccent('#ff0000');
+    expect((outline.material as THREE.MeshBasicMaterial).color.getHexString()).toBe('ff0000');
+    menu.setAccent('');
+    expect((outline.material as THREE.MeshBasicMaterial).color.getHexString()).toBe('00aaff');
+    menu.dispose();
+  });
+
+  it('rejects malformed theme colors', () => {
+    expect(() =>
+      createWorkspaceRadialMenu({
+        items: [
+          { id: 'one', label: 'One' },
+          { id: 'two', label: 'Two' },
+        ],
+        theme: { text: 'red' },
+      }),
+    ).toThrow('must be a #rrggbb string');
   });
 });

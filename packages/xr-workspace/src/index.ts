@@ -2,7 +2,12 @@
 
 export type { WorkspaceColors } from './accent-colors';
 export { installBatchedHandPoses } from './batched-hand-poses';
-export { type CartoonHand, createCartoonHand } from './cartoon-hand';
+export {
+  type CartoonHand,
+  createCartoonHand,
+  type HandSurfaceTheme,
+  type HandTheme,
+} from './cartoon-hand';
 export { type ClockKind, createClockWidget } from './clock-widget';
 export * from './consumer-apis';
 export {
@@ -43,6 +48,7 @@ export {
   type RadialMenu,
   type RadialMenuItem,
   type RadialMenuOptions,
+  type RadialMenuTheme,
 } from './radial-menu';
 export {
   createSpatialKeyboard,
