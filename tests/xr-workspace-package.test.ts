@@ -6,9 +6,11 @@ import {
   createRadialMenu,
   createSpatialKeyboard,
   createStandardHand,
+  createStickRadialNavigation,
   createStickyNoteWidget,
   createTimerWidget,
   stickyNotePages,
+  wedgeIndexFromStick,
 } from '@par/xr-workspace';
 import * as THREE from 'three';
 import type { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -171,5 +173,140 @@ describe('private XR workspace package', () => {
     gauge.setPerfSample({ fps: 72, worstFrameMs: 18, targetHz: 72 });
     expect(panes.visible).toBe(false);
     gauge.dispose();
+  });
+});
+
+describe('radial stick navigation', () => {
+  const ITEMS = ['alpha', 'beta', 'gamma', 'delta', 'echo', 'foxtrot', 'golf', 'hotel'] as const;
+
+  function stubMenu() {
+    return {
+      isOpen: false,
+      interactive: false,
+      setHovered: vi.fn(),
+    };
+  }
+  type StubMenu = ReturnType<typeof stubMenu>;
+
+  function makeNav(menu: StubMenu, busy = false) {
+    return createStickRadialNavigation<(typeof ITEMS)[number], string>({
+      menu,
+      items: ITEMS,
+      isBusy: () => busy,
+      onOpen: () => {
+        menu.isOpen = true;
+      },
+      onClose: () => {
+        menu.isOpen = false;
+      },
+    });
+  }
+
+  it('resolves stick directions to clockwise-from-top wedge indices', () => {
+    expect(wedgeIndexFromStick(0, -1, 8)).toBe(0);
+    expect(wedgeIndexFromStick(Math.SQRT1_2, -Math.SQRT1_2, 8)).toBe(1);
+    expect(wedgeIndexFromStick(1, 0, 8)).toBe(2);
+    expect(wedgeIndexFromStick(Math.SQRT1_2, Math.SQRT1_2, 8)).toBe(3);
+    expect(wedgeIndexFromStick(0, 1, 8)).toBe(4);
+    expect(wedgeIndexFromStick(-1, 0, 8)).toBe(6);
+    expect(wedgeIndexFromStick(-Math.SQRT1_2, -Math.SQRT1_2, 8)).toBe(7);
+    expect(wedgeIndexFromStick(0, -1, 4)).toBe(0);
+    expect(wedgeIndexFromStick(1, 0, 4)).toBe(1);
+    expect(wedgeIndexFromStick(0, 1, 4)).toBe(2);
+    expect(wedgeIndexFromStick(-1, 0, 4)).toBe(3);
+    expect(wedgeIndexFromStick(0, 0, 8)).toBeNull();
+    expect(wedgeIndexFromStick(0.2, -0.2, 8)).toBeNull();
+    expect(wedgeIndexFromStick(1, 0, 0)).toBeNull();
+  });
+
+  it('toggles the menu with stick clicks and ignores them while a host modal is busy', () => {
+    const menu = stubMenu();
+    const onOpen = vi.fn();
+    const onClose = vi.fn();
+    let busy = false;
+    const nav = createStickRadialNavigation<(typeof ITEMS)[number], string>({
+      menu,
+      items: ITEMS,
+      isBusy: () => busy,
+      onOpen: () => {
+        onOpen();
+        menu.isOpen = true;
+      },
+      onClose: () => {
+        onClose();
+        menu.isOpen = false;
+      },
+    });
+    nav.update('right', { x: 0, y: 0, pressed: true });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(nav.active).toBe(true);
+    expect(nav.owns('right')).toBe(true);
+    nav.update('right', { x: 0, y: 0, pressed: true });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    nav.update('right', { x: 0, y: 0, pressed: false });
+    nav.update('right', { x: 0, y: 0, pressed: true });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(nav.active).toBe(false);
+    busy = true;
+    nav.update('right', { x: 0, y: 0, pressed: false });
+    nav.update('right', { x: 0, y: 0, pressed: true });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    nav.update('right', { x: 0, y: 0, pressed: false });
+  });
+
+  it('highlights wedges from the stick angle and confirms them through the trigger', () => {
+    const menu = stubMenu();
+    const nav = makeNav(menu);
+    nav.update('right', { x: 0, y: 0, pressed: true });
+    menu.interactive = true;
+    nav.update('right', { x: 0, y: -1, pressed: false });
+    expect(menu.setHovered).toHaveBeenLastCalledWith('alpha');
+    expect(nav.choice()).toBe('alpha');
+    nav.update('right', { x: 0, y: 0, pressed: false });
+    expect(menu.setHovered).toHaveBeenLastCalledWith('cancel');
+    expect(nav.choice()).toBeNull();
+    nav.update('right', { x: 0, y: -1, pressed: false });
+    expect(nav.confirm()).toBe('alpha');
+    expect(nav.active).toBe(false);
+    expect(nav.choice()).toBeNull();
+    expect(nav.confirm()).toBeNull();
+  });
+
+  it('ends navigation ownership when the host closes the menu', () => {
+    const menu = stubMenu();
+    const nav = makeNav(menu);
+    nav.update('right', { x: 0, y: 0, pressed: true });
+    expect(nav.active).toBe(true);
+    menu.isOpen = false;
+    nav.update('right', { x: 0, y: 0, pressed: false });
+    expect(nav.active).toBe(false);
+    expect(nav.owns('right')).toBe(false);
+  });
+
+  it('drives the real radial menu wedges from stick angle and trigger', () => {
+    const menu = createRadialMenu({
+      items: [
+        { id: 'alpha', label: 'Alpha' },
+        { id: 'beta', label: 'Beta' },
+      ],
+    });
+    const nav = createStickRadialNavigation<string, string>({
+      menu,
+      items: ['alpha', 'beta'],
+      onOpen: () => menu.open(),
+      onClose: () => menu.close(),
+    });
+    nav.update('right', { x: 0, y: 0, pressed: true });
+    nav.update('right', { x: 0, y: 0, pressed: false });
+    expect(menu.isOpen).toBe(true);
+    for (let frame = 0; frame < 60; frame += 1) {
+      nav.update('right', { x: 0, y: -1, pressed: false });
+      menu.update(0.016);
+    }
+    const alpha = menu.root.getObjectByName('radial-menu-alpha') as THREE.Group;
+    const mesh = alpha.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+    expect(mesh.material.color.getHexString()).toBe('315c6d');
+    expect(nav.confirm()).toBe('alpha');
+    menu.dispose();
   });
 });

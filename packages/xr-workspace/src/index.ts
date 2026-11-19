@@ -202,6 +202,13 @@ export {
   type RadialMenuItem,
   type RadialMenuOptions,
 } from './radial-menu';
+export {
+  createStickRadialNavigation,
+  type StickInput,
+  type StickRadialNavigation,
+  type StickRadialNavigationOptions,
+  wedgeIndexFromStick,
+} from './radial-stick-navigation';
 export { ON_TOP_LAYER } from './render-layers';
 export { createSpaceBackground, type SpaceBackground } from './space-background';
 export {

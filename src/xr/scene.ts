@@ -9,6 +9,7 @@ import {
   createRaisedButtonWalls,
   createScalableLabel,
   createStandardHand,
+  createStickRadialNavigation,
   createStickyNoteWidget,
   createUIEnvironment,
   createWristMenuWatch,
@@ -1473,11 +1474,20 @@ export function createWorkspaceScene(
   >();
   const radialButtonDown = new Set<THREE.Group>();
   /**
-   * A radial menu opened by a right thumbstick click: the live stick angle highlights wedges
-   * while it stays open, the trigger confirms the highlight, and another click dismisses it.
+   * Stick navigation for the radial menu, shared with the workspace package: a stick click
+   * toggles the menu, the live angle highlights wedges, the trigger confirms the highlight, and
+   * warp or grip keeps the stick. Ownership ends on any close, so the ray hover never fights it.
    */
-  let stickRadial: { controller: THREE.Group; choice: RadialMenuAction | null } | null = null;
-  let stickClickLatched = false;
+  const stickNav = createStickRadialNavigation<RadialMenuAction, THREE.Group>({
+    menu: radialMenu,
+    items: RADIAL_ITEMS,
+    isBusy: () => Boolean(warpEdit) || gripActive(),
+    onOpen: (controller) => toggleRadialMenu(controller),
+    onClose: () => {
+      closeRadial();
+      notify();
+    },
+  });
   const keyboardHolds = new Map<
     string,
     { controller: THREE.Group; index: number; seconds: number; summoned: boolean }
@@ -3171,41 +3181,12 @@ export function createWorkspaceScene(
       })();
       if (stickPad) {
         const { controller, pad } = stickPad;
-        const pressed = Boolean(pad?.buttons[3]?.pressed);
-        if (pressed && !stickClickLatched) {
-          stickClickLatched = true;
-          if (radialMenu.isOpen) {
-            // A second click dismisses a menu this stick opened (or any open menu).
-            closeRadial();
-            notify();
-          } else if (!warpEdit && !gripActive()) {
-            toggleRadialMenu(controller);
-            if (radialMenu.isOpen) stickRadial = { controller, choice: null };
-          }
-        } else if (!pressed) stickClickLatched = false;
-      }
-      if (stickRadial && radialMenu.isOpen && radialMenu.interactive) {
-        const pad = controllerGamepads.get(stickRadial.controller);
-        if (pad) {
-          const x = pad.axes.length >= 4 ? (pad.axes[2] ?? 0) : 0;
-          const y = pad.axes.length >= 4 ? (pad.axes[3] ?? 0) : 0;
-          const magnitude = Math.hypot(x, y);
-          if (magnitude < 0.35) {
-            stickRadial.choice = null;
-            radialMenu.setHovered('cancel');
-          } else {
-            // Wedges sit clockwise from the top; the stick's up (-y) points at the top wedge.
-            const wedges = RADIAL_ITEMS.length;
-            const step =
-              Math.round(
-                ((Math.atan2(y, x) + Math.PI / 2 + 2 * Math.PI) % (2 * Math.PI)) /
-                  ((2 * Math.PI) / wedges),
-              ) % wedges;
-            const choice = RADIAL_ITEMS[step] as RadialMenuAction;
-            stickRadial.choice = choice;
-            radialMenu.setHovered(choice);
-          }
-        }
+        const hasAxes = (pad?.axes.length ?? 0) >= 4;
+        stickNav.update(controller, {
+          x: hasAxes ? (pad?.axes[2] ?? 0) : 0,
+          y: hasAxes ? (pad?.axes[3] ?? 0) : 0,
+          pressed: Boolean(pad?.buttons[3]?.pressed),
+        });
       }
       const functionOf = (button: ControllerButton): ButtonFunction =>
         mutableState.windowPreferences.buttonMap[button];
@@ -3706,7 +3687,7 @@ export function createWorkspaceScene(
       }
       // The stick's angle owns the highlight while it navigates; the ray would otherwise
       // overwrite it with its own (usually empty) pick every frame.
-      if (!stickRadial) radialMenu.setHovered(radialHoverAction);
+      if (!stickNav.active) radialMenu.setHovered(radialHoverAction);
       const allHovered = new Set(nextHovered.values());
       for (const previous of hoveredByController.values()) {
         if (allHovered.has(previous)) continue;
@@ -4892,7 +4873,7 @@ export function createWorkspaceScene(
         const choice = action.radialAction as RadialMenuAction;
         radialMenu.close();
         mutableState.radialOpen = false;
-        stickRadial = null;
+        stickNav.reset();
         if (choice === 'keyboard') toggleKeyboard();
         else if (choice === 'focus') toggleFocusMode(radialTargetId ?? undefined);
         else if (choice === 'warp') {
@@ -4917,7 +4898,7 @@ export function createWorkspaceScene(
         if (radialMenu.root.visible) {
           radialMenu.close();
           mutableState.radialOpen = false;
-          stickRadial = null;
+          stickNav.reset();
         }
         actions.reloadApp();
         return true;
@@ -5206,10 +5187,9 @@ export function createWorkspaceScene(
     const target = targetFromController(controller);
     const action = target?.object?.userData.inputAction as string | undefined;
     lastSelectSource = controller;
-    if (stickRadial && stickRadial.controller === controller && radialMenu.isOpen) {
-      const choice = stickRadial.choice;
-      stickRadial = null;
-      if (choice && choice !== 'cancel' && radialMenu.interactive) {
+    if (stickNav.owns(controller)) {
+      const choice = stickNav.confirm();
+      if (choice && radialMenu.interactive) {
         let wedge: THREE.Object3D | undefined;
         radialMenu.root.traverse((object) => {
           if (
@@ -6197,7 +6177,7 @@ export function createWorkspaceScene(
     if (!radialMenu.isOpen) return;
     radialMenu.close();
     mutableState.radialOpen = false;
-    stickRadial = null;
+    stickNav.reset();
   };
   const toggleInputMode = (mode: InputMode): void => {
     const open = inputRoot && (inputMode === mode || PANELS[mode].subsumes?.includes(inputMode));
@@ -6271,7 +6251,7 @@ export function createWorkspaceScene(
     if (radialMenu.isOpen) {
       radialMenu.close();
       mutableState.radialOpen = false;
-      stickRadial = null;
+      stickNav.reset();
       notify();
       return;
     }
@@ -6914,7 +6894,7 @@ export function createWorkspaceScene(
       finishWarp(false);
       radialMenu.close();
       mutableState.radialOpen = false;
-      stickRadial = null;
+      stickNav.reset();
       rememberTerminalPlacements();
       for (const [kind, widget] of widgets) saveWidgetPose(kind, widget);
       if (hudRoot) saveUIPose('hud', hudRoot);
@@ -7268,7 +7248,7 @@ export function createWorkspaceScene(
     finishWarp(false);
     radialMenu.close();
     mutableState.radialOpen = false;
-    stickRadial = null;
+    stickNav.reset();
     radialMenu.root.scale.setScalar(0.8);
     poseStore.clear();
     keyboardPoseRestored = true;
