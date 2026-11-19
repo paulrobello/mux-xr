@@ -9,6 +9,14 @@ export interface RadialMenuItem<Action extends string> {
   label: string;
 }
 
+export interface RadialMenuTheme {
+  glass: string;
+  selected: string;
+  cancel: string;
+  text: string;
+  outline: string;
+}
+
 /** Options for `createRadialMenu`. */
 export interface RadialMenuOptions<Action extends string> {
   /** Two to eight sectors, placed clockwise from the top. Other counts and duplicate ids throw `RangeError`, and `cancel` is reserved. */
@@ -17,6 +25,10 @@ export interface RadialMenuOptions<Action extends string> {
   accentColor?: string | null;
   /** An optional button below the wheel. It is hidden until `setFooterVisible(true)`. */
   footer?: { label: string; id: string; name?: string; helpText?: string };
+  /** Projects may override individual colors. Omitting the theme retains the original palette. */
+  theme?: Partial<RadialMenuTheme> | null;
+  /** Text on the center cancel target. Defaults to Cancel. */
+  centerLabel?: string;
 }
 
 /** A mounted radial menu. Call `update` every frame while it is open or closing, because the animations advance only there. */
@@ -52,6 +64,7 @@ const OPEN_SECONDS = 0.64;
 const CLOSE_SECONDS = 0.15;
 const FAN_RADIUS = 0.245;
 const STACK_ANGLE = -Math.PI / 2;
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 
 function sectorShape(
   innerRadius: number,
@@ -123,6 +136,13 @@ function glassMaterial(color: string, opacity = 0.84): THREE.MeshBasicMaterial {
   });
 }
 
+function setLabelColor(label: THREE.Object3D, color: string): void {
+  const text = label.userData.labelTextObject as { color: string; sync?: () => void } | undefined;
+  if (!text) return;
+  text.color = color;
+  text.sync?.();
+}
+
 interface Target<Action extends string> {
   action: Action;
   group: THREE.Group;
@@ -142,6 +162,15 @@ export function createRadialMenu<Action extends string>(
   options: RadialMenuOptions<Action>,
 ): RadialMenu<Action> {
   const { items, footer } = options;
+  const theme = { ...COLORS };
+  for (const name of Object.keys(theme) as (keyof RadialMenuTheme)[]) {
+    const color = options.theme?.[name];
+    if (color === undefined) continue;
+    if (!HEX_COLOR.test(color)) {
+      throw new RangeError(`Radial menu theme color ${name} must be a #rrggbb string`);
+    }
+    theme[name] = color;
+  }
   if (items.length < 2 || items.length > 8) {
     throw new RangeError('A radial menu requires between two and eight items');
   }
@@ -162,9 +191,9 @@ export function createRadialMenu<Action extends string>(
   const geometries = new Set<THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>();
   const targets: Target<Action>[] = [];
-  let selectedColor: string = COLORS.selected;
+  let selectedColor: string = theme.selected;
   const outlineMaterial = new THREE.MeshBasicMaterial({
-    color: COLORS.outline,
+    color: theme.outline,
     transparent: true,
     opacity: OUTLINE_OPACITY,
     depthWrite: false,
@@ -181,13 +210,14 @@ export function createRadialMenu<Action extends string>(
   };
   const footerButton = footer
     ? createScalableLabel(footer.label, 0.34, 0.075, {
-        background: COLORS.selected,
+        background: theme.selected,
         backplate: true,
       })
     : null;
   if (footer && footerButton) {
     setControlId(footerButton, footer.name ?? `radial-menu-${footer.id}`);
     footerButton.position.set(0, -0.43, 0.01);
+    if (options.theme?.text) setLabelColor(footerButton, theme.text);
     footerButton.traverse((child) => {
       child.userData.inputAction = footer.id;
       child.userData.helpText = footer.helpText;
@@ -201,7 +231,7 @@ export function createRadialMenu<Action extends string>(
   center.userData.radialAction = 'cancel';
   const centerDisc = new THREE.Mesh(
     new THREE.CircleGeometry(0.105, 32),
-    glassMaterial(COLORS.cancel),
+    glassMaterial(theme.cancel),
   );
   geometries.add(centerDisc.geometry);
   materials.add(centerDisc.material);
@@ -209,10 +239,11 @@ export function createRadialMenu<Action extends string>(
   centerDisc.userData.radialAction = 'cancel';
   center.add(centerDisc);
   addOutline(center, new THREE.Path().absarc(0, 0, 0.105, 0, Math.PI * 2, false).getPoints(32));
-  const cancelLabel = createScalableLabel('Cancel', 0.15, 0.06, {
-    background: COLORS.cancel,
+  const cancelLabel = createScalableLabel(options.centerLabel ?? 'Cancel', 0.15, 0.06, {
+    background: theme.cancel,
     backplate: false,
   });
+  if (options.theme?.text) setLabelColor(cancelLabel, theme.text);
   cancelLabel.userData.inputAction = 'radialAction';
   cancelLabel.userData.radialAction = 'cancel';
   cancelLabel.traverse((child) => {
@@ -234,7 +265,7 @@ export function createRadialMenu<Action extends string>(
       Math.sin(finalAngle) * FAN_RADIUS,
     ];
     const shape = sectorShape(0.14, 0.36, Math.PI / 2, items.length);
-    const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), glassMaterial(COLORS.glass));
+    const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), glassMaterial(theme.glass));
     geometries.add(mesh.geometry);
     materials.add(mesh.material);
     mesh.userData.inputAction = 'radialAction';
@@ -242,12 +273,13 @@ export function createRadialMenu<Action extends string>(
     group.add(mesh);
     addOutline(group, shape.getPoints());
     const label = createScalableLabel(text, 0.17, 0.07, {
-      background: COLORS.glass,
+      background: theme.glass,
       backplate: false,
     });
     label.userData.inputAction = 'radialAction';
     label.userData.radialAction = action;
-    label.userData.labelColor = COLORS.text;
+    label.userData.labelColor = theme.text;
+    if (options.theme?.text) setLabelColor(label, theme.text);
     label.traverse((child) => {
       child.userData.inputAction = 'radialAction';
       child.userData.radialAction = action;
@@ -320,8 +352,8 @@ export function createRadialMenu<Action extends string>(
       root.userData.interactive = false;
       resetTransforms();
       setOpacity(1);
-      centerDisc.material.color.set(COLORS.cancel);
-      for (const target of targets) target.material.color.set(COLORS.glass);
+      centerDisc.material.color.set(theme.cancel);
+      for (const target of targets) target.material.color.set(theme.glass);
     },
     close(): void {
       if (disposed || phase === 'closed') return;
@@ -400,14 +432,14 @@ export function createRadialMenu<Action extends string>(
       )
         return;
       hovered = action;
-      centerDisc.material.color.set(hovered === 'cancel' ? selectedColor : COLORS.cancel);
+      centerDisc.material.color.set(hovered === 'cancel' ? selectedColor : theme.cancel);
       for (const target of targets)
-        target.material.color.set(target.action === hovered ? selectedColor : COLORS.glass);
+        target.material.color.set(target.action === hovered ? selectedColor : theme.glass);
     },
     setAccent(accent): void {
-      outlineMaterial.color.set(accent || COLORS.outline);
+      outlineMaterial.color.set(accent || theme.outline);
       // The hover fill keeps the authored fill's brightness so white labels stay readable on it.
-      const authored = new THREE.Color(COLORS.selected);
+      const authored = new THREE.Color(theme.selected);
       selectedColor = `#${tintToLuminance(new THREE.Color(), authored, accent ? new THREE.Color(accent) : null).getHexString()}`;
       if (hovered !== null) {
         const current = hovered;

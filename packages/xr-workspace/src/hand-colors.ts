@@ -1,5 +1,33 @@
 import * as THREE from 'three';
 
+export interface HandSurfaceTheme {
+  color?: THREE.ColorRepresentation;
+  roughness?: number;
+  metalness?: number;
+  emissive?: THREE.ColorRepresentation;
+  emissiveIntensity?: number;
+}
+
+export interface HandTheme {
+  hand?: HandSurfaceTheme;
+  sleeve?: HandSurfaceTheme;
+}
+
+export function applyHandSurface(
+  target: THREE.MeshStandardMaterial,
+  surface: HandSurfaceTheme | undefined,
+): void {
+  if (!surface) return;
+  if (surface.color !== undefined) target.color.set(surface.color);
+  if (surface.roughness !== undefined)
+    target.roughness = THREE.MathUtils.clamp(surface.roughness, 0, 1);
+  if (surface.metalness !== undefined)
+    target.metalness = THREE.MathUtils.clamp(surface.metalness, 0, 1);
+  if (surface.emissive !== undefined) target.emissive.set(surface.emissive);
+  if (surface.emissiveIntensity !== undefined)
+    target.emissiveIntensity = Math.max(0, surface.emissiveIntensity);
+}
+
 /** Hand color choices offered in the XR World settings; an empty color keeps the model's own. */
 export const HAND_COLOR_PRESETS = [
   { name: 'Default', color: '' },

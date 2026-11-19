@@ -15,7 +15,13 @@ export {
   type WorkspaceColors,
 } from './accent-colors';
 export { installBatchedHandPoses } from './batched-hand-poses';
-export { type CartoonHand, type CartoonHandOptions, createCartoonHand } from './cartoon-hand';
+export {
+  type CartoonHand,
+  type CartoonHandOptions,
+  createCartoonHand,
+  type HandSurfaceTheme,
+  type HandTheme,
+} from './cartoon-hand';
 export { type ClockKind, createClockWidget } from './clock-widget';
 export { controlIdOf, findControl, setControlId } from './control-ids';
 export {
@@ -201,6 +207,7 @@ export {
   type RadialMenu,
   type RadialMenuItem,
   type RadialMenuOptions,
+  type RadialMenuTheme,
 } from './radial-menu';
 export {
   createStickRadialNavigation,
