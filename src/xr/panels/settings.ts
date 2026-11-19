@@ -18,7 +18,7 @@ export const settingsPanel: PanelModule = {
     'filtering',
     'buttons',
   ] as const,
-  closePosition: () => ({ x: 0, y: -0.89 }),
+  closePosition: () => ({ x: 0, y: -1.09 }),
   build(root: THREE.Group, ctx: SceneContext): void {
     for (const [index, [label, destination]] of (
       [

@@ -11,7 +11,7 @@ vi.mock('three', async (importOriginal) =>
   ),
 );
 
-import { fixture } from '../helpers/xr-harness';
+import { fixture, visibleWithData } from '../helpers/xr-harness';
 
 const TWO_LINES = 'line1\nline2';
 
@@ -111,5 +111,20 @@ describe('paste review two-press flow', () => {
     expect(prompt).toContain('2 lines');
     expect(prompt).toContain('1 control character removed');
     expect(prompt).toContain('First line: ab');
+  });
+});
+
+describe('settings panel layout', () => {
+  it('keeps the Close button clear of the paste review row', () => {
+    const result = fixture();
+    result.workspace.showInput('settings');
+    result.workspace.scene.updateMatrixWorld(true);
+    const close = visibleWithData(result.workspace, { inputAction: 'close' });
+    const multiline = visibleWithData(result.workspace, {
+      inputAction: 'pasteReview',
+      pasteReview: 'multiline',
+    });
+    if (!close || !multiline) throw new Error('Settings panel controls missing');
+    expect(Number(multiline.position.y) - Number(close.position.y)).toBeGreaterThan(0.05);
   });
 });
