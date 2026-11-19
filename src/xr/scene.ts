@@ -54,6 +54,7 @@ import type {
   WorkspaceActions,
 } from '../contracts';
 import { getControlHelp, getControlHelpFor } from '../control-help';
+import { applySessionFoveation, type FoveationLevel } from '../foveation';
 import {
   type PasteReviewMode,
   type PasteSummary,
@@ -217,6 +218,11 @@ import {
 import type { Widget } from './widgets';
 
 type InputKind = 'hand' | 'controller';
+/**
+ * The elastic arm reads solid at every normal pose; it fades out only in the last few
+ * centimetres before the eye so a raised arm cannot fill the view.
+ */
+export const ARM_NEAR_FADE: [near: number, far: number] = [0.08, 0.2];
 type InputMode =
   | 'commands'
   | 'keyboard'
@@ -259,6 +265,8 @@ export interface WorkspaceSceneState {
   gazeInputEnabled: boolean;
   /** The selected terminal renders through a compositor quad layer for sharper text. */
   crispFocusedTerminal: boolean;
+  /** Fixed foveation for immersive sessions: `off`, `low`, `medium` or `high`. */
+  foveation: FoveationLevel;
   terminalColorMode: TerminalColorMode;
   filtering: TerminalFiltering;
   windowPreferences: WindowPreferences;
@@ -346,6 +354,8 @@ export interface WorkspaceScene {
   setUISounds(enabled: boolean): void;
   /** Sets when a paste needs a confirming second press. */
   setPasteReview(mode: PasteReviewMode): void;
+  /** Sets the compositor fixed foveation for immersive sessions. */
+  setFoveation(level: FoveationLevel): void;
   /** Tints both hands and their arms; null restores the default color. */
   setHandColor(color: string | null): void;
   /** Tints both arms; null makes them match the hands. */
@@ -533,6 +543,7 @@ export interface XrSessionLike {
   addEventListener(type: string, listener: () => void): void;
   readonly frameRate?: number;
   readonly visibilityState?: string;
+  updateRenderState?(init: XRRenderStateInit & { fixedFoveation?: number }): void;
   end(): Promise<void>;
 }
 
@@ -920,6 +931,7 @@ export function createWorkspaceScene(
     background: device.background,
     gazeInputEnabled: device.gazeInput,
     crispFocusedTerminal: device.crispFocusedTerminal,
+    foveation: device.foveation,
     terminalColorMode: device.colorMode,
     filtering: validateTerminalFiltering({
       ...device.filtering,
@@ -5472,7 +5484,7 @@ export function createWorkspaceScene(
       });
       handContacts.set(root, createHandContact());
       keyboardProximity.set(root, createHandContact());
-      const visual = createStandardHand();
+      const visual = createStandardHand({ armNearFade: ARM_NEAR_FADE });
       visual.setColor(mutableState.handColor || null, mutableState.armColor || null);
       handVisuals.set(root, visual);
       scene.add(visual.root);
@@ -6303,6 +6315,13 @@ export function createWorkspaceScene(
     if (inputRoot && inputMode === 'settings') refreshInputRoot(inputMode);
     notify();
   };
+  const applyFoveation = (level: FoveationLevel): void => {
+    if (mutableState.foveation === level) return;
+    mutableState.foveation = level;
+    if (activeSession) applySessionFoveation(activeSession, level);
+    if (inputRoot && inputMode === 'settings') refreshInputRoot(inputMode);
+    notify();
+  };
   const applyTerminalColorMode = (mode: TerminalColorMode): void => {
     if (mutableState.terminalColorMode === mode) return;
     mutableState.terminalColorMode = mode;
@@ -6445,6 +6464,9 @@ export function createWorkspaceScene(
   const setPasteReview = (mode: PasteReviewMode): void => {
     updateSettings({ pasteReview: mode });
   };
+  const setFoveation = (level: FoveationLevel): void => {
+    updateSettings({ foveation: level });
+  };
   const setHandColor = (color: string | null): void => {
     updateSettings({ handColor: color ?? '' });
   };
@@ -6464,6 +6486,7 @@ export function createWorkspaceScene(
     if (next.background !== mutableState.background) applyBackground(next.background);
     applyGazeInputEnabled(next.gazeInput);
     applyCrispFocusedTerminal(next.crispFocusedTerminal);
+    applyFoveation(next.foveation);
     applyTerminalColorMode(next.colorMode);
     applyTerminalFiltering(next.filtering);
     applyWindowPreferences(next.windowPreferences);
@@ -6801,6 +6824,7 @@ export function createWorkspaceScene(
     }
     mutableState.xrMode = immersiveMode;
     mutableState.fullPassthrough = mode === 'ar';
+    applySessionFoveation(session, mutableState.foveation);
     deskWindowOnEntry = mode === 'desk';
     setNotice(null);
     setBackground(mutableState.background);
@@ -7672,6 +7696,7 @@ export function createWorkspaceScene(
     setKeyborbMode,
     setUISounds,
     setPasteReview,
+    setFoveation,
     setHandColor,
     setArmColor,
     setAccentColor,

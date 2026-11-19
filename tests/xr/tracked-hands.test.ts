@@ -1970,4 +1970,20 @@ describe('native XR controller event routing', () => {
       expect(panel.position.x - position.x).toBeCloseTo(0.1);
     });
   });
+
+  it('draws the elastic arms solid beyond a tight near-eye band', () => {
+    const { workspace, container } = fixture();
+    const arms: THREE.Mesh[] = [];
+    workspace.scene.traverse((object) => {
+      if (object.name === 'elastic-hand-arm') arms.push(object as THREE.Mesh);
+    });
+    expect(arms).toHaveLength(2);
+    for (const arm of arms) {
+      const material = arm.material as THREE.MeshStandardMaterial;
+      expect(material.transparent).toBe(true);
+      expect(material.customProgramCacheKey?.()).toBe('arm-near-fade:0.080:0.200');
+    }
+    workspace.dispose();
+    container.remove();
+  });
 });

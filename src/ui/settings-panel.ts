@@ -1,6 +1,7 @@
 import { validateHandColor } from '@par/xr-workspace';
 import type { PanelArrangement } from '../contracts';
 import { diagnostics } from '../diagnostics';
+import { validateFoveationLevel } from '../foveation';
 import { validatePasteReviewMode } from '../paste-review';
 import type { WorkspaceSettings } from '../settings/store';
 import { validateTerminalFiltering } from '../terminal/filtering';
@@ -186,6 +187,22 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
   crispFocusedInput.checked = current().crispFocusedTerminal;
   crispFocusedInput.addEventListener('change', () =>
     saveSettings({ crispFocusedTerminal: crispFocusedInput.checked }),
+  );
+  const foveation = document.createElement('label');
+  foveation.innerHTML =
+    '<span>Foveation</span><select data-foveation aria-label="Foveation"><option value="off">Off</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select><small>Sharpness across the peripheral view in XR: Low is the default, High renders fewer peripheral pixels for more headroom.</small>';
+  settingsPanel.insertBefore(
+    foveation,
+    settingsPanel.querySelector('[data-action="passthrough"]') ?? null,
+  );
+  const foveationSelect = foveation.querySelector<HTMLSelectElement>('[data-foveation]');
+  if (!foveationSelect) throw new Error('Foveation control missing');
+  bindSettings(['foveation'], () => {
+    foveationSelect.value = current().foveation;
+  });
+  foveationSelect.value = current().foveation;
+  foveationSelect.addEventListener('change', () =>
+    saveSettings({ foveation: validateFoveationLevel(foveationSelect.value) }),
   );
   const weatherZip = document.createElement('label');
   weatherZip.innerHTML =

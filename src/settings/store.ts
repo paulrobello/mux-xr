@@ -2,6 +2,7 @@ import { validateHandColor, validateWeatherZip } from '@par/xr-workspace';
 import type { BackgroundMode, PanelArrangement, TerminalColorMode } from '../contracts';
 import { isBackgroundMode } from '../contracts';
 import { reportSwallowed } from '../diagnostics';
+import { type FoveationLevel, validateFoveationLevel } from '../foveation';
 import { type PasteReviewMode, validatePasteReviewMode } from '../paste-review';
 import {
   DEFAULT_TERMINAL_FILTERING,
@@ -41,6 +42,8 @@ export interface WorkspaceSettings {
   gazeInput: boolean;
   /** Render the selected terminal through a compositor quad layer for sharper text. */
   crispFocusedTerminal: boolean;
+  /** Compositor fixed foveation for immersive sessions: `off`, `low`, `medium` or `high`. */
+  foveation: FoveationLevel;
   colorMode: TerminalColorMode;
   keyboardBackground: boolean;
   keyboardCurvature: number;
@@ -79,6 +82,7 @@ export const DEFAULT_SETTINGS: WorkspaceSettings = {
   background: 'observatory',
   gazeInput: false,
   crispFocusedTerminal: true,
+  foveation: 'low',
   colorMode: 'comfort',
   keyboardBackground: true,
   keyboardCurvature: 0,
@@ -122,6 +126,7 @@ export function validateSettings(value: unknown): WorkspaceSettings {
       : DEFAULT_SETTINGS.background,
     gazeInput: candidate.gazeInput === true,
     crispFocusedTerminal: candidate.crispFocusedTerminal !== false,
+    foveation: validateFoveationLevel(candidate.foveation),
     colorMode:
       candidate.colorMode === 'original' || candidate.colorMode === 'monochrome'
         ? candidate.colorMode
