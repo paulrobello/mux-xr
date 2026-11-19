@@ -30,6 +30,8 @@ import {
   resetXRControllers,
   selectKeyboardViaRadial,
   selectRadialAction,
+  setStickPressed,
+  setStickTilt,
   surface,
 } from '../helpers/xr-harness';
 
@@ -1148,5 +1150,71 @@ describe('native XR controller event routing', () => {
     workspace.dispose();
     container.remove();
     vi.unstubAllGlobals();
+  });
+  it('opens the radial menu on a right stick press and confirms a highlighted slice with the trigger', () => {
+    const { workspace, container } = fixture();
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    const gamepad = connectController(0, [0, 0, 0, 0], 'right');
+    setStickPressed(gamepad, true);
+    fakeXR.frame?.(1000);
+    expect(workspace.state.radialOpen).toBe(true);
+    // Up highlights the top wedge; the 640 ms opening animation settles before the frame.
+    setStickTilt(gamepad, 0, -1);
+    fakeXR.frame?.(2000);
+    setStickPressed(gamepad, false);
+    fakeXR.frame?.(2016);
+    // A tilted release keeps the menu open with live navigation.
+    expect(workspace.state.radialOpen).toBe(true);
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeDefined();
+    expect(workspace.state.radialOpen).toBe(false);
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('closes the stick-opened radial menu on a centered release and on a centered trigger', () => {
+    const { workspace, container } = fixture();
+    const controller = fakeXR.controllers[0] as THREE.Group;
+    const gamepad = connectController(0, [0, 0, 0, 0], 'right');
+    setStickPressed(gamepad, true);
+    fakeXR.frame?.(1000);
+    fakeXR.frame?.(2000);
+    setStickPressed(gamepad, false);
+    fakeXR.frame?.(2016);
+    expect(workspace.state.radialOpen).toBe(false);
+    // A quick centered tap releases before the opening animation settles, so the menu stays
+    // open; the trigger on the centered (cancel) highlight then closes it.
+    setStickPressed(gamepad, true);
+    fakeXR.frame?.(2100);
+    setStickPressed(gamepad, false);
+    fakeXR.frame?.(2120);
+    expect(workspace.state.radialOpen).toBe(true);
+    fakeXR.frame?.(3100);
+    controller.dispatchEvent({ type: 'selectstart' } as never);
+    expect(workspace.state.radialOpen).toBe(false);
+    expect(workspace.scene.getObjectByName('xr-keyboard-controls')).toBeUndefined();
+    workspace.dispose();
+    container.remove();
+  });
+
+  it('keeps the warp modal owner of the stick while it runs', () => {
+    const { workspace, container } = fixture();
+    const controller = fakeXR.controllers[1] as THREE.Group;
+    const gamepad = connectController(1, [0, 0, 0, 0], 'right');
+    const screen = workspace.scene
+      .getObjectByName('terminal-panel-pane-b')
+      ?.getObjectByName('terminal-surface');
+    if (!screen) throw new Error('Pane B screen missing');
+    workspace.selectTerminal('pane-a');
+    aimController(controller, screen);
+    selectRadialAction(workspace, gamepad, 'warp', 7000);
+    expect(workspace.state.warpTerminalId).toBe('pane-b');
+    setStickPressed(gamepad, true);
+    fakeXR.frame?.(8200);
+    expect(workspace.state.radialOpen).toBe(false);
+    setStickPressed(gamepad, false);
+    fakeXR.frame?.(8216);
+    workspace.dispose();
+    container.remove();
   });
 });

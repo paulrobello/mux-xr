@@ -177,6 +177,13 @@ export function pressFocusButton(gamepad: Gamepad, time: number): void {
   (gamepad.buttons[5] as { pressed: boolean }).pressed = false;
   fakeXR.frame?.(time + 16);
 }
+export function setStickPressed(gamepad: Gamepad, pressed: boolean): void {
+  (gamepad.buttons[3] as { pressed: boolean }).pressed = pressed;
+}
+export function setStickTilt(gamepad: Gamepad, x: number, y: number): void {
+  (gamepad.axes as number[])[2] = x;
+  (gamepad.axes as number[])[3] = y;
+}
 let graphFrameTime = 0;
 export function settleHierarchy(): void {
   for (let frame = 0; frame < 40; frame++) {
