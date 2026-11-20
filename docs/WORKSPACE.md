@@ -100,7 +100,7 @@ Mouse clicks in 3D preview and controller triggers in VR use the same actions, w
 | Settings | Display, World and Selected terminal pages, Keyborb mode and UI sounds. |
 | Focus | Temporarily bring the aimed or selected pane forward. |
 
-Press A to open the selected tinted ring. Its center expands first, eight options emerge as a stack, then move around the circle into their final positions. The menu opens in about 640 ms. Moving targets cannot be activated or grabbed. Point and trigger to choose Keyboard, Commands, Panes, Layout, Warp, Widgets, Settings or Focus (which toggles Focus on the pane aimed at when the menu opened). Center Cancel or A closes it. B remains Focus outside Warp editing. Scrolling and underlying terminal activation are blocked while the menu is visible.
+Press A or click the right thumbstick to open the selected tinted ring. When opened with a stick, aim either controller and pull its trigger, or tilt the opening stick to select a wedge with that controller’s trigger. Its center expands first, eight options emerge as a stack, then move around the circle into their final positions. The menu opens in about 640 ms. Moving targets cannot be activated or grabbed. Point and trigger to choose Keyboard, Commands, Panes, Layout, Warp, Widgets, Settings or Focus (which toggles Focus on the pane aimed at when the menu opened). Center Cancel or A closes it. B remains Focus outside Warp editing. Scrolling and underlying terminal activation are blocked while the menu is visible.
 
 ### Grab, move, and recover
 

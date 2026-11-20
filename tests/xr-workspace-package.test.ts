@@ -254,6 +254,20 @@ describe('radial stick navigation', () => {
     nav.update('right', { x: 0, y: 0, pressed: false });
   });
 
+  it('gives an active non-neutral stick choice priority over a ray, while neutral passes the ray through', () => {
+    const menu = stubMenu();
+    const nav = makeNav(menu);
+    nav.update('right', { x: 0, y: 0, pressed: true });
+    nav.update('right', { x: 0, y: 0, pressed: false });
+    menu.interactive = true;
+    nav.update('right', { x: 0, y: -1, pressed: false });
+    expect(nav.selectionFor('right', 'delta')).toBe('alpha');
+    nav.update('right', { x: 0, y: 0, pressed: false });
+    expect(nav.selectionFor('right', 'delta')).toBe('delta');
+    expect(nav.selectionFor('left', 'echo')).toBe('echo');
+    expect(nav.selectionFor('left', 'cancel')).toBe('cancel');
+  });
+
   it('highlights wedges from the stick angle and confirms them through the trigger', () => {
     const menu = stubMenu();
     const nav = makeNav(menu);

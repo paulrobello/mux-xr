@@ -87,7 +87,20 @@ export class WebGLRenderer extends OriginalRenderer {
       animationFrame = requestAnimationFrame(tick);
     };
     renderer.setSize = (width, height, updateStyle) => { headCamera.aspect = width / Math.max(1, height); headCamera.updateProjectionMatrix(); return originalSetSize(width, height, updateStyle); };
-    renderer.render = (scene, camera) => { window.__questScene = scene; window.__questControllers = controllers; window.__questCamera = headCamera; renderer.xr = originalXR; originalRender(scene, fakeXR.isPresenting ? headCamera : camera); renderer.xr = fakeXR; };
+    renderer.render = (scene, camera) => {
+      window.__questScene = scene;
+      window.__questControllers = controllers;
+      window.__questCamera = headCamera;
+      const mask = headCamera.layers.mask;
+      if (fakeXR.isPresenting) headCamera.layers.mask = camera.layers.mask;
+      renderer.xr = originalXR;
+      try {
+        originalRender(scene, fakeXR.isPresenting ? headCamera : camera);
+      } finally {
+        headCamera.layers.mask = mask;
+        renderer.xr = fakeXR;
+      }
+    };
   }
 }
 `;

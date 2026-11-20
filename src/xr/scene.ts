@@ -3685,9 +3685,9 @@ export function createWorkspaceScene(
           nextHovered.set(controller, object);
         }
       }
-      // The stick's angle owns the highlight while it navigates; the ray would otherwise
-      // overwrite it with its own (usually empty) pick every frame.
-      if (!stickNav.active) radialMenu.setHovered(radialHoverAction);
+      radialMenu.setHovered(
+        stickNav.choice() ?? radialHoverAction ?? (stickNav.active ? 'cancel' : null),
+      );
       const allHovered = new Set(nextHovered.values());
       for (const previous of hoveredByController.values()) {
         if (allHovered.has(previous)) continue;
@@ -5187,26 +5187,22 @@ export function createWorkspaceScene(
     const target = targetFromController(controller);
     const action = target?.object?.userData.inputAction as string | undefined;
     lastSelectSource = controller;
-    if (stickNav.owns(controller)) {
-      const choice = stickNav.confirm();
-      if (choice && radialMenu.interactive) {
-        let wedge: THREE.Object3D | undefined;
-        radialMenu.root.traverse((object) => {
-          if (
-            !wedge &&
-            object.userData.inputAction === 'radialAction' &&
-            object.userData.radialAction === choice
-          )
-            wedge = object;
-        });
-        if (wedge) {
-          handleInputTargetAction(wedge);
-          return;
-        }
+    if (radialMenu.root.visible) {
+      if (!radialMenu.interactive) return;
+      const aimed = target?.object ? radialMenu.actionAt(target.object) : null;
+      const choice = stickNav.selectionFor(controller, aimed);
+      if (choice && choice !== aimed) {
+        const wedge = radialMenu.root.getObjectByName(`radial-menu-${choice}`);
+        if (wedge) handleInputTargetAction(wedge);
+        return;
       }
-      closeRadial();
-      notify();
-      return;
+      if (!choice && action !== 'reloadUpdate' && action !== 'wristMenu') {
+        if (stickNav.owns(controller)) {
+          closeRadial();
+          notify();
+        }
+        return;
+      }
     }
     const cues = cueCount;
     const clicks =

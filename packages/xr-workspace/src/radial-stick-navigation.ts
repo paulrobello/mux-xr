@@ -34,12 +34,17 @@ export interface StickRadialNavigationOptions<Action extends string, Controller>
 export interface StickRadialNavigation<Action extends string, Controller> {
   /** Feed one frame of stick input for the navigating hand. */
   update(controller: Controller, input: StickInput): void;
-  /** Whether a stick currently owns menu navigation; the host's ray hover must defer to it. */
+  /** Whether a stick opened the menu. A non-null choice takes priority over ray hover. */
   readonly active: boolean;
   /** Whether this controller's stick opened the open menu and its trigger should confirm. */
   owns(controller: Controller): boolean;
-  /** The wedge the stick highlights while navigating, or null when centred or after a confirm. */
+  /** The wedge chosen by the navigating stick, or null when centred or after a confirm. */
   choice(): Action | null;
+  /** Resolve a trigger selection: an active non-neutral owner stick wins over a ray action. */
+  selectionFor(
+    controller: Controller,
+    rayAction: Action | 'cancel' | null,
+  ): Action | 'cancel' | null;
   /** Confirm the highlight from the host's trigger path: returns the wedge and frees the stick. */
   confirm(): Action | null;
   /** Forget ownership after a host-driven close; safe to call redundantly. */
@@ -75,7 +80,10 @@ export function createStickRadialNavigation<Action extends string, Controller>(
   let latched = false;
   const navigation: StickRadialNavigation<Action, Controller> = {
     update(controller, input) {
-      if (owner && !menu.isOpen) owner = null;
+      if (owner && !menu.isOpen) {
+        owner = null;
+        choice = null;
+      }
       if (input.pressed && !latched) {
         latched = true;
         if (menu.isOpen) {
@@ -106,6 +114,10 @@ export function createStickRadialNavigation<Action extends string, Controller>(
     },
     choice() {
       return choice;
+    },
+    selectionFor(controller, rayAction) {
+      if (owner === controller && menu.isOpen && choice !== null) return choice;
+      return rayAction;
     },
     confirm() {
       if (!owner) return null;

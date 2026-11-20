@@ -42,6 +42,7 @@ export type FixtureWindow = Window & {
   __radialPad: Pick<ButtonPad, 'buttons'>;
   __radialFreeze?: boolean;
   __testRadialMenu: RadialMenu;
+  __renderRadialFrame(): void;
   __widgetsPad: ButtonPad;
   __speechScene: WorkspaceScene;
   __speechInput: SpeechInput;

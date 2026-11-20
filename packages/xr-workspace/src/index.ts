@@ -194,6 +194,7 @@ export {
   type PicturePickerAction,
 } from './picture-frame';
 export { frameSize, PICTURE_LONG_EDGE, PLACEHOLDER_ASPECT, type Size } from './picture-sizing';
+export { PlacementRays, type PlacementRayTarget } from './placement-ray';
 export {
   type AxisRepeat,
   type ButtonEdges,
@@ -320,6 +321,7 @@ export {
   WRIST_WATCH_PROBE_REACH,
   type WristMenuWatch,
 } from './wrist-menu-watch';
+export { createXrRadialMenu } from './xr-radial-menu';
 export {
   createXrSession,
   FOVEATION_LEVELS,

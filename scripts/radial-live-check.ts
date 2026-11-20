@@ -86,7 +86,7 @@ async function injectSceneHandle(root: string): Promise<void> {
     sceneSource
       .replace(
         'const radialMenu = createRadialMenu();',
-        'const radialMenu = createRadialMenu(); Object.assign(window,{__testRadialMenu:radialMenu});',
+        'const radialMenu = createRadialMenu(); Object.assign(window,{__testRadialMenu:radialMenu,__renderRadialFrame:()=>renderScene()});',
       )
       .replace(
         'radialMenu.update(radialDelta);',
@@ -102,9 +102,10 @@ async function nativeAction(
   page: Page,
   action: string,
   expected: Record<string, unknown> = {},
+  controllerIndex = 0,
 ): Promise<void> {
   await page.evaluate(
-    async ({ action, expected }) => {
+    async ({ action, expected, controllerIndex }) => {
       const w = window as unknown as FixtureWindow;
       let target: import('three').Object3D | undefined;
       w.__questScene.traverse((object) => {
@@ -118,7 +119,7 @@ async function nativeAction(
       if (!target) throw new Error(`Native action missing: ${action}`);
       const point = target.getWorldPosition(new w.__questThree.Vector3());
       const rotation = target.getWorldQuaternion(new w.__questThree.Quaternion());
-      const controller = w.__questControllers[0];
+      const controller = w.__questControllers[controllerIndex];
       controller.position
         .copy(point)
         .add(new w.__questThree.Vector3(0, 0, 0.3).applyQuaternion(rotation));
@@ -127,7 +128,7 @@ async function nativeAction(
       controller.dispatchEvent({ type: 'selectend' } as never);
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     },
-    { action, expected },
+    { action, expected, controllerIndex },
   );
 }
 
@@ -276,18 +277,24 @@ async function main(): Promise<void> {
       ['widgets', 'widgets'],
       ['settings', 'settings'],
     ] as const) {
-      await page.evaluate(async () => {
+      const openButton = action === 'keyboard' || action === 'commands' ? 3 : 4;
+      await page.evaluate(async (button) => {
         const w = window as unknown as FixtureWindow;
-        w.__radialPad.buttons[4].pressed = true;
+        w.__radialPad.buttons[button].pressed = true;
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        w.__radialPad.buttons[4].pressed = false;
-      });
+        w.__radialPad.buttons[button].pressed = false;
+      }, openButton);
       await waitFor(
         async () =>
           page.evaluate(() => (window as unknown as FixtureWindow).__testRadialMenu.interactive),
         'menu did not open',
       );
-      await nativeAction(page, 'radialAction', { radialAction: action });
+      await nativeAction(
+        page,
+        'radialAction',
+        { radialAction: action },
+        action === 'keyboard' ? 1 : 0,
+      );
       await page.waitForTimeout(180);
       if (mode) {
         assert(
@@ -317,6 +324,14 @@ async function main(): Promise<void> {
         });
       }
     }
+    await page.evaluate(() => {
+      // The label readback samples the menu after releasing both controllers.
+      const controllers = (window as unknown as FixtureWindow).__questControllers;
+      controllers.forEach((controller, i) => {
+        controller.position.set(i === 0 ? -0.7 : 0.7, 0.8, 0.2);
+        controller.quaternion.set(0, 1, 0, 0);
+      });
+    });
     await page.waitForTimeout(180);
     const radialEvidence = await page.evaluate(async () => {
       const w = window as unknown as FixtureWindow;
@@ -366,10 +381,7 @@ async function main(): Promise<void> {
         for (const [object] of originalLabelVisibility) object.visible = true;
         root.rotation.y = originalRotation + yaw;
         root.updateMatrixWorld(true);
-        w.__questRenderer.render(
-          (w as unknown as { __questScene: import('three').Scene }).__questScene,
-          (w as unknown as { __questCamera: import('three').Camera }).__questCamera,
-        );
+        w.__renderRadialFrame();
         const visible: Record<string, number> = {};
         for (const label of labels) {
           const object =
@@ -385,10 +397,7 @@ async function main(): Promise<void> {
             text.visible = false;
           }
         }
-        w.__questRenderer.render(
-          (w as unknown as { __questScene: import('three').Scene }).__questScene,
-          (w as unknown as { __questCamera: import('three').Camera }).__questCamera,
-        );
+        w.__renderRadialFrame();
         const hidden: Record<string, number> = {};
         for (const label of labels) {
           const object =
@@ -461,10 +470,7 @@ async function main(): Promise<void> {
       w.__testRadialMenu.open();
       w.__testRadialMenu.update(0.81);
       w.__testRadialMenu.root.rotation.y = 0.3;
-      w.__questRenderer.render(
-        (w as unknown as { __questScene: import('three').Scene }).__questScene,
-        (w as unknown as { __questCamera: import('three').Camera }).__questCamera,
-      );
+      w.__renderRadialFrame();
     });
     await page.screenshot({ path: join(root, 'radial-labels-oblique.png') });
     await page.evaluate(() => {
