@@ -86,6 +86,7 @@ export {
   type HandContactSample,
 } from './hand-contact';
 export { type HandInputResult, type HandInputState, updateHandInput } from './hand-input';
+export { createHandMenuGesture, type HandMenuGesture } from './hand-menu-gesture';
 export {
   createModifierState,
   keyboardDimensions,
