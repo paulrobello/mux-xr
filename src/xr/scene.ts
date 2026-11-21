@@ -56,12 +56,7 @@ import type {
 } from '../contracts';
 import { getControlHelp, getControlHelpFor } from '../control-help';
 import { applySessionFoveation, type FoveationLevel } from '../foveation';
-import {
-  type PasteReviewMode,
-  type PasteSummary,
-  summarizePaste,
-  validatePasteReviewMode,
-} from '../paste-review';
+import { type PasteReviewMode, validatePasteReviewMode } from '../paste-review';
 import type { PictureImage, RestoredPicture } from '../pictures/picture-image';
 import {
   freePictureSlot,
@@ -134,7 +129,8 @@ import {
   draftFromCommand,
   editCommandDraft,
 } from './command-editor';
-import { CONFIRM_MIN_MS, CONFIRM_WINDOW_MS, createArming } from './controllers/arming';
+import { createArming } from './controllers/arming';
+import { createClipboard } from './controllers/clipboard';
 import {
   createDeskBackdrop,
   createDeskWindow,
@@ -846,17 +842,6 @@ export function createWorkspaceScene(
   const clipboard = createClipboardBridge();
   // A pending native select either pastes into a pane id or, with COPY_TO_HOST, sends to the host.
   const pendingPaste = new Map<THREE.Group, string | null>();
-  let clipboardGeneration = 0;
-  let hostPasteInFlight = false;
-  /** A multiline or altered paste waiting for its confirming press, held in memory only. */
-  let armedPaste: {
-    paneId: string;
-    summary: PasteSummary;
-    prompt: string;
-    flavor: 'clipboard' | 'host';
-    at: number;
-    timer: ReturnType<typeof setTimeout>;
-  } | null = null;
   let floorCorrectionPending = false;
   let toastDeadline = 0;
   const radialMenu = createRadialMenu();
@@ -1231,6 +1216,31 @@ export function createWorkspaceScene(
     });
   };
   const availablePanes: PaneDescriptor[] = [];
+  const clipboardCtl = createClipboard({
+    bridge: clipboard,
+    actions,
+    mutableState,
+    panels,
+    availablePanes,
+    cue: (kind, source) => cue(kind, source),
+    setNotice: (message) => setNotice(message),
+    showToast: (message) => showToast(message),
+    notify: () => notify(),
+    disposed: () => disposed,
+    lastSelectSource: () => lastSelectSource,
+    inputRoot: () => inputRoot,
+    inputMode: () => inputMode,
+    refreshInputRoot: (mode) => refreshInputRoot(mode),
+    getPictureUrl: () => pictureUrl,
+    setPictureUrl: (draft) => {
+      pictureUrl = draft;
+    },
+    getPicturePanelMessage: () => picturePanelMessage,
+    setPicturePanelMessage: (value) => {
+      picturePanelMessage = value;
+    },
+    pictureUrlPasteToken: PICTURE_URL_PASTE,
+  });
   const controllerGamepads = new Map<THREE.Group, Gamepad>();
   const controllerHandedness = new Map<THREE.Group, string>();
   let cueCount = 0;
@@ -1827,13 +1837,13 @@ export function createWorkspaceScene(
       return;
     }
     selection.phase = 'copying';
-    const generation = ++clipboardGeneration;
-    clearArmedPaste();
+    const generation = clipboardCtl.beginClipboardAction();
     const copied = clipboard.copy(text);
     cancelTextSelection();
     showToast('Copied. Paste from Keyboard.');
     void copied.then((systemCopied) => {
-      if (disposed || generation !== clipboardGeneration || systemCopied) return;
+      if (disposed || !clipboardCtl.isCurrentClipboardGeneration(generation) || systemCopied)
+        return;
       showToast('Copied in Mux XR. Paste from Keyboard.');
     });
   };
@@ -1845,251 +1855,6 @@ export function createWorkspaceScene(
       toastLabel.visible = Boolean(message);
     }
     notify();
-  };
-  // Null or empty means nothing to paste; an error object carries its own notice.
-  type PasteText = string | null | { error: string };
-  const pasteClipboard = (
-    paneId?: string,
-    source: THREE.Group | null = lastSelectSource,
-  ): Promise<boolean> => pasteFrom(paneId, source, () => clipboard.read(), 'Pasted.');
-  const readHostText = async (): Promise<string | { error: string }> => {
-    if (!actions.readHostClipboard) return { error: 'Host clipboard is not available here.' };
-    const result = await actions.readHostClipboard();
-    if (!result.ok) return { error: result.message };
-    return result.value || { error: 'The host clipboard has no text.' };
-  };
-  const pasteHostClipboard = (
-    paneId?: string,
-    source: THREE.Group | null = lastSelectSource,
-  ): Promise<boolean> => {
-    if (hostPasteInFlight) return Promise.resolve(false);
-    hostPasteInFlight = true;
-    return pasteFrom(paneId, source, readHostText, 'Pasted host clipboard.', true).finally(() => {
-      hostPasteInFlight = false;
-    });
-  };
-  const copyHostToQuest = async (
-    source: THREE.Group | null = lastSelectSource,
-  ): Promise<boolean> => {
-    const generation = ++clipboardGeneration;
-    clearArmedPaste();
-    const result = await readHostText();
-    if (disposed) return false;
-    if (typeof result !== 'string') {
-      setNotice(result.error);
-      cue('error', source);
-      return false;
-    }
-    const systemCopied = await clipboard.copy(result, { fromHost: true });
-    if (disposed || generation !== clipboardGeneration) return systemCopied;
-    showToast(
-      systemCopied
-        ? 'Host clipboard copied to Quest.'
-        : 'Host text kept in Mux XR. The Quest clipboard refused it, so use Paste.',
-    );
-    return systemCopied;
-  };
-  const copyQuestToHost = async (
-    source: THREE.Group | null = lastSelectSource,
-  ): Promise<boolean> => {
-    clipboardGeneration++;
-    clearArmedPaste();
-    // The read starts before any await so the browser still sees the user gesture.
-    const pending = clipboard.read({ excludeHost: true, preferLocal: true });
-    if (!actions.writeHostClipboard) {
-      setNotice('Host clipboard is not available here.');
-      cue('error', source);
-      return false;
-    }
-    const text = await pending;
-    if (disposed) return false;
-    if (!text) {
-      setNotice(
-        'The Quest clipboard is empty or unavailable here. Copy text in the browser, or highlight terminal text, first.',
-      );
-      cue('error', source);
-      return false;
-    }
-    const result = await actions.writeHostClipboard(text);
-    if (disposed) return false;
-    if (!result.ok) {
-      setNotice(result.message);
-      cue('error', source);
-      return false;
-    }
-    showToast('Copied to host clipboard.');
-    return true;
-  };
-  /** Drops the armed paste and, if its prompt is on screen, the prompt with it. */
-  const clearArmedPaste = (): void => {
-    if (!armedPaste) return;
-    clearTimeout(armedPaste.timer);
-    const prompt = armedPaste.prompt;
-    armedPaste = null;
-    mutableState.pastePrompt = null;
-    if (mutableState.notice === prompt) setNotice(null);
-    else notify();
-  };
-  /** Arms the review prompt: the paste sends only after a second Paste press in the window. */
-  const armPaste = (
-    paneId: string,
-    summary: PasteSummary,
-    flavor: 'clipboard' | 'host',
-    title: string,
-    source: THREE.Group | null,
-  ): void => {
-    clearArmedPaste();
-    const lines = summary.lines === 1 ? 'line' : 'lines';
-    const characters = summary.characters === 1 ? 'character' : 'characters';
-    const removed =
-      summary.removed > 0
-        ? `, ${summary.removed} control character${summary.removed === 1 ? '' : 's'} removed`
-        : '';
-    const prompt =
-      `Paste ${summary.lines} ${lines}, ${summary.characters} ${characters} to ${title}? ` +
-      `Press Paste again. First line: ${summary.preview}${removed}`;
-    armedPaste = {
-      paneId,
-      summary,
-      prompt,
-      flavor,
-      at: Date.now(),
-      timer: setTimeout(() => {
-        clearArmedPaste();
-        if (!disposed) notify();
-      }, CONFIRM_WINDOW_MS),
-    };
-    mutableState.pastePrompt = prompt;
-    setNotice(prompt);
-    cue('armed', source);
-  };
-  const pasteFrom = async (
-    paneId: string | undefined,
-    source: THREE.Group | null,
-    read: () => Promise<PasteText>,
-    pastedToast: string,
-    supersedable = false,
-  ): Promise<boolean> => {
-    const generation = ++clipboardGeneration;
-    if (
-      inputRoot &&
-      inputMode === 'picture-url' &&
-      (paneId === undefined || paneId === PICTURE_URL_PASTE)
-    ) {
-      const received = await read();
-      if (disposed || (supersedable && generation !== clipboardGeneration)) return false;
-      // URLs hold no whitespace, so a copied line break or indent is dropped.
-      const text = typeof received === 'string' ? received.replace(/\s+/g, '') : '';
-      if (!text) {
-        setNotice(
-          received && typeof received === 'object'
-            ? received.error
-            : 'Clipboard is empty or unavailable. Copy an image URL first.',
-        );
-        cue('error', source);
-        return false;
-      }
-      if (!inputRoot || inputMode !== 'picture-url') return false;
-      const characters = Array.from(pictureUrl.text);
-      const cursor = Math.min(pictureUrl.cursor, characters.length);
-      const inserted = Array.from(text);
-      characters.splice(cursor, 0, ...inserted);
-      pictureUrl = { text: characters.join(''), cursor: cursor + inserted.length };
-      picturePanelMessage = '';
-      refreshInputRoot('picture-url');
-      showToast(pastedToast);
-      return true;
-    }
-    const id = paneId ?? mutableState.inputTargetId ?? mutableState.selectedTerminalId;
-    const panel = id ? panels.get(id) : undefined;
-    if (
-      !id ||
-      !panel ||
-      panel.surface.status !== 'connected' ||
-      mutableState.selectedTerminalId !== id
-    ) {
-      setNotice('Select a connected terminal before pasting.');
-      cue('error', source);
-      return false;
-    }
-    // A confirming press pastes the reviewed text without reading the clipboard again.
-    if (armedPaste) {
-      const armed = armedPaste;
-      if (armed.paneId !== id || armed.flavor !== (supersedable ? 'host' : 'clipboard')) {
-        clearArmedPaste();
-      } else {
-        const elapsed = Date.now() - armed.at;
-        if (elapsed < CONFIRM_MIN_MS) return false;
-        if (elapsed > CONFIRM_WINDOW_MS) {
-          clearArmedPaste();
-        } else {
-          if (
-            disposed ||
-            panels.get(id) !== panel ||
-            mutableState.selectedTerminalId !== id ||
-            panel.surface.status !== 'connected'
-          ) {
-            clearArmedPaste();
-            setNotice('The paste target changed. Select it and paste again.');
-            cue('error', source);
-            return false;
-          }
-          const summary = armed.summary;
-          clearArmedPaste();
-          try {
-            if (!panel.surface.paste(summary.text)) throw new Error('Paste rejected');
-            showToast(pastedToast);
-            return true;
-          } catch {
-            setNotice('The terminal rejected the paste. Reconnect and try again.');
-            cue('error', source);
-            return false;
-          }
-        }
-      }
-    }
-    const received = await read();
-    if (disposed) return false;
-    // A slow host read loses to any clipboard action started while it was in flight.
-    if (supersedable && generation !== clipboardGeneration) return false;
-    if (
-      panels.get(id) !== panel ||
-      mutableState.selectedTerminalId !== id ||
-      panel.surface.status !== 'connected'
-    ) {
-      setNotice('The paste target changed. Select it and paste again.');
-      cue('error', source);
-      return false;
-    }
-    if (typeof received !== 'string' || received === '') {
-      setNotice(
-        received && typeof received === 'object'
-          ? received.error
-          : 'Clipboard is empty or unavailable. Highlight text to copy it first.',
-      );
-      cue('error', source);
-      return false;
-    }
-    const summary = summarizePaste(received, mutableState.pasteReview);
-    if (!summary.needsReview) {
-      try {
-        if (!panel.surface.paste(summary.text)) throw new Error('Paste rejected');
-        showToast(pastedToast);
-        return true;
-      } catch {
-        setNotice('The terminal rejected the paste. Reconnect and try again.');
-        cue('error', source);
-        return false;
-      }
-    }
-    armPaste(
-      id,
-      summary,
-      supersedable ? 'host' : 'clipboard',
-      availablePanes.find((pane) => pane.id === id)?.title ?? id,
-      source,
-    );
-    return false;
   };
   const startMouse = (
     source: THREE.Group | number,
@@ -3344,9 +3109,11 @@ export function createWorkspaceScene(
       lastSelectSource = controller;
       const cues = cueCount;
       if (press.object.userData.inputAction === 'pasteClipboard') {
-        if (inputMode === 'picture-url') void pasteClipboard(PICTURE_URL_PASTE, controller);
-        else if (press.target) void pasteClipboard(press.target);
-      } else if (press.object.userData.inputAction === 'copyToHost') void copyQuestToHost();
+        if (inputMode === 'picture-url')
+          void clipboardCtl.pasteClipboard(PICTURE_URL_PASTE, controller);
+        else if (press.target) void clipboardCtl.pasteClipboard(press.target);
+      } else if (press.object.userData.inputAction === 'copyToHost')
+        void clipboardCtl.copyQuestToHost();
       else activateTarget(target);
       pressCue(controller, press.object.userData.inputAction, cues);
       pressPanelButton(press.object);
@@ -4779,10 +4546,10 @@ export function createWorkspaceScene(
         } else refreshInputRoot('panes');
         return true;
       case 'pasteClipboard':
-        if (!renderer?.xr.isPresenting) void pasteClipboard();
+        if (!renderer?.xr.isPresenting) void clipboardCtl.pasteClipboard();
         return true;
       case 'pasteHostClipboard':
-        void pasteHostClipboard();
+        void clipboardCtl.pasteHostClipboard();
         return true;
       default:
         return false;
@@ -5262,7 +5029,7 @@ export function createWorkspaceScene(
               !disconnectedControllers.has(root) &&
               targetFromController(root)?.object?.userData.inputAction === 'copyToHost'
             )
-              void copyQuestToHost(root);
+              void clipboardCtl.copyQuestToHost(root);
             return;
           }
           if (
@@ -5271,7 +5038,7 @@ export function createWorkspaceScene(
             id &&
             targetFromController(root)?.object?.userData.inputAction === 'pasteClipboard'
           )
-            void pasteClipboard(id, root);
+            void clipboardCtl.pasteClipboard(id, root);
           return;
         }
         copyTextSelection(root);
@@ -5815,7 +5582,7 @@ export function createWorkspaceScene(
     if (!panel) return;
     // The panel unsubscribes from its surface, so its bell's falling edge never arrives.
     bellFeed.clearPane(id);
-    if (armedPaste?.paneId === id) clearArmedPaste();
+    clipboardCtl.clearArmedPasteForPane(id);
     cancelTextSelection(id);
     if (warpEdit?.id === id) finishWarp(false);
     terminalScreens.splice(terminalScreens.indexOf(panel.screen), 1);
@@ -5858,7 +5625,7 @@ export function createWorkspaceScene(
     if (!gazeRetargeting) gazeInputState = { candidateId: null, emphasizedId: null, since: 0 };
     keyboardResume = null;
     clearArmedModifiers();
-    clearArmedPaste();
+    clipboardCtl.clearArmedPaste();
     mutableState.selectedTerminalId = nextId;
     mutableState.focusedTerminalId = mutableState.selectedTerminalId;
     syncFocusQuadLayer();
@@ -7270,7 +7037,7 @@ export function createWorkspaceScene(
   const dispose = (): void => {
     if (disposed) return;
     arming.dispose();
-    clearArmedPaste();
+    clipboardCtl.dispose();
     messageToasts.dispose();
     clearTimeout(paneCreationRetry);
     clearTimeout(agentRosterRetry);
@@ -7616,7 +7383,7 @@ export function createWorkspaceScene(
       get lastSelectSource() {
         return lastSelectSource;
       },
-      copyQuestToHost,
+      copyQuestToHost: () => clipboardCtl.copyQuestToHost(null),
       syncModifierVisuals,
       get hierarchyHiddenPanels() {
         return hierarchyHiddenPanels;
@@ -7723,10 +7490,10 @@ export function createWorkspaceScene(
         depth.source.height = 0;
       }
     },
-    pasteClipboard: (paneId?: string) => pasteClipboard(paneId, null),
-    pasteHostClipboard: (paneId?: string) => pasteHostClipboard(paneId, null),
-    copyHostToQuest: () => copyHostToQuest(null),
-    copyQuestToHost: () => copyQuestToHost(null),
+    pasteClipboard: (paneId?: string) => clipboardCtl.pasteClipboard(paneId, null),
+    pasteHostClipboard: (paneId?: string) => clipboardCtl.pasteHostClipboard(paneId, null),
+    copyHostToQuest: () => clipboardCtl.copyHostToQuest(null),
+    copyQuestToHost: () => clipboardCtl.copyQuestToHost(null),
     arrangeTerminals,
     toggleFocusMode,
     resetLayout,
