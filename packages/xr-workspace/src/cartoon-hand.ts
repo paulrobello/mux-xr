@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { WristProfile } from './elastic-arm';
 import {
   type ArmNearFade,
   applyArmNearFade,
@@ -37,6 +38,7 @@ export interface CartoonHand {
   /** Midpoint between the index and thumb tips while both digits are tracked, otherwise undefined. */
   readonly keyborbPoint: THREE.Vector3 | undefined;
   update(hand: THREE.Group, camera: THREE.Object3D, side: HandSide, deltaSeconds: number): void;
+  setWristFit(wrist: THREE.Vector3 | undefined, profile: WristProfile | undefined): void;
   updateController(
     pose: THREE.Object3D,
     camera: THREE.Object3D,
@@ -170,6 +172,8 @@ export function createCartoonHand(options: CartoonHandOptions = {}): CartoonHand
   let handTint: THREE.ColorRepresentation | null = null;
   let armTint: THREE.ColorRepresentation | null = null;
   let theme: HandTheme | null = options.theme ?? null;
+  let fittedWrist: THREE.Vector3 | undefined;
+  let fittedProfile: WristProfile | undefined;
   const tintArm = (): void => {
     dimHandColor(armMaterial.color, armTint ?? handTint ?? DEFAULT_COLOR);
     dimHandColor(armMaterial.emissive, armTint ?? handTint ?? DEFAULT_EMISSIVE);
@@ -454,7 +458,21 @@ export function createCartoonHand(options: CartoonHandOptions = {}): CartoonHand
         .set(side === 'left' ? -0.2 : 0.2, -0.18, -0.04)
         .applyQuaternion(cameraRotation)
         .add(cameraPosition);
-      arm.update(anchor, wrist, deltaSeconds);
+      arm.update(
+        anchor,
+        fittedWrist ?? wrist,
+        deltaSeconds,
+        fittedProfile ?? {
+          across,
+          normal,
+          radiusAcross: width * 0.5,
+          radiusNormal: 0.026,
+        },
+      );
+    },
+    setWristFit(wristPosition, profile) {
+      fittedWrist = wristPosition;
+      fittedProfile = profile;
     },
     updateController(pose, camera, side, gamepad, deltaSeconds) {
       if (disposed || !pose.visible) {

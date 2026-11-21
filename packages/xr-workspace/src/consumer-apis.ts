@@ -4,6 +4,7 @@ export {
   type ArmNearFade,
   DEFAULT_ARM_NEAR_FADE,
   ELASTIC_ARM_RENDER_ORDER,
+  type WristProfile,
 } from './elastic-arm';
 export { type ScalableLabelOptions, updateScalableLabel } from './labels';
 export {

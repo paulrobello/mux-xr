@@ -2,11 +2,24 @@ import * as THREE from 'three';
 
 export interface ElasticArm {
   mesh: THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
-  update(anchor: THREE.Vector3, wrist: THREE.Vector3, deltaSeconds: number): void;
+  update(
+    anchor: THREE.Vector3,
+    wrist: THREE.Vector3,
+    deltaSeconds: number,
+    wristProfile?: WristProfile,
+  ): void;
   reset(): void;
   /** A hidden arm stays hidden through later updates. */
   setVisible(visible: boolean): void;
   dispose(): void;
+}
+
+/** World-space ellipse at the hand end of the arm. The axes need not be normalized. */
+export interface WristProfile {
+  across: THREE.Vector3;
+  normal: THREE.Vector3;
+  radiusAcross: number;
+  radiusNormal: number;
 }
 
 export const ELASTIC_ARM_RENDER_ORDER = 900;
@@ -103,6 +116,15 @@ export function createElasticArm(material: THREE.Material): ElasticArm {
   const endDelta = new THREE.Vector3();
   const radial = new THREE.Vector3();
   const vertexPosition = new THREE.Vector3();
+  const profileAcross = new THREE.Vector3();
+  const profileNormal = new THREE.Vector3();
+  const ringAcross = new THREE.Vector3();
+  const ringNormal = new THREE.Vector3();
+  const profileCross = new THREE.Vector3();
+  const basis = new THREE.Matrix4();
+  const wristRotation = new THREE.Quaternion();
+  const ringRotation = new THREE.Quaternion();
+  const surfaceNormal = new THREE.Vector3();
   let initialized = false;
   let disposed = false;
   let shown = true;
@@ -127,7 +149,12 @@ export function createElasticArm(material: THREE.Material): ElasticArm {
     startNormal.set(0, 1, 0);
     mesh.visible = false;
   };
-  const update = (anchor: THREE.Vector3, wrist: THREE.Vector3, deltaSeconds: number): void => {
+  const update = (
+    anchor: THREE.Vector3,
+    wrist: THREE.Vector3,
+    deltaSeconds: number,
+    wristProfile?: WristProfile,
+  ): void => {
     if (disposed) return;
     const length = anchor.distanceTo(wrist);
     if (length < EPSILON) {
@@ -144,6 +171,21 @@ export function createElasticArm(material: THREE.Material): ElasticArm {
       midpoint.lerp(targetMidpoint, alpha);
       endDelta.copy(midpoint).sub(targetMidpoint).clampLength(0, 0.1);
       midpoint.copy(targetMidpoint).add(endDelta);
+    }
+    if (wristProfile) {
+      profileAcross.copy(wristProfile.across).normalize();
+      profileNormal
+        .copy(wristProfile.normal)
+        .addScaledVector(profileAcross, -wristProfile.normal.dot(profileAcross))
+        .normalize();
+      profileCross.crossVectors(profileAcross, profileNormal);
+      if (profileCross.dot(endDelta.subVectors(wrist, midpoint)) < 0) {
+        profileNormal.negate();
+        profileCross.negate();
+      }
+      wristRotation.setFromRotationMatrix(
+        basis.makeBasis(profileAcross, profileNormal, profileCross),
+      );
     }
     for (let segment = 0; segment <= SEGMENTS; segment += 1) {
       const t = segment / SEGMENTS;
@@ -176,14 +218,37 @@ export function createElasticArm(material: THREE.Material): ElasticArm {
       binormal.crossVectors(tangent, normal).normalize();
       previousNormal.copy(normal);
       const radius = THREE.MathUtils.lerp(ANCHOR_RADIUS, WRIST_RADIUS, t);
+      const flare = wristProfile
+        ? THREE.MathUtils.smoothstep(t, Math.max(0, 1 - 0.09 / length), 1)
+        : 0;
+      let wide = radius,
+        thick = radius;
+      ringAcross.copy(normal);
+      ringNormal.copy(binormal);
+      if (wristProfile && flare > 0) {
+        wide = THREE.MathUtils.lerp(radius, wristProfile.radiusAcross, flare);
+        thick = THREE.MathUtils.lerp(radius, wristProfile.radiusNormal, flare);
+        ringRotation
+          .setFromRotationMatrix(basis.makeBasis(normal, binormal, tangent))
+          .slerp(wristRotation, flare);
+        ringAcross.set(1, 0, 0).applyQuaternion(ringRotation);
+        ringNormal.set(0, 1, 0).applyQuaternion(ringRotation);
+      }
       for (let side = 0; side < SIDES; side += 1) {
-        const angle = (side / SIDES) * Math.PI * 2;
+        const angle = (side / SIDES) * Math.PI * 2,
+          cos = Math.cos(angle),
+          sin = Math.sin(angle);
         radial
-          .copy(normal)
-          .multiplyScalar(Math.cos(angle))
-          .addScaledVector(binormal, Math.sin(angle));
-        vertexPosition.copy(point).addScaledVector(radial, radius);
-        writeVertex(segment * SIDES + side, vertexPosition, radial);
+          .copy(ringAcross)
+          .multiplyScalar(cos * wide)
+          .addScaledVector(ringNormal, sin * thick);
+        vertexPosition.copy(point).add(radial);
+        surfaceNormal
+          .copy(ringAcross)
+          .multiplyScalar(cos / wide)
+          .addScaledVector(ringNormal, sin / thick)
+          .normalize();
+        writeVertex(segment * SIDES + side, vertexPosition, surfaceNormal);
       }
     }
     endDelta.copy(tangent);

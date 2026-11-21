@@ -40,6 +40,7 @@ export {
   DEFAULT_ARM_NEAR_FADE,
   ELASTIC_ARM_RENDER_ORDER,
   type ElasticArm,
+  type WristProfile,
 } from './elastic-arm';
 export {
   createEnvironmentController,
@@ -204,6 +205,7 @@ export {
   type Pointer,
   type PointerHit,
 } from './pointer';
+export { PortalOcclusion, type PortalOpening } from './portal-occlusion';
 export {
   createRadialMenu,
   type RadialMenu,

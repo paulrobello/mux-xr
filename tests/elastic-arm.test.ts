@@ -21,6 +21,39 @@ describe('elastic arm', () => {
     arm.dispose();
   });
 
+  it('flares the wrist end into the supplied tracked wrist silhouette', () => {
+    const arm = createElasticArm(new THREE.MeshBasicMaterial());
+    const wrist = new THREE.Vector3(1, 1, 0);
+    arm.update(new THREE.Vector3(0, 1, 0), wrist, 1, {
+      across: new THREE.Vector3(0, 1, 0),
+      normal: new THREE.Vector3(0, 0, 1),
+      radiusAcross: 0.03,
+      radiusNormal: 0.02,
+    });
+    const positions = arm.mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const rim = Array.from({ length: 10 }, (_, side) => center(positions, 24, side));
+    expect(Math.max(...rim.map((point) => point.y))).toBeCloseTo(1.03, 2);
+    expect(Math.min(...rim.map((point) => point.y))).toBeCloseTo(0.97, 2);
+    expect(Math.max(...rim.map((point) => point.z))).toBeCloseTo(0.02, 2);
+    expect(Math.min(...rim.map((point) => point.z))).toBeCloseTo(-0.02, 2);
+    const tilted = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 1.1);
+    const across = new THREE.Vector3(0, 1, 0),
+      minor = new THREE.Vector3(0, 0, 1).applyQuaternion(tilted);
+    arm.update(new THREE.Vector3(0, 1, 0), wrist, 1, {
+      across,
+      normal: minor,
+      radiusAcross: 0.03,
+      radiusNormal: 0.02,
+    });
+    const face = across.clone().cross(minor);
+    for (let i = 0; i < 10; i++) {
+      const p = center(positions, 24, i).sub(wrist);
+      expect(Math.abs(p.dot(face))).toBeLessThan(1e-6);
+      expect(Math.hypot(p.dot(across) / 0.03, p.dot(minor) / 0.02)).toBeCloseTo(1, 4);
+    }
+    arm.dispose();
+  });
+
   it('reuses buffers, owns geometry only, and is not pickable', () => {
     const material = new THREE.MeshBasicMaterial();
     const materialDispose = vi.spyOn(material, 'dispose');

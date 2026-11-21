@@ -81,6 +81,7 @@ interface SideModel {
   probeVertices: number[];
   probes: HandContactProbe[];
   probesStale: boolean;
+  wristFit?: WristCapFit;
 }
 interface PoseTransform {
   position: THREE.Vector3;
@@ -421,6 +422,7 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
       probeVertices,
       probes,
       probesStale: true,
+      wristFit: fit,
     };
   };
 
@@ -515,7 +517,32 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
     return joint.matrixWorld;
   };
 
+  const cutNormal = new THREE.Vector3();
+  const wristEnd = new THREE.Vector3(),
+    fittedProfile = {
+      across: new THREE.Vector3(),
+      normal: new THREE.Vector3(),
+      radiusAcross: 0,
+      radiusNormal: 0,
+    };
   fallback.update = (source, camera, side, deltaSeconds): void => {
+    const joint = (source as TrackedHand).joints?.wrist;
+    const fit = models[side]?.wristFit;
+    if (joint?.visible && fit) {
+      joint.updateWorldMatrix(true, false, true);
+      const matrix = joint.matrixWorld;
+      wristEnd.copy(fit.position).applyMatrix4(matrix);
+      fittedProfile.across.set(1, 0, 0).applyQuaternion(fit.quaternion).transformDirection(matrix);
+      fittedProfile.normal.set(0, 1, 0).applyQuaternion(fit.quaternion).transformDirection(matrix);
+      fittedProfile.radiusAcross = fit.scale.x - WRIST_CAP_MARGIN;
+      fittedProfile.radiusNormal = fit.scale.y - WRIST_CAP_MARGIN;
+      // Bury the tube's end face in the skin so its cap cannot flicker against a closed wrist.
+      wristEnd.addScaledVector(
+        cutNormal.crossVectors(fittedProfile.across, fittedProfile.normal),
+        -0.001,
+      );
+      fallback.setWristFit(wristEnd, fittedProfile);
+    } else fallback.setWristFit(undefined, undefined);
     originalUpdate(source, camera, side, deltaSeconds);
     const tracked = source as TrackedHand;
     for (const [modelSide, model] of Object.entries(models) as [HandSide, SideModel][])
@@ -597,6 +624,7 @@ export function createStandardHand(options: StandardHandOptions = {}): StandardH
       const model = models[(fallback.root.userData.handedness as HandSide) ?? 'left'];
       return loaded && model && fallback.root.visible ? skinProbes(model) : fallback.contactProbes;
     },
+    setWristFit: fallback.setWristFit,
     assetReady,
     update: fallback.update,
     updateController(pose, camera, side, gamepad, deltaSeconds) {
