@@ -76,7 +76,6 @@ import {
   copyCommand,
   isSharedCommand,
   orderQuickCommands,
-  previewCommandText,
   quickStripCommands,
   splitTemplate,
 } from '../quick-commands';
@@ -135,6 +134,7 @@ import {
   draftFromCommand,
   editCommandDraft,
 } from './command-editor';
+import { CONFIRM_MIN_MS, CONFIRM_WINDOW_MS, createArming } from './controllers/arming';
 import {
   createDeskBackdrop,
   createDeskWindow,
@@ -166,9 +166,7 @@ import { createPaneFocus } from './pane-focus';
 import { actionData, getAction, type PanelAction, setAction } from './panel-actions';
 import { measurePanelBounds } from './panel-bounds';
 import {
-  CONFIRM_LABELS,
   type CommandTool,
-  type ConfirmAction,
   createLabelButton,
   raisePanelButton,
   setModifierVisual,
@@ -656,13 +654,6 @@ const BUTTON_PRESS_MS = 140;
 const BUTTON_RELEASE_MS = 80;
 const BUTTON_WALL_COLOR = 0x3a5363;
 
-const CONFIRM_WINDOW_MS = 3000;
-// A controller double-click lands well inside this, so it cannot arm and confirm at once.
-const CONFIRM_MIN_MS = 350;
-// The armed preview shares one 1.1-wide label line, so it is shorter than the browser prompt.
-const XR_PREVIEW_LENGTH = 60;
-// Label text is always white, so the armed amber must stay dark enough to read.
-const ARMED_TINT = 0xf1b65e;
 // Surfaces that a select lands on without pressing a control; they get no click cue.
 const PASSIVE_ACTIONS = new Set(['noop', 'grabInput', 'grabWidget', 'grabRadial', 'scrollStrip']);
 
@@ -1395,11 +1386,6 @@ export function createWorkspaceScene(
     menuCommands = orderQuickCommands(quickCommands).map((command) => ({ ...command }));
     stripCommands = quickStripCommands(quickCommands).map((command) => ({ ...command }));
   };
-  let armedCommand: { id: string; action: string; kind: 'run' | 'remove'; at: number } | null =
-    null;
-  let armedTimer: ReturnType<typeof setTimeout> | undefined;
-  let armedControl: { action: ConfirmAction; at: number } | null = null;
-  let armedControlTimer: ReturnType<typeof setTimeout> | undefined;
   let inputRoot: THREE.Group | null = null;
   let hierarchyNavigator: HierarchyNavigator | null = null;
   let hierarchyNavigation: HierarchyNavigation = { path: [], page: 0 };
@@ -1514,6 +1500,19 @@ export function createWorkspaceScene(
   let gazeInputState: GazeState = { candidateId: null, emphasizedId: null, since: 0 };
   let lastRayDistance = CONTROLLER_RAY_LENGTH;
   const hoveredByController = new Map<THREE.Group, THREE.Object3D>();
+  const arming = createArming({
+    cue,
+    lastSelectSource: () => lastSelectSource,
+    disposed: () => disposed,
+    inputRoot: () => inputRoot,
+    inputMode: () => inputMode,
+    refreshInputRoot: (mode) => refreshInputRoot(mode),
+    menuCommands: () => menuCommands,
+    stripCommands: () => stripCommands,
+    hudRoot: () => hudRoot,
+    hoveredByController,
+    updateLabel,
+  });
   let inputTransform: {
     position: THREE.Vector3;
     quaternion: THREE.Quaternion;
@@ -4248,91 +4247,12 @@ export function createWorkspaceScene(
     templateHint = null;
     commandTool = 'run';
     commandsMessage = '';
-    disarmCommand();
+    arming.disarmCommand();
     clearArmedModifiers();
   };
-  const disarmCommand = (): boolean => {
-    if (armedTimer !== undefined) clearTimeout(armedTimer);
-    armedTimer = undefined;
-    const wasArmed = armedCommand !== null;
-    armedCommand = null;
-    return wasArmed;
-  };
-  const armCommand = (next: { id: string; action: string; kind: 'run' | 'remove' }): void => {
-    disarmCommand();
-    armedCommand = { ...next, at: Date.now() };
-    cue('armed', lastSelectSource);
-    armedTimer = setTimeout(() => {
-      armedTimer = undefined;
-      armedCommand = null;
-      if (inputRoot && !disposed) refreshInputRoot(inputMode);
-    }, CONFIRM_WINDOW_MS);
-    if (inputRoot) refreshInputRoot(inputMode);
-  };
-  const isArmed = (id: string, action: string): boolean =>
-    armedCommand?.id === id && armedCommand.action === action;
-  const confirmTooSoon = (): boolean =>
-    armedCommand !== null && Date.now() - armedCommand.at < CONFIRM_MIN_MS;
-  const armedPreview = (action: string): string | null => {
-    const armed = armedCommand;
-    if (armed?.action !== action) return null;
-    const command = [...menuCommands, ...stripCommands].find((item) => item.id === armed.id);
-    if (!command) return null;
-    const verb = armed.kind === 'remove' ? 'Removes' : 'Sends';
-    return `${verb}: ${previewCommandText(command.text, XR_PREVIEW_LENGTH)}`;
-  };
-  let resetArmShown = false;
-  const syncArmedControls = (): void => {
-    const exit = hudRoot?.children.find((child) => child.userData.inputAction === 'exit') as
-      | THREE.Mesh
-      | undefined;
-    if (exit) {
-      const armed = armedControl?.action === 'exit';
-      updateLabel(exit, CONFIRM_LABELS.exit[armed ? 1 : 0]);
-      exit.userData.armed = armed || undefined;
-      exit.userData.restColor = armed ? ARMED_TINT : undefined;
-      const material = exit.material as THREE.MeshBasicMaterial;
-      if (!hoveredByController.size || ![...hoveredByController.values()].includes(exit))
-        material.color?.setHex(armed ? ARMED_TINT : 0xffffff);
-    }
-    const resetArmed = armedControl?.action === 'resetLayout';
-    if (resetArmed === resetArmShown) return;
-    resetArmShown = resetArmed;
-    if (inputRoot && inputMode === 'arrange' && !disposed) refreshInputRoot('arrange');
-  };
-  const disarmControl = (): boolean => {
-    if (armedControlTimer !== undefined) clearTimeout(armedControlTimer);
-    armedControlTimer = undefined;
-    if (!armedControl) return false;
-    armedControl = null;
-    syncArmedControls();
-    return true;
-  };
-  const disarmPresses = (): void => {
-    disarmControl();
-    if (disarmCommand() && inputRoot && !disposed) refreshInputRoot(inputMode);
-  };
-  /** First press arms `action`; a second press inside the confirm window runs it. */
-  const confirmControl = (action: ConfirmAction): boolean => {
-    if (armedControl?.action === action) {
-      if (Date.now() - armedControl.at < CONFIRM_MIN_MS) return false;
-      disarmControl();
-      return true;
-    }
-    disarmControl();
-    armedControl = { action, at: Date.now() };
-    armedControlTimer = setTimeout(() => {
-      armedControlTimer = undefined;
-      armedControl = null;
-      if (!disposed) syncArmedControls();
-    }, CONFIRM_WINDOW_MS);
-    cue('armed', lastSelectSource);
-    syncArmedControls();
-    return false;
-  };
   const commandButtonLabel = (command: QuickCommand, action: string): string =>
-    isArmed(command.id, action)
-      ? `${armedCommand?.kind === 'remove' ? 'Remove' : 'Run'} ${command.label}?`
+    arming.isArmed(command.id, action)
+      ? `${arming.armedCommandKind() === 'remove' ? 'Remove' : 'Run'} ${command.label}?`
       : isSharedCommand(command)
         ? `Shared · ${command.label}`
         : command.label;
@@ -4756,10 +4676,11 @@ export function createWorkspaceScene(
       !action ||
       action === 'noop' ||
       action === 'grabInput' ||
-      (armedCommand !== null && isArmed(String(hit.userData.commandId), action));
+      (arming.hasArmedCommand() && arming.isArmed(String(hit.userData.commandId), action));
     const root = inputRoot;
-    if (!keepArmed && armedControl && armedControl.action !== action) disarmControl();
-    const disarmed = !keepArmed && disarmCommand();
+    const armedAction = arming.armedControlState()?.action ?? null;
+    if (!keepArmed && armedAction !== null && armedAction !== action) arming.disarmControl();
+    const disarmed = !keepArmed && arming.disarmCommand();
     const handled = handleInputTargetAction(hit);
     if (disarmed && inputRoot && inputRoot === root) refreshInputRoot(inputMode);
     return handled;
@@ -4904,7 +4825,7 @@ export function createWorkspaceScene(
         return true;
       }
       case 'exit': {
-        if (!confirmControl('exit')) return true;
+        if (!arming.confirmControl('exit')) return true;
         hideInput();
         if (activeSession) void activeSession.end();
         else actions.exitPreview();
@@ -5026,12 +4947,12 @@ export function createWorkspaceScene(
       refreshInputRoot('command-editor');
       return;
     } else if (commandTool === 'remove') {
-      if (!isArmed(command.id, action)) {
-        armCommand({ id: command.id, action, kind: 'remove' });
+      if (!arming.isArmed(command.id, action)) {
+        arming.armCommand({ id: command.id, action, kind: 'remove' });
         return;
       }
-      if (confirmTooSoon()) return;
-      disarmCommand();
+      if (arming.confirmTooSoon()) return;
+      arming.disarmCommand();
       if (actions.removeCommand(command.id)) {
         snapshotMenuCommands();
         commandPage = Math.min(commandPage, Math.max(0, Math.ceil(menuCommands.length / 8) - 1));
@@ -5041,12 +4962,12 @@ export function createWorkspaceScene(
     refreshInputRoot('commands');
   };
   const activateCommand = (command: QuickCommand, paneId: string, action: string): void => {
-    if (command.confirm && !isArmed(command.id, action)) {
-      armCommand({ id: command.id, action, kind: 'run' });
+    if (command.confirm && !arming.isArmed(command.id, action)) {
+      arming.armCommand({ id: command.id, action, kind: 'run' });
       return;
     }
-    if (command.confirm && confirmTooSoon()) return;
-    const wasArmed = disarmCommand();
+    if (command.confirm && arming.confirmTooSoon()) return;
+    const wasArmed = arming.disarmCommand();
     const root = inputRoot;
     runMenuCommand(command, paneId);
     if (wasArmed && inputRoot && inputRoot === root) refreshInputRoot(inputMode);
@@ -5208,7 +5129,7 @@ export function createWorkspaceScene(
     const clicks =
       target?.object?.userData.key !== undefined || (action && !PASSIVE_ACTIONS.has(action));
     // These controls bypass handleInputTarget, which is where other presses disarm.
-    if (action === 'wristMenu' || action === 'scrollStrip') disarmPresses();
+    if (action === 'wristMenu' || action === 'scrollStrip') arming.disarmPresses();
     if (action === 'wristMenu') {
       if (clicks) cue('select', controller);
       if (controllerHandedness.get(controller) === 'left') toggleWristMenu(controller);
@@ -5950,7 +5871,7 @@ export function createWorkspaceScene(
       snapshotMenuCommands();
       commandPage = 0;
       templateHint = null;
-      disarmCommand();
+      arming.disarmCommand();
       if (inputMode === 'warp' && warpPanelEdit?.id !== nextId) {
         settleWarpPanel(false);
         if (nextId)
@@ -7348,7 +7269,7 @@ export function createWorkspaceScene(
   };
   const dispose = (): void => {
     if (disposed) return;
-    disarmCommand();
+    arming.dispose();
     clearArmedPaste();
     messageToasts.dispose();
     clearTimeout(paneCreationRetry);
@@ -7356,9 +7277,6 @@ export function createWorkspaceScene(
     for (const thumbnail of backgroundThumbnails.values())
       if (thumbnail instanceof THREE.Texture) thumbnail.dispose();
     backgroundThumbnails.clear();
-    if (armedControlTimer !== undefined) clearTimeout(armedControlTimer);
-    armedControl = null;
-    resetHandContacts(false);
     handContacts.clear();
     keyboardProximity.clear();
     contactSamples.clear();
@@ -7642,9 +7560,9 @@ export function createWorkspaceScene(
         backgroundRow = value;
       },
       get armedControl() {
-        return armedControl;
+        return arming.armedControlState();
       },
-      confirmControl,
+      confirmControl: arming.confirmControl,
       manageCommand,
       getWidgetEntry,
       getTerminalOpacity,
@@ -7709,8 +7627,8 @@ export function createWorkspaceScene(
       dictationCaption,
       editDictationKey,
       pinNote,
-      isArmed,
-      armedPreview,
+      isArmed: arming.isArmed,
+      armedPreview: arming.armedPreview,
       clearArmedModifiers,
       commandButtonLabel,
       snapshotMenuCommands,
