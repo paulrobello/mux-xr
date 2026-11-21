@@ -71,7 +71,7 @@ The desktop DOM hierarchy remains the accessible fallback. The bundled XR labels
 
 When the streamer runs against a par-mux daemon it pushes the agent roster (core `AgentRoster` on connect, `AgentStateChanged` as states change) on the hierarchy socket. The browser sidebar lists it under **Agents**, above the workspace tree. The state glyph and word are coloured by state: question and blocked in amber, working in cyan, done in green. The app redraws only when a shown token changes, and XR coalesces bursts of state changes into one rebuild.
 
-Each entry is configurable the same way as par-mux's `[client] agent-rows`: a list of lines, each a list of tokens joined by ` · `, where a token with nothing to show drops out.
+Each entry is configurable the same way as par-mux's `[client] agent-rows`: a list of lines, each a list of tokens joined by `·`, where a token with nothing to show drops out.
 
 Choose a layout under **Workspace settings → Agent roster → Rows**. The default **Full** layout shows `state_icon, state, agent, title / workspace, project, pane / message`. The par-mux presets **default**, **compact**, **detailed** and **verbose** match par-mux token for token. **Custom** takes your own rows, with lines separated by `/` and tokens by commas, for example `state_icon, agent / project, pane`. Unknown tokens are skipped and named in the hint.
 
@@ -89,16 +89,16 @@ Core 0.81.0 improves roster updates for self-reported state, blocked reasons, pr
 
 Mouse clicks in 3D preview and controller triggers in VR use the same actions, with one input presenter per mode. Browser Keyboard/Commands use the compact DOM drawer. Immersive VR uses spatial controls only. Hover with the mouse or aim a controller ray at a non-obvious control to see its explanation. DOM icon and modifier buttons also have browser hover titles.
 
-| Radial item | Owns |
-| --- | --- |
-| Keyboard | Keys, modifier locks, target readout, Gaze input and Backing. |
-| Commands | Global/workspace commands and their editor. |
-| Panes | Hierarchy browsing and opening/selecting pane views. |
-| Layout | Row, Grid, Arc, Sphere, Closer/Farther and recovery. |
-| Warp | Right-stick left/right adjusts curvature and up/down adjusts opacity. A saves both, B cancels. |
-| Widgets | Add, show, or hide [widgets](#widgets), including pictures and dictated sticky notes. |
-| Settings | Display, World and Selected terminal pages, Keyborb mode and UI sounds. |
-| Focus | Temporarily bring the aimed or selected pane forward. |
+| Radial item | Owns                                                                                           |
+| ----------- | ---------------------------------------------------------------------------------------------- |
+| Keyboard    | Keys, modifier locks, target readout, Gaze input and Backing.                                  |
+| Commands    | Global/workspace commands and their editor.                                                    |
+| Panes       | Hierarchy browsing and opening/selecting pane views.                                           |
+| Layout      | Row, Grid, Arc, Sphere, Closer/Farther and recovery.                                           |
+| Warp        | Right-stick left/right adjusts curvature and up/down adjusts opacity. A saves both, B cancels. |
+| Widgets     | Add, show, or hide [widgets](#widgets), including pictures and dictated sticky notes.          |
+| Settings    | Display, World and Selected terminal pages, Keyborb mode and UI sounds.                        |
+| Focus       | Temporarily bring the aimed or selected pane forward.                                          |
 
 Press A or click the right thumbstick to open the selected tinted ring. When opened with a stick, aim either controller and pull its trigger, or tilt the opening stick to select a wedge with that controller’s trigger. Its center expands first, eight options emerge as a stack, then move around the circle into their final positions. The menu opens in about 640 ms. Moving targets cannot be activated or grabbed. Point and trigger to choose Keyboard, Commands, Panes, Layout, Warp, Widgets, Settings or Focus (which toggles Focus on the pane aimed at when the menu opened). Center Cancel or A closes it. B remains Focus outside Warp editing. Scrolling and underlying terminal activation are blocked while the menu is visible.
 

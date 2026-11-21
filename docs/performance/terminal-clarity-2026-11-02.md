@@ -9,10 +9,10 @@ test-mac Apple M4, Chromium new headless with Metal hardware acceleration, 1440Ã
 ## Accepted comparison
 
 | Panes | Base callback p95 | Candidate callback p95 | Base callback p99 | Candidate callback p99 | Base/candidate uploaded MiB |
-| --- | --- | --- | --- | --- | --- |
-| 6 | 6.4 ms | 6.4 ms | 61.3 ms | 63.1 ms | 502.6 / 502.0 |
-| 12 | 6.4 ms | 6.3 ms | 57.8 ms | 56.1 ms | 437.1 / 437.6 |
-| 18 | 6.3 ms | 6.5 ms | 54.7 ms | 54.1 ms | 378.9 / 378.4 |
+| ----- | ----------------- | ---------------------- | ----------------- | ---------------------- | --------------------------- |
+| 6     | 6.4 ms            | 6.4 ms                 | 61.3 ms           | 63.1 ms                | 502.6 / 502.0               |
+| 12    | 6.4 ms            | 6.3 ms                 | 57.8 ms           | 56.1 ms                | 437.1 / 437.6               |
+| 18    | 6.3 ms            | 6.5 ms                 | 54.7 ms           | 54.1 ms                | 378.9 / 378.4               |
 
 Animation-frame interval p95 was16.8ms in every run. Uploaded bytes differ slightly with delivered packet counts. Accepted one-minute host load before/after each baseline run was2.071/2.146,2.134/2.039,2.039/2.113, and candidate1.987/1.835,1.835/1.860,1.791/1.982. Every run had zero page errors. These results show no material p95 regression in this workload, not a capacity improvement. Long LOD-promotion frames still occur during aggressive gaze changes, as shown by p99. The existing long-frame follow-up remains open.
 

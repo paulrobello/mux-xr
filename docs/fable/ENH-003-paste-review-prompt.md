@@ -21,11 +21,13 @@ SEC-001 (card `01a1dfd6e30f7742ba3be611d214337f`) is done, so `sanitizePasteText
 ## Implementation
 
 1. **Pure classifier.** Create `src/paste-review.ts`:
+
    ```ts
    export type PasteReviewMode = 'always' | 'multiline' | 'off';
    export type PasteSummary = { text: string; lines: number; characters: number; removed: number; preview: string; needsReview: boolean };
    export const summarizePaste: (raw: string, mode: PasteReviewMode) => PasteSummary;
    ```
+
    `text` is `sanitizePasteText(raw)`. `removed` is `raw.length - text.length`. `lines` counts LF-separated lines after normalising CRLF, ignoring one trailing newline. `preview` is the first line through `previewCommandText`. `needsReview` is `mode === 'always'`, or `mode === 'multiline'` and (`lines > 1` or `removed > 0`). With `off` it is always `false`.
 2. **Setting.** Add `pasteReview: PasteReviewMode` (default `'multiline'`) to the settings store, with a three-way control on the XR `settings` panel and in the browser settings panel.
 3. **Pending paste state.** In the clipboard code add `pendingPaste: { paneId: string; summary: PasteSummary; at: number; timer } | null`.

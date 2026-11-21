@@ -20,6 +20,7 @@ QA-005 (card `01a1dfd73f73726b9aacd9a00208ec99`) is done. ARC-006 (widget contex
 ## Implementation
 
 1. **Log core.** Extend `src/diagnostics.ts` (no DOM or Node imports):
+
    ```ts
    export type DiagnosticEntry = { at: number; scope: string; name: string; message: string; count: number };
    export const DIAGNOSTIC_CAPACITY = 200;
@@ -30,6 +31,7 @@ QA-005 (card `01a1dfd73f73726b9aacd9a00208ec99`) is done. ARC-006 (widget contex
      subscribe(listener: () => void): () => void;
    };
    ```
+
    A fixed-size ring. `report` stores `error.name` and `error.message` (or `String(error)`), truncated to 200 characters, after `redact`. A report equal in scope, name and message to the newest entry increments its `count` and updates `at` instead of adding a row, so a failure repeating every frame cannot flood the ring. `reportSwallowed` calls `diagnostics.report` and keeps its `console.debug`.
 2. **Redaction.** `redact(message)`: strip the query string and fragment from anything that parses as a URL, and replace any run of 24 or more base64 or hex characters with `[redacted]`. Callers must still never pass clipboard text, dictated text, pasted text, request bodies or secrets; state this in the doc comment on `report`.
 3. **Global handlers.** In the composition root (`src/app.ts` after ARC-009, otherwise `src/main.ts`), add `error` and `unhandledrejection` listeners that call `diagnostics.report('window.error', …)` and `diagnostics.report('window.unhandledrejection', …)`, removed on dispose. Route the two QA-001 `console.error` sites through `diagnostics.report` as well.

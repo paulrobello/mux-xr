@@ -2,13 +2,13 @@
 
 > Status: historical MVP specification, dated 2026-11-03. The shipped product is described in [README](README.md) and [the workspace guide](docs/WORKSPACE.md).
 
-| Field | Value |
-| --- | --- |
-| Product | Mux XR |
-| Repo | mux-xr |
-| Owner | Paul Robello |
-| Status | Owner reports the controller build works well on Quest 3; hand input requires separate headset acceptance |
-| Date | November 3, 2026, Etc/GMT+8 |
+| Field   | Value                                                                                                     |
+| ------- | --------------------------------------------------------------------------------------------------------- |
+| Product | Mux XR                                                                                                    |
+| Repo    | mux-xr                                                                                                    |
+| Owner   | Paul Robello                                                                                              |
+| Status  | Owner reports the controller build works well on Quest 3; hand input requires separate headset acceptance |
+| Date    | November 3, 2026, Etc/GMT+8                                                                               |
 
 ## Overview
 
@@ -30,12 +30,12 @@ Public hosting/tunnels, physical keyboard dependency, ambient sound, arbitrary r
 
 ## Reference Projects
 
-| Reference | Reuse |
-| --- | --- |
-| par-term-emu-core-rust | Binary protobuf/zlib streaming, pane mirrors, input/paste/mouse, metadata |
-| pardeck | Label/text/optional-Enter command model, local editable lists and intentionally targeted input |
-| par-dots | Direct Three.js WebXR lifecycle, controller-slot handling, grabbable UI and real-headset acceptance boundary |
-| webxr1 | Controller/hand interaction direction, MR/VR mode switching and local Quest development |
+| Reference              | Reuse                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------ |
+| par-term-emu-core-rust | Binary protobuf/zlib streaming, pane mirrors, input/paste/mouse, metadata                                    |
+| pardeck                | Label/text/optional-Enter command model, local editable lists and intentionally targeted input               |
+| par-dots               | Direct Three.js WebXR lifecycle, controller-slot handling, grabbable UI and real-headset acceptance boundary |
+| webxr1                 | Controller/hand interaction direction, MR/VR mode switching and local Quest development                      |
 
 ## Architecture Direction
 
@@ -63,12 +63,12 @@ Keyboard curvature is a saved 0–100° preference, and curved backing/key geome
 
 ## Phases
 
-| Phase | Demonstrable outcome | Acceptance |
-| --- | --- | --- |
-| P0 | Local app and real single-pane vertical slice | Typed build/gates, binary protocol fidelity, initial ANSI seed and live input/output, safe detach/reconnect, trustworthy LAN setup instructions |
-| P1 | Controller-first MVP test build | Two real panes, hierarchy selection, manipulation, command scopes, virtual input, four environment modes, explicit focus, head-gaze option, browser/live-core evidence, and a handoff for the owner's deferred Quest acceptance |
-| P2 | Spatial workspace polish | Named 3D layouts, radial menus, animated window entrance/restore, whole-window split views, broader capacity characterization |
-| P3 | Hand control | Selection, manipulation and typing usable with hands, preserving explicit input-target semantics |
+| Phase | Demonstrable outcome                          | Acceptance                                                                                                                                                                                                                      |
+| ----- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0    | Local app and real single-pane vertical slice | Typed build/gates, binary protocol fidelity, initial ANSI seed and live input/output, safe detach/reconnect, trustworthy LAN setup instructions                                                                                 |
+| P1    | Controller-first MVP test build               | Two real panes, hierarchy selection, manipulation, command scopes, virtual input, four environment modes, explicit focus, head-gaze option, browser/live-core evidence, and a handoff for the owner's deferred Quest acceptance |
+| P2    | Spatial workspace polish                      | Named 3D layouts, radial menus, animated window entrance/restore, whole-window split views, broader capacity characterization                                                                                                   |
+| P3    | Hand control                                  | Selection, manipulation and typing usable with hands, preserving explicit input-target semantics                                                                                                                                |
 
 Plans: [P0](plans/phase-0-live-terminal.md), [P1](plans/phase-1-controller-mvp.md), [P2](plans/phase-2-spatial-workspaces.md), [P3](plans/phase-3-hand-control.md).
 

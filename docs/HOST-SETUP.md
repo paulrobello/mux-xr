@@ -114,28 +114,28 @@ The host service is `scripts/dictation-server.ts`. It takes `--name value` pairs
 
 ### Host service flags
 
-| Flag | Default | Purpose |
-| --- | --- | --- |
-| `--host` | required | Address to bind. The installers use `0.0.0.0`. |
-| `--port` | required | Port to bind, 1 to 65535. The installers use 4242. |
-| `--origin` | required, repeatable | Frontend origin allowed to connect. |
-| `--cert`, `--key` | required | TLS certificate and key PEM paths. |
-| `--model` | required | Whisper model path. The server refuses to start if it cannot read it. |
-| `--ffmpeg` | `/opt/homebrew/bin/ffmpeg` | FFmpeg binary for audio conversion. |
-| `--whisper` | `/opt/homebrew/bin/whisper-cli` | `whisper-cli` binary for transcription. |
-| `--otel-env-file` | `.local/whisper-otel.env` | OpenTelemetry settings file. See [Telemetry](#telemetry). |
-| `--clipboard-secret-file` | none | Pairing secret file. Without it every paired route stays off. |
-| `--dictate-auth` | `off` | `on` requires the pairing proof on `/dictate`. |
-| `--repo-status` | `off` | `on` enables `/repo-status`. |
-| `--picture-proxy` | `off` | `on` enables `/picture-fetch`. |
-| `--picture-depth` | `off` | `on` enables `/picture-depth`. The server refuses to start if the model is missing. |
-| `--depth-model` | `.local/models/depth-anything-v2-small.onnx` | ONNX model for picture depth. |
-| `--board-feeds` | `off` | `on` enables `/kanban-strip` and `/bookings`. |
-| `--service-health` | `off` | `on` enables `/service-health`. |
-| `--service-health-env-file` | `.local/par-obs-query.env` in the checkout | Service token file. It must be mode 600. |
-| `--mesh-inbox` | `off` | `on` enables `/mesh-inbox`. |
-| `--toast-lan` | `off` | `on` accepts `/toast` senders from the LAN as well as this Mac. |
-| `--toast-token-file` | none | Dedicated toast sender token. A valid token replaces the pairing secret as the accepted bearer. |
+| Flag                        | Default                                      | Purpose                                                                                         |
+| --------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `--host`                    | required                                     | Address to bind. The installers use `0.0.0.0`.                                                  |
+| `--port`                    | required                                     | Port to bind, 1 to 65535. The installers use 4242.                                              |
+| `--origin`                  | required, repeatable                         | Frontend origin allowed to connect.                                                             |
+| `--cert`, `--key`           | required                                     | TLS certificate and key PEM paths.                                                              |
+| `--model`                   | required                                     | Whisper model path. The server refuses to start if it cannot read it.                           |
+| `--ffmpeg`                  | `/opt/homebrew/bin/ffmpeg`                   | FFmpeg binary for audio conversion.                                                             |
+| `--whisper`                 | `/opt/homebrew/bin/whisper-cli`              | `whisper-cli` binary for transcription.                                                         |
+| `--otel-env-file`           | `.local/whisper-otel.env`                    | OpenTelemetry settings file. See [Telemetry](#telemetry).                                       |
+| `--clipboard-secret-file`   | none                                         | Pairing secret file. Without it every paired route stays off.                                   |
+| `--dictate-auth`            | `off`                                        | `on` requires the pairing proof on `/dictate`.                                                  |
+| `--repo-status`             | `off`                                        | `on` enables `/repo-status`.                                                                    |
+| `--picture-proxy`           | `off`                                        | `on` enables `/picture-fetch`.                                                                  |
+| `--picture-depth`           | `off`                                        | `on` enables `/picture-depth`. The server refuses to start if the model is missing.             |
+| `--depth-model`             | `.local/models/depth-anything-v2-small.onnx` | ONNX model for picture depth.                                                                   |
+| `--board-feeds`             | `off`                                        | `on` enables `/kanban-strip` and `/bookings`.                                                   |
+| `--service-health`          | `off`                                        | `on` enables `/service-health`.                                                                 |
+| `--service-health-env-file` | `.local/par-obs-query.env` in the checkout   | Service token file. It must be mode 600.                                                        |
+| `--mesh-inbox`              | `off`                                        | `on` enables `/mesh-inbox`.                                                                     |
+| `--toast-lan`               | `off`                                        | `on` accepts `/toast` senders from the LAN as well as this Mac.                                 |
+| `--toast-token-file`        | none                                         | Dedicated toast sender token. A valid token replaces the pairing secret as the accepted bearer. |
 
 Every `on`/`off` flag rejects any other value at startup. The installer exposes the same switches without a value, as in `--install --agent --repo-status`, and has no `--toast-token-file` option.
 
@@ -143,36 +143,36 @@ Every `on`/`off` flag rejects any other value at startup. The installer exposes 
 
 `bun run scripts/install-dictation-service.ts` chooses one action: `--print` (the default), `--install` or `--uninstall`.
 
-| Flag | Purpose |
-| --- | --- |
-| `--agent` | Target the per-user LaunchAgent instead of the LaunchDaemon. Every feature flag below requires it, and so does `--uninstall`. |
-| `--migrate-running-listener` | Let the LaunchDaemon install drain a recognized existing listener. Refused with `--agent`. |
-| `--repo <path>` | Absolute path to the stable checkout. A path under `.codex/worktrees` is refused. |
-| `--user <name>` | Non-root macOS user the service runs as. |
-| `--repo-status`, `--picture-proxy`, `--picture-depth`, `--board-feeds`, `--service-health`, `--mesh-inbox`, `--toast-lan`, `--dictate-auth` | Turn on the matching host service flag. |
+| Flag                                                                                                                                        | Purpose                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--agent`                                                                                                                                   | Target the per-user LaunchAgent instead of the LaunchDaemon. Every feature flag below requires it, and so does `--uninstall`. |
+| `--migrate-running-listener`                                                                                                                | Let the LaunchDaemon install drain a recognized existing listener. Refused with `--agent`.                                    |
+| `--repo <path>`                                                                                                                             | Absolute path to the stable checkout. A path under `.codex/worktrees` is refused.                                             |
+| `--user <name>`                                                                                                                             | Non-root macOS user the service runs as.                                                                                      |
+| `--repo-status`, `--picture-proxy`, `--picture-depth`, `--board-feeds`, `--service-health`, `--mesh-inbox`, `--toast-lan`, `--dictate-auth` | Turn on the matching host service flag.                                                                                       |
 
 ### Local host configuration keys
 
 `.local/host-config.json` is optional. `repository` and `user` set the installer defaults that `--repo` and `--user` override. The remaining keys have no flag.
 
-| Key | Type | Purpose |
-| --- | --- | --- |
-| `repository` | string | Absolute path to the stable checkout. |
-| `user` | string | macOS user for the service. |
-| `origins` | non-empty string array | HTTPS frontend origins. The default is `https://localhost:4240`. |
-| `launchdLabel` | string | launchd job label. The default is `org.mux-xr.whisper`. |
-| `grafanaUrl` | string | HTTPS Grafana origin, read when `--service-health` is on. |
-| `handSource` | string | Editable Blender hand file that the hand scripts verify before they write. |
+| Key            | Type                   | Purpose                                                                    |
+| -------------- | ---------------------- | -------------------------------------------------------------------------- |
+| `repository`   | string                 | Absolute path to the stable checkout.                                      |
+| `user`         | string                 | macOS user for the service.                                                |
+| `origins`      | non-empty string array | HTTPS frontend origins. The default is `https://localhost:4240`.           |
+| `launchdLabel` | string                 | launchd job label. The default is `org.mux-xr.whisper`.                    |
+| `grafanaUrl`   | string                 | HTTPS Grafana origin, read when `--service-health` is on.                  |
+| `handSource`   | string                 | Editable Blender hand file that the hand scripts verify before they write. |
 
 ### Page and tooling settings
 
-| Name | Where | Purpose |
-| --- | --- | --- |
-| `host-port` query parameter | Browser page URL | Integer 1 to 65535 that moves the page's host service connections off port 4242 for a private fixture. Any other value falls back to 4242. |
-| `MUX_XR_TLS_CERT`, `MUX_XR_TLS_KEY` | Environment of `make dev` | PEM paths. Vite serves HTTPS only when both are set. |
-| `MUX_XR_SECRET_FILE` | Environment of `scripts/send-toast.ts` | Pairing secret path. `--secret-file` wins and the default is `.local/clipboard-secret`. |
-| `PAR_MUX_PANE_ID` | Environment of `scripts/send-toast.ts` | Pane id that `--pane current` targets. par-mux sets it in each pane. |
-| `PW_GPU` | Environment of `scripts/background-thumbnails.ts` and `scripts/pane-frame-sheet.ts` | `swiftshader` renders on the CPU. Any other value uses the Metal GPU. |
+| Name                                | Where                                                                               | Purpose                                                                                                                                    |
+| ----------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `host-port` query parameter         | Browser page URL                                                                    | Integer 1 to 65535 that moves the page's host service connections off port 4242 for a private fixture. Any other value falls back to 4242. |
+| `MUX_XR_TLS_CERT`, `MUX_XR_TLS_KEY` | Environment of `make dev`                                                           | PEM paths. Vite serves HTTPS only when both are set.                                                                                       |
+| `MUX_XR_SECRET_FILE`                | Environment of `scripts/send-toast.ts`                                              | Pairing secret path. `--secret-file` wins and the default is `.local/clipboard-secret`.                                                    |
+| `PAR_MUX_PANE_ID`                   | Environment of `scripts/send-toast.ts`                                              | Pane id that `--pane current` targets. par-mux sets it in each pane.                                                                       |
+| `PW_GPU`                            | Environment of `scripts/background-thumbnails.ts` and `scripts/pane-frame-sheet.ts` | `swiftshader` renders on the CPU. Any other value uses the Metal GPU.                                                                      |
 
 The test and check variables (`MUX_XR_*` and `KEYBORB_PERF_*`) are listed in the [testing guide](TESTING.md#environment-variables).
 
@@ -180,16 +180,16 @@ The test and check variables (`MUX_XR_*` and `KEYBORB_PERF_*`) are listed in the
 
 The LaunchAgent installer accepts the flags below after `--install --agent`. Pass all flags for the features you intend to keep enabled when reinstalling. Direct invocation of the server takes `on` after each listed flag. Configure the pairing secret first.
 
-| Feature | Route | Flag or requirement |
-| --- | --- | --- |
-| Host load and Weather | `/host-stats`, `/weather` | Clipboard pairing |
-| Git & CI | `/repo-status` | `--repo-status` |
-| Picture proxy | `/picture-fetch` | `--picture-proxy` |
-| Picture depth | `/picture-depth` | `--picture-depth` and the pinned ONNX model |
-| Kanban strip and Host bookings | `/kanban-strip`, `/bookings` | `--board-feeds` and a working kanban CLI |
-| Service health | `/service-health` | `--service-health` with `grafanaUrl` in the local host config and an owner-only `.local/par-obs-query.env` |
-| Mesh inbox | `/mesh-inbox` | `--mesh-inbox` and a working par-mesh CLI |
-| Toasts | `/toast`, `/toasts` | Clipboard pairing. `--toast-lan` allows posts from other LAN hosts. |
+| Feature                        | Route                        | Flag or requirement                                                                                        |
+| ------------------------------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Host load and Weather          | `/host-stats`, `/weather`    | Clipboard pairing                                                                                          |
+| Git & CI                       | `/repo-status`               | `--repo-status`                                                                                            |
+| Picture proxy                  | `/picture-fetch`             | `--picture-proxy`                                                                                          |
+| Picture depth                  | `/picture-depth`             | `--picture-depth` and the pinned ONNX model                                                                |
+| Kanban strip and Host bookings | `/kanban-strip`, `/bookings` | `--board-feeds` and a working kanban CLI                                                                   |
+| Service health                 | `/service-health`            | `--service-health` with `grafanaUrl` in the local host config and an owner-only `.local/par-obs-query.env` |
+| Mesh inbox                     | `/mesh-inbox`                | `--mesh-inbox` and a working par-mesh CLI                                                                  |
+| Toasts                         | `/toast`, `/toasts`          | Clipboard pairing. `--toast-lan` allows posts from other LAN hosts.                                        |
 
 For picture depth, `bun run scripts/fetch-depth-model.ts` installs the pinned Depth Anything V2 Small model and verifies its hash. The server can override the model path with `--depth-model`. For Service health, the environment file supplies `PAR_OBS_CF_ACCESS_CLIENT_ID` and `PAR_OBS_CF_ACCESS_CLIENT_SECRET`. Use mode 600 and keep the file local. See [widgets](WORKSPACE.md#widgets) for the data each feed shows.
 
@@ -227,18 +227,18 @@ curl -sS https://localhost:4242/toast \
 
 The JSON body takes these fields:
 
-| Field | Values | Default |
-| --- | --- | --- |
-| `message` | 1-280 characters, newlines kept | required |
-| `level` | `info`, `success`, `warn`, `error` | `info` |
-| `title` | up to 60 characters | none |
-| `source` | up to 40 characters, shown after the title | none |
-| `color` | `#rrggbb` accent, overrides the level color | level color |
-| `timeout` | 0–3600 seconds. `0` keeps it until dismissed. | 6 info and success, 10 warn, 15 error |
-| `placement` | `top`, `center`, `bottom`, `hud`, `pane` | `top` |
-| `paneId` | par-mux pane id such as `%12`, for `pane` | the selected pane |
-| `id` | Letters, digits, `.`, `_`, `:` and `-`. Posting the same id again replaces that toast in place | generated |
-| `dismiss` | `true` with `id` clears that toast | |
+| Field       | Values                                                                                         | Default                               |
+| ----------- | ---------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `message`   | 1-280 characters, newlines kept                                                                | required                              |
+| `level`     | `info`, `success`, `warn`, `error`                                                             | `info`                                |
+| `title`     | up to 60 characters                                                                            | none                                  |
+| `source`    | up to 40 characters, shown after the title                                                     | none                                  |
+| `color`     | `#rrggbb` accent, overrides the level color                                                    | level color                           |
+| `timeout`   | 0–3600 seconds. `0` keeps it until dismissed.                                                  | 6 info and success, 10 warn, 15 error |
+| `placement` | `top`, `center`, `bottom`, `hud`, `pane`                                                       | `top`                                 |
+| `paneId`    | par-mux pane id such as `%12`, for `pane`                                                      | the selected pane                     |
+| `id`        | Letters, digits, `.`, `_`, `:` and `-`. Posting the same id again replaces that toast in place | generated                             |
+| `dismiss`   | `true` with `id` clears that toast                                                             |                                       |
 
 `top`, `center` and `bottom` float 1.25 m in front of you and follow your head with a short lag. Top and bottom each stack up to three cards, newest nearest the edge, and center holds one. `hud` stacks above the HUD's notice row and moves with the HUD. `pane` sits above the named pane, or the selected one, and falls back to the top of view while that pane is not shown. Point and trigger or pinch on a card, or its ×, to dismiss it. Up to 24 toasts are held, extra ones wait for a free card, and a timeout counts from arrival. Warnings and errors are also added to the Bell feed as notices, so they are not lost if the card times out unseen. Toasts posted while no headset is connected are replayed when one subscribes, until they time out (at most 16 are kept).
 
@@ -279,45 +279,45 @@ Error frames are `{"type":"error","code":"<code>"}` with an optional `message`. 
 
 ### Routes
 
-| Path | Protocol label | Gate | Auth fields and signed material | Request | Response |
-| --- | --- | --- | --- | --- | --- |
-| `/dictate` | `mux-xr-dictate-v1` | `--dictate-auth on` for the challenge, otherwise origin only | With `--dictate-auth on`: `request` must be the empty string, which is also the signed material | One binary audio clip, at most 8 MiB. WebM and MP4 containers | `{"type":"transcript","text":"..."}`, or `{"type":"error","message":"..."}`. With auth on, error frames also carry `code` |
-| `/clipboard` | `mux-xr-clipboard-v1` | `--clipboard-secret-file` | `op` (`read` or `write`) signs `op` | For `write`, wait for `{"type":"ready"}` and send one binary UTF-8 frame, at most 256 KiB | `read`: one binary UTF-8 frame. `write`: `{"type":"ok","bytes":N}` |
-| `/host-stats` | `mux-xr-host-stats-v1` | Pairing secret | Signs `stats` | None after auth | `{"type":"stats", ...}` with three load averages, CPU percentage and core count |
-| `/repo-status` | `mux-xr-repo-status-v1` | `--repo-status on` | `cwd` and `host` sign `<host>\n<cwd>` | None after auth | `{"type":"status","status":{...}}` |
-| `/picture-fetch` | `mux-xr-picture-fetch-v1` | `--picture-proxy on` | `url` signs the URL | None after auth | `{"type":"image","contentType":"...","size":N}` then one binary frame of image bytes, at most 10 MiB |
-| `/picture-depth` | `mux-xr-picture-depth-v1` | `--picture-depth on` | `size` and `sha256` sign `<size>\n<sha256>` | After `{"type":"ready"}`, one binary image, at most 4 MiB | `{"type":"depth","width":W,"height":H,"size":N}` then one binary PNG |
-| `/weather` | `mux-xr-weather-v1` | Pairing secret | `zip` signs the ZIP | None after auth | `{"type":"weather","status":{...}}` |
-| `/kanban-strip` | `mux-xr-kanban-strip-v1` | `--board-feeds on` | `request` signs the request string | `request` is `{"cwd":"...","host":"..."}` as a JSON string. `host` may be null | `{"type":"feed","data":{...}}` |
-| `/bookings` | `mux-xr-bookings-v1` | `--board-feeds on` | `request` signs the request string | `request` is `{}` | `{"type":"feed","data":{...}}` |
-| `/service-health` | `mux-xr-service-health-v1` | `--service-health on` | `request` signs the request string | `request` is `{}` | `{"type":"feed","data":{...}}` |
-| `/mesh-inbox` | `mux-xr-mesh-inbox-v1` | `--mesh-inbox on` | `request` signs the request string | `request` is `{}` | `{"type":"feed","data":{...}}` |
-| `/toasts` | `mux-xr-toasts-v1` | Pairing secret | Signs `subscribe` | None. The socket stays open | `{"type":"ready"}`, then `{"type":"toast", "toast":{...}}` and dismiss envelopes, with `replay: true` for toasts replayed on connect. A ping every 25 seconds |
+| Path              | Protocol label             | Gate                                                         | Auth fields and signed material                                                                 | Request                                                                                   | Response                                                                                                                                                      |
+| ----------------- | -------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/dictate`        | `mux-xr-dictate-v1`        | `--dictate-auth on` for the challenge, otherwise origin only | With `--dictate-auth on`: `request` must be the empty string, which is also the signed material | One binary audio clip, at most 8 MiB. WebM and MP4 containers                             | `{"type":"transcript","text":"..."}`, or `{"type":"error","message":"..."}`. With auth on, error frames also carry `code`                                     |
+| `/clipboard`      | `mux-xr-clipboard-v1`      | `--clipboard-secret-file`                                    | `op` (`read` or `write`) signs `op`                                                             | For `write`, wait for `{"type":"ready"}` and send one binary UTF-8 frame, at most 256 KiB | `read`: one binary UTF-8 frame. `write`: `{"type":"ok","bytes":N}`                                                                                            |
+| `/host-stats`     | `mux-xr-host-stats-v1`     | Pairing secret                                               | Signs `stats`                                                                                   | None after auth                                                                           | `{"type":"stats", ...}` with three load averages, CPU percentage and core count                                                                               |
+| `/repo-status`    | `mux-xr-repo-status-v1`    | `--repo-status on`                                           | `cwd` and `host` sign `<host>\n<cwd>`                                                           | None after auth                                                                           | `{"type":"status","status":{...}}`                                                                                                                            |
+| `/picture-fetch`  | `mux-xr-picture-fetch-v1`  | `--picture-proxy on`                                         | `url` signs the URL                                                                             | None after auth                                                                           | `{"type":"image","contentType":"...","size":N}` then one binary frame of image bytes, at most 10 MiB                                                          |
+| `/picture-depth`  | `mux-xr-picture-depth-v1`  | `--picture-depth on`                                         | `size` and `sha256` sign `<size>\n<sha256>`                                                     | After `{"type":"ready"}`, one binary image, at most 4 MiB                                 | `{"type":"depth","width":W,"height":H,"size":N}` then one binary PNG                                                                                          |
+| `/weather`        | `mux-xr-weather-v1`        | Pairing secret                                               | `zip` signs the ZIP                                                                             | None after auth                                                                           | `{"type":"weather","status":{...}}`                                                                                                                           |
+| `/kanban-strip`   | `mux-xr-kanban-strip-v1`   | `--board-feeds on`                                           | `request` signs the request string                                                              | `request` is `{"cwd":"...","host":"..."}` as a JSON string. `host` may be null            | `{"type":"feed","data":{...}}`                                                                                                                                |
+| `/bookings`       | `mux-xr-bookings-v1`       | `--board-feeds on`                                           | `request` signs the request string                                                              | `request` is `{}`                                                                         | `{"type":"feed","data":{...}}`                                                                                                                                |
+| `/service-health` | `mux-xr-service-health-v1` | `--service-health on`                                        | `request` signs the request string                                                              | `request` is `{}`                                                                         | `{"type":"feed","data":{...}}`                                                                                                                                |
+| `/mesh-inbox`     | `mux-xr-mesh-inbox-v1`     | `--mesh-inbox on`                                            | `request` signs the request string                                                              | `request` is `{}`                                                                         | `{"type":"feed","data":{...}}`                                                                                                                                |
+| `/toasts`         | `mux-xr-toasts-v1`         | Pairing secret                                               | Signs `subscribe`                                                                               | None. The socket stays open                                                               | `{"type":"ready"}`, then `{"type":"toast", "toast":{...}}` and dismiss envelopes, with `replay: true` for toasts replayed on connect. A ping every 25 seconds |
 
 The kanban strip, bookings, service health and mesh inbox routes share one request limit of 20 per client per minute and allow 6 connections, 3 per client. Picture depth allows 4 connections, 2 per client. Other caps are in [Pairing and request limits](#pairing-and-request-limits) and the sections for each route.
 
 ### Plain HTTP routes
 
-| Method and path | Auth | Request | Response |
-| --- | --- | --- | --- |
-| `GET /health` | None | None | `200 {"ready": true, "engine": "whisper.cpp"}`. Every other path answers `404 {"error": "Not found"}` |
-| `POST /toast` | `Authorization: Bearer <secret or toast token>` | `Content-Type: application/json` body, at most 4 KiB. Fields are in [Toasts from other programs](#toasts-from-other-programs) | `202 {"id": "...", "delivered": N}`, or the refusals listed in that section |
+| Method and path | Auth                                            | Request                                                                                                                       | Response                                                                                              |
+| --------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `GET /health`   | None                                            | None                                                                                                                          | `200 {"ready": true, "engine": "whisper.cpp"}`. Every other path answers `404 {"error": "Not found"}` |
+| `POST /toast`   | `Authorization: Bearer <secret or toast token>` | `Content-Type: application/json` body, at most 4 KiB. Fields are in [Toasts from other programs](#toasts-from-other-programs) | `202 {"id": "...", "delivered": N}`, or the refusals listed in that section                           |
 
 ## Troubleshooting
 
 Each row gives the symptom you see, its cause, the fix and how to check it worked.
 
-| Symptom | Cause | Fix | Verify |
-| --- | --- | --- | --- |
-| `make dev` or `bun run dev` fails or serves another app on port 4240 | Another listener owns 4240, often the LAN preview | Run `bun run dev --port <free-port>` and open that port | The page loads at the port you chose |
-| The browser or Quest shows a certificate warning, or `wss://` connections never open | The certificate is self-signed or its name does not match the address you opened | Serve the app and the streamer with a PEM the headset trusts, whose name matches the address ([Quest and LAN HTTPS](#quest-and-lan-https)) | The page loads over HTTPS without a warning and the streamer endpoint connects |
-| The streamer refuses to start on a LAN address | Since core 0.80.0, an unauthenticated non-loopback bind needs `--allow-unauthenticated` | Preserve your streamer authentication settings. Add the flag only for a LAN you trust ([Serve the built app](#serve-the-built-app)) | The streamer starts and the page connects |
-| Terminal labels or text render blank in the production build | The streamer's CSP blocks blob workers, so Troika cannot typeset in a worker | Serve the built app from the streamer, not a Vite dev server, and run `make production-label-check` ([testing guide](TESTING.md#check-targets)) | The check reports glyph pixels |
-| **New terminal** is disabled | The streamer was not started with `--allow-pane-create`, the connection is read-only, or mux support is missing | Restart the streamer with `--allow-pane-create` on a writable connection ([Create terminals](WORKSPACE.md#create-terminals)) | The control enables after you reconnect |
-| **Git & CI** reads **Directory unknown** | The shell sends no OSC 7 directory report, or the streamer has not forwarded one for this pane | Use a shell that reports OSC 7, or open the pane after the streamer sees one. The widget falls back to the agent roster's project under `~/Repos` | The widget shows the repo folder and branch |
-| **Git & CI**, **Kanban strip**, **Host bookings**, **Service health** or **Mesh inbox** reads **Unavailable** or "... is off on the host" | The route's flag is off, or the pairing secret is missing | Reinstall the LaunchAgent with the feature flag ([Optional host routes](#optional-host-routes)) and pair the browser | The widget shows data within one refresh interval |
-| **Paste host** or **Copy to host** fails, or the clipboard route answers `disabled` | No pairing secret file, the file has the wrong mode or owner, or the service runs as the LaunchDaemon | Create `.local/clipboard-secret` with mode 600, run the service as the LaunchAgent and save the secret in Workspace settings ([Host clipboard sync](#host-clipboard-sync)) | **Paste host** types the Mac clipboard into the selected pane |
-| A route answers `rate_limited` or HTTP 429 | Five failed or pending proofs in a minute from one client | Wait a minute. Fix the secret on the client first ([Pairing and request limits](#pairing-and-request-limits)) | The next request authenticates |
-| A route answers `auth` | The browser holds a different secret than the one in the Mac's secret file | **Forget** the saved secret in Workspace settings, then paste the file's current contents and **Save** | The request succeeds |
-| A picture fails with a CORS notice | The image host sends no CORS headers and the proxy is off or unpaired | Enable `--picture-proxy` and pair the browser ([Picture proxy](#picture-proxy)) | The picture loads |
-| Dictation fails to start or reports an error | `ffmpeg` or `whisper-cli` is missing, or the model path is wrong | Check the `--ffmpeg`, `--whisper` and `--model` values ([Configuration reference](#configuration-reference)) and the service log | A short recording returns a transcript |
+| Symptom                                                                                                                                   | Cause                                                                                                           | Fix                                                                                                                                                                        | Verify                                                                         |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `make dev` or `bun run dev` fails or serves another app on port 4240                                                                      | Another listener owns 4240, often the LAN preview                                                               | Run `bun run dev --port <free-port>` and open that port                                                                                                                    | The page loads at the port you chose                                           |
+| The browser or Quest shows a certificate warning, or `wss://` connections never open                                                      | The certificate is self-signed or its name does not match the address you opened                                | Serve the app and the streamer with a PEM the headset trusts, whose name matches the address ([Quest and LAN HTTPS](#quest-and-lan-https))                                 | The page loads over HTTPS without a warning and the streamer endpoint connects |
+| The streamer refuses to start on a LAN address                                                                                            | Since core 0.80.0, an unauthenticated non-loopback bind needs `--allow-unauthenticated`                         | Preserve your streamer authentication settings. Add the flag only for a LAN you trust ([Serve the built app](#serve-the-built-app))                                        | The streamer starts and the page connects                                      |
+| Terminal labels or text render blank in the production build                                                                              | The streamer's CSP blocks blob workers, so Troika cannot typeset in a worker                                    | Serve the built app from the streamer, not a Vite dev server, and run `make production-label-check` ([testing guide](TESTING.md#check-targets))                            | The check reports glyph pixels                                                 |
+| **New terminal** is disabled                                                                                                              | The streamer was not started with `--allow-pane-create`, the connection is read-only, or mux support is missing | Restart the streamer with `--allow-pane-create` on a writable connection ([Create terminals](WORKSPACE.md#create-terminals))                                               | The control enables after you reconnect                                        |
+| **Git & CI** reads **Directory unknown**                                                                                                  | The shell sends no OSC 7 directory report, or the streamer has not forwarded one for this pane                  | Use a shell that reports OSC 7, or open the pane after the streamer sees one. The widget falls back to the agent roster's project under `~/Repos`                          | The widget shows the repo folder and branch                                    |
+| **Git & CI**, **Kanban strip**, **Host bookings**, **Service health** or **Mesh inbox** reads **Unavailable** or "... is off on the host" | The route's flag is off, or the pairing secret is missing                                                       | Reinstall the LaunchAgent with the feature flag ([Optional host routes](#optional-host-routes)) and pair the browser                                                       | The widget shows data within one refresh interval                              |
+| **Paste host** or **Copy to host** fails, or the clipboard route answers `disabled`                                                       | No pairing secret file, the file has the wrong mode or owner, or the service runs as the LaunchDaemon           | Create `.local/clipboard-secret` with mode 600, run the service as the LaunchAgent and save the secret in Workspace settings ([Host clipboard sync](#host-clipboard-sync)) | **Paste host** types the Mac clipboard into the selected pane                  |
+| A route answers `rate_limited` or HTTP 429                                                                                                | Five failed or pending proofs in a minute from one client                                                       | Wait a minute. Fix the secret on the client first ([Pairing and request limits](#pairing-and-request-limits))                                                              | The next request authenticates                                                 |
+| A route answers `auth`                                                                                                                    | The browser holds a different secret than the one in the Mac's secret file                                      | **Forget** the saved secret in Workspace settings, then paste the file's current contents and **Save**                                                                     | The request succeeds                                                           |
+| A picture fails with a CORS notice                                                                                                        | The image host sends no CORS headers and the proxy is off or unpaired                                           | Enable `--picture-proxy` and pair the browser ([Picture proxy](#picture-proxy))                                                                                            | The picture loads                                                              |
+| Dictation fails to start or reports an error                                                                                              | `ffmpeg` or `whisper-cli` is missing, or the model path is wrong                                                | Check the `--ffmpeg`, `--whisper` and `--model` values ([Configuration reference](#configuration-reference)) and the service log                                           | A short recording returns a transcript                                         |

@@ -5,10 +5,10 @@ Baseline source: `0e84ad3`. Candidate source: `e918a42`, before the later keyboa
 All WebSockets were intercepted. Each case used real logical 149×54 grids, dense colored initial content, one-row agent spinners at approximately 10 Hz per pane and one appended log line per second in pane 1. Two seconds of warmup preceded eight seconds of measurement. The same packet counts and byte counts were delivered to both variants. Keyboard was closed, background Black, gaze keyboard input off, selected pane %1. The center pane remained full quality and a far-pane head turn promoted that pane to full without changing selection.
 
 | Panes | Render callback p95, baseline → candidate | Texture uploads, MiB | Canvas RGBA footprint, MiB | Display interval p95 |
-| --- | --- | --- | --- | --- |
-| 6 | 8.5 → 5.8 ms | 467.9 → 287.6 | 170.2 → 47.9 | 16.8 → 16.8 ms |
-| 12 | 10.3 → 6.3 ms | 713.7 → 295.7 | 340.3 → 58.5 | 16.8 → 16.8 ms |
-| 18 | 12.6 → 6.8 ms | 959.5 → 305.5 | 510.5 → 69.1 | 16.8 → 16.8 ms |
+| ----- | ----------------------------------------- | -------------------- | -------------------------- | -------------------- |
+| 6     | 8.5 → 5.8 ms                              | 467.9 → 287.6        | 170.2 → 47.9               | 16.8 → 16.8 ms       |
+| 12    | 10.3 → 6.3 ms                             | 713.7 → 295.7        | 340.3 → 58.5               | 16.8 → 16.8 ms       |
+| 18    | 12.6 → 6.8 ms                             | 959.5 → 305.5        | 510.5 → 69.1               | 16.8 → 16.8 ms       |
 
 At 18 panes this is about 46% lower render-callback p95, 68% fewer uploaded bytes and 86% less canvas pixel storage. Canvas footprint is a measured RGBA-size proxy, not total browser or GPU memory. CPU time covers the XR render callback, while some paints also run on scheduled timers. Display intervals include their effect on the main thread.
 

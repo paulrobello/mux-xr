@@ -107,7 +107,10 @@ export interface XrSession {
   update(frame?: XRFrame): XRViewerPose | null;
   dispose(): void;
 }
-export function createXrSession(renderer: THREE.WebGLRenderer, options?: XrSessionOptions): XrSession;
+export function createXrSession(
+  renderer: THREE.WebGLRenderer,
+  options?: XrSessionOptions,
+): XrSession;
 ```
 
 - `supported`: false when there is no `xr`, otherwise `xr.isSessionSupported(mode)`, and false if that rejects.
@@ -129,6 +132,7 @@ export function createXrSession(renderer: THREE.WebGLRenderer, options?: XrSessi
 ## Tests
 
 `tests/pointer.test.ts`:
+
 - Two meshes on one ray: the nearer is returned; hide it and the farther is returned; hide the root and the result is null; hide an intermediate group and its descendants are skipped.
 - The hit's `root` is the matching entry of `roots`.
 - `castFrom` with a rotated, translated source hits what a manual origin and direction hit.
@@ -136,6 +140,7 @@ export function createXrSession(renderer: THREE.WebGLRenderer, options?: XrSessi
 - `AxisRepeat`: fires at the crossing, not again before 0.4 s, again at 0.4 s, then every 0.12 s; a sign flip fires at once in the new direction; dropping under the threshold resets.
 
 `tests/xr-session.test.ts`, with fakes for `XRSystem`, `XRSession` (an `EventTarget` with `requestReferenceSpace` and `end`) and `renderer.xr` (`enabled`, `setReferenceSpaceType`, `setSession`, `getReferenceSpace`, `setFoveation`, `isPresenting`):
+
 - `supported` true, false, missing `xr`, and a rejecting `isSessionSupported`.
 - `enter` requests the mode with the merged optional features; when `local-floor` rejects, `local` is used and passed to `setReferenceSpaceType`.
 - Foveation defaults to 0.5, is applied on enter, is asserted by every `update`, and follows `setFoveation('off')` and `setFoveation(0.25)`.

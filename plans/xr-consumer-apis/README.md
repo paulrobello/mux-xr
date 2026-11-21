@@ -18,13 +18,13 @@ An app can hide, light and fade the elastic arms, update a label, keep menus abo
 
 Each slice has its own guide and owns its files exclusively, so the four can be built in parallel.
 
-| Slice | Guide | Owns |
-| --- | --- | --- |
-| 1. Arm controls and near-eye fade | [01-arm.md](01-arm.md) | `elastic-arm.ts`, `cartoon-hand.ts`, `standard-hand.ts` and their tests |
+| Slice                                       | Guide                                                | Owns                                                                                |
+| ------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| 1. Arm controls and near-eye fade           | [01-arm.md](01-arm.md)                               | `elastic-arm.ts`, `cartoon-hand.ts`, `standard-hand.ts` and their tests             |
 | 2. Label update, overlay order, control ids | [02-labels-overlay-ids.md](02-labels-overlay-ids.md) | `labels.ts`, `radial-menu.ts`, `wrist-menu-watch.ts`, new `overlay-order.ts`, tests |
-| 3. Menu panel | [03-menu-panel.md](03-menu-panel.md) | new `menu-panel.ts`, test |
-| 4. Pointer and session helpers | [04-pointer-session.md](04-pointer-session.md) | new `pointer.ts`, `xr-session.ts`, tests |
-| 5. Packaging | done by the orchestrator | `package.json`, `stage-assets.ts`, `assets/`, README, `index.ts` |
+| 3. Menu panel                               | [03-menu-panel.md](03-menu-panel.md)                 | new `menu-panel.ts`, test                                                           |
+| 4. Pointer and session helpers              | [04-pointer-session.md](04-pointer-session.md)       | new `pointer.ts`, `xr-session.ts`, tests                                            |
+| 5. Packaging                                | done by the orchestrator                             | `package.json`, `stage-assets.ts`, `assets/`, README, `index.ts`                    |
 
 ## Verification
 

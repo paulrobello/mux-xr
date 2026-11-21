@@ -55,12 +55,12 @@ Vite builds the static frontend into `dist/`. The [build plugin](../scripts/buil
 
 [scripts/dictation-server.ts](../scripts/dictation-server.ts) starts an HTTPS service, conventionally on port 4242. Its [route dispatcher](../src/server/host-service.ts) handles local Whisper dictation and the optional companion features. Terminal streams stay on the streamer even when the companion is running.
 
-| Feature | Host boundary |
-| --- | --- |
-| Dictation | The browser records bounded audio. `/dictate` checks the frontend origin and runs local FFmpeg and Whisper. |
-| Clipboard and toasts | `/clipboard` accesses the logged-in user's pasteboard. Paired headsets subscribe to `/toasts`. Programs post to `/toast` with a bearer secret. |
-| Pictures | Opt-in `/picture-fetch` fetches public image URLs with bounded transfers. Opt-in `/picture-depth` estimates depth for uploaded images. |
-| Host widgets | `/host-stats` reports load. Optional repo, kanban, booking, service-health, and mesh feeds return limited read-only summaries. `/weather` supplies the US ZIP forecast. |
+| Feature              | Host boundary                                                                                                                                                           |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dictation            | The browser records bounded audio. `/dictate` checks the frontend origin and runs local FFmpeg and Whisper.                                                             |
+| Clipboard and toasts | `/clipboard` accesses the logged-in user's pasteboard. Paired headsets subscribe to `/toasts`. Programs post to `/toast` with a bearer secret.                          |
+| Pictures             | Opt-in `/picture-fetch` fetches public image URLs with bounded transfers. Opt-in `/picture-depth` estimates depth for uploaded images.                                  |
+| Host widgets         | `/host-stats` reports load. Optional repo, kanban, booking, service-health, and mesh feeds return limited read-only summaries. `/weather` supplies the US ZIP forecast. |
 
 Paired WebSocket routes use the clipboard pairing secret with route-specific challenge-response. Credentials for upstream services stay on the host. The [host setup guide](HOST-SETUP.md) covers available flags, TLS, and the launchd modes.
 

@@ -1,82 +1,83 @@
 ---
+
 name: Mux XR
 description: A quiet sci-fi observatory for readable terminal monitoring and intentionally targeted input.
 colors:
-  space-black: "#080c12"
-  field-black: "#0b1016"
-  panel-navy: "#17212d"
-  control-navy: "#192b38"
-  selected-teal: "#203c48"
-  hover-blue: "#264455"
-  selection-blue: "#315c6d"
-  border-slate: "#3a5363"
-  divider-slate: "#293746"
-  muted-blue-gray: "#7e96a6"
-  body-blue-gray: "#b4c5cf"
-  text-blue-gray: "#c9d8e3"
-  text-cool: "#dce7ed"
-  text-bright: "#edf7fa"
-  accent-cyan: "#8be0ea"
-  interactive-cyan: "#66d5e7"
-  selected-text-cyan: "#a7eeef"
-  terminal-black: "#05070b"
-  observatory-deep: "#050a10"
-  cartoon-hand-orange: "#ff672f"
-  cartoon-hand-emissive: "#ff4f1f"
-  wrist-watch-case: "#0b1725"
-  wrist-watch-strap: "#17293a"
-  pending-bell-background: "#302718"
+space-black: "#080c12"
+field-black: "#0b1016"
+panel-navy: "#17212d"
+control-navy: "#192b38"
+selected-teal: "#203c48"
+hover-blue: "#264455"
+selection-blue: "#315c6d"
+border-slate: "#3a5363"
+divider-slate: "#293746"
+muted-blue-gray: "#7e96a6"
+body-blue-gray: "#b4c5cf"
+text-blue-gray: "#c9d8e3"
+text-cool: "#dce7ed"
+text-bright: "#edf7fa"
+accent-cyan: "#8be0ea"
+interactive-cyan: "#66d5e7"
+selected-text-cyan: "#a7eeef"
+terminal-black: "#05070b"
+observatory-deep: "#050a10"
+cartoon-hand-orange: "#ff672f"
+cartoon-hand-emissive: "#ff4f1f"
+wrist-watch-case: "#0b1725"
+wrist-watch-strap: "#17293a"
+pending-bell-background: "#302718"
 rounded:
-  sm: "4px"
-  md: "8px"
+sm: "4px"
+md: "8px"
 spacing:
-  xs: "2px"
-  sm: "8px"
-  md: "12px"
-  lg: "14px"
-  xl: "16px"
+xs: "2px"
+sm: "8px"
+md: "12px"
+lg: "14px"
+xl: "16px"
 typography:
-  body:
-    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "14px"
-    lineHeight: "1.4"
-  title:
-    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "26px"
-    fontWeight: 600
-    lineHeight: "normal"
-    letterSpacing: "-0.02em"
-  label:
-    fontFamily: "system-ui, sans-serif"
-    fontSize: "12px"
-    fontWeight: 600
-  terminal:
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"
-    fontSize: "18px"
+body:
+fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
+fontSize: "14px"
+lineHeight: "1.4"
+title:
+fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
+fontSize: "26px"
+fontWeight: 600
+lineHeight: "normal"
+letterSpacing: "-0.02em"
+label:
+fontFamily: "system-ui, sans-serif"
+fontSize: "12px"
+fontWeight: 600
+terminal:
+fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"
+fontSize: "18px"
 components:
-  button-control:
-    backgroundColor: "{colors.control-navy}"
-    textColor: "{colors.text-cool}"
-    rounded: "{rounded.sm}"
-    padding: "7px 10px"
-    height: "34px"
-  button-control-hover:
-    backgroundColor: "{colors.hover-blue}"
-    textColor: "{colors.text-cool}"
-    rounded: "{rounded.sm}"
-  button-selected:
-    backgroundColor: "{colors.selection-blue}"
-    textColor: "{colors.text-bright}"
-    rounded: "{rounded.sm}"
-  input-field:
-    backgroundColor: "{colors.field-black}"
-    textColor: "{colors.text-cool}"
-    rounded: "{rounded.sm}"
-    padding: "8px"
-  terminal-panel:
-    backgroundColor: "{colors.panel-navy}"
-    textColor: "{colors.text-bright}"
-    rounded: "{rounded.sm}"
+button-control:
+backgroundColor: "{colors.control-navy}"
+textColor: "{colors.text-cool}"
+rounded: "{rounded.sm}"
+padding: "7px 10px"
+height: "34px"
+button-control-hover:
+backgroundColor: "{colors.hover-blue}"
+textColor: "{colors.text-cool}"
+rounded: "{rounded.sm}"
+button-selected:
+backgroundColor: "{colors.selection-blue}"
+textColor: "{colors.text-bright}"
+rounded: "{rounded.sm}"
+input-field:
+backgroundColor: "{colors.field-black}"
+textColor: "{colors.text-cool}"
+rounded: "{rounded.sm}"
+padding: "8px"
+terminal-panel:
+backgroundColor: "{colors.panel-navy}"
+textColor: "{colors.text-bright}"
+rounded: "{rounded.sm}"
 ---
 
 # Design System: Mux XR
@@ -132,6 +133,7 @@ Mux XR is a functional monitoring instrument wrapped in a restrained sci-fi obse
 The system uses blue-black tonal layering, cool blue-gray text, and a scarce cyan selection signal. Motion may clarify active-pane selection, but the user's viewpoint remains under their control. Passthrough, pure black, gradient, observatory, hangar deck, deep-water station, minimal studio, desert night, aurora tundra, koi garden, cloud summit, and rain rooftop backgrounds are explicit modes, not competing visual identities. The four newer worlds carry slow ambient motion (aurora curtains and snow, koi and falling leaves, rolling cloud and passing birds, city windows, beacons, traffic and rain), placed above, below, behind or far beyond the panes and kept dim and low in the forward pane sector, with no flicker faster than about 1 Hz.
 
 **Key Characteristics:**
+
 - Terminal content and intentional input stay primary.
 - Quiet sci-fi atmosphere with no ambient sound dependency.
 - Flat, dark controls with restrained cyan state emphasis.
@@ -142,16 +144,20 @@ The system uses blue-black tonal layering, cool blue-gray text, and a scarce cya
 The palette is a deep blue-black field with cool slate controls and a cyan signal reserved for selection, focus, and active states.
 
 ### Primary
+
 - **Signal Cyan** (`#8be0ea`): Selected and focused states, including active keys and panel emphasis.
 
 ### Secondary
+
 - **Selection Blue** (`#315c6d`): Filled active controls and selection surfaces.
 - **Hover Blue** (`#264455`): Desktop hover feedback on actionable controls.
 
 ### Tertiary
+
 - **Selected Teal** (`#203c48`): Attached or active selector background.
 
 ### Neutral
+
 - **Space Black** (`#080c12`): Desktop application field.
 - **Field Black** (`#0b1016`): Text-entry surfaces and recessed fields.
 - **Panel Navy** (`#17212d`): Attached selector and terminal-adjacent surfaces.
@@ -163,6 +169,7 @@ The palette is a deep blue-black field with cool slate controls and a cyan signa
 - **Divider Slate** (`#293746`): Sidebar and structural separators.
 
 ### Named Rules
+
 **The Signal Rarity Rule.** Cyan is a state signal, not decoration. Reserve it for selection, focus, and active interaction.
 
 ## Typography
@@ -174,12 +181,14 @@ The palette is a deep blue-black field with cool slate controls and a cyan signa
 **Character:** Compact, neutral, and highly legible. Text hierarchy comes from cool-blue contrast and measured size changes rather than expressive type treatments.
 
 ### Hierarchy
+
 - **Title** (600, approximately 12–16px): Panel names, mode titles, and compact workspace headings.
 - **Body** (400, inherited size): Explanatory UI copy and input labels.
 - **Label** (600, 10–12px): Keys, quick commands, hierarchy summaries, and status metadata.
 - **Terminal** (renderer-defined): Live pane content; preserve monospace readability and avoid decorative substitutions.
 
 ### Named Rules
+
 **The Readability Rule.** Never trade terminal legibility for atmosphere, especially in XR where panels must remain readable at physical scale.
 
 ## Layout
@@ -233,6 +242,7 @@ Desktop 3D preview keeps its mouse Smaller, Larger and Reset layout toolbar. Do 
 The system is tonal rather than shadow-led. CSS surfaces distinguish field, panel, control, hover, and selected states through blue-black value steps and borders. Three.js provides depth through panel placement, frame geometry, observatory architecture, and background modes. No broad decorative drop-shadow vocabulary is established.
 
 ### Named Rules
+
 **The Tonal Depth Rule.** Use a darker or lighter surface step before adding glow, blur, or shadow. Depth should support orientation and interaction.
 
 ## Shapes
@@ -264,23 +274,28 @@ When either hand is near a keyboard, hide both rays and block distant ray select
 Controller fingers curl toward the palm normal, opposite the wrist-watch face, for both hands and all controller orientations. A registered pinch flashes its orb mint green for 240 ms, including when typing rebuilds the key meshes.
 
 ### UI sounds and haptics
+
 The saved `uiSounds` preference (default on, browser Settings checkbox and XR Settings toggle) gates every interface cue. Cues are WebAudio oscillator envelopes of 30–80 ms, never audio files, and the audio context starts lazily on the first cue and resumes if suspended. Distinct cues mark a control or key press (ray, contact poke or Keyborb), grab start and end (single, contact and pair grabs, not internal re-captures), each scroll-strip line batch (rate-limited to one per 40 ms), a held modifier lock, a press-twice confirm arming (instead of the click), a paste failure and the both-stick recenter. Controllers pulse their first haptic actuator (or the dual-rumble vibration actuator) on the same events, the confirm, Reset and paste cues on the controller that pressed; hands get sound only. Off means neither sound nor haptics.
 
 ### Buttons
+
 - **Shape:** Tight rectangular corners (4px), 34px minimum height for desktop controls.
 - **Primary:** Control navy fill, cool text, and 7px 10px padding.
 - **Hover / Focus:** Hover shifts to hover blue. Focus and active states use selection blue with the cyan signal border where applicable.
 - **Secondary / Ghost:** Use the same compact geometry with tonal or border contrast, not a new shape language.
 
 ### Inputs / Fields
+
 - **Style:** Recessed field black, 1px slate border, 4px radius, and 8px internal padding.
 - **Focus:** Increase border contrast toward the cyan signal without adding a persistent glow.
 - **Disabled:** Preserve hierarchy with reduced opacity and no misleading active color.
 
 ### Navigation
+
 - **Style:** The mux hierarchy is a compact tree in the sidebar. Summaries use 12px cool blue-gray text, 7px vertical padding, and indentation to communicate workspace/session/window/pane structure.
 
 ### XR mux hierarchy
+
 The immersive Panes surface renders the same workspace/session/window/pane hierarchy as native 3D geometry through `src/xr/hierarchy-navigator.ts`. **Helix Navigator** is the default style; **Spatial Docks** is the alternate spatial grouping. Both use muted teal (`#3c91a0`) and ivory (`#dce7ed`) solid node bodies, amber (`#e4a84a`) for the selected branch and attached rings, muted teal (`#1d4c59`) connectors, dark depth (`#102832`), locally bundled crisp labels and a short scale-in transition. The desktop DOM tree remains the accessible fallback.
 
 Panes navigation initially shows the current workspace and sessions, then centers the current parent with one spherical child level while unrelated siblings disappear. Click expands a node. Ancestors remain breadcrumbs, and Home, Up and paging retain parent context. A pane leaf selects the existing terminal view and closes the navigator. B closes the navigator without invoking Focus. The navigator is a grabbable root with the same one- and two-controller gestures as other XR surfaces. Its path and transform persist across style changes. Opening it temporarily hides terminal view roots, and closing or switching away restores their prior visibility. The browser Workspace **Hierarchy style** selector and native Settings → Display **Mux tree** control are one saved, synchronized preference. These controls do not alter terminal processes or remote grids.
@@ -288,6 +303,7 @@ Panes navigation initially shows the current workspace and sessions, then center
 Keyboard curvature is a saved 0–100° preference. Curved backing and key geometry preserve ray picking and shared-root grip behavior. Key borders use textured `#7197a8`; Backing remains independent. Keyboard Dictate prefers local Whisper through the host service when the browser can record, falling back to standard/prefixed Web Speech API detection. Both use editable transcript review, explicit Insert without Enter and a captured connected target. Browser/service support and physical voice acceptance remain pending. The terminal frame applies its front-surface offset after cylindrical warp so its hollow rim retains exact screen-edge coordinates without opaque geometry behind text. The selected pane has no separate outline: its frame glows in the accent color and its bracket accents turn white and stay solid at any glass opacity.
 
 ### Cards / Containers
+
 - **Corner Style:** 8px for the scene host and larger application containers, 4px for controls and labels.
 - **Background:** Layer space black, field black, panel navy, and control navy by function.
 - **Border:** Use slate borders for interactive controls and divider slate for structural separation.
@@ -302,11 +318,13 @@ Host clipboard actions sit with the clipboard control they extend. In the browse
 Non-obvious controls explain their action on browser hover or controller-ray hover. Spatial hints use the existing dark label treatment, face the viewer and stay outside ray picking. XR tooltips keep a compact angular size by scaling with distance, appear after a 700 ms dwell, describe actions only and are hidden while gripping. There are no automatic grip instructions. Hover feedback never sends terminal input or changes its target.
 
 ### XR Terminal Panel
+
 Each panel presents one live pane with a readable terminal surface, title/status, Disconnect/Reconnect, Close view and Bring here. Bring here places that pane level, facing the viewer's heading, at the Focus distance, ends any active Focus first, and saves the placement; the button sits left of Close view and is excluded from the pane's measured footprint. While a pane is focused its button becomes Keep here. Grid, local text zoom and glass opacity live in Settings → Selected terminal. Typing controls live on Keyboard The whole panel is a grabbable transform root, as are the keyboard, commands, hierarchy and workspace HUD surfaces. Terminal grid settings are selected-pane scoped and apply only through explicit numeric Apply controls, with presets 80x24, 100x30, 120x36 and 160x48 plus ±1/±10 draft controls. Bounds are 2..300 columns and 2..150 rows, server echo is read-only, and disconnected resize is denied. Terminal colors are a saved global preference: Comfortable is the default, with Original and Monochrome alternatives. The content remains one canvas texture on flat or curved screen geometry. Saturated color depth is a qualitative optical inference, not a proven physical display effect, and any physical effect needs owner recheck. Selection is explicit by default and independent from head-directed rendering fidelity. Optional Gaze input uses a short head-directed dwell to retarget the keyboard, with a visible target caption. Its sole native toggle lives on Keyboard, next to Backing. Settings → Display separately owns color modes and Filtering, and Settings → World owns backgrounds and VR/passthrough The native keyboard uses self-hosted OFL Noto Sans and Symbols 2 through Troika SDF (the pinned version in `package.json`); unsupported visual glyphs render as `?` while the original title remains. Keyboard Backing is a saved browser/native-header toggle: off hides only the backing while key buttons remain visible and the logical plane stays grabbable and can occlude gaze, retaining the input target. The native FPS HUD is an actual frame counter updated about every 500 ms, not a capacity benchmark. Comfortable-distance guidance remains qualitative GPU-shot evidence and is not headset proof. The physical controller grab pose and two-hand behavior remain unchanged. The observatory background is peripheral architecture and a distant planet, never a competing focal surface.
 
 ## Do's and Don'ts
 
 ### Do:
+
 - **Do** keep live terminal text and targeted input visually primary.
 - **Do** use the existing blue-black palette and cyan only for interaction state.
 - **Do** preserve 4px control corners and 8px container corners.
@@ -314,6 +332,7 @@ Each panel presents one live pane with a readable terminal surface, title/status
 - **Do** keep motion expressive enough to explain selection while leaving viewpoint control to the user.
 
 ### Don't:
+
 - **Don't** redirect input from gaze unless the user enables Gaze input. Show the current target and retain it while the user looks at the keyboard.
 - **Don't** add ambient sound as part of the visual system.
 - **Don't** use bright gradients, ornamental neon, or decorative glows that compete with pane content.

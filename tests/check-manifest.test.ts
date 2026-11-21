@@ -71,7 +71,13 @@ describe('check manifest', () => {
     expect(start, 'start marker').toBeGreaterThanOrEqual(0);
     expect(end, 'end marker').toBeGreaterThan(start);
     const block = doc.slice(start + '<!-- checks:start -->'.length, end);
-    expect(block.trim()).toBe(buildTestingTable().trimEnd());
+    // Biome pads table columns, so compare content with cell padding collapsed.
+    const collapse = (table: string): string =>
+      table
+        .trim()
+        .replace(/[ \t]{2,}/g, ' ')
+        .replace(/-{3,}/g, '---');
+    expect(collapse(block)).toBe(collapse(buildTestingTable()));
   });
 
   it('matches each script environment declaration to its source', () => {

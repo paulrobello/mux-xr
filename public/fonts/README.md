@@ -3,9 +3,9 @@
 These fonts are vendored so Troika text rendering works on an offline LAN without
 runtime CDN requests.
 
-| File | Official source | Bytes | SHA-256 |
-| --- | --- | ---: | --- |
-| `NotoSans-Regular.ttf` | https://github.com/notofonts/noto-fonts/blob/main/hinted/ttf/NotoSans/NotoSans-Regular.ttf | 569208 | `b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5` |
+| File                           | Official source                                                                             |   Bytes | SHA-256                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------------------- | ------: | ------------------------------------------------------------------ |
+| `NotoSans-Regular.ttf`         | https://github.com/notofonts/noto-fonts/blob/main/hinted/ttf/NotoSans/NotoSans-Regular.ttf  |  569208 | `b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5` |
 | `NotoSansSymbols2-Regular.ttf` | https://github.com/google/fonts/blob/main/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf | 1233128 | `7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21` |
 
 Both fonts are licensed under the SIL Open Font License 1.1. The corresponding

@@ -34,11 +34,13 @@
 ### Task 1: `agentBoardMaxRows` setting + validator
 
 **Files:**
+
 - Modify: `src/workspace/agent-roster.ts`
 - Modify: `src/settings/store.ts`
 - Test: `tests/agent-roster.test.ts`, `tests/property/settings.property.test.ts`
 
 **Interfaces:**
+
 - Produces (exported from `src/workspace/agent-roster.ts`): `AGENT_BOARD_ROWS_MIN = 3`, `AGENT_BOARD_ROWS_MAX = 12`, `AGENT_BOARD_ROWS_DEFAULT = 6`, `validateAgentBoardRows(value: unknown): number`.
 - Produces: `WorkspaceSettings.agentBoardMaxRows: number`, in `DEFAULT_SETTINGS` as `AGENT_BOARD_ROWS_DEFAULT`.
 
@@ -73,12 +75,14 @@ Expected: PASS.
 ### Task 2: `agentBoardMaxRows` widget channel
 
 **Files:**
+
 - Modify: `src/xr/widget-types.ts`
 - Modify: `src/xr/scene.ts` (mutableState interface field, init near `weatherZip: device.weatherZip` at line ~935, `applyAgentBoardMaxRows` near `applyWeatherZip` at ~6293, subscribe line after `applyWeatherZip(next.weatherZip)` at ~6412, `createWidgetChannels` arg at ~1396)
 - Modify: `src/xr/widget-registry.ts` (agent-board entry, lines 87–96)
 - Test: `tests/widget-channels.test.ts` (create; no channels test exists today)
 
 **Interfaces:**
+
 - Consumes: Task 1's `validateAgentBoardRows`.
 - Produces: `WidgetChannels.agentBoardMaxRows: Channel<number>` and `WidgetChannelPublishers.agentBoardMaxRows: Publisher<number>`; `createWidgetChannels(initial: {...; agentBoardMaxRows: number})` with `createChannel(initial.agentBoardMaxRows, true)` (replayed).
 
@@ -97,11 +101,13 @@ Expected: PASS.
 ### Task 3: Board page model, pager, rebuildable geometry
 
 **Files:**
+
 - Modify: `src/xr/agent-board.ts`
 - Test: `tests/agent-board.test.ts`
 - Modify: `tests/widget-close-corner.test.ts` (imports `AGENT_BOARD_HEIGHT`)
 
 **Interfaces:**
+
 - Consumes: Task 1 constants (`AGENT_BOARD_ROWS_DEFAULT`); Task 2 options param.
 - Produces (exported from `src/xr/agent-board.ts`):
   - `agentBoardHeight(maxRows: number): number` — replaces the `AGENT_BOARD_HEIGHT` export (its only importer is `widget-close-corner.test.ts`, updated here).
@@ -113,7 +119,6 @@ Expected: PASS.
   - Pager child names: `agent-board-page-prev`, `agent-board-page-label`, `agent-board-page-next`; buttons carry `inputAction: 'widgetControl'`, `userData.agentBoardAction: 'prev' | 'next'`, helpText `'Previous agents page'` / `'Next agents page'`.
 
 - [ ] **Step 1: Write the failing tests** in `tests/agent-board.test.ts` (keep the existing suite passing by updating `agent-board-overflow` expectations to the pager):
-
   - Page model (pure): `agentBoardPageCount([], 6) === 1`; `agentBoardPageCount(8 rows, 6) === 2`; `agentBoardPageCount(15 rows, 6) === 3`. `agentBoardPage(roster, [], 0, 6)` equals `agentBoardRows(roster, [], 6)`; page 1 of 8 rows/6 max = the 2 paneIds missing from page 0, in `sortAgentRows(..., 'priority')` order; `agentBoardPage(rows, prev, 99, 6)` clamps to the last page; negative clamps to page 0.
   - Pager widget: default widget shows all three pager nodes hidden; with 8 agents it is visible with label `'1/2'`; `activate` on the next node (`userData.agentBoardAction === 'next'`) flips to page 2 rows and label `'2/2'`; `activate` again stays on `'2/2'`; prev flips back; `activate` on the label node does nothing. Buttons' `inputAction` is `'widgetControl'`.
   - Clamp: on page 2, feed a roster that shrinks to fit one page → pager hides, rows show page-1 selection; feed `agentBoardMaxRows` change 6 → 3 (4 agents) → three visible rows, pager `'1/2'`, board geometry rebuilt (body height equals `agentBoardHeight(3)`); change to a value below the current page count clamps the page.
@@ -136,10 +141,12 @@ Expected: PASS.
 ### Task 4: Drawer settings stepper
 
 **Files:**
+
 - Modify: `src/ui/settings-panel.ts` (agentControls fieldset, ~lines 316–390)
 - Test: `tests/agent-roster.test.ts` (settings-panel section, ~lines 490–520; mirror its mount/save pattern)
 
 **Interfaces:**
+
 - Consumes: Task 1's `validateAgentBoardRows`; `bindSettings` key `'agentBoardMaxRows'`.
 - Produces: stepper `<label>Board rows<input data-agent-board-rows type="number" min="3" max="12" step="1" aria-label="Agent board rows per page"><small>Rows the XR agent board shows per page.</small></label>` appended to the Agent roster fieldset after the Order label.
 
@@ -156,6 +163,7 @@ Expected: PASS.
 ### Task 5: Docs
 
 **Files:**
+
 - Modify: `docs/WORKSPACE.md` (Agent board section, ~line 261–265)
 - Modify: `DESIGN.md` (Agent board section, ~line 345–348)
 

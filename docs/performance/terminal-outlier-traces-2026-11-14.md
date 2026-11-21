@@ -20,12 +20,12 @@ Card: Reduce long-frame outliers beyond terminal LOD, criterion 1 (capture + cla
 
 ## Gap inventory (display gaps over 30 ms between renderer frames)
 
-| Arm | Frames | Gaps >30 ms | >50 ms | Worst | Warmup outliers |
-| --- | --- | --- | --- | --- | --- |
-| static 6 | 637 | 8 | 8 | 65.7 ms | none |
-| static 12 | 635 | 12 | 4 | 113.5 ms | 102.1 ms, 76.4 ms |
-| static 18 | 592 | 33 | 10 | 212.9 ms | 212.9 ms, 192.1 ms |
-| sweep 18 | 588 | 33 | 13 | 215.4 ms | 215.4 ms, 190.9 ms |
+| Arm       | Frames | Gaps >30 ms | >50 ms | Worst    | Warmup outliers    |
+| --------- | ------ | ----------- | ------ | -------- | ------------------ |
+| static 6  | 637    | 8           | 8      | 65.7 ms  | none               |
+| static 12 | 635    | 12          | 4      | 113.5 ms | 102.1 ms, 76.4 ms  |
+| static 18 | 592    | 33          | 10     | 212.9 ms | 212.9 ms, 192.1 ms |
+| sweep 18  | 588    | 33          | 13     | 215.4 ms | 215.4 ms, 190.9 ms |
 
 Capacity summary under trace: static cpu p50 1.1-1.9 ms, p95 10.1 / 19.0 / 31.6 ms (6/12/18),
 pacing p95 16.8 / 16.8 / 33.3 ms; sweep 18-pane cpu p95 29.8 ms. Uploads 424-486 MiB per static

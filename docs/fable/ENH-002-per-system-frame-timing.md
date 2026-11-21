@@ -21,6 +21,7 @@ ENH-001 step 3 (frame systems) has landed. Without it this plan would add timing
 ## Implementation
 
 1. **Timing core.** Create `src/xr/frame-timing.ts`:
+
    ```ts
    export type SystemTiming = { name: string; worstMs: number; meanMs: number };
    export type FrameTiming = {
@@ -34,6 +35,7 @@ ENH-001 step 3 (frame systems) has landed. Without it this plan would add timing
    };
    export const createFrameTiming: (names: readonly string[], now?: () => number) => FrameTiming;
    ```
+
    State is three preallocated `Float64Array(names.length)` buffers (current frame, window sum, split of the worst frame) plus counters. `drain` writes into one array of objects created at construction. Nothing allocates per frame.
 2. **Loop integration.** In `render`'s loop over systems, call `timing.measure(index, system.update)` when `timing.enabled`, otherwise call `system.update` directly. Keep the branch outside the loop body's hot path by selecting one of two loop functions when the flag changes.
 3. **Flag.** Add a `frameTiming: boolean` setting (default `false`) through the settings store, with a toggle on the XR `display` panel and in the browser settings panel. The setting is session-scoped: do not persist it, so a headset never stays in measuring mode by accident.

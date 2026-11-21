@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "packageManager": "bun@1.4.4",
+  "packageManager": "bun@1.4.5",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 4240 --strictPort",
     "build": "vite build",
@@ -15,30 +15,30 @@
     "e2e": "bun run scripts/e2e.ts"
   },
   "dependencies": {
-    "@bufbuild/protobuf": "2.16.0",
+    "@bufbuild/protobuf": "2.17.0",
     "@par/xr-workspace": "workspace:*",
     "@xterm/xterm": "6.0.0",
     "libheif-js": "1.23.5",
     "onnxruntime-node": "1.31.1",
     "pako": "3.0.3",
     "sharp": "0.35.5",
-    "three": "0.186.1",
-    "troika-three-text": "0.52.5",
-    "ws": "8.22.1"
+    "three": "0.187.0",
+    "troika-three-text": "0.53.1",
+    "ws": "8.23.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.15",
-    "@types/node": "26.6.4",
-    "@types/three": "0.186.0",
+    "@biomejs/biome": "2.6.8",
+    "@types/node": "26.6.6",
+    "@types/three": "0.187.0",
     "@types/webxr": "0.5.24",
     "@types/ws": "8.18.2",
-    "@vitest/coverage-v8": "5.0.3",
-    "fast-check": "4.10.2",
+    "@vitest/coverage-v8": "5.1.1",
+    "fast-check": "4.10.3",
     "happy-dom": "21.0.4",
-    "playwright": "1.63.0",
+    "playwright": "1.65.1",
     "typescript": "7.0.2",
-    "vite": "8.3.5",
-    "vitest": "5.0.3"
+    "vite": "8.3.8",
+    "vitest": "5.1.1"
   },
   "workspaces": [
     "packages/xr-workspace"

@@ -34,13 +34,15 @@ Work in a worktree. One extraction per commit, `make checkall` after each.
    - `hand-input.ts`: `activeHand`, `manipulationSpace`, `shoulderOffset`, `handReach`, `captureGrab`.
    - `hierarchy-touch.ts`: `updateHierarchyTouch`, `hierarchyGrab`, `startPanePull`.
    - `xr-session.ts`: `setupControllers` and session start and end handling.
-   Order: `arming`, `clipboard`, `hierarchy-touch`, `hand-input`, `terminal-panels`, `xr-session` (least to most entangled).
+     Order: `arming`, `clipboard`, `hierarchy-touch`, `hand-input`, `terminal-panels`, `xr-session` (least to most entangled).
 2. **Dispose.** Each controller returns `dispose()`. `dispose` in the scene (`:8665-8779`) calls them in reverse creation order. Confirm every `addEventListener` moved with its removal: `grep -c addEventListener` and `grep -c removeEventListener` per new file must match.
 3. **Frame systems.** Create `src/xr/frame-systems.ts`:
+
    ```ts
    export type FrameInfo = { time: number; deltaSeconds: number; frame: XRFrame | undefined; presenting: boolean };
    export type FrameSystem = { name: string; update(info: FrameInfo): void };
    ```
+
    Cut `render` into systems in its current statement order: `toasts`, `widget-restore`, `controller-visuals`, `face-buttons`, `pair-grabs`, `drags`, `fidelity` (LOD), `gaze-input`, `hover`, `perf-sample`, `environment`, `draw`. `render` becomes: build one reused `FrameInfo` object, loop the array, return. Do not reorder systems; several read state the previous one wrote in the same frame.
 4. **No new per-frame allocation.** The `FrameInfo` object and the systems array are created once. Do not introduce closures, spreads or array literals inside any `update`. Where the moved code already allocates (the sites listed on the perf card), leave it as it is unless that card has already fixed it.
 5. **`TerminalSurface` split** (deferred half of ARC-018). In `src/contracts.ts`, define `TerminalView` (canvas, revision, grid, status), `TerminalInput`, `TerminalSelection` and `TerminalDiagnostics`, with `TerminalSurface` as their intersection so existing code compiles. Narrow each controller's parameter type to the parts it uses. `src/demo.ts` implements view and input and supplies explicit no-ops for the rest.

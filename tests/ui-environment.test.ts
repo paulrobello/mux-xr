@@ -55,7 +55,7 @@ describe('shared UI environment', () => {
   });
 
   it('builds one tagged texture eagerly and disposes the generator', () => {
-    const target = new THREE.WebGLRenderTarget(4, 4);
+    const target = new THREE.WebGLCubeRenderTarget(4);
     const fromScene = vi
       .spyOn(THREE.PMREMGenerator.prototype, 'fromScene')
       .mockImplementation(() => target);
@@ -121,7 +121,7 @@ describe('shared UI environment', () => {
   });
 
   it('warms each env-lit program variant once and keeps the materials until dispose', () => {
-    const target = new THREE.WebGLRenderTarget(4, 4);
+    const target = new THREE.WebGLCubeRenderTarget(4);
     vi.spyOn(THREE.PMREMGenerator.prototype, 'fromScene').mockImplementation(() => target);
     vi.spyOn(THREE.PMREMGenerator.prototype, 'dispose').mockImplementation(() => undefined);
     const renderer = fakeRenderer();

@@ -19,6 +19,7 @@ ARC-013 (card `01a1dfd6fbc5742da2a784d69042049a`) and DOC-003 are done. The in-p
 ## Implementation
 
 1. **Manifest.** Create `scripts/checks/manifest.ts`:
+
    ```ts
    export type CheckSpec = {
      name: string;                 // Makefile target, e.g. 'focus-mode-check'
@@ -32,16 +33,19 @@ ARC-013 (card `01a1dfd6fbc5742da2a784d69042049a`) and DOC-003 are done. The in-p
    };
    export const CHECKS: readonly CheckSpec[];
    ```
+
    Fill it from the current scripts: `requires` and `optional` from each script's `requirePrivateTest` call and `process.env` reads, `purpose` and `doesNotProve` from the DOC-003 table.
 2. **Runner.** Create `scripts/run-check.ts <name>`: look the name up, fail with the list of valid names when unknown, fail naming every missing variable in `requires`, require `MUX_XR_PRIVATE_TEST=1` when `sendsInput` is true, then `await import()` the script. `--list` prints the names one per line.
 3. **Scripts.** Remove each script's own `requirePrivateTest` call once the runner covers it, but keep a one-line guard at the top of each script that throws when it is run directly without `MUX_XR_PRIVATE_TEST=1` and `sendsInput` is true. The private-daemon rule must hold whichever way a script is started.
 4. **Makefile.** Replace the per-check rules with:
+
    ```make
    CHECKS := <space-separated names, kept in manifest order>
    .PHONY: $(CHECKS)
    $(CHECKS):
    	bun run scripts/run-check.ts $@
    ```
+
    Keep the list static in the Makefile; do not shell out to compute it.
 5. **Doc table.** Create `scripts/gen-testing-table.ts` that rewrites the block between `<!-- checks:start -->` and `<!-- checks:end -->` in `docs/TESTING.md` from the manifest, and add a `testing-table` Makefile target. Put the markers around the DOC-003 table.
 6. **Sync test.** Add `tests/check-manifest.test.ts` asserting: every `scripts/*-check.ts` file is in the manifest and every manifest script exists; the Makefile's `CHECKS` list equals the manifest names; the table in `docs/TESTING.md` equals the generator's output; every check with `sendsInput: true` lists `MUX_XR_PRIVATE_TEST` handling.

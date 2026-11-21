@@ -8,22 +8,22 @@ Mux XR is a TypeScript, Vite and Three.js WebXR client for par-mux. The [README]
 
 ## Development and verification
 
-| Command | Use |
-| --- | --- |
-| `bun install --frozen-lockfile` | Install dependencies with the Bun version pinned in [package.json](package.json) |
-| `make help` | List every Makefile target with a one-line description |
-| `make install` | Install dependencies from the frozen lockfile, the same as `bun install --frozen-lockfile` |
-| `make dev` | Run Vite on port 4240. Use an isolated port when the LAN preview already owns 4240 |
-| `make dev-stop`, `make dev-restart` | Stop the Vite dev server, or stop it and start it again |
-| `make preview` | Serve the production build with Vite preview |
-| `make checkall` | Run Biome, strict TypeScript, Vitest, and the production build |
-| `make checkall-ci` | Run the full local gate, including observatory asset checks, Gitleaks, and the high-severity dependency audit |
-| `make asset-check` | Validate the observatory asset and its runtime copies. `make checkall-ci` runs it |
-| `make pre-commit` | Run every pre-commit hook on all files. Install both hooks once per clone and worktree with `pre-commit install --hook-type pre-commit --hook-type pre-push`. The pre-push hook runs `make checkall-ci`, and `--no-verify` or a missing install skips it |
-| `make e2e` | Run the local GPU browser suite with synthetic streamer fixtures |
-| `make real-app-check` | Verify the built app against a private mux daemon and streamer |
-| `bun run test tests/<name>.test.ts` | Run one Vitest file. Unit tests live in `tests/` and run under happy-dom |
-| `make <feature>-check` | Targeted browser or protocol check, e.g. `make hierarchy-check`, `make focus-mode-check`; see [Testing](docs/TESTING.md) for the flags each one requires |
+| Command                             | Use                                                                                                                                                                                                                                                      |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun install --frozen-lockfile`     | Install dependencies with the Bun version pinned in [package.json](package.json)                                                                                                                                                                         |
+| `make help`                         | List every Makefile target with a one-line description                                                                                                                                                                                                   |
+| `make install`                      | Install dependencies from the frozen lockfile, the same as `bun install --frozen-lockfile`                                                                                                                                                               |
+| `make dev`                          | Run Vite on port 4240. Use an isolated port when the LAN preview already owns 4240                                                                                                                                                                       |
+| `make dev-stop`, `make dev-restart` | Stop the Vite dev server, or stop it and start it again                                                                                                                                                                                                  |
+| `make preview`                      | Serve the production build with Vite preview                                                                                                                                                                                                             |
+| `make checkall`                     | Run Biome, strict TypeScript, Vitest, and the production build                                                                                                                                                                                           |
+| `make checkall-ci`                  | Run the full local gate, including observatory asset checks, Gitleaks, and the high-severity dependency audit                                                                                                                                            |
+| `make asset-check`                  | Validate the observatory asset and its runtime copies. `make checkall-ci` runs it                                                                                                                                                                        |
+| `make pre-commit`                   | Run every pre-commit hook on all files. Install both hooks once per clone and worktree with `pre-commit install --hook-type pre-commit --hook-type pre-push`. The pre-push hook runs `make checkall-ci`, and `--no-verify` or a missing install skips it |
+| `make e2e`                          | Run the local GPU browser suite with synthetic streamer fixtures                                                                                                                                                                                         |
+| `make real-app-check`               | Verify the built app against a private mux daemon and streamer                                                                                                                                                                                           |
+| `bun run test tests/<name>.test.ts` | Run one Vitest file. Unit tests live in `tests/` and run under happy-dom                                                                                                                                                                                 |
+| `make <feature>-check`              | Targeted browser or protocol check, e.g. `make hierarchy-check`, `make focus-mode-check`; see [Testing](docs/TESTING.md) for the flags each one requires                                                                                                 |
 
 Documentation-only commits (`.md`, `.txt`, `docs/`) skip the fast gate in the pre-commit hook.
 

@@ -86,11 +86,11 @@ The complete real-app check then passed from test-mac to the configured LAN prev
 
 A separate run against the official [core 0.76.0 release](https://github.com/paulrobello/par-term-emu-core-rust/releases/tag/v0.76.0), using a fresh private daemon and streamer on test-mac, passed those same assertions. Both downloads matched their published checksums:
 
-| Artifact | SHA-256 |
-| --- | --- |
+| Artifact                                      | SHA-256                                                            |
+| --------------------------------------------- | ------------------------------------------------------------------ |
 | `par-mux-v0.76.0-aarch64-apple-darwin.tar.gz` | `6ad8c9e9205c71f3c70eb675dd1fb749f0e14075dec0008feb970b291333ec72` |
-| Extracted `par-mux` | `81d840a5cce96a87fe612f730e1b5b82a8ff41397ddaef60bb8594c0bcbdba2a` |
-| `par-term-streamer-mux-macos-aarch64` | `94a4eccb8279c7e9c5184d78f23124bb52cdb98ab05fa9d70d5e206e9cd1d969` |
+| Extracted `par-mux`                           | `81d840a5cce96a87fe612f730e1b5b82a8ff41397ddaef60bb8594c0bcbdba2a` |
+| `par-term-streamer-mux-macos-aarch64`         | `94a4eccb8279c7e9c5184d78f23124bb52cdb98ab05fa9d70d5e206e9cd1d969` |
 
 The release tag resolves to `676e44f237eebf1c01c0843481ec8b00fceb43d1`; the downloaded daemon reports `0.76.0+761624a`, and the streamer reports `0.76.0`. test-mac load was 1.959 before and after this run. The live LAN preview retains its original approved candidate binary, while release compatibility was tested separately. Shared services were not restarted.
 
@@ -142,7 +142,6 @@ Browser growth now projects the whole panel hierarchy, including attached contro
 
 All 46 unit tests and the parity gate pass. Desktop, tablet and mobile native-GPU fixtures pass after clicking the actual HUD Keyboard control, asserting no spatial keyboard exists, enlarging 25 times, checking viewport bounds/reachable shrink controls, and using recovery/reset. Accepted screenshots include `desktop-single-keyboard.png` and `desktop-bounded-panel.png`. The final screenshot run recorded test-mac load 1.843 to 2.290 with no page errors. These are browser/simulated XR results; physical Quest comfort/readability remains owner-pending.
 
-
 ## First Quest feedback: rays, keyboard manipulation and gaze input (2026-11-01)
 
 Paul confirmed headset XR operation and reported short visible rays, a keyboard filling the view, missing hover/contact feedback and missing manipulation controls. The revised scene uses the actual picked intersection for the visible ray endpoint, an eight-meter fallback ray, a small contact dot and per-controller key highlights. Both controllers can hover one key without clearing each other's tint. Disconnect hides contact/ray visuals and releases the grab.
@@ -157,7 +156,6 @@ Gaze input is a separate, persistent, default-off option in browser settings, th
 
 The accepted logs are `.local/evidence/quest-final-parity.log` and `quest-final-browser.log`, with `quest-keyboard-native.png` and `quest-keyboard-native-highlight.png` under `.impeccable/review`. This round uses protocol fixtures and simulated XR, not a fresh real-daemon round trip or physical headset acceptance. Existing real-core/LAN evidence above remains separate. Terminal processes, streamer binaries, firewall rules and certificates are preserved.
 
-
 ## Universal direct manipulation (2026-11-01)
 
 The owner subsequently requested all XR UI surfaces be directly manipulable, replacing the prior fixed-HUD and dedicated resize/reset-button approach. Terminal panes, keyboard, quick commands, hierarchy and HUD now share whole-surface grip behavior. Child keys and actions remain attached. XR panel-size buttons, keyboard-size/reset actions and the separate recovery strip are removed. A−/A+ remain local terminal text zoom, and the desktop DOM toolbar retains mouse-accessible scale/reset controls.
@@ -168,12 +166,9 @@ Recovery uses a one-second hold on both thumbstick clicks while neither grip is 
 
 The full fast and parity gates pass with 68 tests. New tests cover pair-grip translation/rotation/scaling for each of the five surface types, no-jump one/two-controller handoffs, scaled/moved menu refresh and target retargeting, disconnect rebasing, disposal of a grabbed input target, and both-stick recovery with held-grip suppression. Physical Quest acceptance of the new gestures remains owner-pending.
 
-
 Native Metal verification also passes with no XR transform actions in the scene, all 59 keyboard keys in view, and two-controller scaling from 0.38 to 0.5881 with 0.06 meters of midpoint movement. Removing the transform rows reduces the keyboard surface height from 0.7505 to 0.6479 meters at its default scale, while width remains 1.0735 meters. The ray still ends on highlighted key A at 0.7 meters. Desktop/tablet/mobile fixture checks each pass with 42 captured frames and zero page errors. test-mac load was 1.912 before the spatial check, 2.239 afterward and 2.128 after the browser suite. Accepted evidence is `.local/evidence/direct-final-browser.log` and `direct-parity.log`. An initial fixture timeout moved the two simulated controllers toward one another because key traversal order reversed left/right; the verifier now orders grip targets spatially before spreading them. That attempt was excluded. Screenshots were inspected, and the temporary remote daemon/scratch were removed and booking released.
 
-
 The final visual review also caught passive grip help from the other controller covering the keyboard while a letter key was targeted. Control hover now takes priority over body help, with a positive two-ray regression and native Metal rerun. The latest gate passes 68 tests. The focused rerun reproduced the same geometry, scale and ray values with test-mac load 1.903 before and after; its log is `.local/evidence/direct-hover-visual.log`. No headset performance or physical controller acceptance is inferred from these fixtures.
-
 
 ## Orientation, explicit grids and readable XR text (2026-11-01)
 
@@ -194,7 +189,6 @@ All 81 tests and the full parity gate pass. Desktop/tablet/mobile protocol fixtu
 Excluded diagnostics found an overbroad glyph coverage table that triggered external font fallback, then a network-idle readiness assumption that never settled. Coverage is now generated from the actual bundled font cmaps, and browser checks wait for application readiness. A full native run after the fix made no external requests. Test daemons, browsers and fleet scratch are cleaned up after verification. No credential, certificate, firewall rule or shared service was changed, and no maximum headset capacity or physical comfort result is claimed.
 
 The final browser grid-form pass used the actual UI component and global CSS at mobile and desktop widths. Numeric inputs are themed dark, 122×36 px in the settings panel, arranged in two columns, and the panel scrolls within the viewport. Initial Apply is disabled until a terminal is available. Both captures passed; readability-grid-style.log records the computed field styling. This static DOM check ran in a booked load-tolerant local window and is not a timing or GPU-performance sample.
-
 
 ## Served label repair, reversed pitch and quieter blues (2026-11-01)
 
@@ -280,7 +274,6 @@ Baseline host load was 1.762 to 2.227 and candidate load 2.227 to 1.905. Several
 
 macOS detects the Quest 3 USB device, but ADB exposes no debugging device yet. No USB trace was captured. Subsequently, Paul confirmed five-plus panes together with the keyboard held around 60 FPS and reported performance was much better. This is owner hardware acceptance of ad00aba, not an inferred desktop result or a maximum-capacity benchmark. Developer Mode and the headset USB debugging prompt are required only for remote profiling, not for normal browser use.
 
-
 ## Spatial controls and TUI mouse batch (2026-11-01)
 
 Paul confirmed creation and execution of a native quick command worked perfectly, and that the existing arrangement actions worked before this size-aware change. Terminal scaling now clamps at0.3 instead of0.6 in controller and desktop paths. Both native background button groups are compact synchronized selectors with uniform options. Layout inputs measure actual grid-sized frames and control geometry in root-local coordinates, preserve manual scale and center the complete envelope. Perspective overlap checks move the layout outward when necessary while retaining its shape and inward-facing orientation. Controller interaction range follows those farther windows.
@@ -290,7 +283,6 @@ Controller triggers and desktop canvases now dispatch cell-based MouseInput. Tra
 The mixed-size rendered fixture uses six grids(80×24,120×36,160×48,52×30,100×18,64×42) and varied manual scales including0.3. Viewer-space polygon checks independently verify actual window/control envelopes for Row,Grid,Arc and front-hemisphere Sphere, with target,grid and scale invariants. A brief local check was mistakenly started after a reservation refusal at about8:41PM PST; it was excluded, its browser closed, and the reservation holder notified. The final browser checks passed in the authorized 8:54–9:04 PM PST window. Evidence is retained under `.local/evidence/spatial-controls`.
 
 The final `make checkall-ci` passed with 187 tests across 23 files, strict TypeScript, production build, asset checks, secret scanning and dependency audit. Desktop, tablet and mobile protocol fixtures each captured 46 frames with zero page errors on native Apple M4 Max Metal. The independent mixed-size rendered fixture passed all four arrangements with no fixture errors. The private real-core TUI check passed press/drag/release, grip suppression, grip-transition release, original-pane capture, native selector selection and desktop cell mapping. These are software checks. New physical Quest mouse precision and mixed-size layout comfort remain owner checks. The private daemons and browsers were stopped, and localhost port 4241 was clear afterward.
-
 
 ## Reversible terminal focus mode (2026-11-01)
 
@@ -304,7 +296,6 @@ Run `make focus-mode-check` only with `MUX_XR_PRIVATE_TEST=1`, an explicit `MUX_
 
 The final `make checkall-ci` passed 198 tests across 24 files, strict TypeScript, production build, asset checks, secret scan and dependency audit. The final actual-main native focus fixture passed and the desktop/tablet/mobile protocol fixtures each passed 46 frames with zero page errors. These are functional native-GPU checks, not new frame-time or Quest capacity measurements.
 
-
 ## Gaze-prioritized terminal LOD and exterior space (2026-11-02)
 
 The full parity gate passes 212 tests across 27 files, strict TypeScript, production build, asset/provenance checks, secret scanning and dependency audit. Focused tests cover raster scaling, 60 Hz flush throttling, hidden output/promotion, independent rendering gaze, input/grid preservation, distance hysteresis, async asset cancellation and resource disposal. An immediate full-quality color preference repaint regression and a TextureLoader import error were caught and fixed before acceptance.
@@ -312,7 +303,6 @@ The full parity gate passes 212 tests across 27 files, strict TypeScript, produc
 Matched native M4 Mac mini runs used 6/12/18 actual terminal surfaces at149×54, device scale2, two-second warmup and eight-second spinner/log phases. At18 panes render-callback p95 fell12.6→6.8ms, uploads959.5→305.5MiB, and canvasRGBA footprint510.5→69.1MiB. Display p95 remained16.8ms and long-frame outliers remain. All corresponding packet/byte counts match, with loads below15 before/after. No real/default mux server was used. See docs/performance/terminal-lod-2026-11-02.md for all counts, limits and source hashes. These comparisons do not establish a physical Quest maximum.
 
 The final desktop/tablet/mobile protocol fixtures pass46frames/errors0 each, and the native focus regression retains520 title foreground pixels, exact restore and no page/font/shader errors. Rendered exterior and workspace captures were inspected. The final space has three added draws, textured planet detail and static colored stars/cloud bands. The original clipped star positions were beyond the camera far plane. The fallback PNG preserves the existing owned map hash, and CSP remains unchanged. New owner creative/Quest comfort acceptance remains pending.
-
 
 ## Keyboard, controller and visual comfort batch (2026-11-02)
 
@@ -479,7 +469,6 @@ The same runs exposed three core faults, filed on the core board (card 01a1c28e)
 
 The configurable layout (2026-11-09) was rerun against a private par-mux 0.80.0 daemon and the 0.78.1 streamer on loopback port 4241, with the worktree's built `dist`. The connect snapshot rendered the `full` layout. The header button cycled to `priority`, which put the question pane ahead of the blocked one. Custom rows `agent, pane / session, window, source` set in the settings panel rendered `claude · %1` over `rc · rc · hook`. Selecting a row again sent zero resize messages, and there were no page errors. The reason-only run after a fresh streamer start showed the `full` entry with workspace, project, pane, the reason `pick a plan` and `active 56s`. Load average was about 91, so these are functional checks only. Evidence is under `.local/evidence/agent-roster-config`. Reading `roster_watcher.rs` shows that a state delta copies the previous activity, input, viewer and cpu values, and that the streamer refetches the full roster only on connect and on host-telemetry changes. The README describes those tokens as being as of the last fetch.
 
-
 ## Agent board widget (2026-11-10)
 
 The Widgets panel registers a third entry, `agent-board` (Agent board), spawned at (0, -0.27, -1.25) and 0.8 scale through the registry's `spawnScale`, below both clocks and above the HUD. A registry test spawns every entry at its offset and scale and checks that no boxes intersect and that none covers another, or the HUD backing at its default or recentered pose, when projected from the eye. The first offset, (0, -0.4, -1.25) at scale 1, covered the HUD's active-pane label and Exit after a both-stick recenter, which review caught. Review then found the board still covering the HUD's transient lines (notice, toast, Reload) after a recenter. Those lines, with the FPS readout, now draw over widgets without depth testing, and HUD buttons win the ray over a nearer widget. Controller tests read the real HUD children at the default and recentered poses and, at eye heights 1.1, 1.35, 1.52 and 1.8 m, assert that overlay controls stay reachable through widgets, that no other HUD control (Exit) fires through one, that a press on a board row covering Exit selects the row, that the overlay lines carry the overlay settings, and that a ray through the board reaches Reload. `tests/agent-board.test.ts` covers the empty state, row text, state colours, stalled chip, ages, rows that hold their slots through state flips, an urgent agent taking only the displaced agent's slot past the cap, urgent agents claiming fresh capped slots, the six-row cap with `+4 more`, freed rows returning to grab, once-a-second age ticks, and a disposed board ignoring updates and roster feeds. A controller test feeds the roster, opens the board, checks that an age-only roster change still reaches it (the menu signature omits ages), selects a row pane through `actions.selectPane`, grips a row to move the board without selecting, shows a notice for a row whose pane left the tree, and closes it.
@@ -519,10 +508,10 @@ The registry spawn test (with spawn yaw) and a HUD test (both poses, eye heights
 
 Frame cost was measured with `MUX_XR_PERF_GAUGE=1 make terminal-capacity-check` (6 panes, mixed workload, 8 s, 1440×1000 at device scale 2, headless `channel: 'chromium'` on ANGLE Metal / Apple M4 Max). Arms alternated baseline and gauge, three runs each. Mean render-callback CPU per frame, on the first review build (before the stat relayout and event-driven pause marking, which add no per-frame work beyond one event listener):
 
-| Arm | Run 1 | Run 2 | Run 3 | Mean |
-| --- | --- | --- | --- | --- |
+| Arm           | Run 1 | Run 2 | Run 3 | Mean  |
+| ------------- | ----- | ----- | ----- | ----- |
 | Baseline (ms) | 2.396 | 2.522 | 2.187 | 2.368 |
-| Gauge (ms) | 2.840 | 2.297 | 2.527 | 2.555 |
+| Gauge (ms)    | 2.840 | 2.297 | 2.527 | 2.555 |
 
 The gauge mean is 0.187 ms higher, inside the 0.335 ms spread between baseline runs. Run-level noise is larger than the effect: the gauge's own best run (2.297 ms) is lower than two of the three baselines. Every run had a p50 of 1.0 to 1.2 ms and a frame-pacing p95 of 16.8 ms. Its p95 ranged from 3.7 to 8.1 ms with no pattern by arm. The 1-minute load was 9.02 to 12.17 before and after every run. In the gauge runs it read `58 / 72 fps`, `worst (20 s) 33.4 ms` and `6 panes shown`. The pre-review build measured 2.177 ms baseline against 2.244 ms with the gauge, at load 9.87 to 13.88. Its worst-frame readout then showed 250 to 350 ms of setup stalls, which the XR-session reset now clears.
 

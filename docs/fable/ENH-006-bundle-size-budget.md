@@ -20,6 +20,7 @@ ARC-012 (card `01a1dfd701f071c7a1f85db1a98039ec`) is done and its measured sizes
 ## Implementation
 
 1. **Budget file.** Create `bundle-budget.json` at the repo root:
+
    ```json
    {
      "entry": 900000,
@@ -28,6 +29,7 @@ ARC-012 (card `01a1dfd701f071c7a1f85db1a98039ec`) is done and its measured sizes
      "total": 2600000
    }
    ```
+
    Replace every number with the size measured after ARC-012 plus 10% headroom, rounded up to the next 10,000 bytes. Sizes are raw bytes of the emitted `.js` files, not gzip, because parse and compile cost on the Quest follows raw size.
 2. **Checker.** Create `scripts/bundle-budget.ts`: read `dist/assets/*.js`; classify each file as entry (`index-*.js`), vendor (name starts with a `vendor` key) or lazy (everything else); compare against the budget; print a table of chunk, bytes, limit and status; exit 1 if any row is over or if `dist/assets` is missing. With `--json`, print the table as JSON for the performance notes.
 3. **Makefile.** Add `bundle-budget:` running `bun run scripts/bundle-budget.ts`, add it to `.PHONY`, and add it to `checkall-ci` as a prerequisite after `checkall` (`checkall-ci: checkall asset-check bundle-budget`). Keep it out of `checkall` so the fast gate does not fail on a deliberate size change mid-work.

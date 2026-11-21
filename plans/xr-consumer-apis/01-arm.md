@@ -40,6 +40,7 @@ export function applyArmNearFade(
 - `createElasticArm` sets `mesh.renderOrder = ELASTIC_ARM_RENDER_ORDER`. A transparent arm must blend after scene content drawn before it.
 - `applyArmNearFade(material, fade)`:
   - `fade` is a pair: set `material.transparent = true`, `material.depthWrite = true`, and install
+
     ```ts
     material.onBeforeCompile = (shader) => {
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -49,6 +50,7 @@ export function applyArmNearFade(
     };
     material.customProgramCacheKey = () => `arm-near-fade:${near.toFixed(3)}:${far.toFixed(3)}`;
     ```
+
     `vViewPosition` is declared by the standard material's fragment shader. `opaque_fragment` writes `gl_FragColor = vec4(outgoingLight, diffuseColor.a)` when the material is transparent.
   - `fade` is `false`: set `material.transparent = false`, restore `onBeforeCompile` and `customProgramCacheKey` to no-op defaults (`() => {}` and `() => ''`).
   - Set `material.needsUpdate = true` in both cases.

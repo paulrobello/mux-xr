@@ -24,9 +24,9 @@ SEC-001 (card `01a1dfd6e30f7742ba3be611d214337f`) and ARC-003 (card `01a1dfd6ec4
 1. **Dependency.** `bun add -d --exact fast-check` and record the resolved version in the commit message. Check `bun audit --audit-level high` stays clean.
 2. **Layout and bounds.** Put the tests in `tests/property/`. Every property uses `{ numRuns: 200 }` and a fixed `seed` read from `process.env.FC_SEED` when set, otherwise a constant, so a gate failure is reproducible. On failure fast-check prints the seed and the shrunk counterexample; keep that output.
 3. **`tests/property/protocol.property.test.ts`**
-   - *Totality*: for any `Uint8Array` up to 4,096 bytes, `decodeServerMessage` either returns a message or throws an `Error`. It never throws a non-Error and never hangs (run under a 2-second per-test timeout).
-   - *Round trip*: for generated `ServerMessage` values built with `create(ServerMessageSchema, …)` over a small set of cases, `decodeServerMessage(frame(toBinary(...), flag))` equals the input for flag 0 and for flag 1 with `pako.deflate`.
-   - *Bound*: a compressed frame whose inflated size exceeds `MAX_DECOMPRESSED_SIZE` always throws. Use one generated repeat count per run, not megabytes of random data.
+   - _Totality_: for any `Uint8Array` up to 4,096 bytes, `decodeServerMessage` either returns a message or throws an `Error`. It never throws a non-Error and never hangs (run under a 2-second per-test timeout).
+   - _Round trip_: for generated `ServerMessage` values built with `create(ServerMessageSchema, …)` over a small set of cases, `decodeServerMessage(frame(toBinary(...), flag))` equals the input for flag 0 and for flag 1 with `pako.deflate`.
+   - _Bound_: a compressed frame whose inflated size exceeds `MAX_DECOMPRESSED_SIZE` always throws. Use one generated repeat count per run, not megabytes of random data.
 4. **`tests/property/paste.property.test.ts`**
    - For any string (use `fc.fullUnicodeString()` plus an arbitrary that splices ESC, CSI and the bracketed-paste markers at random positions), the output of `sanitizePasteText` contains no code point in `U+0000–U+0008`, `U+000B`, `U+000C`, `U+000E–U+001F`, `U+007F` or `U+0080–U+009F`.
    - Idempotent: `sanitize(sanitize(s)) === sanitize(s)`.

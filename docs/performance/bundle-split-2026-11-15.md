@@ -14,15 +14,15 @@ This note records the production bundle before and after splitting vendor code i
 
 Measured with `bun run build` at commit base `68c4586` (before) and this change (after). Sizes are minified bytes from `dist/assets`, gzip is `gzip -9`.
 
-| | Before | After |
-| --- | --- | --- |
-| JavaScript chunks | 4 (entry, heif-worker, heif-decode, hierarchy) | 16 |
-| Entry chunk (`index-*.js`) | 1,878,188 B | 679,135 B (226,066 B gzip) |
-| `vendor-three` | in entry | 662,345 B (165,595 B gzip) |
-| `vendor-xterm` | in entry | 330,972 B (81,959 B gzip) |
-| `vendor-troika` | in entry | 119,675 B (42,928 B gzip) |
-| Eight environment chunks | in entry | 88,461 B together, fetched on first selection |
-| JavaScript parsed at startup | 1,878,188 B | 1,792,127 B |
+|                              | Before                                         | After                                         |
+| ---------------------------- | ---------------------------------------------- | --------------------------------------------- |
+| JavaScript chunks            | 4 (entry, heif-worker, heif-decode, hierarchy) | 16                                            |
+| Entry chunk (`index-*.js`)   | 1,878,188 B                                    | 679,135 B (226,066 B gzip)                    |
+| `vendor-three`               | in entry                                       | 662,345 B (165,595 B gzip)                    |
+| `vendor-xterm`               | in entry                                       | 330,972 B (81,959 B gzip)                     |
+| `vendor-troika`              | in entry                                       | 119,675 B (42,928 B gzip)                     |
+| Eight environment chunks     | in entry                                       | 88,461 B together, fetched on first selection |
+| JavaScript parsed at startup | 1,878,188 B                                    | 1,792,127 B                                   |
 
 ## What the numbers say
 

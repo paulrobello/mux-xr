@@ -15,10 +15,10 @@
     "xr-workspace-assets": "./stage-assets.ts"
   },
   "peerDependencies": {
-    "three": "0.186.1"
+    "three": "0.187.0"
   },
   "dependencies": {
-    "troika-three-text": "0.52.5"
+    "troika-three-text": "0.53.1"
   },
   "sideEffects": [
     "./src/labels.ts"
