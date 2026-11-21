@@ -57,7 +57,7 @@ See the [workspace guide](docs/WORKSPACE.md) for hand input, Keyborb, window con
 | [Testing](docs/TESTING.md) | Local gates, check targets and their environment, private-streamer tests, and headset acceptance |
 | [Pane bell indicators](docs/pane-bells.md) | How bells reach the pane and the bell feed |
 | [Verification record](docs/verification.md) | Dated evidence for each shipped batch |
-| [Core reviews](docs/core-0.81-review.md) | Streamer and daemon compatibility for the pinned core, with the earlier [0.78](docs/core-0.78-review.md) and [0.77](docs/core-0.77-review.md) reviews |
+| [Core reviews](docs/core-0.86-review.md) | Streamer and daemon compatibility for the pinned core, with the earlier [0.81](docs/core-0.81-review.md), [0.78](docs/core-0.78-review.md) and [0.77](docs/core-0.77-review.md) reviews |
 | [Performance reports](docs/performance/) | Measured terminal clarity, level-of-detail and frame-trace results |
 | [Observatory asset contract](docs/blender-kit-project.md) | Budgets, deliverables and validation for the observatory background |
 | [XR Workspace package](packages/xr-workspace/README.md) | The reusable toolkit package |
