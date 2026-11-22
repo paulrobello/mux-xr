@@ -55,6 +55,8 @@ const SEGMENTS = 24;
 const SIDES = 10;
 const ANCHOR_RADIUS = 0.018;
 const WRIST_RADIUS = 0.014;
+const FALLBACK_WRIST_RADIUS = 0.019;
+const WRIST_FLARE_LENGTH = 0.12;
 const EPSILON = 1e-5;
 
 export function createElasticArm(material: THREE.Material): ElasticArm {
@@ -172,13 +174,27 @@ export function createElasticArm(material: THREE.Material): ElasticArm {
       endDelta.copy(midpoint).sub(targetMidpoint).clampLength(0, 0.1);
       midpoint.copy(targetMidpoint).add(endDelta);
     }
-    if (wristProfile) {
+    const profileValid =
+      wristProfile !== undefined &&
+      Number.isFinite(wristProfile.radiusAcross) &&
+      Number.isFinite(wristProfile.radiusNormal) &&
+      wristProfile.radiusAcross > EPSILON &&
+      wristProfile.radiusNormal > EPSILON &&
+      wristProfile.across.lengthSq() > EPSILON * EPSILON &&
+      wristProfile.normal.lengthSq() > EPSILON * EPSILON;
+    if (profileValid) {
       profileAcross.copy(wristProfile.across).normalize();
       profileNormal
         .copy(wristProfile.normal)
         .addScaledVector(profileAcross, -wristProfile.normal.dot(profileAcross))
         .normalize();
       profileCross.crossVectors(profileAcross, profileNormal);
+      if (profileCross.lengthSq() < EPSILON * EPSILON) {
+        profileNormal.set(0, 1, 0);
+        if (Math.abs(profileAcross.y) > 0.9) profileNormal.set(1, 0, 0);
+        profileNormal.addScaledVector(profileAcross, -profileNormal.dot(profileAcross)).normalize();
+        profileCross.crossVectors(profileAcross, profileNormal).normalize();
+      }
       if (profileCross.dot(endDelta.subVectors(wrist, midpoint)) < 0) {
         profileNormal.negate();
         profileCross.negate();
@@ -218,16 +234,24 @@ export function createElasticArm(material: THREE.Material): ElasticArm {
       binormal.crossVectors(tangent, normal).normalize();
       previousNormal.copy(normal);
       const radius = THREE.MathUtils.lerp(ANCHOR_RADIUS, WRIST_RADIUS, t);
-      const flare = wristProfile
-        ? THREE.MathUtils.smoothstep(t, Math.max(0, 1 - 0.09 / length), 1)
-        : 0;
+      const flare = THREE.MathUtils.smoothstep(t, Math.max(0, 1 - WRIST_FLARE_LENGTH / length), 1);
       let wide = radius,
         thick = radius;
       ringAcross.copy(normal);
       ringNormal.copy(binormal);
-      if (wristProfile && flare > 0) {
-        wide = THREE.MathUtils.lerp(radius, wristProfile.radiusAcross, flare);
-        thick = THREE.MathUtils.lerp(radius, wristProfile.radiusNormal, flare);
+      if (flare > 0) {
+        wide = THREE.MathUtils.lerp(
+          radius,
+          profileValid ? wristProfile.radiusAcross : FALLBACK_WRIST_RADIUS,
+          flare,
+        );
+        thick = THREE.MathUtils.lerp(
+          radius,
+          profileValid ? wristProfile.radiusNormal : FALLBACK_WRIST_RADIUS,
+          flare,
+        );
+      }
+      if (profileValid && flare > 0) {
         ringRotation
           .setFromRotationMatrix(basis.makeBasis(normal, binormal, tangent))
           .slerp(wristRotation, flare);
