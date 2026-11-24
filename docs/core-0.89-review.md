@@ -24,6 +24,10 @@ Sources: [v0.89.0 release](https://github.com/paulrobello/par-term-emu-core-rust
 
 Core 0.89 rejects legacy htpasswd formats by default on its library path, matching the standalone streamer's existing policy. This pin preserves the LAN API-key file, query-key option, TLS and origins. No credentials or authentication options were changed. Other upstream changes concern native divider dragging, Windows file locking, download redirects, benchmark tooling and removal of an unused Rust Broadcaster API, not new XR controls.
 
+## Known upstream gap: the mirror bridge lacks the replay fence
+
+The 0.88/0.89 generation fence fixed the native attach clients, but the streaming server's mux-mirror bridge still applies everything after the seed reply block without consuming the fence (core `src/streaming/mux_factory`; the bridge's module doc names ordering as its only defense). A daemon restart while a browser viewer is attached can therefore double-apply a replay-covered chunk onto the mirror `Terminal`, and the browser renders the corrupted mirror until a resync frame. The fence halves are already on the wire: the daemon stamps `%output` with `gen=` and puts the export-time generation on the seed reply's closing flags. Filed upstream as card `01a20beb3ed070c084d67e3cb9e28b7d`. A fresh page load or reconnect handshake always recovers, because the client resets the emulator on the connect handshake (`src/terminal/surface.ts`).
+
 ## Qualification
 
 Verified November 23, 2026 (America/Los_Angeles):
