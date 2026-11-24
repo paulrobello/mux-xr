@@ -5,7 +5,11 @@ Run these commands from the repository root. Install the pinned dependencies wit
 ## Local gates
 
 - `make checkall` runs Biome, TypeScript, unit tests, and the production build.
-- `make checkall-ci` adds asset validation, secret scanning, and the dependency audit.
+- `make checkall-ci` adds the bundle size budget, asset validation, secret scanning, and the dependency audit.
+
+### Bundle size budget
+
+`make bundle-budget` compares the JavaScript chunks emitted into `dist/assets` with the limits in `bundle-budget.json`. It bounds the entry chunk, each named vendor chunk, the largest lazy chunk, and the total JS, in raw minified bytes (not gzip), because Quest parse and compile cost follows raw size. To raise a limit, change `bundle-budget.json` in the same commit as the code that needs it, with the reason in the commit message. Measured sizes live in `docs/performance/`.
 
 There are no tracked CI workflows. `make checkall-ci` is the full local gate. The browser and live-streamer checks below run separately.
 

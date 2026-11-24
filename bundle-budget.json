@@ -1,0 +1,10 @@
+{
+  "entry": 770000,
+  "lazyChunkMax": 110000,
+  "vendor": {
+    "vendor-three": 740000,
+    "vendor-xterm": 370000,
+    "vendor-troika": 140000
+  },
+  "total": 2210000
+}
