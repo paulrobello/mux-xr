@@ -131,6 +131,7 @@ import {
 } from './command-editor';
 import { createArming } from './controllers/arming';
 import { createClipboard } from './controllers/clipboard';
+import { createHierarchyTouchController } from './controllers/hierarchy-touch';
 import {
   createDeskBackdrop,
   createDeskWindow,
@@ -151,7 +152,7 @@ import { createFocusQuadLayer, type FocusQuadLayer, supportsQuadLayers } from '.
 import { createFrameCounter } from './fps';
 import { type HandReel, rebaseHandReel, reelOffset, startHandReel } from './hand-reel';
 import type { HierarchyNavigation, HierarchyNavigator } from './hierarchy-navigator';
-import { createHierarchyTouch, HIERARCHY_NEAR_ENTER, HIERARCHY_NEAR_EXIT } from './hierarchy-touch';
+import { createHierarchyTouch } from './hierarchy-touch';
 import {
   createLabelBatcher,
   LABEL_BATCH_HIDDEN_LAYER,
@@ -2275,217 +2276,43 @@ export function createWorkspaceScene(
     }
     keyborbInput.animate(deltaSeconds);
   };
-  const hierarchyTouchRoot = (): THREE.Group | null =>
-    renderer?.xr.isPresenting &&
-    inputRoot?.visible &&
-    inputMode === 'panes' &&
-    hierarchyNavigator &&
-    !hierarchyNavigator.transitioning &&
-    !radialMenu.root.visible &&
-    !warpEdit
-      ? hierarchyNavigator.root
-      : null;
-  // Node bodies only: label planes share the action but their wide bounds would steal the hover.
-  const hierarchyTargets = (root: THREE.Group | null, paneOnly = false): THREE.Object3D[] => {
-    const targets: THREE.Object3D[] = [];
-    if (!root) return targets;
-    root.updateMatrixWorld(true);
-    const collect = (object: THREE.Object3D): void => {
-      if (object.userData.disposeLabel) return;
-      const action = object.userData.inputAction;
-      if (
-        (object as THREE.Mesh).isMesh &&
-        (action === 'pane' ||
-          (!paneOnly && (action === 'hierarchyNode' || action === 'createPane')))
-      )
-        targets.push(object);
-      for (const child of object.children) collect(child);
-    };
-    collect(root);
-    return targets;
-  };
-  const hierarchyTouchMarker = new THREE.Mesh(
-    new THREE.TorusGeometry(1, 0.05, 8, 48),
-    new THREE.MeshBasicMaterial({ color: accent.hex, transparent: true, opacity: 0.9 }),
-  );
-  hierarchyTouchMarker.name = 'hierarchy-touch-marker';
-  hierarchyTouchMarker.raycast = () => undefined;
-  hierarchyTouchMarker.visible = false;
-  scene.add(hierarchyTouchMarker);
-  const markerSphere = new THREE.Sphere();
-  const updateHierarchyTouch = (): void => {
-    const root = controllerRoots.some((controller) => activeHand(controller))
-      ? hierarchyTouchRoot()
-      : null;
-    const targets = hierarchyTargets(root);
-    let marked: THREE.Object3D | null = null;
-    for (const controller of controllerRoots) {
-      const hand = activeHand(controller);
-      const gesture = hand ? sampleHand(controller) : null;
-      const visual = root && hand && gesture?.tracked ? contactVisual(controller) : undefined;
-      // A grab pinch or a held object owns the hand; its index-thumb gap is not a select.
-      const free = visual && !gesture?.pinching && !dragStates.has(controller);
-      const sample = hierarchyTouch.sample(
-        controller,
-        free ? visual.indexTip : null,
-        free ? visual.thumbTip : null,
-        targets,
-      );
-      marked ??= sample.hovered;
-      if (!sample.committed) continue;
-      lastSelectSource = controller;
-      const cues = cueCount;
-      activateTarget({
-        kind: 'keyboard',
-        terminalId: mutableState.inputTargetId ?? '',
-        object: sample.committed,
-      });
-      pressCue(controller, sample.committed.userData.inputAction, cues);
-      lastSelectSource = null;
-      hierarchyTouch.reset(controller);
-      marked = null;
-      break;
-    }
-    hierarchyTouchMarker.visible = Boolean(marked);
-    if (!marked) return;
-    const mesh = marked as THREE.Mesh;
-    if (!mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere();
-    markerSphere.copy(mesh.geometry.boundingSphere as THREE.Sphere).applyMatrix4(mesh.matrixWorld);
-    hierarchyTouchMarker.position.copy(markerSphere.center);
-    hierarchyTouchMarker.scale.setScalar(markerSphere.radius * 1.2);
-    hierarchyTouchMarker.lookAt(headPosition());
-  };
-  const PANE_PULL_START_SCALE = 0.12;
-  const PANE_PULL_GROW_DISTANCE = 0.25;
-  const PANE_PULL_MIN_TRAVEL = 0.1;
-  // A terminal 1.5 m away opens at scale 1, so nearer drops shrink to the same angular size.
-  const PANE_PULL_REFERENCE_DISTANCE = 1.5;
-  const panePulls = new Set<THREE.Group>();
-  // A hand at a node has its rays hidden, so no ray target can stand in for the whole-tree grab.
-  const hierarchyGrab = (
-    controller: THREE.Group,
-    contactObject: THREE.Group | undefined,
-    target: InputTarget | null,
-  ): { pane: THREE.Object3D | null; tree: boolean } => {
-    const none = { pane: null, tree: false };
-    const root = hierarchyTouchRoot();
-    if (!root || (contactObject && contactObject !== inputRoot)) return none;
-    const pulling = (node: THREE.Object3D): boolean =>
-      [...panePulls].some((proxy) => proxy.userData.panePullId === node.userData.paneId);
-    const hit = target?.object;
-    if (hit) {
-      const pane =
-        hit.userData.inputAction === 'pane' && root.getObjectById(hit.id) && !pulling(hit)
-          ? hit
-          : null;
-      return { pane, tree: false };
-    }
-    const visual = contactVisual(controller);
-    if (!visual) return none;
-    const thumb = visual.thumbTip;
-    const pane = hierarchyTouch.nearest(thumb, hierarchyTargets(root, true), HIERARCHY_NEAR_ENTER);
-    if (pane) return { pane: pulling(pane) ? null : pane, tree: false };
-    return {
-      pane: null,
-      tree:
-        !contactObject &&
-        Boolean(hierarchyTouch.nearest(thumb, hierarchyTargets(root), HIERARCHY_NEAR_EXIT)),
-    };
-  };
-  const panePullScale = (proxy: THREE.Group): number => {
-    const start = proxy.userData.panePullStart as THREE.Vector3;
-    const grown = THREE.MathUtils.clamp(
-      proxy.position.distanceTo(start) / PANE_PULL_GROW_DISTANCE,
-      0,
-      1,
-    );
-    const target = THREE.MathUtils.clamp(
-      proxy.position.distanceTo(headPosition()) / PANE_PULL_REFERENCE_DISTANCE,
-      0.3,
-      1.8,
-    );
-    return THREE.MathUtils.lerp(PANE_PULL_START_SCALE, target, grown);
-  };
-  const startPanePull = (controller: THREE.Group, node: THREE.Object3D, far: boolean): void => {
-    const paneId = node.userData.paneId as string;
-    const title = availablePanes.find((pane) => pane.id === paneId)?.title ?? paneId;
-    const proxy = new THREE.Group();
-    proxy.name = 'pane-pull-proxy';
-    proxy.userData.panePullId = paneId;
-    const card = new THREE.Mesh(
-      new THREE.PlaneGeometry(PANEL_WIDTH, PANEL_HEIGHT),
-      new THREE.MeshBasicMaterial({
-        color: 0x101820,
-        transparent: true,
-        opacity: 0.75,
-        side: THREE.DoubleSide,
-        forceSinglePass: true,
-      }),
-    );
-    const edge = new THREE.LineSegments(
-      new THREE.EdgesGeometry(card.geometry),
-      new THREE.LineBasicMaterial({ color: accent.hex }),
-    );
-    const label = createScalableLabel(title, 1.1, 0.16);
-    label.position.z = 0.01;
-    proxy.add(card, edge, label);
-    proxy.traverse((object) => {
-      object.raycast = () => undefined;
-    });
-    node.updateWorldMatrix(true, false);
-    node.getWorldPosition(proxy.position);
-    proxy.userData.panePullStart = proxy.position.clone();
-    proxy.scale.setScalar(PANE_PULL_START_SCALE);
-    proxy.lookAt(headPosition());
-    scene.add(proxy);
-    panePulls.add(proxy);
-    captureGrab(controller, proxy, far);
-  };
-  const discardPanePull = (proxy: THREE.Group): void => {
-    panePulls.delete(proxy);
-    scene.remove(proxy);
-    disposeObject(proxy);
-  };
-  const finishPanePull = (controller: THREE.Group, proxy: THREE.Group): void => {
-    const paneId = proxy.userData.panePullId as string;
-    const travel = proxy.position.distanceTo(proxy.userData.panePullStart as THREE.Vector3);
-    proxy.scale.setScalar(panePullScale(proxy));
-    proxy.lookAt(headPosition());
-    proxy.updateMatrixWorld(true);
-    const pose = captureUIPose(proxy);
-    discardPanePull(proxy);
-    // Tracking loss mid-pull is not a deliberate release, so it drops the ghost.
-    if (
-      handTrackingLost.has(controller) ||
-      travel < PANE_PULL_MIN_TRAVEL ||
-      !availablePanes.some((pane) => pane.id === paneId)
-    ) {
-      cue('release', controller);
-      return;
-    }
-    // Order matters: closing the hierarchy restores the visibility it recorded, then ending Focus
-    // reveals its faded panels, and only then may selection run, so it rebuilds no hierarchy and
-    // Focus cannot restore its pre-focus transform over the drop.
-    hideInput();
-    if (paneFocus.activeId) endFocusMode(true);
-    actions.selectPane(paneId);
-    if (panels.has(paneId)) {
-      restoreTerminalPose(paneId, pose);
-      rememberTerminalPlacements();
-    }
-    cue('select', controller);
-  };
-  const updatePanePulls = (): void => {
-    const held = new Set([...dragStates.values()].map((drag) => drag.object));
-    for (const proxy of panePulls) {
-      if (!held.has(proxy)) {
-        discardPanePull(proxy);
-        continue;
-      }
-      proxy.scale.setScalar(panePullScale(proxy));
-      proxy.lookAt(headPosition());
-    }
-  };
+  const hierarchyTouchCtl = createHierarchyTouchController({
+    presenting: () => Boolean(renderer?.xr.isPresenting),
+    inputRoot: () => inputRoot,
+    inputMode: () => inputMode,
+    hierarchyNavigator: () => hierarchyNavigator,
+    radialMenuVisible: () => radialMenu.root.visible,
+    warpEditActive: () => warpEdit !== null,
+    controllerRoots: () => controllerRoots,
+    activeHand: (controller) => activeHand(controller),
+    sampleHand: (controller) => sampleHand(controller),
+    contactVisual: (controller) => contactVisual(controller),
+    dragStates,
+    hierarchyTouch,
+    setLastSelectSource: (source) => {
+      lastSelectSource = source;
+    },
+    cueCount: () => cueCount,
+    activateTarget: (target) => activateTarget(target),
+    inputTargetId: () => mutableState.inputTargetId ?? '',
+    pressCue: (controller, action, cues) => pressCue(controller, action, cues),
+    headPosition: () => headPosition(),
+    accent,
+    scene,
+    panelSize: { width: PANEL_WIDTH, height: PANEL_HEIGHT },
+    availablePanes,
+    captureGrab: (controller, object, far) => captureGrab(controller, object, far),
+    disposeObject,
+    handTrackingLost,
+    cue: (kind, source) => cue(kind, source),
+    hideInput: () => hideInput(),
+    paneFocusActiveId: () => paneFocus.activeId,
+    endFocusMode: (immediate) => endFocusMode(immediate),
+    actions,
+    panels,
+    restoreTerminalPose: (id, pose) => restoreTerminalPose(id, pose),
+    rememberTerminalPlacements: () => rememberTerminalPlacements(),
+  });
   const contactGripTarget = (source: THREE.Group): THREE.Group | null => {
     const visual = contactVisual(source, true);
     const query = handContacts.get(source);
@@ -2820,7 +2647,7 @@ export function createWorkspaceScene(
       for (const visual of handVisuals.values()) visual.hide();
       wristWatch.setVisible(false);
     }
-    updateHierarchyTouch();
+    hierarchyTouchCtl.updateHierarchyTouch();
     suppressKeyboardRays();
     updateKeyborbInput(deltaSeconds);
     if (renderer?.xr.isPresenting) {
@@ -3248,7 +3075,7 @@ export function createWorkspaceScene(
         1 - Math.exp(-12 * Math.max(0, deltaSeconds)),
       );
     }
-    updatePanePulls();
+    hierarchyTouchCtl.updatePanePulls();
     correctTerminalFloor();
     if (renderer?.xr.isPresenting) {
       // Rays and gaze below only use visible objects; the renderer's pass catches hidden ones up.
@@ -5062,10 +4889,10 @@ export function createWorkspaceScene(
         heldControllers.add(root);
         if (radialMenu.root.visible && !radialMenu.interactive) return;
         const target = contactObject || wasNearKeyboard ? null : targetFromController(root);
-        const hierarchy = hierarchyGrab(root, contactObject, target);
+        const hierarchy = hierarchyTouchCtl.hierarchyGrab(root, contactObject, target);
         if (hierarchy.pane) {
           contactGripArmed.delete(root);
-          startPanePull(root, hierarchy.pane, Boolean(target?.object));
+          hierarchyTouchCtl.startPanePull(root, hierarchy.pane, Boolean(target?.object));
           cue('grab', root);
           return;
         }
@@ -5116,8 +4943,8 @@ export function createWorkspaceScene(
         const object = dragStates.get(root)?.object;
         heldControllers.delete(root);
         releaseGrab(root);
-        if (object && panePulls.has(object)) {
-          finishPanePull(root, object);
+        if (object && hierarchyTouchCtl.isPanePull(object)) {
+          hierarchyTouchCtl.finishPanePull(root, object);
           return;
         }
         if (object) cue('release', root);
@@ -7050,9 +6877,7 @@ export function createWorkspaceScene(
     contactGripArmed.clear();
     pokeSources.clear();
     pendingPokes.clear();
-    for (const proxy of [...panePulls]) discardPanePull(proxy);
-    hierarchyTouch.reset();
-    disposeObject(hierarchyTouchMarker);
+    hierarchyTouchCtl.dispose();
     finishWarp(false);
     disposed = true;
     clipboard.dispose();
