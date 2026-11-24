@@ -17,6 +17,9 @@ typecheck: ## Run strict TypeScript
 .PHONY: protocol-check
 protocol-check: ## Verify the vendored protobuf binding against core-release.json
 	bun run scripts/protocol-check.ts
+.PHONY: core-pin
+core-pin: ## Fetch and verify a par-term core release for pinning (CORE_VERSION=vX.Y.Z, default latest)
+	bun run scripts/core-pin.ts $(CORE_VERSION)
 checkall: protocol-check lint typecheck test build ## Fast gate: protocol check, lint, typecheck, unit tests and build
 checkall-ci: checkall asset-check ## CI-parity gate: checkall, asset checks, Gitleaks and the dependency audit
 	gitleaks dir . --redact --no-banner
