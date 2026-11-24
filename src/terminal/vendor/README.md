@@ -1,6 +1,6 @@
 # Terminal protocol provenance
 
-`terminal_pb.ts` is the generated `protoc-gen-es` 2.16.0 schema from Paul Robello's MIT-licensed `par-term-emu-core-rust` web frontend. It is pinned to the v0.87.0 tag at core commit `6268237684057006fc315ba06ecc970a5a3e2777` and copied byte for byte from that tag. Against v0.81.0 it only adds the optional field `Connected.paneResizeReflow` (ENH-045, mux panes with daemon-side xterm-style resize reflow; older streamers leave it absent). It also includes the damage metadata, cwd reporting, pane-create protocol messages and the earlier optional fields, and keeps the existing generated message APIs. Runtime release and Apple Silicon artifact hashes are pinned in the project-root `core-release.json`.
+`terminal_pb.ts` is the generated `protoc-gen-es` 2.16.0 schema from Paul Robello's MIT-licensed `par-term-emu-core-rust` web frontend. It is pinned to the v0.89.0 tag at core commit `bf095c0fee7a11f9ddd8700c895485cfe2f648fd` and copied byte for byte from that tag. Against v0.81.0 it only adds the optional field `Connected.paneResizeReflow` (ENH-045, mux panes with daemon-side xterm-style resize reflow; older streamers leave it absent). It also includes the damage metadata, cwd reporting, pane-create protocol messages and the earlier optional fields, and keeps the existing generated message APIs. Runtime release and Apple Silicon artifact hashes are pinned in the project-root `core-release.json`.
 
 SHA-256: `149c4be5e774aae1f6353acd9f036e1d07ae910cbee0ec666954280c1fb1f031`.
 

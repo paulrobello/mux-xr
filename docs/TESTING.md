@@ -130,6 +130,6 @@ Browser and simulated XR checks establish software behavior. Verify real control
 
 ## Evidence
 
-See [historical verification](verification.md), [core compatibility](core-0.87-review.md), and the [performance reports](performance/) for recorded results.
+See [historical verification](verification.md), [core compatibility](core-0.89-review.md), and the [performance reports](performance/) for recorded results.
 
 The observatory's editable high/low sources, deterministic generator, hashes and technical reports are in [assets-source/observatory](../assets-source/observatory) and [scripts/assets](../scripts/assets). The runtime GLB is 2,528,120 bytes with 22,712 triangles and ten draw calls. Creative owner approval and Quest checks remain explicit.
