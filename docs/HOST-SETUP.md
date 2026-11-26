@@ -28,7 +28,7 @@ Use this guide for real par-mux panes and the optional macOS companion service. 
 
 ## Serve the built app
 
-Use a mux-enabled par-term-streamer and an existing par-mux daemon. Full hierarchy browsing needs the metadata WebSocket at `/ws?metadata=1` and the core tree request and snapshot messages. The plain streamer binary lacks mux support. [core-release.json](../core-release.json) pins core 0.89.0. The official macOS ARM64 streamer at that pin was qualified against a private par-mux 0.89.0 daemon. See the [core 0.89 review](core-0.89-review.md) for artifact hashes, compatibility, and verification.
+Use a mux-enabled par-term-streamer and an existing par-mux daemon. Full hierarchy browsing needs the metadata WebSocket at `/ws?metadata=1` and the core tree request and snapshot messages. The plain streamer binary lacks mux support. [core-release.json](../core-release.json) pins core 0.90.0. See the [core 0.90 review](core-0.90.0-review.md) for artifact hashes, compatibility, and verification.
 
 Build the frontend with `make build`. Run the streamer in a par-mux pane with the actual binary, socket and TLS PEM paths. For LAN use, load your existing streamer authentication settings first. This example assumes HTTP Basic Auth is already configured with `PAR_TERM_HTTP_USER` and `PAR_TERM_HTTP_PASSWORD_HASH`. Use the HTTPS origin you will open on Quest.
 
