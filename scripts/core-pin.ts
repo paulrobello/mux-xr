@@ -4,6 +4,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -332,6 +333,9 @@ function main(): void {
     mkdirSync(stage, { recursive: true });
     copyFileSync(streamerPath, join(stage, 'streamer-candidate'));
     copyFileSync(muxBinary, join(stage, 'mux-core'));
+    for (const name of ['streamer-candidate', 'mux-core']) {
+      chmodSync(join(stage, name), 0o755);
+    }
     console.log(
       `core-pin: staged ${join(stage, 'streamer-candidate')} and ${join(stage, 'mux-core')}`,
     );
