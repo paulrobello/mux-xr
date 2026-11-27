@@ -28,6 +28,14 @@ textarea {
   align-items: center;
   gap: 8px;
 }
+.mux-ui .command-editor button {
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid #3a5363;
+  border-radius: 4px;
+  background: #192b38;
+  color: #dcebf2;
+}
 .attached-selector > button:first-child {
   border: 0;
   padding: 8px 12px;
@@ -48,14 +56,6 @@ textarea {
 .mux-ui .command-editor > input,
 .mux-ui .command-editor > label {
   grid-column: 1 / -1;
-}
-.mux-ui .command-editor button {
-  min-height: 34px;
-  padding: 7px 10px;
-  border: 1px solid #3a5363;
-  border-radius: 4px;
-  background: #192b38;
-  color: #dcebf2;
 }
 .mux-ui .command-editor button:hover {
   background: #264455;
@@ -247,13 +247,13 @@ textarea {
   stroke-width: 1.7;
   stroke-linecap: round;
 }
-.mux-ui .tree-create:hover:not(:disabled) {
-  background: var(--surface-2);
-  border-color: #5c8790;
-}
 .mux-ui .tree-create:disabled {
   color: #71818b;
   cursor: default;
+}
+.mux-ui .tree-create:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: #5c8790;
 }
 .mux-ui .tree-create-note {
   margin: 0 5px 8px;
