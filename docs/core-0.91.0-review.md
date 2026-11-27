@@ -34,4 +34,4 @@ Verified November 27, 2026 (America/Los_Angeles):
 
 ## Local installation
 
-The pristine release binaries are staged in this checkout's gitignored `.local/bin`: `streamer-candidate-0.91.0` and `mux-core-0.91.0`, plus the unversioned `streamer-candidate`/`mux-core` refreshed to 0.91.0 (the unversioned `mux-core` had been stale at 0.87.0). `make core-pin --stage .local/bin` is non-executable on macOS (copyFileSync drops the mode bit), so the staged copies need `chmod +x` before use — a follow-up card is filed for the script fix.
+The pristine release binaries are staged in this checkout's gitignored `.local/bin`: `streamer-candidate-0.91.0` and `mux-core-0.91.0`, plus the unversioned `streamer-candidate`/`mux-core` refreshed to 0.91.0 (the unversioned `mux-core` had been stale at 0.87.0). `make core-pin --stage .local/bin` initially produced non-executable copies on macOS (copyFileSync drops the mode bit); the script now chmods both staged copies (`2021f4c`).
