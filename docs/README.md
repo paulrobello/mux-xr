@@ -14,12 +14,14 @@ This folder holds the guides for running, using and testing Mux XR. Start with t
 
 ## Records
 
-| Document                                             | Contents                                                                                                                              |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| [Verification record](verification.md)               | Dated evidence for each shipped batch, in date order                                                                                  |
-| [Core 0.81 review](core-0.81-review.md)              | Compatibility of the pinned streamer and daemon, with the earlier [0.78](core-0.78-review.md) and [0.77](core-0.77-review.md) reviews |
-| [Observatory asset contract](blender-kit-project.md) | Budgets, deliverables and validation for the observatory background                                                                   |
-| [Performance reports](performance/)                  | Measured terminal clarity, level-of-detail and frame-trace results                                                                    |
+| Document                                             | Contents                                                                                                                                                                                                                                                                                 |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Verification record](verification.md)               | Dated evidence for shipped batches from November 1 to 12, 2026, in date order                                                                                                                                                                                                            |
+| [Core 0.91 review](core-0.91.0-review.md)            | Compatibility of the pinned streamer and daemon, with the earlier [0.90](core-0.90.0-review.md), [0.89](core-0.89-review.md), [0.87](core-0.87-review.md), [0.86](core-0.86-review.md), [0.81](core-0.81-review.md), [0.78](core-0.78-review.md) and [0.77](core-0.77-review.md) reviews |
+| [Observatory asset contract](blender-kit-project.md) | Budgets, deliverables and validation for the observatory background                                                                                                                                                                                                                      |
+| [Performance reports](performance/)                  | Measured terminal clarity, level-of-detail, frame-trace and bundle-size results                                                                                                                                                                                                          |
+| [Audit enhancement plans](fable/)                    | Plans ENH-001 to ENH-007 from the 2026-11-15 audit: scene decomposition, frame timing, paste review, check manifest, headset diagnostics, bundle budget and boundary property tests                                                                                                      |
+| [Implementation plans](superpowers/plans/)           | Task-by-task feature implementation plans, currently the agent board pagination and max rows plan                                                                                                                                                                                        |
 
 ## Writing guidelines
 

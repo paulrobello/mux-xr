@@ -27,7 +27,7 @@ The private [XR Workspace package](../packages/xr-workspace/README.md) owns reus
 
 The [hierarchy client](../src/workspace/hierarchy.ts) opens `/ws?metadata=1`, requests the tree, and receives hierarchy snapshots and agent roster updates. It normalizes workspace → session → window → pane data for both presenters. Metadata browsing is independent of terminal viewer connections.
 
-Each [terminal surface](../src/terminal/surface.ts) opens a viewer connection at `/ws?session=pane-<id>`. The [protocol adapter](../src/terminal/protocol.ts) uses the [vendored protobuf binding](../src/terminal/vendor/terminal_pb.ts) and a compression flag for raw or zlib payloads, with a 9 MiB bound. [core-release.json](../core-release.json) records the upstream revision and artifact hashes. The [core 0.81 review](core-0.81-review.md) records compatibility evidence for that pin.
+Each [terminal surface](../src/terminal/surface.ts) opens a viewer connection at `/ws?session=pane-<id>`. The [protocol adapter](../src/terminal/protocol.ts) uses the [vendored protobuf binding](../src/terminal/vendor/terminal_pb.ts) and a compression flag for raw or zlib payloads, with a 9 MiB bound. [core-release.json](../core-release.json) records the upstream revision and artifact hashes. The [core 0.91.0 review](core-0.91.0-review.md) records compatibility evidence for that pin.
 
 The streamer supplies terminal state and dimensions at attach, then sends output, updates, and process lifecycle events. The surface uses xterm.js to maintain the terminal model and supplies its canvas, status, and input methods to both presenters. Connection status and [process state](../src/terminal/lifecycle.ts) are separate. For example, an exited shell can still have an attached viewer.
 

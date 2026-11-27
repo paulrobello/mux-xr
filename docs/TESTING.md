@@ -4,7 +4,7 @@ Run these commands from the repository root. Install the pinned dependencies wit
 
 ## Local gates
 
-- `make checkall` runs Biome, TypeScript, unit tests, and the production build.
+- `make checkall` runs the protocol check, Biome, TypeScript, unit tests, and the production build.
 - `make checkall-ci` adds the bundle size budget, asset validation, secret scanning, and the dependency audit.
 
 ### Bundle size budget
@@ -23,7 +23,7 @@ The hooks are advisory. `git commit --no-verify` and `git push --no-verify` skip
 
 The trust boundaries have property-based tests in `tests/property/`: the terminal frame decoder, the paste sanitizer, the paired-route handshake, and the settings and pose validators. They run with the rest of the unit tests (`bun run test tests/property` selects just the property files) through the same Vitest projects, with the paired-route file in the Node project like every other `src/server` test.
 
-Every property runs 200 generated cases (`numRuns: 200`) with one seed for the whole file: `FC_SEED` when set, otherwise the constant 20261116. A gate failure prints the seed and a shrunk counterexample; rerun it with `FC_SEED=<seed from the log> bun run test tests/property` to reproduce the exact run. The oversize-frame bound property runs 25 cases because each case inflates a real 9 MiB stream.
+Every property runs 200 generated cases (`numRuns: 200`) with one seed for the whole file: `FC_SEED` when set, otherwise the constant 20261116. A gate failure prints the seed and a shrunk counterexample; rerun it with `FC_SEED=<seed from the log> bun run test tests/property` to reproduce the exact run. The oversize-frame bound property runs 15 cases because each case inflates a real 9 MiB stream.
 
 When a property finds a counterexample in shipped code, the fix adds a named example test covering that exact input, so the regression keeps a permanent, readable witness. Keep the property as the boundary guard.
 
@@ -134,6 +134,6 @@ Browser and simulated XR checks establish software behavior. Verify real control
 
 ## Evidence
 
-See [historical verification](verification.md), [core compatibility](core-0.90.0-review.md), and the [performance reports](performance/) for recorded results.
+See [historical verification](verification.md), [core compatibility](core-0.91.0-review.md), and the [performance reports](performance/) for recorded results.
 
 The observatory's editable high/low sources, deterministic generator, hashes and technical reports are in [assets-source/observatory](../assets-source/observatory) and [scripts/assets](../scripts/assets). The runtime GLB is 2,528,120 bytes with 22,712 triangles and ten draw calls. Creative owner approval and Quest checks remain explicit.

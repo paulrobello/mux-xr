@@ -1,12 +1,14 @@
 # Observatory asset contract
 
+This contract defines the observatory background's runtime frame, deliverables, and validation requirements.
+
 ## Approval and Scope
 
 Paul approved the dark orbital observatory concept in this chat on October 31, 2026 and authorized implementation with sub-agents. The environment must support terminal readability: peripheral architecture, dark open central viewing area, distant planet and sparse stars. No ambient sound. Blender may be used as needed. No paid provider step is authorized or needed.
 
 ## Piece and Runtime Frame
 
-One rigid background piece, `observatory`, rendered in Three.js 0.186.1 on Quest 3. Meters, glTF Y-up/-Z-forward, origin at the center of the user's seated workspace on the floor. Typical eye is (0,1.6,0), terminals near z=-1.5 to -2.5. Keep the forward central reading volume x=-2..2,y=0.4..2.8,z=-0.5..-4 mostly unobstructed. Architecture can frame the view at x outside +-2.5 and below y=0.3. Background planet beyond the window, not intersecting panels. No colliders or sockets needed for decorative background.
+One rigid background piece, `observatory`, rendered with the Three.js version pinned in [package.json](../package.json) on Quest 3. Meters, glTF Y-up/-Z-forward, origin at the center of the user's seated workspace on the floor. Typical eye is (0,1.6,0), terminals near z=-1.5 to -2.5. Keep the forward central reading volume x=-2..2,y=0.4..2.8,z=-0.5..-4 mostly unobstructed. Architecture can frame the view at x outside +-2.5 and below y=0.3. Background planet beyond the window, not intersecting panels. No colliders or sockets needed for decorative background.
 
 ## Deliverables and Ownership
 
